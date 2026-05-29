@@ -21,7 +21,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from sustena.core.whatsapp_handler import WhatsAppHandler
 
@@ -39,13 +39,14 @@ class SimulateRequest(BaseModel):
     phone: str = "+254712345678"
     message: str
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "phone": "+254712345678",
-                "message": "hello"
+                "message": "hello",
             }
         }
+    )
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
