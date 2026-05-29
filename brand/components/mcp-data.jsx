@@ -510,52 +510,202 @@ const ORCHIE_INTENTS = [
   { text: 'File Sustena XII entity docs',     confidence: 61, source: 'from task list', id: 'i4' },
 ];
 
+/*
+  OrchieExpansionPanel — full-page overlay (like Monitor/Simulator panels).
+  Opens when user clicks the Orchie node in the DAG.
+  Top: voice + chat CTAs (primary interaction entry points).
+  Below: intent cards, customisations, ambient activity viz.
+  Renders at fixed inset:0 z-index:500 so it covers the full app view.
+*/
 function OrchieExpansionPanel({ open, onClose, tick = 0 }) {
   const [intents, setIntents] = dUseState(ORCHIE_INTENTS);
   const [prefResponseLen, setPrefResponseLen] = dUseState('balanced');
   const [prefProactive, setPrefProactive] = dUseState(true);
   const [prefNotifs, setPrefNotifs] = dUseState('important');
+  const [isRecording, setIsRecording] = dUseState(false);
+  const [chatInput, setChatInput] = dUseState('');
 
   const dismissIntent = (id) => setIntents(prev => prev.filter(i => i.id !== id));
 
+  const handleVoice = () => {
+    setIsRecording(r => {
+      if (!r) window.flash?.('Listening… speak now', 'info');
+      else     window.flash?.('Voice captured — Orchie is processing', 'ok');
+      return !r;
+    });
+  };
+
+  const handleChat = (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    window.flash?.(`Orchie: processing "${chatInput.slice(0, 40)}…"`, 'info');
+    setChatInput('');
+  };
+
   return (
+    /* Full-page overlay — same z-level as Monitor/Simulator */
     <div style={{
-      position: 'absolute', top: 0, right: 0, bottom: 0,
-      width: '42%', minWidth: 280, maxWidth: 480,
-      background: 'var(--bg-surface)',
-      borderLeft: '1px solid var(--border-mid)',
-      zIndex: 30,
+      position: 'fixed', inset: 0,
+      zIndex: 500,
+      background: 'var(--bg-base)',
       display: 'flex', flexDirection: 'column',
-      transform: open ? 'translateX(0)' : 'translateX(100%)',
-      transition: 'transform 0.28s cubic-bezier(0.22,0.61,0.36,1)',
-      boxShadow: open ? '-10px 0 32px rgba(0,0,0,0.4)' : 'none',
-      overflow: 'hidden',
+      opacity: open ? 1 : 0,
+      pointerEvents: open ? 'all' : 'none',
+      transition: 'opacity 0.22s ease',
     }}>
-      {/* Header */}
+      {/* ── Top bar: back arrow + ORCHIE label + status ── */}
       <div style={{
-        padding: '10px 14px', flexShrink: 0,
+        padding: '10px 16px', flexShrink: 0,
         borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', gap: 8,
+        display: 'flex', alignItems: 'center', gap: 10,
+        background: 'var(--bg-surface)',
       }}>
+        {/* Back button */}
+        <button onClick={onClose} style={{
+          display: 'flex', alignItems: 'center', gap: 5,
+          color: 'var(--text-secondary)', padding: '3px 8px',
+          borderRadius: 'var(--radius-sm)',
+          border: '1px solid var(--border)', background: 'transparent',
+          transition: 'all var(--t-fast)', cursor: 'pointer',
+          fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.07em',
+        }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--amber-border)'; e.currentTarget.style.color = 'var(--amber)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+        >
+          <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 1.5L2.5 4.5L6 7.5" />
+          </svg>
+          BACK
+        </button>
+
+        <div style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
+
+        {/* Orchie monogram */}
         <div style={{
-          width: 24, height: 24, borderRadius: '50%',
+          width: 22, height: 22, borderRadius: '50%',
           background: 'var(--bg-base)', border: '1px solid var(--amber-border)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 0 8px var(--amber-glow)',
+          boxShadow: '0 0 6px var(--amber-glow)', flexShrink: 0,
         }}>
-          <SustenaMark size={14} />
+          <SustenaMark size={13} />
         </div>
-        <span style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 500, flex: 1 }}>Orchie</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--teal)' }} />
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--teal)', letterSpacing: '0.08em' }}>ACTIVE</span>
+
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600,
+          color: 'var(--text-primary)', letterSpacing: '0.08em',
+        }}>
+          ORCHIE
         </span>
-        <button onClick={onClose} style={{ color: 'var(--text-muted)', padding: 4, marginLeft: 4, transition: 'color var(--t-fast)' }}
-          onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
-          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
-        >
-          <Icon name="x" size={12} />
-        </button>
+
+        <span style={{ flex: 1 }} />
+
+        {/* Tick-driven state label */}
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)',
+          letterSpacing: '0.07em', textTransform: 'uppercase',
+        }}>
+          {['DELEGATING', 'RECEIVING', 'ANSWERING', 'VOTING'][tick % 4]}
+        </span>
+
+        {/* ACTIVE pill */}
+        <span style={{
+          display: 'flex', alignItems: 'center', gap: 5,
+          padding: '3px 8px',
+          background: '#2ab8a015', border: '1px solid #2ab8a040',
+          borderRadius: 'var(--radius-sm)',
+        }}>
+          <span className="pulse" style={{
+            width: 5, height: 5, borderRadius: '50%',
+            background: 'var(--teal)', flexShrink: 0,
+          }} />
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 9,
+            color: 'var(--teal)', letterSpacing: '0.08em',
+          }}>ACTIVE</span>
+        </span>
+      </div>
+
+      {/* ── Primary CTAs: Voice (top) + Chat (below) ── */}
+      <div style={{
+        padding: '24px 24px 18px',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16,
+        flexShrink: 0,
+        background: 'linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-base) 100%)',
+      }}>
+        {/* Voice CTA — primary, large mic button */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+          <button onClick={handleVoice} style={{
+            width: 72, height: 72, borderRadius: '50%',
+            background: isRecording
+              ? 'radial-gradient(circle at 50% 50%, #e0505022 0%, transparent 70%)'
+              : 'radial-gradient(circle at 50% 50%, var(--amber-glow) 0%, transparent 70%)',
+            border: isRecording
+              ? '2px solid var(--danger)'
+              : '2px solid var(--amber-border)',
+            boxShadow: isRecording
+              ? '0 0 0 6px #e0505018, 0 0 0 14px #e0505008'
+              : '0 0 0 4px var(--amber-glow), 0 4px 18px rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', transition: 'all 0.25s ease',
+            animation: isRecording ? 'orchMicPulse 1.1s ease-in-out infinite' : 'none',
+          }}>
+            <style>{`
+              @keyframes orchMicPulse {
+                0%,100% { box-shadow: 0 0 0 4px #e0505025, 0 0 0 10px #e0505010; }
+                50%      { box-shadow: 0 0 0 10px #e0505035, 0 0 0 20px #e0505015; }
+              }
+            `}</style>
+            {/* Microphone SVG icon */}
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
+              stroke={isRecording ? 'var(--danger)' : 'var(--amber)'}
+              strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+            >
+              <rect x="9" y="2" width="6" height="12" rx="3" />
+              <path d="M5 10a7 7 0 0 0 14 0" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+              <line x1="9" y1="21" x2="15" y2="21" />
+            </svg>
+          </button>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em',
+            textTransform: 'uppercase',
+            color: isRecording ? 'var(--danger)' : 'var(--amber)',
+          }}>
+            {isRecording ? '● LISTENING…' : 'SPEAK TO ORCHIE'}
+          </span>
+        </div>
+
+        {/* Chat CTA — text input row */}
+        <form onSubmit={handleChat} style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 480 }}>
+          <input
+            type="text"
+            value={chatInput}
+            onChange={e => setChatInput(e.target.value)}
+            placeholder="Ask Orchie anything…"
+            style={{
+              flex: 1, padding: '9px 13px',
+              fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-primary)',
+              background: 'var(--bg-base)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)',
+              outline: 'none', transition: 'border-color var(--t-fast)',
+            }}
+            onFocus={e => e.target.style.borderColor = 'var(--amber-border)'}
+            onBlur={e => e.target.style.borderColor = 'var(--border)'}
+          />
+          <button type="submit" style={{
+            padding: '9px 16px', flexShrink: 0,
+            background: chatInput.trim() ? 'var(--amber)' : 'var(--bg-overlay)',
+            border: `1px solid ${chatInput.trim() ? 'var(--amber)' : 'var(--border)'}`,
+            borderRadius: 'var(--radius-md)',
+            color: chatInput.trim() ? 'var(--bg-base)' : 'var(--text-dim)',
+            fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.07em',
+            transition: 'all var(--t-fast)', cursor: 'pointer',
+          }}>
+            SEND
+          </button>
+        </form>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 0 }}>

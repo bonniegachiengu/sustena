@@ -2430,4 +2430,16 @@ The Homestead sustain's home screen is assembled from its `ui_schema` sub-operat
 **Sample interactions using generic names:**
 
 *Budget alert:*
-> "Nyambu, food pocket is at 88% for the week with 4 days remain
+> "Nyambu, food pocket is at 88% for the week with 4 days remaining. Projected overage: KES 640. Move KES 1,000 from discretionary? Niandike M-Pesa prompt?"
+
+*Task roster:*
+> "Colo, kitchen cleaning is on your roster tonight. Nyambu finishes cooking by 8pm — should I set a reminder at 8:30?"
+
+*Asset alert:*
+> "The washing machine warranty expires in 14 days. Service centre contacts are in the asset register. Want me to book a service visit via Navigator?"
+
+---
+
+*Document ends. Version 1.0. All sections are editable and will be maintained as a living document.*
+
+*Next document: Sustena XII NDA Template (to be created on request).*

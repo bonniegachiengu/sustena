@@ -1,21 +1,2126 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Orchie · Mobile</title>
-  <link rel="stylesheet" href="styles.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orchie · Mobile — Sustena</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Inter+Tight:wght@300;400;500;600&display=swap');
+
+:root {
+  /* Surfaces */
+  --bg-base: #0f0f0f;
+  --bg-surface: #181818;
+  --bg-raised: #212121;
+  --bg-overlay: #2a2a2a;
+
+  /* Borders */
+  --border: #2e2e2e;
+  --border-mid: #3a3a3a;
+  --border-light: #4a4a4a;
+
+  /* Text */
+  --text-primary: #e8e4dc;
+  --text-secondary: #8a8680;
+  --text-muted: #565250;
+  --text-dim: #3a3836;
+
+  /* Amber */
+  --amber: #E8A020;
+  --amber-dim: #c07818;
+  --amber-glow: rgba(232, 160, 32, 0.12);
+  --amber-border: rgba(232, 160, 32, 0.3);
+
+  /* Teal */
+  --teal: #2ab8a0;
+  --teal-dim: #1e8c7a;
+  --teal-glow: rgba(42, 184, 160, 0.1);
+  --teal-border: rgba(42, 184, 160, 0.3);
+
+  /* Status */
+  --ok: #4caf80;
+  --warn: #e8a020;
+  --danger: #e05050;
+  --info: #5090e0;
+
+  /* Type */
+  --ui: 'Inter Tight', system-ui, sans-serif;
+  --mono: 'DM Mono', ui-monospace, monospace;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* Motion */
+  --t-fast: 120ms ease;
+  --t-mid: 220ms ease;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--ui);
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+  height: 100vh;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(ellipse 1200px 800px at 12% 0%, rgba(232,160,32,0.02), transparent 55%),
+    radial-gradient(ellipse 900px 700px at 100% 100%, rgba(42,184,160,0.018), transparent 55%);
+  z-index: 0;
+}
+
+#root { position: relative; z-index: 1; height: 100vh; overflow: hidden; }
+
+button, input, textarea { font-family: inherit; color: inherit; }
+button { background: none; border: none; cursor: pointer; }
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+/* ─── Type utilities ─── */
+.mono { font-family: var(--mono); }
+.label-10 { font-family: var(--mono); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.10em; color: var(--text-muted); }
+.label-11 { font-family: var(--mono); font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); }
+.meta-10 { font-family: var(--mono); font-size: 10px; color: var(--text-secondary); }
+.meta-11 { font-family: var(--mono); font-size: 11px; color: var(--text-secondary); }
+.val-12  { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--text-primary); }
+.val-22  { font-family: var(--mono); font-size: 22px; font-weight: 500; color: var(--text-primary); letter-spacing: -0.01em; }
+.val-hero { font-family: var(--mono); font-size: 96px; font-weight: 500; color: var(--text-primary); letter-spacing: -0.02em; line-height: 1; }
+.ui-13   { font-family: var(--ui); font-size: 13px; font-weight: 400; }
+.ui-18   { font-family: var(--ui); font-size: 18px; font-weight: 500; letter-spacing: -0.01em; }
+
+/* ─── Animations ─── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.pulse { animation: pulse 1.6s ease-in-out infinite; }
+
+@keyframes blink {
+  0%, 65% { opacity: 1; }
+  70%, 100% { opacity: 0.15; }
+}
+.blink { animation: blink 1.2s steps(2, end) infinite; }
+
+@keyframes drawLine {
+  from { stroke-dashoffset: var(--dash-len, 2000); }
+  to { stroke-dashoffset: 0; }
+}
+.draw-line {
+  stroke-dasharray: var(--dash-len, 2000);
+  stroke-dashoffset: var(--dash-len, 2000);
+  animation: drawLine 1.2s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.45s ease-out both; }
+
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, var(--bg-raised) 25%, var(--bg-overlay) 50%, var(--bg-raised) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@keyframes flash {
+  0% { color: var(--amber); text-shadow: 0 0 8px var(--amber-glow); }
+  100% { color: var(--text-primary); text-shadow: none; }
+}
+.flash { animation: flash 0.8s ease-out; }
+
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+/* ─── Bracket frame (corner crops, Expanse-style) ─── */
+.frame {
+  position: relative;
+  padding: 16px;
+}
+.frame::before, .frame::after,
+.frame > .frame-corner-bl, .frame > .frame-corner-br {
+  content: '';
+  position: absolute;
+  width: 10px; height: 10px;
+  border-color: var(--border-light);
+  border-style: solid;
+  border-width: 0;
+  pointer-events: none;
+}
+.frame::before { top: 0; left: 0; border-top-width: 1px; border-left-width: 1px; }
+.frame::after  { top: 0; right: 0; border-top-width: 1px; border-right-width: 1px; }
+.frame > .frame-corner-bl { bottom: 0; left: 0; border-bottom-width: 1px; border-left-width: 1px; }
+.frame > .frame-corner-br { bottom: 0; right: 0; border-bottom-width: 1px; border-right-width: 1px; }
+.frame--amber::before, .frame--amber::after,
+.frame--amber > .frame-corner-bl, .frame--amber > .frame-corner-br { border-color: var(--amber-border); }
+
+/* ─── Hover focus ring ─── */
+.focus-ring { transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast); }
+
+/* ─── Nav link ─── */
+.nav-link {
+  position: relative;
+  display: flex; align-items: center; gap: 12px;
+  width: 100%;
+  padding: 9px 14px 9px 16px;
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-secondary);
+  background: transparent;
+  transition: color var(--t-fast), background var(--t-fast);
+  text-align: left;
+}
+.nav-link:hover { color: var(--text-primary); background: var(--bg-raised); }
+.nav-link.active {
+  color: var(--amber);
+  background: var(--amber-glow);
+}
+.nav-link.active::before {
+  content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; background: var(--amber);
+}
+.nav-link .nav-id { color: var(--text-dim); margin-left: auto; font-size: 9px; }
+.nav-link.active .nav-id { color: var(--amber-dim); }
+
+/* ─── Status badge ─── */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid var(--border-mid);
+  color: var(--text-secondary);
+}
+.badge-amber  { color: var(--amber); border-color: var(--amber-border); background: var(--amber-glow); }
+.badge-teal   { color: var(--teal);  border-color: var(--teal-border);  background: var(--teal-glow); }
+.badge-ok     { color: var(--ok);    border-color: rgba(76,175,128,0.3); background: rgba(76,175,128,0.08); }
+.badge-danger { color: var(--danger); border-color: rgba(224,80,80,0.3); background: rgba(224,80,80,0.08); }
+.badge-muted  { color: var(--text-muted); border-color: var(--border); }
+.badge-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+/* ─── Toast ─── */
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.toast-stack {
+  position: fixed; right: 16px; bottom: 16px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 2147483645;
+  pointer-events: none;
+}
+.toast {
+  font-family: var(--mono); font-size: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  min-width: 260px;
+  display: flex; align-items: center; gap: 10px;
+  animation: toastIn 0.2s ease-out;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+/* ─── Sliding view transition ─── */
+@keyframes viewIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.view-root { animation: viewIn 0.32s ease-out both; }
+
+/* ─── Reusable event row ─── */
+.event-row {
+  display: grid;
+  grid-template-columns: 80px 60px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 9px 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  transition: background var(--t-fast);
+}
+.event-row:hover { background: var(--bg-raised); }
+.event-row .e-time { color: var(--text-muted); }
+.event-row .e-code { color: var(--amber); letter-spacing: 0.08em; }
+.event-row.system .e-code { color: var(--teal); }
+.event-row .e-text { color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.event-row .e-meta { color: var(--text-muted); }
+
+/* ─── Hero pulse animation when fresh ─── */
+@keyframes heroSettle {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); letter-spacing: -0.04em; }
+  to { opacity: 1; transform: translateY(0) scale(1); letter-spacing: -0.02em; }
+}
+.hero-settle { animation: heroSettle 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
+/* Number flash on tick */
+.tick-num { transition: color 80ms ease; }
+.tick-num.tick-pulse { color: var(--amber); }
+
+/* ─── Node type colors for DAG ─── */
+:root {
+  --node-state: #5090e0;
+  --node-operator: #E8A020;
+  --node-constraint: #e05050;
+  --node-event: #9a7fb8;
+  --node-operative: #2ab8a0;
+  --node-time: #8a8680;
+}
+
+/* ─── DAG node base ─── */
+.dag-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-mid);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform var(--t-fast), box-shadow var(--t-fast), border-color var(--t-fast);
+  user-select: none;
+}
+.dag-node:hover { transform: translate(-50%, -50%) scale(1.04) !important; z-index: 5; }
+.dag-node--active {
+  box-shadow: 0 0 0 1px currentColor, 0 0 12px currentColor;
+  z-index: 4;
+}
+.dag-node--pulse::before {
+  content: '';
+  position: absolute; inset: -3px;
+  border: 1px solid currentColor;
+  border-radius: inherit;
+  opacity: 0.35;
+  animation: nodePulse 1.6s ease-out infinite;
+}
+@keyframes nodePulse {
+  0% { transform: scale(1); opacity: 0.5; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+/* Travel dot along edge */
+@keyframes flowDot {
+  from { offset-distance: 0%; }
+  to   { offset-distance: 100%; }
+}
+
+/* Event log row enters from top */
+@keyframes logIn {
+  from { opacity: 0; transform: translateY(-6px); background: var(--amber-glow); }
+  to   { opacity: 1; transform: translateY(0); background: transparent; }
+}
+.log-in { animation: logIn 0.6s ease-out both; }
+
+/* ─── Modal ─── */
+@keyframes modalFadeIn {
+  from { opacity: 0; backdrop-filter: blur(0); }
+  to   { opacity: 1; backdrop-filter: blur(6px); }
+}
+@keyframes modalSlideIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.modal-scrim {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  animation: modalFadeIn 0.2s ease-out;
+  display: flex; align-items: center; justify-content: center;
+  padding: 32px;
+}
+.modal-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  max-width: 720px;
+  width: 100%;
+  max-height: calc(100vh - 64px);
+  display: flex; flex-direction: column;
+  animation: modalSlideIn 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
+  box-shadow: 0 24px 48px rgba(0,0,0,0.5);
+}
+
+/* ─── Panel switch transition ─── */
+@keyframes panelEnter {
+  from { opacity: 0; transform: translateX(8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.panel-enter { animation: panelEnter 0.34s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
+/* ─── Highlight pulse ring (for card focus) ─── */
+@keyframes highlightRing {
+  0%   { box-shadow: 0 0 0 0 var(--amber-border); }
+  100% { box-shadow: 0 0 0 8px transparent; }
+}
+.highlight-ring { animation: highlightRing 0.9s ease-out; }
+
+/* ─── Card hover lift ─── */
+.lift {
+  transition: transform var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.lift:hover {
+  border-color: var(--border-light);
+  background: var(--bg-raised);
+}
+
+/* ─── Terminal ─── */
+.terminal {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: #000;
+  color: var(--text-primary);
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  overflow-y: auto;
+}
+.terminal .t-prompt { color: var(--amber); }
+.terminal .t-ok { color: var(--ok); }
+.terminal .t-err { color: var(--danger); }
+.terminal .t-meta { color: var(--text-muted); }
+.terminal .t-line { white-space: pre; line-height: 1.55; }
+
+@keyframes cursorBlink { 50% { opacity: 0; } }
+.t-cursor {
+  display: inline-block;
+  width: 7px; height: 13px;
+  background: var(--amber);
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  animation: cursorBlink 1s steps(2, end) infinite;
+}
+
+/* ─── Mobile (Orchie) ─── */
+.bubble {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  border-left: 2px solid var(--amber);
+}
+.bubble-user {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  border-left: none;
+  align-self: flex-end;
+  max-width: 78%;
+}
+
+/* ─── Density tweak hook ─── */
+[data-density="compact"] { --pad-y: 8px; --pad-x: 12px; }
+[data-density="regular"] { --pad-y: 12px; --pad-x: 16px; }
+[data-density="comfy"]   { --pad-y: 16px; --pad-x: 20px; }
+
+/* Hide scrollbar utility (still scrollable) */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+  </style>
 </head>
 <body>
   <div id="root"></div>
+  <script type="text/babel">
+    /* ── Unified React hooks ─────────────────────────────────── */
+    const { useState, useEffect, useRef, useMemo, useCallback } = React;
+    const oUseState = useState, oUseEffect = useEffect, oUseRef = useRef, oUseMemo = useMemo;
+    const mUseState = useState, mUseEffect = useEffect, mUseRef = useRef;
 
-  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 
-  <script type="text/babel" src="ios-frame.jsx"></script>
-  <script type="text/babel" src="core.jsx"></script>
-  <script type="text/babel" src="orchie-chat.jsx"></script>
-  <script type="text/babel" src="orchie-mobile.jsx"></script>
+
+// iOS.jsx — Simplified iOS 26 (Liquid Glass) device frame
+// Based on the iOS 26 UI Kit + Figma status bar spec. No assets, no deps.
+// Exports: IOSDevice, IOSStatusBar, IOSNavBar, IOSGlassPill, IOSList, IOSListRow, IOSKeyboard
+
+// ─────────────────────────────────────────────────────────────
+// Status bar
+// ─────────────────────────────────────────────────────────────
+function IOSStatusBar({ dark = false, time = '9:41' }) {
+  const c = dark ? '#fff' : '#000';
+  return (
+    <div style={{
+      display: 'flex', gap: 154, alignItems: 'center', justifyContent: 'center',
+      padding: '21px 24px 19px', boxSizing: 'border-box',
+      position: 'relative', zIndex: 20, width: '100%',
+    }}>
+      <div style={{ flex: 1, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 1.5 }}>
+        <span style={{
+          fontFamily: '-apple-system, "SF Pro", system-ui', fontWeight: 590,
+          fontSize: 17, lineHeight: '22px', color: c,
+        }}>{time}</span>
+      </div>
+      <div style={{ flex: 1, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, paddingTop: 1, paddingRight: 1 }}>
+        <svg width="19" height="12" viewBox="0 0 19 12">
+          <rect x="0" y="7.5" width="3.2" height="4.5" rx="0.7" fill={c}/>
+          <rect x="4.8" y="5" width="3.2" height="7" rx="0.7" fill={c}/>
+          <rect x="9.6" y="2.5" width="3.2" height="9.5" rx="0.7" fill={c}/>
+          <rect x="14.4" y="0" width="3.2" height="12" rx="0.7" fill={c}/>
+        </svg>
+        <svg width="17" height="12" viewBox="0 0 17 12">
+          <path d="M8.5 3.2C10.8 3.2 12.9 4.1 14.4 5.6L15.5 4.5C13.7 2.7 11.2 1.5 8.5 1.5C5.8 1.5 3.3 2.7 1.5 4.5L2.6 5.6C4.1 4.1 6.2 3.2 8.5 3.2Z" fill={c}/>
+          <path d="M8.5 6.8C9.9 6.8 11.1 7.3 12 8.2L13.1 7.1C11.8 5.9 10.2 5.1 8.5 5.1C6.8 5.1 5.2 5.9 3.9 7.1L5 8.2C5.9 7.3 7.1 6.8 8.5 6.8Z" fill={c}/>
+          <circle cx="8.5" cy="10.5" r="1.5" fill={c}/>
+        </svg>
+        <svg width="27" height="13" viewBox="0 0 27 13">
+          <rect x="0.5" y="0.5" width="23" height="12" rx="3.5" stroke={c} strokeOpacity="0.35" fill="none"/>
+          <rect x="2" y="2" width="20" height="9" rx="2" fill={c}/>
+          <path d="M25 4.5V8.5C25.8 8.2 26.5 7.2 26.5 6.5C26.5 5.8 25.8 4.8 25 4.5Z" fill={c} fillOpacity="0.4"/>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Liquid glass pill — blur + tint + shine
+// ─────────────────────────────────────────────────────────────
+function IOSGlassPill({ children, dark = false, style = {} }) {
+  return (
+    <div style={{
+      height: 44, minWidth: 44, borderRadius: 9999,
+      position: 'relative', overflow: 'hidden',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      boxShadow: dark
+        ? '0 2px 6px rgba(0,0,0,0.35), 0 6px 16px rgba(0,0,0,0.2)'
+        : '0 1px 3px rgba(0,0,0,0.07), 0 3px 10px rgba(0,0,0,0.06)',
+      ...style,
+    }}>
+      {/* blur + tint */}
+      <div style={{
+        position: 'absolute', inset: 0, borderRadius: 9999,
+        backdropFilter: 'blur(12px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+        background: dark ? 'rgba(120,120,128,0.28)' : 'rgba(255,255,255,0.5)',
+      }} />
+      {/* shine */}
+      <div style={{
+        position: 'absolute', inset: 0, borderRadius: 9999,
+        boxShadow: dark
+          ? 'inset 1.5px 1.5px 1px rgba(255,255,255,0.15), inset -1px -1px 1px rgba(255,255,255,0.08)'
+          : 'inset 1.5px 1.5px 1px rgba(255,255,255,0.7), inset -1px -1px 1px rgba(255,255,255,0.4)',
+        border: dark ? '0.5px solid rgba(255,255,255,0.15)' : '0.5px solid rgba(0,0,0,0.06)',
+      }} />
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', padding: '0 4px' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Navigation bar — glass pills + large title
+// ─────────────────────────────────────────────────────────────
+function IOSNavBar({ title = 'Title', dark = false, trailingIcon = true }) {
+  const muted = dark ? 'rgba(255,255,255,0.6)' : '#404040';
+  const text = dark ? '#fff' : '#000';
+  const pillIcon = (content) => (
+    <IOSGlassPill dark={dark}>
+      <div style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {content}
+      </div>
+    </IOSGlassPill>
+  );
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 10,
+      paddingTop: 62, paddingBottom: 10, position: 'relative', zIndex: 5,
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 16px',
+      }}>
+        {/* back chevron */}
+        {pillIcon(
+          <svg width="12" height="20" viewBox="0 0 12 20" fill="none" style={{ marginLeft: -1 }}>
+            <path d="M10 2L2 10l8 8" stroke={muted} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
+        {/* trailing ellipsis */}
+        {trailingIcon && pillIcon(
+          <svg width="22" height="6" viewBox="0 0 22 6">
+            <circle cx="3" cy="3" r="2.5" fill={muted}/>
+            <circle cx="11" cy="3" r="2.5" fill={muted}/>
+            <circle cx="19" cy="3" r="2.5" fill={muted}/>
+          </svg>
+        )}
+      </div>
+      {/* large title */}
+      <div style={{
+        padding: '0 16px',
+        fontFamily: '-apple-system, system-ui',
+        fontSize: 34, fontWeight: 700, lineHeight: '41px',
+        color: text, letterSpacing: 0.4,
+      }}>{title}</div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Grouped list (inset card, r:26) + row (52px)
+// ─────────────────────────────────────────────────────────────
+function IOSListRow({ title, detail, icon, chevron = true, isLast = false, dark = false }) {
+  const text = dark ? '#fff' : '#000';
+  const sec = dark ? 'rgba(235,235,245,0.6)' : 'rgba(60,60,67,0.6)';
+  const ter = dark ? 'rgba(235,235,245,0.3)' : 'rgba(60,60,67,0.3)';
+  const sep = dark ? 'rgba(84,84,88,0.65)' : 'rgba(60,60,67,0.12)';
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', minHeight: 52,
+      padding: '0 16px', position: 'relative',
+      fontFamily: '-apple-system, system-ui', fontSize: 17,
+      letterSpacing: -0.43,
+    }}>
+      {icon && (
+        <div style={{
+          width: 30, height: 30, borderRadius: 7, background: icon,
+          marginRight: 12, flexShrink: 0,
+        }} />
+      )}
+      <div style={{ flex: 1, color: text }}>{title}</div>
+      {detail && <span style={{ color: sec, marginRight: 6 }}>{detail}</span>}
+      {chevron && (
+        <svg width="8" height="14" viewBox="0 0 8 14" style={{ flexShrink: 0 }}>
+          <path d="M1 1l6 6-6 6" stroke={ter} strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      )}
+      {!isLast && (
+        <div style={{
+          position: 'absolute', bottom: 0, right: 0,
+          left: icon ? 58 : 16, height: 0.5, background: sep,
+        }} />
+      )}
+    </div>
+  );
+}
+
+function IOSList({ header, children, dark = false }) {
+  const hc = dark ? 'rgba(235,235,245,0.6)' : 'rgba(60,60,67,0.6)';
+  const bg = dark ? '#1C1C1E' : '#fff';
+  return (
+    <div>
+      {header && (
+        <div style={{
+          fontFamily: '-apple-system, system-ui', fontSize: 13,
+          color: hc, textTransform: 'uppercase',
+          padding: '8px 36px 6px', letterSpacing: -0.08,
+        }}>{header}</div>
+      )}
+      <div style={{
+        background: bg, borderRadius: 26,
+        margin: '0 16px', overflow: 'hidden',
+      }}>{children}</div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Device frame
+// ─────────────────────────────────────────────────────────────
+function IOSDevice({
+  children, width = 402, height = 874, dark = false,
+  title, keyboard = false,
+}) {
+  return (
+    <div style={{
+      width, height, borderRadius: 48, overflow: 'hidden',
+      position: 'relative', background: dark ? '#000' : '#F2F2F7',
+      boxShadow: '0 40px 80px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.12)',
+      fontFamily: '-apple-system, system-ui, sans-serif',
+      WebkitFontSmoothing: 'antialiased',
+    }}>
+      {/* dynamic island */}
+      <div style={{
+        position: 'absolute', top: 11, left: '50%', transform: 'translateX(-50%)',
+        width: 126, height: 37, borderRadius: 24, background: '#000', zIndex: 50,
+      }} />
+      {/* status bar (absolute) */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
+        <IOSStatusBar dark={dark} />
+      </div>
+      {/* nav + content */}
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {title !== undefined && <IOSNavBar title={title} dark={dark} />}
+        <div style={{ flex: 1, overflow: 'auto' }}>{children}</div>
+        {keyboard && <IOSKeyboard dark={dark} />}
+      </div>
+      {/* home indicator — always on top */}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 60,
+        height: 34, display: 'flex', justifyContent: 'center', alignItems: 'flex-end',
+        paddingBottom: 8, pointerEvents: 'none',
+      }}>
+        <div style={{
+          width: 139, height: 5, borderRadius: 100,
+          background: dark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.25)',
+        }} />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Keyboard — iOS 26 liquid glass
+// ─────────────────────────────────────────────────────────────
+function IOSKeyboard({ dark = false }) {
+  const glyph = dark ? 'rgba(255,255,255,0.7)' : '#595959';
+  const sugg = dark ? 'rgba(255,255,255,0.6)' : '#333';
+  const keyBg = dark ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.85)';
+
+  // special-key icons
+  const icons = {
+    shift: <svg width="19" height="17" viewBox="0 0 19 17"><path d="M9.5 1L1 9.5h4.5V16h8V9.5H18L9.5 1z" fill={glyph}/></svg>,
+    del: <svg width="23" height="17" viewBox="0 0 23 17"><path d="M7 1h13a2 2 0 012 2v11a2 2 0 01-2 2H7l-6-7.5L7 1z" fill="none" stroke={glyph} strokeWidth="1.6" strokeLinejoin="round"/><path d="M10 5l7 7M17 5l-7 7" stroke={glyph} strokeWidth="1.6" strokeLinecap="round"/></svg>,
+    ret: <svg width="20" height="14" viewBox="0 0 20 14"><path d="M18 1v6H4m0 0l4-4M4 7l4 4" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  };
+
+  const key = (content, { w, flex, ret, fs = 25, k } = {}) => (
+    <div key={k} style={{
+      height: 42, borderRadius: 8.5,
+      flex: flex ? 1 : undefined, width: w, minWidth: 0,
+      background: ret ? '#08f' : keyBg,
+      boxShadow: '0 1px 0 rgba(0,0,0,0.075)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: '-apple-system, "SF Compact", system-ui',
+      fontSize: fs, fontWeight: 458, color: ret ? '#fff' : glyph,
+    }}>{content}</div>
+  );
+
+  const row = (keys, pad = 0) => (
+    <div style={{ display: 'flex', gap: 6.5, justifyContent: 'center', padding: `0 ${pad}px` }}>
+      {keys.map(l => key(l, { flex: true, k: l }))}
+    </div>
+  );
+
+  return (
+    <div style={{
+      position: 'relative', zIndex: 15, borderRadius: 27, overflow: 'hidden',
+      padding: '11px 0 2px',
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      boxShadow: dark
+        ? '0 -2px 20px rgba(0,0,0,0.09)'
+        : '0 -1px 6px rgba(0,0,0,0.018), 0 -3px 20px rgba(0,0,0,0.012)',
+    }}>
+      {/* liquid glass bg — same recipe as nav pills */}
+      <div style={{
+        position: 'absolute', inset: 0, borderRadius: 27,
+        backdropFilter: 'blur(12px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+        background: dark ? 'rgba(120,120,128,0.14)' : 'rgba(255,255,255,0.25)',
+      }} />
+      <div style={{
+        position: 'absolute', inset: 0, borderRadius: 27,
+        boxShadow: dark
+          ? 'inset 1.5px 1.5px 1px rgba(255,255,255,0.15)'
+          : 'inset 1.5px 1.5px 1px rgba(255,255,255,0.7), inset -1px -1px 1px rgba(255,255,255,0.4)',
+        border: dark ? '0.5px solid rgba(255,255,255,0.15)' : '0.5px solid rgba(0,0,0,0.06)',
+        pointerEvents: 'none',
+      }} />
+
+      {/* autocorrect bar */}
+      <div style={{
+        display: 'flex', gap: 20, alignItems: 'center',
+        padding: '8px 22px 13px', width: '100%', boxSizing: 'border-box',
+        position: 'relative',
+      }}>
+        {['"The"', 'the', 'to'].map((w, i) => (
+          <React.Fragment key={i}>
+            {i > 0 && <div style={{ width: 1, height: 25, background: '#ccc', opacity: 0.3 }} />}
+            <div style={{
+              flex: 1, textAlign: 'center',
+              fontFamily: '-apple-system, system-ui', fontSize: 17,
+              color: sugg, letterSpacing: -0.43, lineHeight: '22px',
+            }}>{w}</div>
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* key layout */}
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: 13,
+        padding: '0 6.5px', width: '100%', boxSizing: 'border-box',
+        position: 'relative',
+      }}>
+        {row(['q','w','e','r','t','y','u','i','o','p'])}
+        {row(['a','s','d','f','g','h','j','k','l'], 20)}
+        <div style={{ display: 'flex', gap: 14.25, alignItems: 'center' }}>
+          {key(icons.shift, { w: 45, k: 'shift' })}
+          <div style={{ display: 'flex', gap: 6.5, flex: 1 }}>
+            {['z','x','c','v','b','n','m'].map(l => key(l, { flex: true, k: l }))}
+          </div>
+          {key(icons.del, { w: 45, k: 'del' })}
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {key('ABC', { w: 92.25, fs: 18, k: 'abc' })}
+          {key('', { flex: true, k: 'space' })}
+          {key(icons.ret, { w: 92.25, ret: true, k: 'ret' })}
+        </div>
+      </div>
+
+      {/* bottom spacer (emoji+mic area, icons omitted) */}
+      <div style={{ height: 56, width: '100%', position: 'relative' }} />
+    </div>
+  );
+}
+
+Object.assign(window, {
+  IOSDevice, IOSStatusBar, IOSNavBar, IOSGlassPill, IOSList, IOSListRow, IOSKeyboard,
+});
+
+
+/* Sustena — core primitives: logo, icons, frames, badges, hero readouts */
+
+
+
+/* ───────────────────────────────────────────────────────────
+   LOGO — network node (center disc + 3 branching arcs)
+   ─────────────────────────────────────────────────────────── */
+function SustenaMark({ size = 18, primary = 'var(--amber)', secondary = 'var(--text-primary)', mono = false }) {
+  const a = mono ? secondary : primary;
+  const c = secondary;
+  const endX = 78 * Math.cos((28 * Math.PI) / 180);
+  const endY = 78 * Math.sin((28 * Math.PI) / 180);
+  const branchPath = `M 0 0 Q 52 0 ${endX} ${endY}`;
+  return (
+    <svg width={size} height={size} viewBox="-100 -100 200 200" style={{ display: 'block' }}>
+      {[-90, 30, 150].map(r => (
+        <g key={r} transform={`rotate(${r})`}>
+          <path d={branchPath} stroke={c} strokeWidth="14" fill="none" strokeLinecap="round" />
+          <circle cx={endX} cy={endY} r="11" fill={c} />
+        </g>
+      ))}
+      <circle cx="0" cy="0" r="22" fill={a} />
+    </svg>
+  );
+}
+
+function SustenaLogo({ size = 16, gap = 8 }) {
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap }}>
+      <SustenaMark size={size} />
+      <span style={{
+        fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 500,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        color: 'var(--text-primary)', lineHeight: 1,
+      }}>
+        <span style={{ color: 'var(--amber)' }}>S</span>USTENA
+      </span>
+    </div>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────
+   ICONS — line set
+   ─────────────────────────────────────────────────────────── */
+function Icon({ name, size = 14 }) {
+  const s = { width: size, height: size, fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  switch (name) {
+    case 'pulse':    return <svg {...s} viewBox="0 0 16 16"><path d="M1 8h3l2-5 3 10 2-5h4" /></svg>;
+    case 'ledger':   return <svg {...s} viewBox="0 0 16 16"><rect x="3" y="2" width="10" height="12" /><path d="M5 5h6M5 8h6M5 11h4" /></svg>;
+    case 'council':  return <svg {...s} viewBox="0 0 16 16"><circle cx="5" cy="5.5" r="1.6" /><circle cx="11" cy="5.5" r="1.6" /><path d="M2 13c0-2 1.4-3.5 3-3.5s3 1.5 3 3.5" /><path d="M8 13c0-2 1.4-3.5 3-3.5s3 1.5 3 3.5" /></svg>;
+    case 'leaf':     return <svg {...s} viewBox="0 0 16 16"><path d="M3 13c0-6 4-10 10-10 0 6-4 10-10 10z" /><path d="M3 13c2-2 4-4 7-6" /></svg>;
+    case 'agent':    return <svg {...s} viewBox="0 0 16 16"><rect x="3" y="4" width="10" height="9" rx="1.5" /><circle cx="6.5" cy="8.5" r="0.8" fill="currentColor" stroke="none" /><circle cx="9.5" cy="8.5" r="0.8" fill="currentColor" stroke="none" /><path d="M8 4V2M6 2h4" /></svg>;
+    case 'vault':    return <svg {...s} viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" /><circle cx="8" cy="8" r="2.5" /><path d="M8 5.5v0.5M8 10v0.5M5.5 8h0.5M10 8h0.5" /></svg>;
+    case 'settings': return <svg {...s} viewBox="0 0 16 16"><circle cx="8" cy="8" r="2" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3 3l1.5 1.5M11.5 11.5L13 13M3 13l1.5-1.5M11.5 4.5L13 3" /></svg>;
+    case 'send':     return <svg {...s} viewBox="0 0 16 16"><path d="M14 2L2 7l5 2 2 5z" /></svg>;
+    case 'arrow-up':   return <svg {...s} viewBox="0 0 16 16"><path d="M8 13V3M4 7l4-4 4 4" /></svg>;
+    case 'arrow-down': return <svg {...s} viewBox="0 0 16 16"><path d="M8 3v10M4 9l4 4 4-4" /></svg>;
+    case 'chevron':  return <svg {...s} viewBox="0 0 16 16"><path d="M6 4l4 4-4 4" /></svg>;
+    case 'check':    return <svg {...s} viewBox="0 0 16 16"><path d="M3 8.5L6.5 12 13 4.5" /></svg>;
+    case 'x':        return <svg {...s} viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" /></svg>;
+    case 'plus':     return <svg {...s} viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>;
+    case 'expand':   return <svg {...s} viewBox="0 0 16 16"><path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" /></svg>;
+    case 'replay':   return <svg {...s} viewBox="0 0 16 16"><path d="M3 8a5 5 0 1 0 5-5" /><path d="M3 3v3h3" /></svg>;
+    case 'crosshair': return <svg {...s} viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" /><path d="M8 1v3M8 12v3M1 8h3M12 8h3" /></svg>;
+    case 'warning':  return <svg {...s} viewBox="0 0 16 16"><path d="M8 2l6.5 11h-13z" /><path d="M8 6v3.5M8 11.5v0.5" /></svg>;
+    case 'dot':      return <svg {...s} viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.5" fill="currentColor" stroke="none" /></svg>;
+    default: return null;
+  }
+}
+
+/* ───────────────────────────────────────────────────────────
+   BADGE — status pill
+   ─────────────────────────────────────────────────────────── */
+function Badge({ tone = 'muted', dot, children }) {
+  return (
+    <span className={`badge badge-${tone}`}>
+      {dot && <span className="badge-dot" />}
+      {children}
+    </span>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────
+   FRAME — bracket-cornered container
+   ─────────────────────────────────────────────────────────── */
+function Frame({ children, amber, style, label, sub }) {
+  return (
+    <div className={`frame ${amber ? 'frame--amber' : ''}`} style={style}>
+      {label && (
+        <div style={{ position: 'absolute', top: -7, left: 14, background: 'var(--bg-base)', padding: '0 6px', display: 'flex', gap: 8, alignItems: 'baseline' }}>
+          <span className="label-11">{label}</span>
+          {sub && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{sub}</span>}
+        </div>
+      )}
+      <span className="frame-corner-bl" />
+      <span className="frame-corner-br" />
+      {children}
+    </div>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────
+   CARD — bg-surface card with header
+   ─────────────────────────────────────────────────────────── */
+function Card({ title, sub, actions, children, padded = true, scroll, style }) {
+  return (
+    <section style={{
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)',
+      display: 'flex', flexDirection: 'column',
+      overflow: 'hidden',
+      minHeight: 0,
+      ...style,
+    }}>
+      {title && (
+        <header style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '10px 14px',
+          borderBottom: '1px solid var(--border)',
+          flexShrink: 0,
+          minHeight: 38,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
+            <span className="label-11">{title}</span>
+            {sub && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{sub}</span>}
+          </div>
+          {actions}
+        </header>
+      )}
+      <div style={{ flex: 1, minHeight: 0, padding: padded ? 14 : 0, overflow: scroll ? 'auto' : 'visible' }}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────
+   HERO READOUT — the big number
+   ─────────────────────────────────────────────────────────── */
+function Hero({ label, value, unit, delta, sub, accent, prefix }) {
+  const tone = accent || 'var(--text-primary)';
+  return (
+    <div className="hero-settle" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className="label-10" style={{ color: 'var(--text-muted)' }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        {prefix && (
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 400,
+            color: 'var(--text-muted)', alignSelf: 'flex-start', paddingTop: 6,
+          }}>{prefix}</span>
+        )}
+        <span className="val-hero" style={{ color: tone }}>{value}</span>
+        {unit && (
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 22, fontWeight: 400,
+            color: 'var(--text-secondary)', alignSelf: 'flex-end', paddingBottom: 16,
+          }}>{unit}</span>
+        )}
+      </div>
+      {(delta || sub) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 4 }}>
+          {delta && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: delta.positive ? 'var(--teal)' : 'var(--danger)' }}>
+              <Icon name={delta.positive ? 'arrow-up' : 'arrow-down'} size={12} />
+              <span className="val-12" style={{ color: 'inherit' }}>{delta.value}</span>
+              <span className="meta-11" style={{ color: 'var(--text-muted)' }}>{delta.label}</span>
+            </div>
+          )}
+          {sub && <span className="meta-11" style={{ color: 'var(--text-secondary)' }}>{sub}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────
+   PULSE TICK — tiny live number with flash
+   ─────────────────────────────────────────────────────────── */
+function LiveNum({ value, prev }) {
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    if (prev != null && prev !== value) {
+      setFlash(true);
+      const t = setTimeout(() => setFlash(false), 600);
+      return () => clearTimeout(t);
+    }
+  }, [value]);
+  return (
+    <span className={`tick-num ${flash ? 'tick-pulse' : ''}`}>{value}</span>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────
+   SPARKLINE
+   ─────────────────────────────────────────────────────────── */
+function Spark({ series, w = 100, h = 28, color = 'var(--text-secondary)', dot = true, animate = true }) {
+  const min = Math.min(...series);
+  const max = Math.max(...series);
+  const range = max - min || 1;
+  const pts = series.map((v, i) => {
+    const x = (i / (series.length - 1)) * w;
+    const y = h - ((v - min) / range) * h;
+    return `${x},${y}`;
+  }).join(' ');
+  const last = series[series.length - 1];
+  const lastY = h - ((last - min) / range) * h;
+  return (
+    <svg width={w} height={h} style={{ overflow: 'visible' }}>
+      <polyline
+        points={pts} fill="none" stroke={color} strokeWidth="1.2"
+        className={animate ? 'draw-line' : undefined}
+        style={{ '--dash-len': w * 3 }}
+      />
+      {dot && <circle cx={w} cy={lastY} r="2" fill={color} />}
+    </svg>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────
+   AREA CHART
+   ─────────────────────────────────────────────────────────── */
+function AreaChart({ series, w = 600, h = 160, color = 'var(--amber)', fill = 'var(--amber-glow)', animate = true, axis = true }) {
+  if (!series || series.length < 2) return null;
+  const min = 0;
+  const max = Math.max(...series) * 1.1;
+  const range = max - min || 1;
+  const pts = series.map((v, i) => {
+    const x = (i / (series.length - 1)) * w;
+    const y = h - ((v - min) / range) * h;
+    return [x, y];
+  });
+  const linePath = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ');
+  const areaPath = `M 0 ${h} ` + pts.map(([x, y]) => `L ${x} ${y}`).join(' ') + ` L ${w} ${h} Z`;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }}>
+      {axis && [0.25, 0.5, 0.75].map(p => (
+        <line key={p} x1="0" y1={h * p} x2={w} y2={h * p} stroke="var(--border)" strokeDasharray="2 4" strokeWidth="0.5" />
+      ))}
+      <path d={areaPath} fill={fill} className={animate ? 'fade-up' : undefined} style={{ animationDelay: '0.6s', animationFillMode: 'both', opacity: animate ? 0 : 1, ...(animate ? { animation: 'fadeUp 0.6s ease-out 0.6s forwards' } : {}) }} />
+      <path d={linePath} fill="none" stroke={color} strokeWidth="1.4"
+        className={animate ? 'draw-line' : undefined}
+        style={{ '--dash-len': w * 3 }}
+      />
+      {/* End marker */}
+      <circle
+        cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="3"
+        fill={color}
+        style={{ opacity: animate ? 0 : 1, animation: animate ? 'fadeUp 0.3s ease-out 1.4s forwards' : undefined }}
+      />
+    </svg>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────
+   PERSONA HEADER
+   ─────────────────────────────────────────────────────────── */
+function PersonaHeader({ persona, cycle }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 28 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="label-10" style={{ color: 'var(--text-muted)' }}>{persona.role}</span>
+          <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--text-dim)' }} />
+          <span className="label-10" style={{ color: 'var(--text-muted)' }}>{persona.context}</span>
+          <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--text-dim)' }} />
+          <span className="label-10" style={{ color: 'var(--text-muted)' }}>{persona.location} · {persona.coords}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
+          <span style={{ fontFamily: 'var(--ui)', fontSize: 22, fontWeight: 500, letterSpacing: '-0.01em', color: 'var(--text-primary)' }}>
+            {persona.name}
+          </span>
+          <span className="meta-11" style={{ color: 'var(--text-muted)' }}>
+            ↳ {persona.org}
+          </span>
+        </div>
+      </div>
+      {cycle && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <span className="label-10">{cycle.label}</span>
+          <span className="val-12" style={{ fontSize: 13 }}>{cycle.value}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────
+   TOOLBAR BUTTON
+   ─────────────────────────────────────────────────────────── */
+function TBtn({ children, active, onClick }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        padding: '3px 8px',
+        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        color: active ? 'var(--amber)' : (hover ? 'var(--text-primary)' : 'var(--text-muted)'),
+        border: '1px solid ' + (active ? 'var(--amber-border)' : 'var(--border)'),
+        background: active ? 'var(--amber-glow)' : 'transparent',
+        borderRadius: 'var(--radius-sm)',
+        transition: 'all var(--t-fast)',
+      }}>
+      {children}
+    </button>
+  );
+}
+
+/* Primary action button */
+function PBtn({ children, onClick, variant = 'primary' }) {
+  const [hover, setHover] = useState(false);
+  const primary = variant === 'primary';
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        padding: '6px 14px',
+        fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        color: primary ? 'var(--bg-base)' : (hover ? 'var(--text-primary)' : 'var(--text-secondary)'),
+        background: primary ? (hover ? '#f5b030' : 'var(--amber)') : (hover ? 'var(--bg-raised)' : 'transparent'),
+        border: '1px solid ' + (primary ? 'var(--amber)' : 'var(--border-mid)'),
+        borderRadius: 'var(--radius-sm)',
+        transition: 'all var(--t-fast)',
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+      }}>
+      {children}
+    </button>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────
+   EMPTY / LOADING / ERROR STATES
+   ─────────────────────────────────────────────────────────── */
+function Loading({ label = 'STREAMING' }) {
+  return (
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', gap: 5 }}>
+        {[0, 1, 2, 3, 4].map(i => (
+          <span key={i} style={{
+            width: 6, height: 6, borderRadius: '50%', background: 'var(--amber)',
+            animation: `pulse 1.2s ease-in-out infinite`,
+            animationDelay: `${i * 0.15}s`,
+          }} />
+        ))}
+      </div>
+      <span className="label-10" style={{ color: 'var(--text-muted)' }}>{label}<span className="blink">_</span></span>
+    </div>
+  );
+}
+
+function Empty({ label = 'NO SIGNAL', sub, action }) {
+  return (
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 14, padding: 24 }}>
+      <pre style={{
+        fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.3, margin: 0,
+        textAlign: 'center',
+      }}>{`╭─ · · · ─╮
+│ ∙       ∙ │
+│           │
+│ ∙       ∙ │
+╰─ · · · ─╯`}</pre>
+      <span className="label-11" style={{ color: 'var(--text-secondary)' }}>{label}</span>
+      {sub && <span className="meta-11" style={{ color: 'var(--text-muted)', textAlign: 'center', maxWidth: 280 }}>{sub}</span>}
+      {action}
+    </div>
+  );
+}
+
+function ErrorState({ label = 'STREAM DEGRADED', code = 'ERR-0427', sub, onRetry }) {
+  return (
+    <div style={{
+      height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, padding: 20,
+      borderTop: '1px solid var(--danger)', borderBottom: '1px solid var(--danger)',
+      background: 'rgba(224,80,80,0.04)',
+    }}>
+      <div style={{ color: 'var(--danger)' }}>
+        <Icon name="warning" size={20} />
+      </div>
+      <span className="label-11" style={{ color: 'var(--danger)' }}>{label}</span>
+      <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{code}</span>
+      {sub && <span className="meta-11" style={{ color: 'var(--text-secondary)', textAlign: 'center', maxWidth: 320 }}>{sub}</span>}
+      {onRetry && <PBtn variant="ghost" onClick={onRetry}><Icon name="replay" size={11}/> RETRY</PBtn>}
+    </div>
+  );
+}
+
+/* ───────────────────────────────────────────────────────────
+   Export
+   ─────────────────────────────────────────────────────────── */
+Object.assign(window, {
+  SustenaMark, SustenaLogo, Icon, Badge, Frame, Card,
+  Hero, LiveNum, Spark, AreaChart,
+  PersonaHeader, TBtn, PBtn,
+  Loading, Empty, ErrorState,
+});
+
+
+/* Orchie — shared chat + widget renderer. Used by sidebar (compact) and mobile (full). */
+
+
+
+/* ─── Typewriter hook ──────────────────────────────────────
+   Progressively reveals text characters at given speed (chars/tick).
+*/
+function useTypewriter(text, speed = 30, onDone) {
+  const [shown, setShown] = oUseState('');
+  const doneRef = oUseRef(false);
+  oUseEffect(() => {
+    setShown('');
+    doneRef.current = false;
+    if (!text) return;
+    let i = 0;
+    const interval = setInterval(() => {
+      i += Math.max(1, Math.floor(speed / 12));
+      if (i >= text.length) {
+        setShown(text);
+        clearInterval(interval);
+        if (!doneRef.current) { doneRef.current = true; onDone?.(); }
+      } else {
+        setShown(text.slice(0, i));
+      }
+    }, 16);
+    return () => clearInterval(interval);
+  }, [text, speed]);
+  return shown;
+}
+
+/* ─── Scripted conversation ────────────────────────────────
+   A canonical demo flow that shows Orchie generating multiple widget types.
+*/
+const ORCHIE_DEMO = [
+  {
+    role: 'assistant',
+    text: 'Habari, Bonnie. Mid-day briefing — three things landed since you last checked.',
+  },
+  {
+    role: 'assistant',
+    text: 'Your cash position right now:',
+    widget: { type: 'metric', data: { label: 'CASH · CONSOLIDATED', value: '184,250', unit: 'KSH', delta: { positive: false, value: '−4.2%', label: '7d' }, sub: 'runway ~ 42 days at current burn' } },
+  },
+  {
+    role: 'assistant',
+    text: "Here's how it's split across pockets — Food and Transport are eating most of it:",
+    widget: {
+      type: 'pie',
+      data: {
+        slices: [
+          { label: 'Food',      value: 38, color: '#E8A020' },
+          { label: 'Transport', value: 22, color: '#2ab8a0' },
+          { label: 'Utilities', value: 16, color: '#5090e0' },
+          { label: 'Health',    value: 11, color: '#9a7fb8' },
+          { label: 'Savings',   value: 8,  color: '#4caf80' },
+          { label: 'Other',     value: 5,  color: '#565250' },
+        ],
+        total: 'KSH 184,250',
+      },
+    },
+  },
+  {
+    role: 'assistant',
+    text: 'Burn rate is approaching the watchdog ceiling (KSH 4,500/day):',
+    widget: {
+      type: 'line',
+      data: {
+        series: [3120, 3280, 3410, 3520, 3680, 3840, 3920, 4010, 4080, 4140, 4180, 4214],
+        labels: ['D12', '', '', 'D15', '', '', 'D18', '', '', 'D21', '', 'NOW'],
+        threshold: 4500,
+        unit: 'KSH/day',
+      },
+    },
+  },
+  {
+    role: 'assistant',
+    text: "Pantry is at zero on matumbo — Mama Mboga in Githurai has it at KSH 280/kg, 12-min ETA. Approve?",
+    widget: {
+      type: 'mpesa',
+      data: {
+        recipient: 'MAMA MBOGA · GITHURAI',
+        amount: 'KSH 1,120',
+        memo: 'matumbo 4 kg · restock',
+        till: '5826141',
+        sustain: 'homestead.bonnie',
+      },
+    },
+  },
+  {
+    role: 'assistant',
+    text: 'Quick note — pantry oil is low too.',
+    widget: {
+      type: 'alert',
+      data: {
+        tone: 'amber',
+        title: 'Pantry threshold breach',
+        body: 'Cooking oil at 0.4 L · reorder threshold 0.5 L. Curator can batch this with the matumbo restock.',
+        actions: ['Batch', 'Dismiss'],
+      },
+    },
+  },
+  {
+    role: 'assistant',
+    text: "And one Council motion needs your eye before quorum closes:",
+    widget: {
+      type: 'proposal',
+      data: {
+        id: 'SUS-0148',
+        title: 'Advance Q3 disbursement to Carbon-R&D by 14 days',
+        for: 7, against: 2, abstain: 1, quorum: 10,
+        eta: '4h 22m',
+        score: 0.84,
+      },
+    },
+  },
+];
+
+/* ─── Widget renderers ─────────────────────────────────────
+   Compact-by-default; each takes a `size` hint ('sm' for sidebar, 'md' for mobile).
+*/
+
+function MetricWidget({ data, size }) {
+  return (
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', padding: size === 'sm' ? '10px 12px' : '14px 16px',
+      display: 'flex', flexDirection: 'column', gap: 6,
+    }}>
+      <span className="label-10">{data.label}</span>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: size === 'sm' ? 26 : 36, fontWeight: 500, letterSpacing: '-0.01em', color: 'var(--text-primary)' }}>
+          {data.value}
+        </span>
+        {data.unit && <span className="meta-10">{data.unit}</span>}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        {data.delta && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3, color: data.delta.positive ? 'var(--teal)' : 'var(--danger)' }}>
+            <span style={{ fontSize: 10 }}>{data.delta.positive ? '▲' : '▼'}</span>
+            <span className="val-12" style={{ color: 'inherit', fontSize: 11 }}>{data.delta.value}</span>
+            <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{data.delta.label}</span>
+          </div>
+        )}
+        {data.sub && <span className="meta-10" style={{ color: 'var(--text-muted)', fontSize: 9 }}>{data.sub}</span>}
+      </div>
+    </div>
+  );
+}
+
+function PieWidget({ data, size }) {
+  const total = data.slices.reduce((s, x) => s + x.value, 0);
+  const dim = size === 'sm' ? 88 : 120;
+  const r = dim / 2 - 6;
+  const cx = dim / 2, cy = dim / 2;
+  const inner = r * 0.55;
+
+  // Compute arcs
+  let acc = 0;
+  const arcs = data.slices.map(s => {
+    const start = (acc / total) * 2 * Math.PI;
+    acc += s.value;
+    const end = (acc / total) * 2 * Math.PI;
+    return { ...s, start, end };
+  });
+
+  const pathArc = (a) => {
+    const x1 = cx + r * Math.cos(a.start - Math.PI / 2);
+    const y1 = cy + r * Math.sin(a.start - Math.PI / 2);
+    const x2 = cx + r * Math.cos(a.end - Math.PI / 2);
+    const y2 = cy + r * Math.sin(a.end - Math.PI / 2);
+    const xi2 = cx + inner * Math.cos(a.end - Math.PI / 2);
+    const yi2 = cy + inner * Math.sin(a.end - Math.PI / 2);
+    const xi1 = cx + inner * Math.cos(a.start - Math.PI / 2);
+    const yi1 = cy + inner * Math.sin(a.start - Math.PI / 2);
+    const large = a.end - a.start > Math.PI ? 1 : 0;
+    return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${xi2} ${yi2} A ${inner} ${inner} 0 ${large} 0 ${xi1} ${yi1} Z`;
+  };
+
+  return (
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', padding: size === 'sm' ? '10px 12px' : '14px 16px',
+      display: 'flex', gap: 14, alignItems: 'center',
+    }}>
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        <svg width={dim} height={dim}>
+          {arcs.map((a, i) => (
+            <path
+              key={i}
+              d={pathArc(a)}
+              fill={a.color}
+              style={{
+                opacity: 0,
+                animation: `fadeUp 0.4s ease-out ${0.15 + i * 0.08}s forwards`,
+                transformOrigin: `${cx}px ${cy}px`,
+              }}
+            />
+          ))}
+        </svg>
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', pointerEvents: 'none',
+        }}>
+          <span className="label-10" style={{ fontSize: 8 }}>TOTAL</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: size === 'sm' ? 10 : 12, fontWeight: 500, color: 'var(--text-primary)' }}>{data.total}</span>
+        </div>
+      </div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+        {data.slices.map((s, i) => (
+          <div key={i} className="fade-up" style={{
+            display: 'grid', gridTemplateColumns: '8px 1fr auto', gap: 8, alignItems: 'center',
+            animationDelay: `${0.25 + i * 0.06}s`,
+          }}>
+            <span style={{ width: 7, height: 7, background: s.color, borderRadius: 1 }} />
+            <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
+            <span className="val-12" style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{s.value}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LineWidget({ data, size }) {
+  const W = size === 'sm' ? 280 : 360;
+  const H = size === 'sm' ? 80 : 100;
+  const series = data.series;
+  const min = Math.min(...series, data.threshold || Infinity) * 0.9;
+  const max = Math.max(...series, data.threshold || -Infinity) * 1.05;
+  const range = max - min || 1;
+  const pts = series.map((v, i) => {
+    const x = (i / (series.length - 1)) * (W - 24) + 12;
+    const y = H - ((v - min) / range) * H + 8;
+    return [x, y];
+  });
+  const linePath = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ');
+  const lastY = pts[pts.length - 1][1];
+  const lastX = pts[pts.length - 1][0];
+  const thrY = data.threshold ? (H - ((data.threshold - min) / range) * H + 8) : null;
+
+  return (
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', padding: size === 'sm' ? '10px 12px' : '14px 16px',
+      display: 'flex', flexDirection: 'column', gap: 6,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span className="label-10">BURN RATE · LAST 12 DAYS</span>
+        <span className="val-12" style={{ fontSize: 11, color: 'var(--amber)' }}>{series[series.length - 1].toLocaleString()} {data.unit}</span>
+      </div>
+      <svg width={W} height={H + 18} style={{ overflow: 'visible' }}>
+        {/* Threshold line */}
+        {thrY != null && (
+          <>
+            <line x1="0" y1={thrY} x2={W} y2={thrY} stroke="var(--danger)" strokeDasharray="2 3" strokeWidth="1" opacity="0.6" />
+            <text x={W - 4} y={thrY - 4} textAnchor="end" fontFamily="DM Mono" fontSize="9" fill="var(--danger)">CEILING {data.threshold}</text>
+          </>
+        )}
+        {/* Area */}
+        <path
+          d={`${linePath} L ${lastX} ${H + 8} L 12 ${H + 8} Z`}
+          fill="var(--amber-glow)"
+          style={{ opacity: 0, animation: 'fadeUp 0.5s ease-out 0.4s forwards' }}
+        />
+        {/* Line */}
+        <path d={linePath} fill="none" stroke="var(--amber)" strokeWidth="1.4"
+          className="draw-line"
+          style={{ '--dash-len': W * 3, animationDuration: '1s' }}
+        />
+        {/* End dot */}
+        <circle cx={lastX} cy={lastY} r="3" fill="var(--amber)"
+          style={{ opacity: 0, animation: 'fadeUp 0.3s ease-out 1.1s forwards' }}
+        />
+        {/* Labels */}
+        {data.labels?.map((l, i) => {
+          if (!l) return null;
+          const x = (i / (series.length - 1)) * (W - 24) + 12;
+          return <text key={i} x={x} y={H + 18} textAnchor="middle" fontFamily="DM Mono" fontSize="9" fill="var(--text-muted)">{l}</text>;
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function MpesaWidget({ data, size }) {
+  return (
+    <div style={{
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--amber-border)',
+      borderRadius: 'var(--radius-md)',
+      padding: size === 'sm' ? '12px 14px' : '14px 16px',
+      display: 'flex', flexDirection: 'column', gap: 10,
+      position: 'relative', overflow: 'hidden',
+    }}>
+      <span style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'var(--amber)' }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span className="label-10" style={{ color: 'var(--amber)' }}>M-PESA · STK PUSH</span>
+        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>TILL · {data.till}</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-secondary)' }}>To</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-primary)' }}>{data.recipient}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 24, fontWeight: 500, color: 'var(--text-primary)' }}>{data.amount}</span>
+      </div>
+      <span className="meta-10" style={{ color: 'var(--text-muted)' }}>memo · {data.memo}</span>
+      <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+        <button onClick={() => window.openPinPad?.({
+          title: `M-Pesa STK · ${data.amount}`,
+          body: `To ${data.recipient}. ${data.memo}.`,
+          onConfirm: () => window.flash?.(`Sent ${data.amount} to ${data.recipient}`, 'ok'),
+        })} style={{
+          flex: 1, padding: '8px',
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em',
+          background: 'var(--amber)', color: 'var(--bg-base)',
+          border: '1px solid var(--amber)', borderRadius: 'var(--radius-sm)',
+        }}>APPROVE · PIN</button>
+        <button onClick={() => window.flash?.('Deferred · re-prompt in 30 min', 'info')} style={{
+          padding: '8px 12px',
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em',
+          background: 'transparent', color: 'var(--text-secondary)',
+          border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
+        }}>DEFER</button>
+      </div>
+    </div>
+  );
+}
+
+function AlertWidget({ data, size }) {
+  const c = data.tone === 'amber' ? 'var(--amber)' : data.tone === 'danger' ? 'var(--danger)' : 'var(--teal)';
+  return (
+    <div style={{
+      background: 'var(--bg-surface)',
+      border: `1px solid ${c}`,
+      borderRadius: 'var(--radius-md)',
+      padding: '12px 14px',
+      display: 'flex', flexDirection: 'column', gap: 6,
+      borderLeftWidth: 3,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Icon name="warning" size={12} />
+        <span className="label-10" style={{ color: c }}>{data.title.toUpperCase()}</span>
+      </div>
+      <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{data.body}</span>
+      {data.actions && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+          {data.actions.map((a, i) => (
+            <button key={a} onClick={() => window.flash?.(`${a} · ${data.title.toLowerCase()}`, i === 0 ? 'ok' : 'info')} style={{
+              padding: '5px 10px',
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em',
+              color: i === 0 ? c : 'var(--text-muted)',
+              background: i === 0 ? 'transparent' : 'transparent',
+              border: `1px solid ${i === 0 ? c : 'var(--border-mid)'}`,
+              borderRadius: 'var(--radius-sm)',
+            }}>{a.toUpperCase()}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProposalWidget({ data, size }) {
+  const total = data.for + data.against + data.abstain;
+  const forPct = (data.for / total) * 100;
+  const againstPct = (data.against / total) * 100;
+  const abstainPct = (data.abstain / total) * 100;
+  return (
+    <div style={{
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--amber-border)',
+      borderRadius: 'var(--radius-md)',
+      padding: '12px 14px',
+      display: 'flex', flexDirection: 'column', gap: 10,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{data.id} · COUNCIL</span>
+          <span style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', lineHeight: 1.35 }}>{data.title}</span>
+        </div>
+        <Badge tone="amber" dot>VOTING</Badge>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span className="meta-10" style={{ fontSize: 9 }}>QUORUM</span>
+          <span className="val-12" style={{ fontSize: 10, color: total >= data.quorum ? 'var(--teal)' : 'var(--amber)' }}>{total}/{data.quorum}</span>
+        </div>
+        <div style={{ display: 'flex', height: 4, borderRadius: 2, overflow: 'hidden', background: 'var(--bg-base)' }}>
+          <div style={{ width: `${forPct}%`, background: 'var(--teal)' }} />
+          <div style={{ width: `${againstPct}%`, background: 'var(--danger)' }} />
+          <div style={{ width: `${abstainPct}%`, background: 'var(--text-muted)' }} />
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <span className="meta-10" style={{ fontSize: 9, color: 'var(--teal)' }}>YES {data.for}</span>
+          <span className="meta-10" style={{ fontSize: 9, color: 'var(--danger)' }}>NO {data.against}</span>
+          <span className="meta-10" style={{ fontSize: 9, color: 'var(--text-muted)' }}>ABSTAIN {data.abstain}</span>
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+        <span className="meta-10">CLOSES IN {data.eta}</span>
+        <PBtn onClick={() => window.confirmAction?.({
+          title: `Vote on ${data.id}?`,
+          body: `${data.title}. Council quorum at ${data.for + data.against + data.abstain} / ${data.quorum}.`,
+          ctaLabel: 'CAST · YES',
+          tone: 'amber',
+          onConfirm: () => window.flash?.(`Vote cast · YES on ${data.id}`, 'ok'),
+        })}>VOTE</PBtn>
+      </div>
+    </div>
+  );
+}
+
+/* Composite widget switch */
+function OrchieWidget({ widget, size = 'sm' }) {
+  if (!widget) return null;
+  switch (widget.type) {
+    case 'metric':   return <MetricWidget data={widget.data} size={size} />;
+    case 'pie':      return <PieWidget data={widget.data} size={size} />;
+    case 'line':     return <LineWidget data={widget.data} size={size} />;
+    case 'mpesa':    return <MpesaWidget data={widget.data} size={size} />;
+    case 'alert':    return <AlertWidget data={widget.data} size={size} />;
+    case 'proposal': return <ProposalWidget data={widget.data} size={size} />;
+    default: return null;
+  }
+}
+
+/* ─── Animated Orchie message bubble ───────────────────────
+   Reveals text via typewriter then fades widget in.
+*/
+function OrchieBubble({ m, size = 'sm', onDone }) {
+  const [widgetReady, setWidgetReady] = oUseState(false);
+  const text = useTypewriter(m.text || '', 30, () => setTimeout(() => { setWidgetReady(true); onDone?.(); }, 80));
+  const isUser = m.role === 'user';
+  const compact = size === 'sm';
+
+  if (isUser) {
+    return (
+      <div className="fade-up" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+        <div className="bubble-user" style={{
+          maxWidth: compact ? '85%' : '78%',
+          fontSize: compact ? 12 : 14,
+          fontFamily: 'var(--ui)', color: 'var(--text-primary)', lineHeight: 1.5,
+        }}>{m.text}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fade-up" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      {!compact && (
+        <div style={{
+          width: 28, height: 28, flexShrink: 0,
+          borderRadius: '50%',
+          background: 'var(--bg-surface)', border: '1px solid var(--amber-border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 0 12px var(--amber-glow)',
+        }}>
+          <SustenaMark size={18} />
+        </div>
+      )}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="bubble" style={{
+          fontFamily: 'var(--ui)',
+          fontSize: compact ? 12 : 14,
+          color: 'var(--text-primary)',
+          lineHeight: 1.55,
+        }}>
+          {compact && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <SustenaMark size={12} />
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--amber)', letterSpacing: '0.08em' }}>ORCHIE</span>
+            </div>
+          )}
+          {text}
+          {text.length < (m.text?.length || 0) && <span className="t-cursor" style={{ width: 5, height: 11 }} />}
+        </div>
+        {m.widget && widgetReady && (
+          <div className="fade-up">
+            <OrchieWidget widget={m.widget} size={size} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Thinking dots */
+function OrchieThinking({ size = 'sm' }) {
+  return (
+    <div className="fade-up" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      {size === 'md' && (
+        <div style={{
+          width: 28, height: 28, flexShrink: 0, borderRadius: '50%',
+          background: 'var(--bg-surface)', border: '1px solid var(--amber-border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <SustenaMark size={18} />
+        </div>
+      )}
+      <div className="bubble" style={{ display: 'flex', gap: 4, padding: '10px 14px' }}>
+        {[0, 1, 2].map(i => (
+          <span key={i} className="pulse" style={{
+            width: 5, height: 5, borderRadius: '50%', background: 'var(--text-muted)',
+            animationDelay: `${i * 0.18}s`,
+          }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* Streamed conversation hook — plays scripted messages with delays */
+function useStreamedConversation(script, autoStart = true, baseDelay = 1200) {
+  const [shown, setShown] = oUseState([]);
+  const [thinking, setThinking] = oUseState(false);
+  const idxRef = oUseRef(0);
+
+  const playNext = () => {
+    if (idxRef.current >= script.length) return;
+    setThinking(true);
+    const msg = script[idxRef.current];
+    const thinkTime = 400 + Math.random() * 600;
+    setTimeout(() => {
+      setThinking(false);
+      setShown(s => [...s, msg]);
+      idxRef.current += 1;
+    }, thinkTime);
+  };
+
+  // Auto-start sequence
+  oUseEffect(() => {
+    if (!autoStart) return;
+    if (shown.length === 0 && idxRef.current === 0) {
+      const t0 = setTimeout(() => playNext(), 600);
+      return () => clearTimeout(t0);
+    }
+  }, []);
+
+  const onMessageDone = () => {
+    setTimeout(() => playNext(), baseDelay);
+  };
+
+  const send = (text) => {
+    setShown(s => [...s, { role: 'user', text }]);
+    setThinking(true);
+    setTimeout(() => {
+      setThinking(false);
+      // Loop back to a relevant assistant reply
+      const reply = pickReply(text);
+      setShown(s => [...s, reply]);
+    }, 900 + Math.random() * 800);
+  };
+
+  const restart = () => {
+    setShown([]);
+    idxRef.current = 0;
+    setThinking(false);
+    setTimeout(() => playNext(), 400);
+  };
+
+  return { messages: shown, thinking, onMessageDone, send, restart };
+}
+
+function pickReply(text) {
+  const t = text.toLowerCase();
+  if (t.includes('budget') || t.includes('pocket')) {
+    return {
+      role: 'assistant',
+      text: "Here's the pocket breakdown again, with overspend flagged in amber:",
+      widget: { type: 'pie', data: ORCHIE_DEMO[2].widget.data },
+    };
+  }
+  if (t.includes('burn') || t.includes('rate')) {
+    return {
+      role: 'assistant',
+      text: "Burn rate over the last 12 days — we're 6% under ceiling but trending up:",
+      widget: { type: 'line', data: ORCHIE_DEMO[3].widget.data },
+    };
+  }
+  if (t.includes('reall') || t.includes('move') || t.includes('reallocate')) {
+    return {
+      role: 'assistant',
+      text: "Simulated. Moving KSH 400k from Treasury Ops → Carbon-R&D keeps you 6.1% above the council floor and unblocks two grants by 9 days. Draft as SUS-0149?",
+      widget: { type: 'proposal', data: { ...ORCHIE_DEMO[6].widget.data, id: 'SUS-0149 (DRAFT)', title: 'Reallocate −KSH 400k Ops → Carbon-R&D', for: 0, against: 0, abstain: 0, eta: 'NOT QUEUED' } },
+    };
+  }
+  if (t.includes('cash') || t.includes('position')) {
+    return {
+      role: 'assistant',
+      text: 'Right now:',
+      widget: { type: 'metric', data: ORCHIE_DEMO[1].widget.data },
+    };
+  }
+  return {
+    role: 'assistant',
+    text: "Pulling that — I'll need a moment to simulate the dependency chain. Should I surface the impact on Q3 cap, or just the headline number?",
+  };
+}
+
+Object.assign(window, {
+  useTypewriter, ORCHIE_DEMO,
+  OrchieWidget, OrchieBubble, OrchieThinking,
+  useStreamedConversation, pickReply,
+  MetricWidget, PieWidget, LineWidget, MpesaWidget, AlertWidget, ProposalWidget,
+});
+
+
+/* Orchie mobile — full screen iOS frame, dark, chat with animated widgets */
+
+
+
+function OrchieMobileApp() {
+  const { messages, thinking, onMessageDone, send, restart } = useStreamedConversation(ORCHIE_DEMO, true, 1500);
+  const [input, setInput] = mUseState('');
+  const scrollerRef = mUseRef(null);
+
+  // Scale device to fit viewport (max 0.92)
+  const [scale, setScale] = mUseState(1);
+  mUseEffect(() => {
+    const update = () => {
+      const margin = 60;
+      const sh = (window.innerHeight - margin) / 874;
+      const sw = (window.innerWidth - margin) / 402;
+      setScale(Math.min(1, sh, sw));
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  mUseEffect(() => {
+    scrollerRef.current?.scrollTo({ top: 999999, behavior: 'smooth' });
+  }, [messages.length, thinking]);
+
+  const submit = () => {
+    if (!input.trim()) return;
+    send(input.trim());
+    setInput('');
+  };
+
+  return (
+    <div style={{
+      width: '100vw', height: '100vh', overflow: 'hidden',
+      background: 'var(--bg-base)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      position: 'relative',
+    }}>
+      {/* Backdrop atmospherics */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: `
+          radial-gradient(ellipse 800px 600px at 30% 20%, var(--amber-glow), transparent 60%),
+          radial-gradient(ellipse 600px 500px at 70% 80%, var(--teal-glow), transparent 60%)
+        `,
+        opacity: 0.5, pointerEvents: 'none',
+      }} />
+
+      {/* Side info — desktop only */}
+      <div style={{
+        position: 'absolute', left: 40, top: 40,
+        display: 'flex', flexDirection: 'column', gap: 8,
+      }}>
+        <SustenaLogo size={16} />
+        <div className="label-10" style={{ marginTop: 16 }}>HUMAN-AGENT INTERFACE</div>
+        <h1 style={{ fontFamily: 'var(--ui)', fontSize: 32, fontWeight: 500, letterSpacing: '-0.02em', color: 'var(--text-primary)', lineHeight: 1.05, maxWidth: 320 }}>
+          Orchie · <span style={{ color: 'var(--amber)' }}>your delegate</span> in the Sustenaverse
+        </h1>
+        <p style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: 320, marginTop: 4 }}>
+          Mobile-first. WhatsApp-compatible. Widget-driven. Every recommendation
+          carries simulation evidence; the user holds the 51% vote.
+        </p>
+      </div>
+
+      {/* Side meta — bottom-left */}
+      <div style={{
+        position: 'absolute', left: 40, bottom: 40,
+        display: 'flex', flexDirection: 'column', gap: 6,
+      }}>
+        <span className="label-10" style={{ fontSize: 9 }}>RUNTIME</span>
+        <div className="meta-11" style={{ color: 'var(--text-secondary)' }}>haiku-4.5 · sonnet-fallback</div>
+        <div className="meta-11" style={{ color: 'var(--text-secondary)' }}>p95 inference · 412 ms</div>
+        <div className="meta-11" style={{ color: 'var(--text-secondary)' }}>privilege · L1 delegate</div>
+      </div>
+
+      {/* Right-side controls */}
+      <div style={{
+        position: 'absolute', right: 40, top: 40,
+        display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-end',
+      }}>
+        <button onClick={restart} style={{
+          padding: '6px 12px',
+          fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', fontWeight: 500,
+          color: 'var(--text-secondary)',
+          background: 'var(--bg-surface)', border: '1px solid var(--border-mid)',
+          borderRadius: 'var(--radius-sm)',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          transition: 'all var(--t-fast)',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--amber-border)'; e.currentTarget.style.color = 'var(--amber)'; }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-mid)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+        ><Icon name="replay" size={11} /> REPLAY DEMO</button>
+        <a href="Sustena Dashboard.html" style={{
+          padding: '6px 12px',
+          fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', fontWeight: 500,
+          color: 'var(--text-muted)',
+          background: 'transparent', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)',
+          textDecoration: 'none',
+          transition: 'all var(--t-fast)',
+        }}>← MYCELIUM CONTROL PANEL</a>
+      </div>
+
+      {/* The device */}
+      <div style={{ position: 'relative', zIndex: 2, transform: `scale(${scale})`, transformOrigin: 'center center' }}>
+        <IOSDevice width={402} height={874} dark>
+          <OrchieScreen
+            messages={messages}
+            thinking={thinking}
+            onMessageDone={onMessageDone}
+            send={send}
+            input={input}
+            setInput={setInput}
+            submit={submit}
+            scrollerRef={scrollerRef}
+          />
+        </IOSDevice>
+      </div>
+    </div>
+  );
+}
+
+function OrchieScreen({ messages, thinking, onMessageDone, send, input, setInput, submit, scrollerRef }) {
+  const [focused, setFocused] = mUseState(false);
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', height: '100%',
+      background: 'var(--bg-base)',
+      paddingTop: 54, /* below status bar */
+    }}>
+      {/* Persona header */}
+      <header style={{
+        padding: '8px 16px 12px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        borderBottom: '1px solid var(--border)',
+        flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            position: 'relative',
+            width: 40, height: 40, borderRadius: '50%',
+            background: 'var(--bg-surface)', border: '1px solid var(--amber-border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 0 16px var(--amber-glow)',
+          }}>
+            <SustenaMark size={24} />
+            <span style={{
+              position: 'absolute', bottom: -1, right: -1,
+              width: 10, height: 10, borderRadius: '50%',
+              background: 'var(--teal)', border: '2px solid var(--bg-base)',
+            }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontFamily: 'var(--ui)', fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>Orchie</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span className="pulse" style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--teal)' }} />
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--teal)', letterSpacing: '0.06em' }}>ONLINE · 28 ms</span>
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <HeaderBtn icon={<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="7" cy="7" r="5.5"/><path d="M7 4v3.5l2 2"/></svg>} />
+          <HeaderBtn icon={<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M2 4h10M2 7h10M2 10h6"/></svg>} />
+        </div>
+      </header>
+
+      {/* Context strip */}
+      <div className="no-scrollbar" style={{
+        padding: '8px 16px',
+        display: 'flex', gap: 6, overflow: 'auto',
+        borderBottom: '1px solid var(--border)',
+        flexShrink: 0,
+      }}>
+        <ContextChip active>HOMESTEAD</ContextChip>
+        <ContextChip>BIASHARA</ContextChip>
+        <ContextChip>CHAMA</ContextChip>
+        <ContextChip>+2</ContextChip>
+      </div>
+
+      {/* Messages */}
+      <div ref={scrollerRef} className="no-scrollbar" style={{
+        flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden',
+        padding: '16px 14px 16px',
+        display: 'flex', flexDirection: 'column', gap: 14,
+      }}>
+        <DayDivider>TODAY · 14:32 EAT</DayDivider>
+        {messages.map((m, i) => (
+          <OrchieBubble
+            key={i}
+            m={m}
+            size="md"
+            onDone={i === messages.length - 1 ? onMessageDone : undefined}
+          />
+        ))}
+        {thinking && <OrchieThinking size="md" />}
+      </div>
+
+      {/* Suggestions */}
+      <div className="no-scrollbar" style={{
+        padding: '8px 14px 6px',
+        display: 'flex', gap: 6, overflow: 'auto',
+        flexShrink: 0,
+      }}>
+        {['Show pockets', 'Why is burn rising?', 'Reallocate 400k', 'Pantry'].map(s => (
+          <button key={s} onClick={() => send(s)} style={{
+            padding: '6px 12px',
+            fontFamily: 'var(--ui)', fontSize: 12,
+            color: 'var(--text-secondary)',
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 16,
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+            transition: 'all var(--t-fast)',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--amber-border)'; e.currentTarget.style.color = 'var(--amber)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+          >{s}</button>
+        ))}
+      </div>
+
+      {/* Composer */}
+      <div style={{
+        padding: '8px 12px 16px',
+        display: 'flex', alignItems: 'flex-end', gap: 8,
+        borderTop: '1px solid var(--border)',
+        flexShrink: 0,
+      }}>
+        <button style={{
+          width: 36, height: 36, borderRadius: '50%',
+          background: 'var(--bg-surface)', border: '1px solid var(--border-mid)',
+          color: 'var(--text-secondary)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}><Icon name="plus" size={14} /></button>
+        <div style={{
+          flex: 1, position: 'relative',
+          background: 'var(--bg-surface)',
+          border: '1px solid ' + (focused ? 'var(--amber-border)' : 'var(--border-mid)'),
+          borderRadius: 22,
+          padding: '8px 14px',
+          minHeight: 36,
+          transition: 'border-color var(--t-fast)',
+        }}>
+          <input
+            value={input} onChange={e => setInput(e.target.value)}
+            onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+            onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+            placeholder="Ask Orchie..."
+            style={{
+              width: '100%', background: 'transparent', border: 0, outline: 'none',
+              fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--text-primary)',
+            }}
+          />
+        </div>
+        <button onClick={submit} disabled={!input.trim()} style={{
+          width: 36, height: 36, borderRadius: '50%',
+          background: input.trim() ? 'var(--amber)' : 'var(--bg-surface)',
+          color: input.trim() ? 'var(--bg-base)' : 'var(--text-muted)',
+          border: '1px solid ' + (input.trim() ? 'var(--amber)' : 'var(--border-mid)'),
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          transition: 'all var(--t-fast)',
+        }}><Icon name="send" size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
+function HeaderBtn({ icon }) {
+  return (
+    <button style={{
+      width: 32, height: 32, borderRadius: '50%',
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      color: 'var(--text-secondary)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      transition: 'all var(--t-fast)',
+    }}
+    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--amber-border)'; e.currentTarget.style.color = 'var(--amber)'; }}
+    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+    >{icon}</button>
+  );
+}
+
+function ContextChip({ children, active }) {
+  return (
+    <span style={{
+      padding: '4px 10px',
+      fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em', fontWeight: 500,
+      color: active ? 'var(--amber)' : 'var(--text-secondary)',
+      background: active ? 'var(--amber-glow)' : 'var(--bg-surface)',
+      border: '1px solid ' + (active ? 'var(--amber-border)' : 'var(--border)'),
+      borderRadius: 12,
+      whiteSpace: 'nowrap',
+    }}>{children}</span>
+  );
+}
+
+function DayDivider({ children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0' }}>
+      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+      <span className="label-10" style={{ color: 'var(--text-muted)', fontSize: 9 }}>{children}</span>
+      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<OrchieMobileApp />);
+
+  </script>
 </body>
 </html>

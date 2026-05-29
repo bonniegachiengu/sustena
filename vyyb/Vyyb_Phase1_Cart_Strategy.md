@@ -1,23 +1,23 @@
-# VYYB PHASE 1 — STARTUP & MOBILE CART STRATEGY
+# VYYB PHASE 1 — STARTUP & OUTLET STRATEGY
 
 > **This document covers the startup-phase specifications for Vyyb.**
 > The full franchise vision is captured in `Vyyb_QSR_Operations_Strategy.md`.
 > This document is the *how we begin* — minimal cost, maximum learning, data-first.
 
-*Version 2.0 — Updated 26 May 2026*
+*Version 3.0 — Updated 28 May 2026*
 
 ---
 
 ## 0. THE PHASE 1 THESIS
 
-**One Hive. One Cart. Vyyb-Owned. Sustena-Tracked.**
+**One Hive. One Outlet. Vyyb-Owned. Sustena-Tracked.**
 
 The goal of Phase 1 is not to build a restaurant. It is to prove the modular franchise model — with Vyyb owning and operating the first outlet itself to validate the system before handing it to vendor partners.
 
-- The Hive (commissary) produces everything. The cart just finishes and sells.
-- The first cart is Vyyb-owned. This proves the model, generates real data, and trains the Vyyb.sustain system.
+- The Hive (commissary) produces everything. The outlet just finishes and sells.
+- The first outlet is Vyyb-owned. This proves the model, generates real data, and trains the Vyyb.sustain system.
 - Sustena tracks every dispatch, receipt, sale, and leftover from Day 1 — this data drives future logistics, pricing, and vendor partner matching.
-- Once the model is proven, we replicate the cart with vendor partners — universities, business parks, events, estates.
+- Once the model is proven, we replicate the outlet with vendor partners — universities, business parks, events, estates.
 
 **Budget constraint: 500,000 – 600,000 KES total** (Hive setup + Cart + Uniforms + First stock)
 
@@ -209,215 +209,254 @@ Apply: 1–2 tbsp per piece. Best on bone-in cuts (leg, wing, piece). Store in s
 
 ---
 
-## 3. THE ORIGAMI CART — OUTLET DESIGN
+## 3. THE MODULAR OUTLET STRUCTURE
 
 ### Philosophy
 
-One steel structure. 2×2 meter footprint. Folds into a pickup or truck bed. Sets up in 30 minutes. Reconfigures between morning (breakfast mode) and full-day mode without swapping the frame — equipment folds, swings, or clips in.
+One armored modular kitchen. 3×2m footprint when assembled. Six interlocking modules roll into position, lock from the inside, and open into a fully functional finishing kitchen. Deploys in 30–45 minutes from module storage to service-ready. Closes into a sealed steel structure — weatherproof, secure, zero exterior fasteners — every night.
 
-**Cart aesthetic:** Fully branded in Vyyb safety orange. Powder-coated steel frame with vinyl brand wrap. Decorative accents (brushed chrome/gold trim, styled wheels). Not bare stainless steel — this is a brand asset, not a utility trolley. Reference: Le'Boone, Wrap Nation, oui! cart styles.
+**Outlet aesthetic:** Fully branded across all exterior Alucobond cladding faces — full vinyl wrap in Vyyb safety orange. The four ground-level modules lock together into a sealed kibanda with smooth panel surfaces on all exterior faces. Not bare stainless steel — this is a brand asset on the street.
 
-This is the franchise template. Every subsequent cart is the same Jua kali spec, same structure, same brand. Phase 1 proves it; Phase 2 replicates it.
+This is the franchise template. Every subsequent outlet is the same Jua Kali spec, same brand, same structure. Phase 1 proves it; Phase 2 replicates it.
 
----
-
-### Cart Zones
-
-**Front face (customer-facing):**
-- 2-tier curved glass heated display case — lower tier: bases (rice, pilau, biryani, stews); upper tier: proteins (chicken, strips, matumbo). Compact (50–60cm wide) — display quantity only, not a holding vat. Items are cooked to order; display is visual merchandising.
-- TV screen menu board (22–27", cart-mounted bracket, sunlight-readable) — solar-powered
-- Order counter surface (foldable SS shelf)
-
-**Left side:**
-- Tabletop double gas fryer (2 basket) — chicken/fries in one basket, mandazi/samosas in separate dedicated basket with separate oil
-- Gas flat-top griddle — eggs, smocha, tortilla finishing (oil + heat for chapati texture), grilled chicken finish, fried rice mix finish
-- Gas cylinder storage (2× 6kg, base compartment, ventilated)
-
-**Right side:**
-- Small refrigerated chest unit (12V DC compressor, 40–60L) — cold chain items: breaded chicken, sauces, kachumbari, smoothie bases
-- Small ambient shelf/display — drinks concentrate, fresh veg, tortilla bases, buns, mandazi dough
-
-**Interior/back (working side):**
-- POS tablet + cart-mount arm (Vyyb OS outlet dashboard)
-- Under-counter storage (branded shelving, for packaging: bags, cups, wraps, serviettes)
-- Fresh water tank (20L) + small pump
-- Waste water tank (20L, sealed, gravity drain)
-- Oil drip tray / filter compartment (below fryer)
-- SS electric kettle (1.7L, solar-powered) — hot water for chai, hot milk, coffee
-- Milk pitcher (SS, small) — hot milk for chai
-- 2 fold-down staff seats (wall-mounted flip style)
-- 4G LTE Wi-Fi router (SIM-based, battery-backed — Safaricom/Airtel SIM) — POS, Sustena sync, tablet connectivity. *Starlink Roam (KES 14,000/month) is an option for events in low-coverage zones but 4G LTE is primary for fixed urban locations.*
-
-**Top/exterior:**
-- Large commercial umbrella (centre or corner post mount)
-- Patron standing table (foldable, side-attaching or free-standing)
-- Garbage bin (rear-facing, lidded)
-- LED perimeter lighting (12V solar strip)
-
-**Power system:**
-- 1× 200W solar panel (roof-mounted, tiltable)
-- 1× 100Ah lithium battery + MPPT charge controller
-- Powers: TV screen, POS tablet, refrigeration, heated display case, kettle, Wi-Fi router, LED lights
-- Gas: fryer, griddle (no electric cooking)
+For the full fabrication specification (frame gauges, hardware spec, module dimensions, external cage construction), see: `Technical Brief & Project Summary.md`
 
 ---
 
-### Cart Configurations by Time
+### Assembly Geometry
+
+The four ground-level modules form a closed rectangle. Modules 1 and 3 are the two long faces (3m each, staff and customer). Modules 2 and 4 are the short sides that close both ends. The result is an enclosed interior workspace approximately 3m × 1m. Module 5 (solar roof + customer awning) mounts on telescopic legs above. Module 6 (floor panels) bridges the interior workspace floor.
+
+All interlocking latches, toggle clamps, and connecting hardware are on the **interior face** of each module — no accessible fasteners on the exterior when closed. Module 4 (the door) is the only exterior access point, locked from outside at shutdown.
+
+---
+
+### Outlet Zones
+
+**Module 1 — Front Service Counter** *(customer-facing, 3m long face)*
+- Insulated under-counter DC compressor refrigerator (12V/24V)
+- Recessed cooled salad well with Grade 304 GN pan inserts
+- Insulated Bain Marie cavity — hot-holding stews, bases, and legumes
+- Glass-enclosed insulated heated display case — proteins and bases (visual merchandising)
+- POS tablet in welded steel lockbox — M-Pesa Daraja STK Push cashless flow
+- Primary customer-facing branding face: full exterior Alucobond panel for vinyl wrap
+
+**Module 2 — Hydro-Station** *(short side)*
+- Grade 304 SS double-basin sink with faucet
+- Gravity-fed from 50–100L fresh water tank fixed on exterior water cage — no pump required
+- Greywater drains through module floor to waste tank in external cage — under-sink interior is **dry storage only**
+- Under-sink shelves/drawers for dry goods, packaging, and serviettes
+- DC marine plug utility terminals for inter-module electrical connections
+
+**Module 3 — Cook Station** *(staff-facing, 3m long face)*
+- Standardized drop-in counter cutouts across the full 3m run — hot-swap appliance flexibility:
+  - Countertop double-basket gas fryer
+  - Gas flat-top griddle (400–500mm)
+  - 2-burner gas range
+  - Commercial countertop juicer
+- SS flush lids cover unused cutout slots between service modes
+- Brass quick-disconnect LPG couplings connected to external gas cylinder cage
+- Heavy-duty 12V/24V DC marine plugs for electrical appliances
+- Lower lockable cupboards for swapped-out appliances and tools
+- Full-run aluminium smoke extraction hood + chimney canopy overhead
+
+**Module 4 — Door Module** *(short side — sole access point)*
+- Full-height reinforced door panel: keyed multi-point lock (exterior), interior latch bar (staff)
+- At shutdown — all equipment, POS tablet, and stock sealed inside
+- Optional louvred vent panel at top for passive overnight air circulation
+
+**Module 5 — Solar Roof & Customer Awning** *(overhead)*
+- Alucobond canopy frame: 300W–400W monocrystalline solar panel on manual-tilt bracket
+- Four telescopic legs into corner socket brackets — setup and takedown without tools, safety-pinned
+- Customer awning on piano hinge extending over Module 1 — gas struts or drop-rods
+- Awning underside: Till Number + dynamic M-Pesa QR code printed in high-visibility — rain-protected, customer-facing
+- 12V DC LED strip rail along inner canopy frame: counter and workspace illumination
+
+**Module 6 — Non-Slip Floor Panels** *(base)*
+- Heavy-duty aluminium checker plate or interlocking anti-fatigue panels
+- Bridges the full enclosed interior workspace floor
+- Bevelled or rubber-tipped edges — no trip hazard, no food-trap gap
+- Stacks compactly for transport alongside modules
+
+**External Utility Cages** *(fabricated as part of overall build)*
+- *Gas Cylinder Cage:* Exterior corner at Module 2/Module 1 junction — 2×13kg LPG cylinders in upright position, hinged lockable grid gate, open-grid construction (no vapour buildup), base casters aligned with module casters
+- *Water Tank Cage:* Exterior corner at Module 4 side — 50–100L fresh water tank fixed on top (gravity-fed), 20–40L waste tank in lower section with roll-out gate, base casters aligned
+
+---
+
+### Outlet Configurations by Time
 
 **Morning Mode (06:00 – 11:00) — Commuter Breakfast**
 
-Active equipment: griddle (eggs, smocha, tortilla finishing), one fryer basket (samosas, mandazi), heated display (uji, chai/hot milk prep area, small stews)
+Active equipment: griddle (eggs, smocha, tortilla finishing), one fryer basket (samosas, mandazi), Bain Marie + heated display (uji/chai staging area, small stews)
 Active menu: mandazi dondo, smocha, mayocha, mayai bun, samosas, chai, hot milk, uji power, coffee express (flask)
 No grilled chicken. No biryani. No fried chicken pieces.
 
 **Transition (11:00 – 12:00)**
-Swap display tiers to rice, pilau, biryani, stews. Second fryer basket activated for chicken. Grilled chicken proteins moved from cold unit to griddle staging.
+Swap display tiers to rice, pilau, biryani, stews. Second fryer basket activated for chicken. Grilled chicken proteins moved from refrigerator to griddle staging.
 
 **Day Mode (12:00 – 20:00+) — Full Menu**
 Both fryer baskets active. Full display running. Smoothie blending. Full menu.
 
 **Event/Roaming Mode**
-Cart folds. All units secure. Loads onto 1-ton pickup. Unfold, connect gas, power on — 30 minutes to service-ready.
+Modules disassemble and load onto a 1-ton pickup or multiple transport. Reassemble on-site — 30–45 minutes to service-ready.
 
 ---
 
-### Cart Bill of Materials (Phase 1 Build)
+### Outlet Bill of Materials (Phase 1 Build)
 
 | Item | Notes | KES Est. |
 |------|-------|----------|
-| Cart frame (Jua kali fabricated steel, 2×2m, foldable, lockable wheels) | Powder-coat in Vyyb safety orange + vinyl brand wrap. Decorative trim accents. | 80,000–150,000 |
-| Tabletop double gas fryer (2 basket) | 8–10L each, temperature control | 15,000–30,000 |
-| Gas flat-top griddle (tabletop, 400–500mm) | Manual temp control | 8,000–18,000 |
-| 2-tier curved glass heated display case (compact, 50–60cm) | Lower: bases/stews. Upper: proteins. Visual merchandising. | 10,000–22,000 |
-| Small refrigerated chest (12V DC compressor, 40–60L) | Cold chain items | 18,000–35,000 |
-| Ambient shelf/display unit | Tortilla bases, buns, dough, veg, concentrates | 3,000–8,000 |
-| Solar panel (200W, rigid) | Roof-mounted | 8,000–15,000 |
-| Lithium battery (100Ah) + MPPT charge controller | Under-counter, ventilated | 12,000–22,000 |
-| TV screen menu board (22–27", sunlight-readable) | Solar-powered, cart bracket | 8,000–18,000 |
-| POS tablet + cart-mount arm | Android, Vyyb OS | 8,000–15,000 |
-| Fresh water tank (20L) + pump | Wall-mount or base | 3,000–8,000 |
-| Waste water tank (20L, sealed) | Gravity drain | 2,000–5,000 |
-| Oil drip tray / filter compartment | Below fryer shelf | 2,000–5,000 |
-| SS electric kettle (1.7L) | Hot water for chai, milk, coffee | 2,000–4,500 |
-| SS milk pitcher (small) | Hot milk component | 500–1,500 |
-| 4G LTE Wi-Fi router (SIM-based) | Safaricom/Airtel SIM, battery-backed | 3,000–8,000 |
-| Patron umbrella (large commercial) | Centre/side mount | 3,000–8,000 |
-| Patron standing table (foldable) | Side-attaching or free-standing | 2,000–5,000 |
-| Gas cylinders × 2 (6kg) | Base storage, ventilated | 4,000–8,000 |
-| Staff fold-down seats × 2 | Wall-mounted flip style | 1,500–4,000 |
-| LED strip lighting (12V perimeter) | Solar-powered | 1,500–3,500 |
-| Garbage bin (lidded, rear-facing) | Metal or HDPE | 1,000–2,500 |
-| **Cart Total** | | **~196,000–393,000** |
+| Modules 1–4 fabrication (Jua Kali) | GI square tube chassis, Grade 304 SS counters/sinks, Alucobond cladding, polyurethane casters × 16 with dual brakes, toggle latch interlocking system, insulated cavities (fridge bay, Bain Marie recess, heated display recess), POS tablet welded lockbox, Module 3 smoke extraction hood, Module 4 multi-point door + lock | 120,000–200,000 |
+| Module 5 fabrication (solar roof + awning) | Alucobond canopy frame, telescopic legs + socket brackets, piano hinge awning, gas struts, manual-tilt solar panel bracket | 18,000–35,000 |
+| Module 6 floor panels | Aluminium checker plate, bevelled/rubber edges, cut to fit | 5,000–12,000 |
+| External cages × 2 (gas + water) | GI grid cage fabrication, hinged lockable gates, base casters, pipe routing for water/greywater | 10,000–20,000 |
+| Branding vinyl wrap (exterior, all faces) | Vyyb safety orange full wrap, all Alucobond faces | 15,000–30,000 |
+| DC compressor refrigerator (12V/24V, under-counter) | Fits insulated bay in Module 1 lower section | 20,000–38,000 |
+| Heated display case (glass, insulated) | Visual merchandising — protein + base display, Module 1 upper | 15,000–28,000 |
+| Bain Marie (wet element, insulated) | Hot-holding stews and bases, Module 1 countertop cavity | 8,000–18,000 |
+| Gas fryer (double basket, countertop) | Drop-in plate for Module 3 cutout | 15,000–30,000 |
+| Gas flat-top griddle (400–500mm, countertop) | Drop-in plate for Module 3 cutout | 8,000–18,000 |
+| 2-burner gas range (countertop) | Drop-in plate for Module 3 cutout | 6,000–14,000 |
+| Commercial countertop juicer | Drop-in plate for Module 3 cutout | 5,000–12,000 |
+| Solar system (300W–400W panel + 30A MPPT + 100Ah–150Ah LiFePO4 battery) | Luthuli Avenue / Nyamakima sourcing. LiFePO4 preferred — lighter, longer cycle life. | 44,000–58,000 |
+| 12V DC LED strip rail | Inner canopy frame illumination | 3,000–7,000 |
+| POS tablet (Android) | Locks inside counter lockbox — stays secured overnight | 8,000–15,000 |
+| 4G LTE SIM router (battery-backed) | Safaricom/Airtel SIM. *Starlink Roam (KES 14,000/month) for events in low-coverage zones — not standard.* | 3,000–8,000 |
+| Fresh water tank (50–100L) | Fixed to water cage top frame, gravity-fed | 3,000–6,000 |
+| Waste/greywater tank (20–40L) | Lower water cage section, roll-out for emptying | 2,000–4,000 |
+| Gas cylinders × 2 (13kg) + LPG regulators + flexible hose | In gas cage, hose routes to Module 3 quick-disconnect couplings | 8,000–16,000 |
+| SS flush lids for Module 3 cutouts | Cover plates for unused appliance slots | 2,000–4,000 |
+| **Outlet Total** | | **~318,000–517,000** |
 
 ---
 
-## 4. HIVE EQUIPMENT — PHASE 1 SCALED (JUA KALI / LOCAL SOURCING)
+## 4. HIVE EQUIPMENT
 
-No walk-in freezer. No induction. Rented space — all units freestanding, removable. Minimize plastic throughout; use wood, SS, or bamboo wherever possible.
+The Hive runs in two phases. Phase 1 uses a home kitchen — lean, low-capex, no commercial lease. Phase 2 upgrades to a dedicated commercial commissary when the outlet model is proven and multi-outlet supply demands it. Do not buy Phase 2 equipment in Phase 1.
 
-### Zone 1 — Prep Area
+---
 
-| Item | Notes | KES Est. |
-|------|-------|----------|
-| SS workbench (1.5m) × 2 | Jua kali fab preferred | 8,000–16,000 |
-| Desk-type commercial SS dough kneader | High-output, automatic. For tortilla bases, mandazi, samosa dough. | 25,000–50,000 |
-| SS stencil/cutter set | Circles (tortilla), squares (mandazi), other shapes for baked items | 3,000–8,000 |
-| Vegetable chopper/slicer (manual commercial) | Kachumbari, salad, beetroot | 3,000–8,000 |
-| Hardwood cutting boards (acacia or teak, commercial grade) × 4 | Colour-coded by protein. Wood preferred over plastic — durable, safe when maintained, no micro-plastics. | 4,000–10,000 |
-| Knife set (commercial) | Chef, boning, serrated | 3,000–7,000 |
-| Digital weighing scale (30kg + 5kg) | Portioning control | 3,000–6,000 |
-| Mixing bowls (SS, various) × 6 | Marinating, batter, mixing | 2,000–5,000 |
+### Phase 1 Hive — Home Kitchen (Single Outlet Supply)
 
-### Zone 2 — Breading Station
+The home kitchen does one job: prep, cook, and dispatch everything the outlet needs before 05:30. At single-outlet volume, a well-equipped domestic kitchen handles this comfortably.
+
+**Key constraints:** No floor-standing fryer. No commercial dough kneader. No convection oven. All frying happens at the outlet — the Hive sends raw breaded chicken, raw filled samosa pastry, and raw mandazi dough. Tortilla bases are par-cooked on a flat pan on the gas burner. Buns are sourced externally at Phase 1 volume rather than baked in-house. All units freestanding and removable — no walk-in anything.
+
+See `Vyyb_Hive_Home_Strategy.md` for property requirements and structural upgrade checklist.
+
+#### Zone 1 — Prep Area
 
 | Item | Notes | KES Est. |
 |------|-------|----------|
-| Breading lugs (SS, 1/3 hotel pan size) × 4 | Dry flour, wet bath, second flour, staging | 4,000–8,000 |
-| Commercial SS flour sifter / sifting unit | Prevents lumps in breading flour, consistent coat | 2,500–6,000 |
-| Perforated SS resting tray × 2 | Resting breaded chicken pre-fry | 1,500–3,500 |
-| Tong set (SS) × 3 | Breading process — no bare hands | 1,000–2,500 |
+| SS workbench (1.5m, Jua Kali) × 1 | Core prep surface | 4,000–8,000 |
+| Knife set (chef, boning, serrated) | | 3,000–7,000 |
+| Hardwood cutting boards (colour-coded) × 3 | Chicken / veg / cooked — no cross-contamination | 3,000–7,000 |
+| Digital weighing scales (5kg + 30kg) | Portioning and batch control | 3,000–6,000 |
+| Mixing bowls (SS, various) × 4 | Marinating, batter, mixing | 2,000–4,000 |
 
-### Zone 3 — Frying
-
-| Item | Notes | KES Est. |
-|------|-------|----------|
-| Commercial gas deep fryer (double basket, floor-standing) | Chicken + fries. 16–20L oil capacity | 25,000–55,000 |
-| Ventilation hood scoop (above fryer) | Extraction hood to remove fry vapour. Must be above fryer station. | 8,000–20,000 |
-| Oil filter unit (manual, portable, SS) | Extends oil life, food safety | 6,000–14,000 |
-| Fry baskets × 4 (spare set) | | Included above |
-| Thermometer (fryer clip type) | Oil temp control | 500–1,500 |
-| Fire extinguisher (Class K / wet chemical) | Mounted at fryer station — cooking oil fires | 3,000–6,000 |
-
-> **Mandazi note:** Dedicated third basket + dedicated oil in the same fryer. Basket and oil labelled. No separate fryer needed.
-
-### Zone 4 — Grill
+#### Zone 2 — Breading Station
 
 | Item | Notes | KES Est. |
 |------|-------|----------|
-| Commercial flat-top gas griddle (600mm, floor-standing) | Tortilla finishing, eggs, grilled chicken, smokies | 20,000–45,000 |
-| Ventilation hood scoop (above griddle) | Extraction above grill surface | Shared with Zone 3 if ducted, or separate: 8,000–20,000 |
-| Grill scraper + brush | Between batches | 500–1,500 |
-| Grease/drip tray | Below griddle | Included |
-| Fire extinguisher (Class K / wet chemical) | Mounted at grill station | 3,000–6,000 |
+| Breading lugs (SS, 1/3 hotel pan) × 4 | Dry flour / wet bath / second flour / staging | 4,000–8,000 |
+| Perforated SS resting trays × 2 | Resting breaded chicken before cold chain | 1,500–3,500 |
+| Tong set (SS) × 2 | No bare hands in breading line | 1,000–2,000 |
 
-### Zone 5 — Cooking (Gas — No Induction)
+#### Zone 3 — Cooking (Gas — No Induction, No Fryer)
 
 | Item | Notes | KES Est. |
 |------|-------|----------|
-| Commercial gas range (2-burner with built-in oven, cast iron, LPG) × 2 | Burners for gravy, biryani, stews, chai; built-in oven for baking buns in-house | 15,000–35,000 |
+| Commercial gas range (4-burner, cast iron, LPG) × 1 | Biryani, stews, gravies, legumes, sauces, tortilla par-cooking on flat pan | 15,000–30,000 |
 | SS stock pots (20L) × 2 | Master gravy, biryani, legumes | 4,000–8,000 |
-| SS sauce pans (various, 5L–10L) × 4 | Sauces, stews, chai | 5,000–10,000 |
+| SS sauce pans (5L–10L) × 3 | Sauces, stews | 4,000–8,000 |
 | Ladles, spatulas, SS utensils set | Full cooking toolkit | 3,000–6,000 |
-| Gas cylinders × 4 (13kg, Hive) | 2 active, 2 reserve | 8,000–16,000 |
+| Gas cylinders × 2 (13kg) | Active + reserve | 8,000–16,000 |
 
-### Zone 6 — Bakery / Dough
-
-| Item | Notes | KES Est. |
-|------|-------|----------|
-| Smallest commercial convection oven (tabletop, 4-tray) | Secondary baking: samosa variations, toasting, controlled bakes | 15,000–35,000 |
-| SS baking trays × 4 | Oven trays + staging | 2,000–4,000 |
-
-> Buns are baked primarily in the Zone 5 gas range oven. The convection oven handles precision bakes and overflow.
-
-### Zone 7 — Cold Storage (Scaled Down)
+#### Zone 4 — Cold Storage
 
 | Item | Notes | KES Est. |
 |------|-------|----------|
-| Upright fridge (300–400L double door) | Raw proteins, prepped sauces, kachumbari | 30,000–55,000 |
-| Chest freezer (200L) | Long-term raw chicken stock, frozen veg | 15,000–28,000 |
+| Upright fridge (200–300L) | Raw proteins, prepped sauces, kachumbari, cold chain items | 18,000–35,000 |
+| Chest freezer (100–150L) | Raw chicken stock. **Defer to Month 2 if budget is tight** | 12,000–22,000 |
 
-> No walk-in freezer. Fully removable. Chest freezer can defer to Month 2 to reduce Day 1 spend.
-
-### Zone 8 — Beverages & Concentrates
+#### Zone 5 — Beverages & Sauces
 
 | Item | Notes | KES Est. |
 |------|-------|----------|
-| Heavy-duty commercial blender (2L jar) × 2 | Smoothie bases, uji concentrate, sauce blending | 10,000–22,000 |
-| Immersion blender (commercial) | Spicy sauce, large-batch blending | 4,000–9,000 |
-| Juicer (centrifugal + citrus) | Lime juice for mojito base, fresh fruit | 4,000–9,000 |
+| Heavy-duty commercial blender (2L jar) × 1 | Smoothie bases, uji concentrate, sauce blending | 8,000–18,000 |
+| Manual citrus juicer | Lime juice for mojito base | 1,500–3,000 |
 
-### Zone 9 — Transport (SS Containers, Cold Chain)
-
-| Item | Notes | KES Est. |
-|------|-------|----------|
-| Food-grade SS containers with lids (1L, 2L, 5L) × 12 assorted | Hot food transport, ambient components | 8,000–16,000 |
-| Insulated cooler boxes (30–50L) × 2 | Cold chain dispatch — breaded chicken, sauces, kachumbari | 6,000–14,000 |
-| SS food transport trays with lids × 4 | Samosas, tortilla bases, mandazi (unfried), flat items | 4,000–8,000 |
-| Insulated flasks (5L) × 2 | Uji concentrate and chai (hot) | 2,000–5,000 |
-| QR batch label kit (label printer + rolls + waterproof labels) | Every container gets QR batch label — see Section 5 | 4,000–8,000 |
-
-### Zone 10 — Hygiene, Safety & Utilities
+#### Zone 6 — Transport (Cold Chain Dispatch)
 
 | Item | Notes | KES Est. |
 |------|-------|----------|
-| Commercial SS sink (double basin, heavy-duty) | Washing, food prep, handwash. Freestanding, connects to plumbing or water tank. | 8,000–18,000 |
-| Grease trap (commercial, floor-mounted) | Installed below sink drain. Intercepts fats/oils before drain. Required for any commercial kitchen on proper drainage. | 5,000–15,000 |
-| Fire suppression system (removable, above fryer + grill) | If local certification requires suppression beyond extinguishers. Specify to fabricator: removable mounting, reinstallable on relocation. | 15,000–40,000 |
-| Fire extinguishers (Class K + ABC) × 3–4 | 1 per cooking station + 1 general. Class K for oil fires at fryer/grill; ABC for general. | 9,000–18,000 |
-| First aid kit (commercial) | Wall-mounted | 1,500–3,000 |
-| Hand soap dispenser + paper towel holder × 2 | At sink and entry to kitchen | 1,000–3,000 |
+| Food-grade SS containers with lids (1L, 2L, 5L) × 10 assorted | Hot food and ambient component transport | 6,000–12,000 |
+| Insulated cooler boxes (40L) × 2 | Cold chain dispatch — breaded chicken, sauces, kachumbari | 6,000–14,000 |
+| SS food transport trays with lids × 3 | Samosas (raw), tortilla bases, mandazi dough | 3,000–6,000 |
+| Insulated flasks (5L) × 2 | Uji concentrate and hot bases | 2,000–5,000 |
+| QR batch label printer + waterproof label rolls | Every container gets a QR batch label — see Section 5 | 4,000–8,000 |
 
-> **On fire suppression:** Class K extinguishers at each cooking station satisfy basic operational requirements. If the space or permit requires a suppression system (automatic hood suppression), install a removable/modular suppression unit — specify to the installer that it must unmount for relocation without requiring structural work.
+#### Zone 7 — Hygiene & Safety
+
+| Item | Notes | KES Est. |
+|------|-------|----------|
+| Grease trap (inline, below sink drain) | Non-negotiable — intercepts cooking oils before drain | 5,000–15,000 |
+| Fire extinguisher (Class K) × 1 | At cooking station — oil fires | 3,000–6,000 |
+| Fire extinguisher (ABC) × 1 | General | 3,000–6,000 |
+| First aid kit | Wall-mounted | 1,500–3,000 |
+| Hand soap dispenser + paper towel | At sink | 1,000–2,000 |
+
+#### Home Kitchen Structural Upgrades
+
+| Item | Notes | KES Est. |
+|------|-------|----------|
+| Ventilation extraction hood + ducting | Above cooking station — mandatory | 8,000–20,000 |
+| LPG cylinder manifold + copper piping to cooking station | Gas fitter, 1-day job | 5,000–12,000 |
+| Non-slip floor mats / rubber tile | Safety compliance | 3,000–8,000 |
+
+---
+
+**Phase 1 Hive Budget**
+
+| Category | Low (KES) | High (KES) |
+|----------|-----------|-----------|
+| Equipment (Zones 1–7) | 105,500 | 205,500 |
+| Structural upgrades (hood, gas piping, floor mats) | 16,000 | 40,000 |
+| House deposit + first month rent | 40,000 | 90,000 |
+| **Phase 1 Hive Total** | **~162,000** | **~336,000** |
+
+> **To hit low band (~162K):** Source fridge, blender, and gas range second-hand from Kirinyaga Road / Gikomba. Defer chest freezer (~12–22K) and QR label printer (~4–8K) to Month 2. Use a single 4-burner range instead of two 2-burner units. The 150–170K path is achievable with active sourcing.
+
+---
+
+### Phase 2 Hive — Commercial Commissary (Multi-Outlet Supply)
+
+These items are added or upgraded when Phase 1 outlets multiply or the home kitchen hits its ceiling. Do not buy these in Phase 1.
+
+**Phase 2 triggers:** 3+ vendor outlets being supplied; production volume doubles; County health mandates commercial premises; cold storage becomes a bottleneck; kitchen staff grows beyond 4.
+
+| Item | Replaces / Adds | KES Est. |
+|------|----------------|----------|
+| Commercial dough kneader (desk-type, automatic) | Phase 1: hand-kneading | 25,000–50,000 |
+| SS flour sifter | Phase 1: manual sifting | 2,500–6,000 |
+| Second SS workbench (1.5m) | Phase 1: single bench | 4,000–8,000 |
+| Commercial floor-standing fryer (double basket, 16–20L) | Not present in Phase 1 | 25,000–55,000 |
+| Commercial flat-top griddle (floor-standing, 600mm) | Phase 1: flat pan on burner | 20,000–45,000 |
+| Second gas range or range upgrade | Phase 1: single 4-burner | 15,000–35,000 |
+| Ventilation hood upgrade / second extraction hood | Phase 1: single hood | 8,000–20,000 |
+| Oil filter unit (portable, SS) | Not present in Phase 1 | 6,000–14,000 |
+| Upright fridge upgrade (double-door, 400L) | Phase 1: smaller unit | 25,000–50,000 |
+| Chest freezer upgrade (200L) | Phase 1: smaller/deferred unit | 12,000–22,000 |
+| Tabletop convection oven (4-tray) | Not present in Phase 1 | 15,000–35,000 |
+| Second commercial blender (2L jar) | Phase 1: single blender | 8,000–18,000 |
+| Immersion blender (commercial) | Phase 1: none | 4,000–9,000 |
+| Centrifugal + citrus juicer | Phase 1: manual juicer | 4,000–9,000 |
+| Commercial SS double-basin sink (freestanding) | Upgrade if home sink insufficient | 8,000–18,000 |
+| Fire suppression system (removable, above fryer + grill) | Phase 1: extinguishers only | 15,000–40,000 |
+| Additional SS containers + transport kit (scale-up) | Phase 1: initial set | 8,000–16,000 |
+
+**Phase 2 Hive Addition Budget: KES ~189,500–410,000** *(added on top of Phase 1 setup at the point of commercial Hive transition)*
 
 ---
 
@@ -626,17 +665,17 @@ This program is visible. The QR label on every container can link to a "where do
 
 ---
 
-## 9. MODULAR ARCHITECTURE — FUTURE CART VARIANTS
+## 9. MODULAR ARCHITECTURE — FUTURE OUTLET VARIANTS
 
-| Cart Variant | Location | Key Config |
-|-------------|----------|-----------|
-| **Commuter Cart** (Phase 1) | Matatu stage, estate entrance | Full menu, breakfast + day |
-| **Campus Cart** | University / polytechnic | Snacks + smoothies heavy, study hours |
-| **Office Park Cart** | Business park, industrial zone | Lunch biryani + boxes, bulk advance orders |
-| **Events Cart** | Concerts, matches, expos | Full menu, night hours, buckets, cashless |
-| **Night Cart** | CBD, entertainment district | Street core + smoothies + fries, late hours |
+| Outlet Variant | Location | Key Config |
+|----------------|----------|-----------|
+| **Commuter Outlet** (Phase 1) | Matatu stage, estate entrance | Full menu, breakfast + day |
+| **Campus Outlet** | University / polytechnic | Snacks + smoothies heavy, study hours |
+| **Office Park Outlet** | Business park, industrial zone | Lunch biryani + boxes, bulk advance orders |
+| **Events Outlet** | Concerts, matches, expos | Full menu, night hours, buckets, cashless |
+| **Night Outlet** | CBD, entertainment district | Street core + smoothies + fries, late hours |
 
-All variants: same 2×2m Jua kali frame. Only configuration and menu board changes. The replicable SS structure and Jua kali template are locked after Phase 1 validation.
+All variants: same 3×2m Jua Kali modular outlet structure. Only configuration, menu board, and appliance tray loadout change. The replicable 6-module spec and Jua Kali template are locked after Phase 1 validation.
 
 ---
 
@@ -689,31 +728,40 @@ Dedicated touch displays or tablets at each Hive station. Wall-mounted or on SS 
 
 | Category | Low (KES) | High (KES) |
 |----------|-----------|-----------|
-| Hive equipment (all zones incl. hygiene/safety) | 210,000 | 420,000 |
-| Cart build (frame + all fittings) | 196,000 | 393,000 |
+| Phase 1 Hive — equipment (Zones 1–7) | 105,500 | 205,500 |
+| Phase 1 Hive — structural upgrades (hood, gas piping, floor) | 16,000 | 40,000 |
+| Phase 1 Hive — house deposit + first month rent | 40,000 | 90,000 |
+| Outlet structure (fabrication + all fittings) | 318,000 | 517,000 |
 | Uniforms | 22,000 | 45,000 |
 | First stock (ingredients, 1 week) | 40,000 | 80,000 |
 | Packaging (first order) | 15,000 | 25,000 |
-| Permits, signage, misc | 15,000 | 25,000 |
-| **TOTAL** | **~498,000** | **~988,000** |
+| Permits + plot lease (first month) | 23,000 | 35,000 |
+| **TOTAL** | **~579,500** | **~1,037,500** |
 
-> **To hit 500–600K:** Build cart at lower band (80–120K Jua kali). Defer chest freezer, convection oven, and fire suppression system to Month 2. Source kneader, fryer, and blenders second-hand from Kirinyaga Road / Gikomba equipment dealers. The 500K path is achievable — the low-band total lands at ~498K before contingency.
+> **To hit 500–600K:** At low-band, the total lands at ~580K. Shave it to ~500K by: deferring the chest freezer (~12–22K) and QR label printer (~4–8K) to Month 2; sourcing the fridge, blender, and gas range second-hand (Kirinyaga Road / Gikomba, saves 15–25K); negotiating the outlet fabrication to 280–300K with a competitive Kamukunji quote. The 500K path is executable with active sourcing discipline — the full-price low-band is ~580K.
 
 ---
 
 ## 13. WHAT WAITS FOR PHASE 2
 
-- Chest freezer (Month 2–3, if Day 1 cold storage is insufficient)
-- Commercial convection oven (Month 2–3, if baked items volume justifies)
-- Fire suppression system (if not required for Day 1 certification — confirm with local authority first)
-- Second cart + first vendor partner (once Phase 1 KPIs are met)
-- Refrigerated logistics vehicle (replaces cooler boda delivery at scale)
-- Touch-screen KDS displays at Hive stations (Phase 2 upgrade from personal phones)
-- Moka machine at cart (Phase 1 = flask coffee — honest, fast, zero waste)
+**Hive upgrades (see Section 4 — Phase 2 Hive table for full spec and costs):**
+- Chest freezer full-size upgrade (Month 2–3 if Day 1 cold storage is insufficient)
+- Commercial dough kneader — hand-kneading is sufficient at single-outlet volume
+- Commercial floor-standing fryer and griddle — not needed at Hive until multi-outlet supply
+- Convection oven — buns sourced externally at Phase 1; bring in-house at Phase 2 volume
+- Second blender, immersion blender, centrifugal juicer
+- Fire suppression system — extinguishers satisfy Phase 1; suppression system at Phase 2 commercial kitchen
+- Move from home kitchen to dedicated commercial commissary (trigger: 3+ outlets)
+
+**Outlet and operations:**
+- Second outlet + first vendor partner (once Phase 1 KPIs are proven)
+- Refrigerated logistics vehicle (replaces insulated cooler boda dispatch at scale)
+- Touch-screen KDS displays at Hive stations (Phase 1 = staff personal phones)
+- Moka machine at outlet (Phase 1 = flask coffee — fast, zero waste)
 - Full Sustena vendor dashboard (Phase 1 = Vyyb OS basic; Sustena integration deepens in Phase 2)
 
 ---
 
-*Document: Vyyb Phase 1 Cart Strategy | Version 2.1 — 26 May 2026*
-*Vendor revenue model confirmed: Option A — Food Margin + Monthly Flat Fee (Section 7). Flat fee amount TBD after Phase 1 food cost audit.*
-*Reference: `Vyyb_QSR_Operations_Strategy.md` (full franchise vision)*
+*Document: Vyyb Phase 1 Outlet Strategy | Version 3.0 — 28 May 2026*
+*Outlet structure updated to 6-module modular kitchen (replaces Origami Cart). Vendor revenue model confirmed: Option A — Food Margin + Monthly Flat Fee (Section 7). Flat fee amount TBD after Phase 1 food cost audit.*
+*References: `Technical Brief & Project Summary.md` (fabrication spec) · `Vyyb_Hive_Home_Strategy.md` (home Hive approach) · `Vyyb_QSR_Operations_Strategy.md` (full franchise vision)*

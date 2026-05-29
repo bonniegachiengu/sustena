@@ -1,8 +1,15 @@
 @echo off
 REM Sustena XII — Git commit helper
-REM Run this from any location after each Claude session
+REM Double-click to stage, commit, and push all changes
 
 cd /d "C:\Users\DELL\OneDrive\Documents\Projects\Sustena XII\Sustena XII"
+
+REM Clear any stale git locks from crashed sessions
+if exist ".git\index.lock"           del /f ".git\index.lock"
+if exist ".git\HEAD.lock"            del /f ".git\HEAD.lock"
+if exist ".git\refs\heads\main.lock" del /f ".git\refs\heads\main.lock"
+if exist ".git\refs\heads\dev.lock"  del /f ".git\refs\heads\dev.lock"
+if exist ".git\MERGE_HEAD.lock"      del /f ".git\MERGE_HEAD.lock"
 
 REM Initialize git if not already done
 if not exist ".git" (
@@ -19,12 +26,19 @@ git config user.name "bonniegachiengu"
 REM Stage all changes
 git add -A
 
-REM Commit with timestamp
-git commit -m "Sustena XII: strategy update %date% %time%"
+REM Show what will be committed
+echo.
+echo === CHANGES STAGED ===
+git status --short
+echo.
 
-REM Push — enter GitHub Personal Access Token when prompted for password
-REM Username: bonniegachiengu
-REM Password: [your GitHub PAT from github.com > Settings > Developer Settings > PATs]
+REM Optional: prompt for custom message, default to timestamp
+set /p MSG="Commit message (Enter = use timestamp): "
+if "%MSG%"=="" set MSG=checkpoint: sustena update %date% %time%
+
+git commit -m "%MSG%"
+
+REM Push
 git push origin main
 
 echo.

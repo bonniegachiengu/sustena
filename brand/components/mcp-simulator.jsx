@@ -362,4 +362,44 @@ function StateDiff({ tick }) {
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)' }}>{c.name}</span>
               <Badge tone="ok">{c.status}</Badge>
-     
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span className="label-10">PAWA COST</span>
+          <span className="val-12" style={{ color: 'var(--amber)' }}>{42 - (tick % 5)} <span style={{ color: 'var(--text-muted)' }}>pwa</span></span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { SimulatorPanel, RailToggle });
+
+function RailToggle({ open, onClick, side, label }) {
+  return (
+    <button onClick={onClick} title={open ? `Hide ${label}` : `Show ${label}`} style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '4px 8px',
+      fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 500, letterSpacing: '0.08em',
+      color: open ? 'var(--text-primary)' : 'var(--text-muted)',
+      background: open ? 'var(--bg-raised)' : 'transparent',
+      border: '1px solid ' + (open ? 'var(--border-mid)' : 'var(--border)'),
+      borderRadius: 'var(--radius-sm)',
+      transition: 'all var(--t-fast)',
+    }}
+    onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--amber-border)'}
+    onMouseLeave={e => e.currentTarget.style.borderColor = open ? 'var(--border-mid)' : 'var(--border)'}
+    >
+      <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+        {side === 'left'
+          ? (open ? <path d="M5.5 2L3 4.5L5.5 7" /> : <path d="M3 2L5.5 4.5L3 7" />)
+          : (open ? <path d="M3 2L5.5 4.5L3 7" /> : <path d="M5.5 2L3 4.5L5.5 7" />)}
+      </svg>
+      {label}
+    </button>
+  );
+}

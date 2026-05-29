@@ -27,6 +27,69 @@ Each task has:
 
 ## Phase 0 — Foundation (Days 1–14)
 
+### Epic 0.0 — Day 1 Pre-Build: Domains, Legal, Banking, Cloud
+
+> Do this before writing a single line of code. These are irreversible blockers — the earlier you lock them, the less risk.
+
+- [ ] 🔴 **0.0.1** Acquire all target domains — lock before any public announcement
+
+  | Domain | Priority | Est. Annual Cost |
+  |--------|---------|-----------------|
+  | `sustena.io` | P1 — acquire Day 1 | ~$40 |
+  | `sustena.ai` | P1 — AI brand credibility | ~$80 |
+  | `vyyb.io` | P2 — Vyyb brand | ~$40 |
+  | `vyyb.ai` | P2 — food-tech AI branding | ~$80 |
+  | `colosso.io` | P2 — Brian's sustain | ~$40 |
+  | `colosso.ai` | P2 | ~$80 |
+  | `365plus.io` | P3 — holding entity | ~$40 |
+
+  - [ ] Register via Namecheap (or Cloudflare Registrar for `.io`)
+  - [ ] Point all domains to Cloudflare DNS immediately — free DDoS protection + edge caching from Day 1
+  - [ ] Set up email forwarding on `sustena.io` (team@, bonnie@, brian@) — no G Suite needed yet
+
+- [ ] 🔴 **0.0.2** Business Name registration + KRA PIN + NCBA bank account
+
+  > *These three unlock everything: Daraja production access, ODPC registration, and investor-credible financials.*
+
+  - [ ] Register Business Name "Sustena" or "365+ Ventures" via eCitizen (KES 950, 1–3 days)
+  - [ ] **[BRIAN]** Obtain KRA PIN for the business entity via iTax (free, online) — Brian coordinates this
+  - [ ] **[BRIAN]** Open NCBA Business Account using the Business Name registration — Brian to initiate (NCBA is the priority banking partner per Master Strategy §11.2; more flexible developer partnership terms than Equity)
+  - [ ] Upload Business Name certificate to a shared secure folder (needed for: Daraja production, lawyer, ODPC)
+
+- [ ] 🔴 **0.0.3** Privacy policy (must be live before 50 WhatsApp users go live)
+
+  > *ODPC obligation: a privacy policy must be published before personal data is collected.*
+
+  - [ ] Draft privacy policy covering: M-Pesa SMS parsing (on-device, metadata only), WhatsApp data, sustain state storage, data retention, user deletion rights
+  - [ ] Publish at `sustena.io/privacy` before releasing the WhatsApp bot to testers
+  - [ ] **[BRIAN]** Engage Kenyan fintech lawyer to review the privacy policy (KES 50,000–80,000 for full engagement; privacy policy review can be scoped separately for Phase 0)
+
+- [ ] 🔴 **0.0.4** Cloud infrastructure baseline
+
+  - [ ] Create Google Cloud project: `sustena-xii` — enable Cloud Run, Firestore, Cloud Functions, Secret Manager
+  - [ ] Configure `gcloud` CLI locally; set project as default
+  - [ ] Create Firestore database (Native mode, `europe-west1` or `us-central1`) — used for WhatsApp session state and real-time sync in Phase 0
+  - [ ] Create initial Firestore collections: `wa_users`, `wa_transactions`, `wa_sessions`
+  - [ ] Store all secrets in Secret Manager (not `.env` in production): `ANTHROPIC_API_KEY`, `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID`, `SECRET_KEY`
+  - [ ] Set up Cloud Run service (initially: 1 container, 512MB RAM, min 0 instances for cost)
+  - [ ] Configure Cloud Build CI trigger: push to `main` → deploy to Cloud Run automatically
+
+- [ ] 🟡 **0.0.5** Anthropic API + Meta WhatsApp Business API setup
+
+  - [ ] Create Anthropic account; obtain API key; add billing card; set monthly spend cap (start at $50)
+  - [ ] Create Meta developer account; add a WhatsApp Business App; configure webhook URL to your Cloud Run endpoint
+  - [ ] Obtain Meta WhatsApp Business Phone ID and Token; store in Secret Manager
+  - [ ] Test webhook verification (`GET /webhook` returns challenge correctly before any user messages)
+
+**[TEST] Epic 0.0 — Milestone Criteria:**
+- [ ] All 7 domains resolve (even to a placeholder page) within 72 hours of registration
+- [ ] `sustena.io/privacy` is live and readable before 50 testers are invited
+- [ ] `gcloud run services list` shows the `sustena-xii` service deployed and healthy
+- [ ] WhatsApp webhook GET verification passes in Meta developer console
+- [ ] Business Name certificate, KRA PIN, and NCBA account number are in the shared secure folder
+
+---
+
 > **Updated sequence — 26 May 2026:**
 >
 > Phase 0 runs as two parallel tracks:
@@ -64,6 +127,21 @@ Each task has:
   - [ ] Use SQLAlchemy Core (not ORM) — explicit table definitions; async engine
 
   > **[CODE]** "Create `sustena/db/schema.py` using SQLAlchemy Core with async SQLite. Define tables: `users` (id, phone_number, created_at, pawa_balance), `sustains` (id, user_id, sustain_type, name, version, created_at), `sustain_states` (id, sustain_id, state_json, updated_at, version_number), `operators_log` (id, sustain_id, operative_id, operator_name, input_json, output_json, status, pawa_cost, timestamp), `events` (id, sustain_id, event_name, payload_json, timestamp), `pawa_ledger` (id, user_id, sustain_id, delta, reason, balance_after, timestamp), `council_proposals` (id, sustain_id, proposed_by, operator_name, input_json, status, created_at, resolved_at), `council_votes` (id, proposal_id, operative_id, vote, reasoning, timestamp). Include SQLAlchemy migration helper using Alembic."
+
+- [ ] 🔴 **0.1.4** Firestore sync layer — cloud backup and real-time state
+
+  > *SQLite is the local truth. Firestore is the cloud sync layer — enabling real-time state updates across devices and the WhatsApp bot. The two stay in sync via an async write-through pattern: every SQLite write triggers a Firestore mirror write.*
+
+  > **[CODE]** "Create `sustena/db/firestore_sync.py`. Implement `FirestoreSync` class. `sync_state(sustain_id, state_json) -> None` — writes current sustain state to Firestore document `sustains/{sustain_id}/state`. `sync_event(event: dict) -> None` — appends event to Firestore subcollection `sustains/{sustain_id}/events`. `subscribe_state(sustain_id, callback) -> None` — registers a Firestore listener that calls `callback(delta)` whenever state changes (enables real-time WebSocket pushes without polling). Use `google-cloud-firestore` async client. Firestore document structure mirrors the SQLite schema exactly — Phase 3 migration path: swap `FirestoreSync` for the on-chain equivalent without changing the interface."
+
+- [ ] 🔴 **0.1.5** Cloud Run deployment configuration
+
+  - [ ] Create `Dockerfile` — Python 3.11 slim base; install dependencies; `CMD uvicorn sustena.api.main:app --host 0.0.0.0 --port 8080`
+  - [ ] Create `cloudbuild.yaml` — build Docker image; push to Google Artifact Registry; deploy to Cloud Run
+  - [ ] Configure Cloud Run environment variables from Secret Manager: `gcloud run deploy` with `--set-secrets` flags
+  - [ ] Set Cloud Run minimum instances to 0 (cost: pay only when active) for Phase 0; bump to 1 minimum when Phase 1 has live users
+
+  > **[CODE]** "Write a `Dockerfile` for the Sustena XII FastAPI app. Base: `python:3.11-slim`. Steps: `COPY requirements.txt .`, `RUN pip install --no-cache-dir -r requirements.txt`, `COPY . .`, `EXPOSE 8080`, `CMD [\"uvicorn\", \"sustena.api.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8080\"]`. Write `cloudbuild.yaml`: steps: (1) `docker build -t gcr.io/$PROJECT_ID/sustena-xii .`, (2) `docker push gcr.io/$PROJECT_ID/sustena-xii`, (3) `gcloud run deploy sustena-xii --image gcr.io/$PROJECT_ID/sustena-xii --region us-central1 --platform managed --allow-unauthenticated`. Health check: `GET /health` returns 200."
 
 **[TEST] Epic 0.1 — Milestone Criteria:**
 - [ ] `make test` passes with zero errors on a clean clone
@@ -243,6 +321,33 @@ This is the most important code in the entire platform. Get it right before writ
 
 ---
 
+### Epic 1.5b — Chama Secretary Sustain *(Colosso Finance product — coordinate with Brian)*
+
+**Reference:** Master Strategy §8.4 (Chama Secretary Operative), §10.3 Week 3–4. Chama is a Colosso Finance product built on Sustena infrastructure. Brian owns product decisions; you own the build.
+
+- [ ] 🔴 **1.5b.1** Chama sustain spec (JSON)
+
+  > **[BRIAN]** Product decisions for Chama (rotation rules, fine policy, governance structure) are Brian's domain. Get Brian's input on the spec before building. Specifically: fee schedule, contribution floor/ceiling rules, loan interest rate ranges, Trust Score weighting.
+
+  > **[CODE]** "Create `sustena/sustains/chama.json`. Chama Sustain spec following Master Strategy §8.4. State schema: `members` (roster with tier, contribution_history, trust_score, loan_history), `rotation` (schedule array: {period, recipient_member_id, amount, status}), `pool` (balance, total_contributed_mtd, total_disbursed_mtd), `loans` (active_loans array, repayment_history), `proposals` (DAO proposal queue), `rules` (min_contribution, max_loan_ratio, fine_reasons, quorum_threshold). Operators: `chama.contribution.record`, `chama.loan.request`, `chama.loan.disburse`, `chama.loan.repay`, `chama.fine.record`, `chama.meeting.schedule`, `chama.dividend.calculate`, `chama.rotation.advance`. Access policy: Secretary = Level 0; Members = Level 1. Operative: Chama Secretary (DAO proposal manager, contribution matcher, Trust Score calculator)."
+
+- [ ] 🔴 **1.5b.2** Chama Secretary Operative
+
+  > **[CODE]** "Implement `sustena/operatives/chama_secretary.py`. `ChamaSecretaryOperative(BaseOperative)`. Functions: (1) `match_contribution(mpesa_event) -> str | None` — given an incoming M-Pesa C2B event, matches `BillRefNumber` (format: `{chama_id}-{member_id}-{period}`) to a pending contribution; calls `chama.contribution.record` if matched. (2) `compute_trust_score(member_id) -> float` — calculates Chama Cred: on-time rate (60%), longevity (20%), dispute history (20%). (3) `generate_reminder(member_id, days_to_deadline) -> str` — generates a calibrated WhatsApp reminder; tone adapts to member history (warm for first miss, firmer for repeat misses; never aggressive). (4) `evaluate_loan_request(request) -> OperativeProposal` — evaluates loan request against pool balance and member Trust Score; creates Council proposal with simulation evidence. (5) `weekly_audit_summary() -> ResponseWidget` — generates contribution matrix widget for the Secretary."
+
+- [ ] 🟡 **1.5b.3** Mocked chama DAO governance
+
+  > **[CODE]** "Extend `CouncilSession` to support chama-specific governance. Chama proposals have two types: (1) `chama.financial` (loan approval, fine dispute, dividend declaration) — requires quorum of members + Secretary majority, (2) `chama.structural` (admission of new member, rule change, payout reorder) — requires unanimous minus 1 vote. Implement `chama.vote(proposal_id, member_id, vote)` — WhatsApp-native voting: user replies YES/NO to the proposal notification. Results are aggregated in real time. When quorum reached + required votes achieved: proposal status moves to PASSED. Secretary auto-notified via WhatsApp. Member voting via WhatsApp interactive buttons (not web UI — WhatsApp-first for Phase 1)."
+
+**[TEST] Epic 1.5b — Milestone Criteria:**
+- [ ] Instantiate a 10-member Chama sustain; record contributions from 8 members; confirm pool balance correct
+- [ ] Simulate late contribution from Member 3 — confirm Chama Secretary generates calibrated reminder (not a harsh message for first offence)
+- [ ] Trust Score computed correctly for a member with 100% on-time history vs. one with 2 missed contributions
+- [ ] Loan request creates Council proposal; proposal sent to member phones via WhatsApp interactive buttons; voting works
+- [ ] C2B: incoming M-Pesa with correct `BillRefNumber` → contribution recorded; incorrect ref → support queue
+
+---
+
 ### Epic 1.6 — Customer Support System
 
 - [ ] 🔴 **1.6.1** Build and maintain the support workflow
@@ -358,6 +463,40 @@ A live, well-maintained GitHub repo is a credibility signal to developers, inves
 - [ ] `ci.yml` passes on a clean clone in GitHub Actions
 - [ ] At least 5 GitHub issues created from the support log, labelled `user-reported`
 - [ ] GitHub Projects board shows at least 10 tasks across phases with status tracking
+
+---
+
+### Epic 1.8b — Legal, Business, and Investor Track *(Brian-led; Bonnie coordinates)*
+
+> These are not code tasks — they are Phase 1 critical-path business milestones that run in parallel with the technical build. They require Brian's leadership. Your job is to keep this list visible and unblock Brian with technical deliverables (demo, docs, GitHub link) when he needs them.
+
+**Week 1–2 (parallel with Epic 1.1–1.3):**
+- [ ] 🔴 **[BRIAN]** Incorporate Sustena Ltd as a Private Limited Company via eCitizen — KES 11,750 filing fee; requires CR12 (director registry), Memorandum & Articles. Engage fintech lawyer.
+- [ ] 🔴 **[BRIAN]** Incorporate Colosso Finance Ltd separately — same process. Sustena and Colosso are separate revenue entities from Day 1.
+- [ ] 🔴 **[BRIAN]** ODPC pre-registration: register Sustena as a Data Controller within 6 months of collecting personal data (KES 5,000/year). Submit before 50 active WhatsApp users milestone. Lawyer reviews privacy policy first (see Epic 0.0.3).
+- [ ] 🔴 **[BRIAN]** NCBA open banking API partnership conversation — initiate Week 1. Minimum viable target: bank statement PDF/CSV import. Full API access if partnership progresses. NCBA before Equity (more flexible developer terms per Master Strategy §10.3).
+
+**Week 3–4 (parallel with Epic 1.5, 1.5b):**
+- [ ] 🟡 **[BRIAN]** 365+ Ventures Private Limited Company incorporation — the holding entity. Director: all three founders.
+- [ ] 🟡 Sustena dogfooding: begin using the Homestead sustain spec for your own household finances. Document every friction point — this is your first user research dataset.
+- [ ] 🟡 **[BRIAN]** Chama Secretary outreach: target 10 active chamas through personal network. Secretary must be willing to use the WhatsApp bot for real contributions (real money, real group).
+
+**Week 5–6 (parallel with Epic 1.10):**
+- [ ] 🔴 **[BRIAN]** Daraja production upgrade application: submit CR12, KRA PIN, certified NCBA bank statement, business name certificate to Safaricom. 7–21 day review — begin BEFORE the code is ready. See Epic 1.14.1.
+- [ ] 🟡 **[BRIAN]** Investor one-pager (one page, not a deck): problem → solution → traction → ask. Brian writes; Bonnie provides technical architecture diagram and demo link. Target audience: Kenyan angel investors and regional tech VCs.
+- [ ] 🟡 **[BRIAN]** 2-minute demo script — for investor conversations. Uses the live Orchie web UI (Epic 1.10) running against a seeded demo sustain. Bonnie provides the demo environment; Brian scripts the narrative.
+
+**Week 7–10 (parallel with Epic 1.13, 1.16):**
+- [ ] 🟡 **[BRIAN]** Development finance conversations: IFC Startup Catalyst, AGRA, Mastercard Foundation. These are non-dilutive — begin conversations early. Mkulima social impact case is the hook. Brian leads; Bonnie provides Mkulima sustain demo + architecture doc.
+- [ ] 🟢 **[BRIAN]** Kenya Climate Innovation Centre grant application — sustainability + IoT angle (smart meter integration, regenerative Mkulima supply chain).
+- [ ] 🟡 Pre-funding milestone tracking: 500 active WhatsApp users + 20 active chamas + Homestead sustain live + working mobile demo = the fundraising unlock condition (Master Strategy §11.4). Track this weekly.
+
+**[TEST] Epic 1.8b — Milestone Criteria:**
+- [ ] Sustena Ltd and Colosso Finance Ltd are incorporated; CR12s in hand before Week 4 ends
+- [ ] ODPC registration submitted before 50 active WhatsApp users
+- [ ] Daraja production application submitted by Week 6 (application, not approval — that takes 7–21 days)
+- [ ] Investor one-pager exists, is on-brand, and has been reviewed by Bonnie for technical accuracy
+- [ ] 10 Chama secretaries onboarded and actively using the WhatsApp bot before Week 10
 
 ---
 
@@ -527,10 +666,13 @@ Mkulima is forked from Biashara. Build Biashara spec first (Epic 1.5), then fork
 
 - [ ] 🔴 **1.14.1** Daraja production upgrade — credentials and sandbox → production
 
-  - [ ] Complete Safaricom Daraja production upgrade process: submit CR12, KRA PIN, certified bank account, business name
-  - [ ] Obtain Production Business Shortcode and Lipa Na M-Pesa Online Passkey
+  - [ ] **[BRIAN]** Submit Daraja production upgrade application — required documents: CR12 (from company incorporation), KRA PIN (business entity), certified NCBA bank account statement, business name registration certificate. Brian coordinates this with Safaricom (7–21 day review timeline). Begin application in Week 5-6 — do not wait until the code is ready.
+  - [ ] Obtain Production Business Shortcode and Lipa Na M-Pesa Online Passkey once approved
   - [ ] Update `config.py`: add `DARAJA_CONSUMER_KEY`, `DARAJA_CONSUMER_SECRET`, `DARAJA_SHORTCODE`, `DARAJA_PASSKEY`, `DARAJA_ENV` (sandbox/production)
   - [ ] Test STK Push in sandbox on own phone; confirm callback received before going production
+  - [ ] **Backup payment gateway (parallel track):** Integrate IntaSend or Pesapal as a Daraja alternative while production access is pending. Both support M-Pesa STK Push without requiring a Business Shortcode — they handle it under their own shortcode and disburse to your NCBA account. This ensures Phase 1 can go live on STK Push even if Daraja production is delayed.
+
+  > **[CODE]** "Create `sustena/payments/intasend_adapter.py`. Implement `IntaSendAdapter` with `stk_push(phone, amount, ref, description) -> str` (returns checkout_id). IntaSend API: `POST https://sandbox.intasend.com/api/v1/payment/mpesa-stk-push/` with Bearer token auth. Store `IntaSend_API_KEY` in Secret Manager. Implement `POST /payments/intasend/callback` — receives IntaSend payment confirmation; maps to the same `event.payment.mpesa_confirmed` event as the Daraja callback. This adapter is the fallback; Daraja replaces it when production access is granted without changing the operator interface."
 
 - [ ] 🔴 **1.14.2** HOE — Historical Onboarding Engine (M-Pesa SMS parsing)
 
@@ -635,6 +777,31 @@ These are the remaining three standard Council councillors. Mentor and Protégé
 - [ ] Mock `api.p95_latency_ms` = 900 (above 800 threshold); confirm SLA alert raised; WhatsApp notification sent to staff number
 - [ ] `GET /admin/platform-status` returns complete Platform Ops state with current metrics
 - [ ] Staff Orchie `cost_forecast()` returns accurate prediction based on current burn rate
+
+---
+
+### Epic 1.18 — Mobile PWA: Offline-First Web App *(Phase 1 — Week 7–10)*
+
+**Reference:** Master Strategy §10.3 Week 7–10. The PWA ships in Phase 1 as the mobile-accessible web surface before the React Native app (Epic 2.1). It is a Progressive Web App — no App Store, installable from the browser, offline-first. The React Native app replaces it in Phase 2 without breaking users.
+
+- [ ] 🟡 **1.18.1** Service worker — offline cache and background sync
+
+  > **[CODE]** "Create `sustena/static/sw.js`. Service worker for offline-first operation. Cache strategy: (1) Static assets (CSS, fonts, JS) → cache-first (never stale), (2) API responses (`/orchie/home-data`, `/sustains/{id}`) → stale-while-revalidate (show cached, update in background), (3) Orchie chat messages → network-first with fallback to last 50 messages from cache. Background sync: queue failed POST requests (`/orchie/message`, `/sustains/{id}/operators/*`) in IndexedDB; replay when connection restores. Offline banner: display amber banner `[OFFLINE — showing last synced data]` when `navigator.onLine === false`. Register the service worker in `orchie/home.html`: `if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js'); }`."
+
+- [ ] 🟡 **1.18.2** PWA manifest and installability
+
+  > **[CODE]** "Create `sustena/static/manifest.json`. PWA manifest: `name: 'Sustena'`, `short_name: 'Sustena'`, `start_url: '/orchie'`, `display: 'standalone'`, `background_color: '#0f0f0f'`, `theme_color: '#E8A020'`, icons: 192×192 and 512×512 PNG (amber S logo on dark background). Add `<link rel='manifest' href='/manifest.json'>` and `<meta name='theme-color' content='#E8A020'>` to all Orchie HTML templates. Test: on Android Chrome, visiting `sustena.io/orchie` prompts 'Add to Home Screen'. Installed PWA opens fullscreen, no browser chrome."
+
+- [ ] 🟡 **1.18.3** SQLite local cache — IndexedDB mirror
+
+  > **[CODE]** "Create `sustena/static/db.js`. Implement `SustenaLocalDB` using IndexedDB (via `idb` library CDN import). Stores: `sustain_state` (current state snapshot per sustain_id), `events` (last 500 events per sustain), `orchie_thread` (last 50 messages), `pending_actions` (queued operator calls awaiting sync). Methods: `saveState(sustain_id, state)`, `getState(sustain_id)`, `appendEvent(event)`, `queueAction(action)`, `dequeuePendingActions()`. The service worker reads from `SustenaLocalDB` on cache miss. On reconnect: `dequeuePendingActions()` replays all queued operator calls in order."
+
+**[TEST] Epic 1.18 — Milestone Criteria:**
+- [ ] Open Orchie home on Android Chrome; go offline; confirm budget ring shows last cached data with amber offline banner
+- [ ] Type a message in Orchie while offline; confirm it queues; reconnect; confirm the message replays and response arrives
+- [ ] On Android Chrome: visiting `sustena.io/orchie` shows 'Add to Home Screen' prompt; installed PWA opens fullscreen
+- [ ] Lighthouse PWA audit scores ≥ 90 on Performance and Best Practices
+- [ ] Service worker update: deploy a code change; existing users receive update notification without a full page reload
 
 ---
 
@@ -790,4 +957,68 @@ These are the remaining three standard Council councillors. Mentor and Protégé
 
 - [ ] 🟢 **3.4.1** Multi-country payment adapter layer
 
-  > **[CODE]** "Create `sustena/payments/adapter.py`. Abstract `PaymentAdapter` interface: `stk_push()`, `c2b_listen()`, `b2c_disburse()`, `parse_sms()`. Country-specific implementations: `MpesaKenyaAdapter` (Daraja — existing), `MtnMomoAdapter` (Uganda/Rwanda — MTN MoMo API), `AirtelMoneyAdapter` (Tanzania/Uganda — Airtel Money API), `TigoMomoAdapter` (Tanzania — Tigo Pesa API). The `mpesa.*` operator namespace becomes a country-agnostic `mobile_money.*` namespace in Phase 3. All M-Pesa references in the existing codebase are wrapped in the Kenya adapter — country
+  > **[CODE]** "Create `sustena/payments/adapter.py`. Abstract `PaymentAdapter` interface: `stk_push()`, `c2b_listen()`, `b2c_disburse()`, `parse_sms()`. Country-specific implementations: `MpesaKenyaAdapter` (Daraja — existing), `MtnMomoAdapter` (Uganda/Rwanda — MTN MoMo API), `AirtelMoneyAdapter` (Tanzania/Uganda — Airtel Money API), `TigoMomoAdapter` (Tanzania — Tigo Pesa API). The `mpesa.*` operator namespace becomes a country-agnostic `mobile_money.*` namespace in Phase 3. All M-Pesa references in the existing codebase are wrapped in the Kenya adapter — country detection happens at sustain instantiation time (`state.meta.country_code`)."
+
+---
+
+## Personal Operating Instructions — Applies Across All Phases
+
+**Discipline for the solo developer (your rules, not suggestions):**
+
+1. **Commit daily.** Even a 5-line fix is a commit. Use conventional format (`feat:`, `fix:`, `docs:`, `test:`). Frequency is the credibility signal.
+
+2. **Test before merge.** No code merges to `dev` without passing `pytest tests/`. The CI gate is not a suggestion — it is the anti-regress boundary.
+
+3. **Prompt before implementation.** Every non-trivial function block gets a `[CODE]` prompt first. Run it, review the output, integrate. Never write boilerplate from scratch.
+
+4. **Mockup before frontend.** Every new UI surface starts as a Claude Design mockup. The mockup is the spec. Implementation follows the mockup, not the other way round.
+
+5. **Log support issues.** Check `GET /admin/support-queue` every morning. Log every recurring issue in `support_log.md`. Convert to GitHub issues weekly.
+
+6. **Write before you ship.** Every milestone gets a Substack post draft. The post does not need to be published before the next milestone — but the draft must exist. Writing forces clarity about what you built.
+
+7. **Simulate before you execute.** Every operator sequence that touches money or external APIs must pass through the Simulator Panel first. The Council proposal workflow is not a formality — it is your error-correction layer.
+
+8. **Platform Ops first every morning.** Open `GET /admin/platform-status` before starting work. If any SLA is breached, resolve it before building new features.
+
+9. **Update this document at each phase transition.** This roadmap is a living document. At the end of Phase 0 (before starting Phase 1), read all Phase 0 epics — mark completed, add notes, revise Phase 1 based on what you learned. The roadmap is not a contract — it is a navigation system. Correct your course.
+
+10. **Lane discipline.** You own: code, documentation, customer support, Substack, blog, media, demos, community. Brian owns: investor relations, partnerships, legal logistics, business development content, Colosso Finance product decisions. Overlap is coordination, not competition.
+
+---
+
+*Bonnie_Master_Roadmap.md — Version 3.0 — Updated 28 May 2026*
+*Cross-referenced against Sustena_XII_Master_Strategy.md — all gaps resolved. Brian tasks flagged [BRIAN] throughout.*
+*Cross-reference: Sustena_XII_Master_Strategy.md | Sustena_XII_Feature_Spec.md | Brian_Master_Roadmap.md | Vyyb_OS_Dev_Roadmap.md*
+
+---
+
+### Cross-Reference Summary — What Was Added in v3.0
+
+The following were in `Sustena_XII_Master_Strategy.md` but missing from v2.1 of this roadmap:
+
+| Added | Where | Source (Strategy §) |
+|-------|-------|---------------------|
+| Epic 0.0: Domain acquisition (7 domains), Business Name, KRA PIN, NCBA account, privacy policy, Cloud Run + Firestore baseline | Phase 0 | §3.2, §11.2, §10.2 |
+| Firestore sync layer (`FirestoreSync` class, Firestore collections) | Epic 0.1 | §9.6, §10.1 |
+| Cloud Run `Dockerfile` + `cloudbuild.yaml` + deployment configuration | Epic 0.1 | §10.1, §11.2 |
+| IntaSend/Pesapal as Daraja production backup (parallel track) | Epic 1.14 | §3.2 |
+| [BRIAN] Daraja application paperwork (CR12, KRA PIN, bank account) | Epic 1.14 | §3.2, §10.3 W5–6 |
+| Epic 1.5b: Chama Secretary Sustain (spec, operative, DAO governance) | Phase 1 | §8.4, §10.3 W3–4 |
+| Epic 1.8b: Legal/business/investor track with Brian task flags | Phase 1 | §3.2, §10.3, §11.4 |
+| Epic 1.18: Mobile PWA (service worker, offline cache, installability) | Phase 1 (W7–10) | §10.3 W7–10 |
+| [BRIAN] flags throughout for: company incorporation, ODPC, NCBA partnership, investor one-pager, dev finance conversations, 365+ Ventures | Various | §3.2, §10.3, §11.2 |
+
+**Brian's lane summary (tasks in this roadmap that are [BRIAN]-owned):**
+- Domain registrations: `colosso.io`, `colosso.ai`, `365plus.io` (coordinate with Bonnie on timing)
+- KRA PIN + NCBA Business Account setup (Epic 0.0.2)
+- Privacy policy legal review (Epic 0.0.3)
+- Sustena Ltd + Colosso Finance Ltd incorporation (Epic 1.8b)
+- ODPC data controller registration (Epic 1.8b)
+- NCBA open banking API partnership conversation (Epic 1.8b)
+- 365+ Ventures incorporation (Epic 1.8b)
+- Daraja production application paperwork (Epic 1.14.1)
+- Chama product decisions (spec inputs) (Epic 1.5b)
+- Investor one-pager + 2-minute demo script (Epic 1.8b)
+- Development finance conversations — IFC, AGRA, Mastercard Foundation (Epic 1.8b)
+- CBK DCP licence pre-application (Epic 3.2)
