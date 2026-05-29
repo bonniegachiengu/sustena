@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     )
 
     # ── AI ────────────────────────────────────────────────────────────────
-    anthropic_api_key: str = Field(..., description="Anthropic API key")
+    # Set to "mock" to use MockClaudeClient (zero spend, full stack runs locally)
+    anthropic_api_key: str = Field(default="mock", description="Anthropic API key — 'mock' for local dev")
     claude_haiku_model: str = Field(
         default="claude-haiku-4-5-20251001",
         description="Claude Haiku model string for fast classification calls",
@@ -34,16 +35,17 @@ class Settings(BaseSettings):
     )
 
     # ── WhatsApp Business API ─────────────────────────────────────────────
-    whatsapp_token: str = Field(..., description="Meta WhatsApp Business API bearer token")
-    whatsapp_phone_id: str = Field(..., description="Meta WhatsApp Business Phone ID")
+    # Leave as "mock" to use MockWhatsAppSender — messages print to console only
+    whatsapp_token: str = Field(default="mock", description="Meta WhatsApp token — 'mock' for local dev")
+    whatsapp_phone_id: str = Field(default="mock", description="Meta WhatsApp Phone ID — 'mock' for local dev")
     whatsapp_verify_token: str = Field(
         default="sustena_webhook_verify_2026",
         description="Webhook verification token set in Meta dashboard",
     )
 
     # ── Security ──────────────────────────────────────────────────────────
-    secret_key: str = Field(..., description="JWT signing secret — must be long and random")
-    admin_token: str = Field(..., description="Bearer token for admin-only endpoints")
+    secret_key: str = Field(default="dev-secret-change-in-production", description="JWT signing secret")
+    admin_token: str = Field(default="dev-admin-token", description="Bearer token for admin-only endpoints")
 
     # ── Environment ───────────────────────────────────────────────────────
     environment: Literal["development", "production"] = Field(

@@ -93,8 +93,8 @@ async def health():
 
     claude_ok = False
     try:
-        client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-        # Minimal token call to verify the key is valid
+        from sustena.core.claude_client import get_claude_client
+        client = get_claude_client()
         await client.messages.create(
             model=settings.claude_haiku_model,
             max_tokens=1,

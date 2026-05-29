@@ -2,17 +2,32 @@
 
 > Human-agent reality interface. 7 primitives. Any describable system.
 
-## Quick start
+## Quick start (Windows / PowerShell)
 
-```bash
-cd backend/
-cp .env.example .env        # fill in your real keys
-make install                # pip install -e ".[dev]"
-make migrate                # create SQLite tables
-make run                    # start dev server on :8000
+```powershell
+cd backend\
+
+# 1. Create and activate a virtual environment
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+# 2. Copy env config — all defaults work locally, no credentials needed
+copy .env.example .env
+
+# 3. Install dependencies
+pip install -e ".[dev]"
+
+# 4. Start the server (creates DB tables automatically on first run)
+uvicorn sustena.api.main:app --reload --host 0.0.0.0 --port 9000
 ```
 
-Then open `http://localhost:8000/docs` for the interactive API.
+Then open `http://localhost:9000/docs` for the interactive API.
+
+### PyCharm setup
+- Open the `backend\` folder as a PyCharm project
+- Set the Python interpreter to `backend\venv\Scripts\python.exe`
+- Add a **FastAPI** run config: module `uvicorn`, parameters `sustena.api.main:app --reload --port 9000`
+- Tests: right-click `tests\` → Run with pytest
 
 ## Directory structure
 
