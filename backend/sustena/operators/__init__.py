@@ -3,3 +3,4 @@
 # Add new operator modules here as they are built.
 
 from sustena.operators import budget  # noqa: F401  (registers budget.* operators)
+from sustena.operators import chama   # noqa: F401  (registers chama.* operators)
