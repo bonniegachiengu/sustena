@@ -55,11 +55,11 @@ Operators:
   chama.dividend.calculate   — computes per-member dividend split, returns ResponseWidget
 
 All four primitives are wired in every operator:
-  1. @sustena_operator   — registers in OPERATOR_REGISTRY with metadata + constraints
-  2. ConstraintEngine    — evaluates pre-conditions at the top of every operator body
-  3. StateAccessor       — all reads and mutations go through ctx.state
-  4. EventBus            — ctx.events.publish() fires domain events after mutations
-  5. PawaLedger          — ctx.pawa.deduct() charges pawa after constraints pass
+  1. @sustena_operator — registers in OPERATOR_REGISTRY with metadata + constraints
+  2. ConstraintEngine — evaluates pre-conditions at the top of every operator body
+  3. StateAccessor — all reads and mutations go through ctx.state
+  4. EventBus — ctx.events.publish() fires domain events after mutations
+  5. PawaLedger — ctx.pawa.deduct() charges pawa after constraints pass
 """
 
 import uuid

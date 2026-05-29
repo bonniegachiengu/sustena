@@ -39,7 +39,14 @@ CHAMA_OPERATORS = [
     "chama.dividend.calculate",
 ]
 
-ALL_KNOWN_OPERATORS = BUDGET_OPERATORS + CHAMA_OPERATORS  # extend as epics ship
+PROCUREMENT_OPERATORS = [
+    "mkulima.broadcast_supply_signal",
+    "mkulima.receive_signal",
+    "procurement.raise_po",
+    "procurement.confirm_delivery",
+]
+
+ALL_KNOWN_OPERATORS = BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS  # extend as epics ship
 
 
 class TestRegistryCompleteness:
