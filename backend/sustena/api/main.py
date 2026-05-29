@@ -117,8 +117,19 @@ async def health():
     )
 
 
-# ── Routers (added as they are built) ────────────────────────────────────────
-# from sustena.api.routes import sustains, operators, council, users, whatsapp
-# app.include_router(whatsapp.router, prefix="/webhook", tags=["whatsapp"])
+# ── Routers ───────────────────────────────────────────────────────────────────
+
+from sustena.api.routes import whatsapp, dev
+
+# WhatsApp webhook (real — always mounted)
+app.include_router(whatsapp.router, prefix="/webhook", tags=["whatsapp"])
+
+# Dev-only simulation and inspection endpoints
+if settings.is_development:
+    app.include_router(dev.router, prefix="/dev", tags=["dev"])
+    logger.info("Dev endpoints mounted at /dev/* (development mode)")
+
+# Future routers (uncomment as each Epic is completed):
+# from sustena.api.routes import sustains, users
 # app.include_router(sustains.router, prefix="/api/v1/sustains", tags=["sustains"])
-# app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+# app.include_router(users.router,    prefix="/api/v1/users",    tags=["users"])
