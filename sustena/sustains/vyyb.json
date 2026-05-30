@@ -1,0 +1,645 @@
+{
+  "id": "vyyb",
+  "version": "1.0.0",
+  "display_name": "Vyyb",
+  "description": "QSR (Quick Service Restaurant) fork of the Biashara sustain. Inherits all Biashara domains (inventory, accounts, parties, orders, purchases, assets, expenses, calendar, analytics) and adds recipe library, production batch tracking, KDS (Kitchen Display System), staff scheduling, payroll, and QSR-specific procurement. The Vyyb Hive outlet is the first instantiation of this sustain.",
+  "extends": "biashara",
+  "state_schema": {
+    "recipes": {
+      "type": "object",
+      "description": "Recipe library keyed by recipe_id. Three-tier hierarchy: raw_material -> semi_finished -> finished_good.",
+      "properties": {
+        "library": {
+          "type": "object",
+          "description": "Dict keyed by recipe_id.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "recipe_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "raw_material",
+                  "semi_finished",
+                  "finished_good"
+                ]
+              },
+              "yield_qty": {
+                "type": "number",
+                "minimum": 0
+              },
+              "yield_unit": {
+                "type": "string"
+              },
+              "selling_price": {
+                "type": "number",
+                "minimum": 0
+              },
+              "ingredients": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "item_id": {
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "unit": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "item_id",
+                    "quantity",
+                    "unit"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "recipe_id",
+              "name",
+              "tier",
+              "yield_qty",
+              "ingredients"
+            ]
+          }
+        }
+      },
+      "required": [
+        "library"
+      ]
+    },
+    "production": {
+      "type": "object",
+      "description": "Production batch tracking and planning.",
+      "properties": {
+        "batches": {
+          "type": "array",
+          "description": "Production batch history.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "batch_id": {
+                "type": "string"
+              },
+              "recipe_id": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "number",
+                "minimum": 0
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "IN_PROGRESS",
+                  "COMPLETE",
+                  "FAILED"
+                ]
+              },
+              "station": {
+                "type": "string"
+              },
+              "started_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "completed_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "batch_id",
+              "recipe_id",
+              "quantity",
+              "status"
+            ]
+          }
+        },
+        "plans": {
+          "type": "array",
+          "description": "Planned production runs (prep schedules).",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "batches",
+        "plans"
+      ]
+    },
+    "kds": {
+      "type": "object",
+      "description": "Kitchen Display System task queue and station routing.",
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "task_id": {
+                "type": "string"
+              },
+              "order_id": {
+                "type": "string"
+              },
+              "station": {
+                "type": "string"
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "QUEUED",
+                  "IN_PROGRESS",
+                  "DONE"
+                ]
+              },
+              "dispatched_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "completed_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "task_id",
+              "order_id",
+              "station",
+              "status"
+            ]
+          }
+        },
+        "station_routes": {
+          "type": "object",
+          "description": "Routing rules: item_id -> station name.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "tasks",
+        "station_routes"
+      ]
+    },
+    "staff": {
+      "type": "object",
+      "description": "Staff management: roster, schedules, shifts, payroll, hours.",
+      "properties": {
+        "roster": {
+          "type": "object",
+          "description": "Staff profiles keyed by staff_id.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "staff_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "hourly_rate": {
+                "type": "number",
+                "minimum": 0
+              },
+              "active": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "staff_id",
+              "name",
+              "role"
+            ]
+          }
+        },
+        "schedules": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "shifts": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "payroll": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "hours": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "roster",
+        "schedules",
+        "shifts",
+        "payroll",
+        "hours"
+      ]
+    },
+    "procurement": {
+      "type": "object",
+      "description": "QSR-specific supplier management and procurement history.",
+      "properties": {
+        "suppliers": {
+          "type": "object",
+          "description": "Supplier profiles keyed by supplier_id.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "supplier_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "contact": {
+                "type": "string"
+              },
+              "items_supplied": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "supplier_id",
+              "name"
+            ]
+          }
+        },
+        "po_history": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "suppliers",
+        "po_history"
+      ]
+    }
+  },
+  "operators": [
+    {
+      "name": "biashara.inventory.restock",
+      "description": "Record a stock restock event, increasing item quantity and posting a journal entry (Dr Inventory / Cr Accounts Payable).",
+      "params": [
+        "item_id",
+        "quantity",
+        "unit_cost",
+        "vendor_id"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.inventory.adjust",
+      "description": "Adjust inventory quantity by a delta (positive or negative) with a required reason. Posts a journal entry for the adjustment.",
+      "params": [
+        "item_id",
+        "quantity_delta",
+        "reason"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.orders.place",
+      "description": "Place a new customer order. Validates item availability and creates an active order record.",
+      "params": [
+        "items",
+        "customer_id",
+        "payment_method"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.orders.fulfill",
+      "description": "Fulfill an active order: deduct inventory, post revenue journal entries, move order to history.",
+      "params": [
+        "order_id",
+        "outlet_id"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.purchases.record",
+      "description": "Record a supplier purchase: update inventory and post Dr Inventory / Cr AP journal entry.",
+      "params": [
+        "item_id",
+        "quantity",
+        "unit_cost",
+        "vendor_id",
+        "invoice_ref"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.po.raise",
+      "description": "Raise a Purchase Order to a vendor for items not yet received.",
+      "params": [
+        "vendor_id",
+        "line_items",
+        "expected_delivery_date"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.po.receive",
+      "description": "Receive goods against an open Purchase Order, updating inventory and AP.",
+      "params": [
+        "po_id",
+        "received_lines"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.accounts.journal_entry",
+      "description": "Post a manual double-entry journal entry. Validates that debit total == credit total per entry.",
+      "params": [
+        "description",
+        "lines",
+        "date"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.tax.calculate_vat",
+      "description": "Calculate VAT on a given amount at the applicable rate and return the breakdown.",
+      "params": [
+        "amount",
+        "vat_rate",
+        "inclusive"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.assets.depreciate",
+      "description": "Run periodic depreciation on all depreciable assets, posting depreciation journal entries and updating book values.",
+      "params": [
+        "period",
+        "method"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.expenses.record",
+      "description": "Record a business expense and post the corresponding journal entry (Dr Expense / Cr Cash or AP).",
+      "params": [
+        "amount",
+        "category",
+        "description",
+        "paid_to",
+        "payment_method"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "vyyb.production.start_batch",
+      "description": "Start a production batch for a recipe. Deducts raw material inventory and creates a batch record in production.batches.",
+      "params": [
+        "recipe_id",
+        "quantity",
+        "station"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "vyyb.production.complete_batch",
+      "description": "Mark a production batch as complete, increment finished goods inventory, and post the production journal entry.",
+      "params": [
+        "batch_id",
+        "yield_qty",
+        "notes"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "vyyb.kds.dispatch_task",
+      "description": "Dispatch a KDS (Kitchen Display System) task to a station. Created when an order is placed with KDS-routable items.",
+      "params": [
+        "order_id",
+        "station",
+        "items"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "vyyb.kds.complete_task",
+      "description": "Mark a KDS task as completed. Updates task status and triggers order fulfillment check.",
+      "params": [
+        "task_id",
+        "completed_by"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "vyyb.staff.clock_in",
+      "description": "Record a staff clock-in event, opening a shift record for the staff member.",
+      "params": [
+        "staff_id",
+        "station",
+        "timestamp"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "vyyb.staff.clock_out",
+      "description": "Record a staff clock-out, closing the shift and computing hours worked.",
+      "params": [
+        "staff_id",
+        "timestamp"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "vyyb.staff.schedule_shift",
+      "description": "Schedule a future shift for a staff member, adding to staff.schedules.",
+      "params": [
+        "staff_id",
+        "date",
+        "start_time",
+        "end_time",
+        "station"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "vyyb.procurement.raise_po",
+      "description": "Raise a procurement PO to a supplier in the procurement.suppliers registry.",
+      "params": [
+        "supplier_id",
+        "line_items",
+        "expected_delivery_date"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "vyyb.procurement.receive_po",
+      "description": "Receive goods against an open procurement PO, update inventory, and move PO to procurement.po_history.",
+      "params": [
+        "po_id",
+        "received_lines"
+      ],
+      "pawa_cost": 0
+    }
+  ],
+  "operatives": [
+    "mentor",
+    "navigator",
+    "attache",
+    "curator",
+    "protege"
+  ],
+  "invariants": [
+    {
+      "id": "journal_balanced",
+      "expression": "ALL accounts.journal_entries[*]: SUM(lines[*].debit) == SUM(lines[*].credit)",
+      "description": "Inherited from Biashara. Every journal entry must balance."
+    },
+    {
+      "id": "inventory_qty_non_negative",
+      "expression": "ALL inventory.items[*].qty >= 0",
+      "description": "Inherited from Biashara. No item may have negative stock."
+    }
+  ],
+  "ui_schema": {
+    "sustain_home": {
+      "widget": "sustain_home"
+    },
+    "kds_widget": {
+      "widget": "kds_widget",
+      "override": true
+    },
+    "production_batch_widget": {
+      "widget": "production_batch_widget",
+      "override": true
+    }
+  },
+  "access_policy": {
+    "owner_ids": "{{owner_ids}}"
+  },
+  "default_state": {
+    "inventory": {
+      "items": {},
+      "movements": []
+    },
+    "accounts": {
+      "chart": {},
+      "journal_entries": [],
+      "journal_lines": []
+    },
+    "parties": {},
+    "orders": {
+      "active": [],
+      "history": []
+    },
+    "purchases": {
+      "active": [],
+      "history": []
+    },
+    "purchase_orders": {
+      "active": [],
+      "history": []
+    },
+    "assets": {},
+    "expenses": [],
+    "calendar": {
+      "events": []
+    },
+    "analytics": {
+      "period_reports": []
+    },
+    "recipes": {
+      "library": {}
+    },
+    "production": {
+      "batches": [],
+      "plans": []
+    },
+    "kds": {
+      "tasks": [],
+      "station_routes": {}
+    },
+    "staff": {
+      "roster": {},
+      "schedules": [],
+      "shifts": [],
+      "payroll": [],
+      "hours": []
+    },
+    "procurement": {
+      "suppliers": {},
+      "po_history": []
+    }
+  },
+  "parameters": [
+    {
+      "name": "owner_ids",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of user IDs with owner (Level 0) access.",
+      "required": true
+    },
+    {
+      "name": "business_name",
+      "type": "string",
+      "description": "Display name for this business.",
+      "required": true
+    },
+    {
+      "name": "outlet_name",
+      "type": "string",
+      "description": "Outlet / branch name (e.g. Vyyb Hive).",
+      "required": true
+    },
+    {
+      "name": "currency",
+      "type": "string",
+      "description": "ISO 4217 currency code.",
+      "required": false,
+      "default": "KES"
+    }
+  ],
+  "_notes": {
+    "epic": "Epic 1.5.1 — Vyyb QSR sustain spec, fork of Biashara.",
+    "recipes": "107 Vyyb recipes (3-tier: raw_material / semi_finished / finished_good) seeded via migrate_vyyb.py.",
+    "protege_role": "Protege operative handles staff scheduling and shift management for the QSR context.",
+    "kds_override": "kds_widget and production_batch_widget override the base sustain_home panels for QSR-specific real-time views.",
+    "migration": "sustena/scripts/migrate_vyyb.py seeds this sustain from the legacy Vyyb OS SQLite database."
+  }
+}

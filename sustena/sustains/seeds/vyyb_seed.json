@@ -1,0 +1,72 @@
+{
+  "sustain_id": "vyyb",
+  "spec_id": "vyyb",
+  "migrated_at": "2026-05-30T13:39:00.827498Z",
+  "source_db": "C:\\Users\\DELL\\OneDrive\\Documents\\New project\\.claude\\worktrees\\goofy-cohen-11f0d8\\data\\vyyb.db",
+  "migration_summary": {
+    "inventory.items": 0,
+    "inventory.movements": 0,
+    "recipes.library": 0,
+    "orders.history": 0,
+    "accounts.chart": 0,
+    "accounts.journal_entries": 0,
+    "accounts.journal_lines": 0,
+    "parties": 0,
+    "assets": 0,
+    "production.batches": 0
+  },
+  "state": {
+    "inventory": {
+      "items": {},
+      "movements": []
+    },
+    "accounts": {
+      "chart": {},
+      "journal_entries": [],
+      "journal_lines": []
+    },
+    "parties": {},
+    "orders": {
+      "active": [],
+      "history": []
+    },
+    "purchases": {
+      "active": [],
+      "history": []
+    },
+    "purchase_orders": {
+      "active": [],
+      "history": []
+    },
+    "assets": {},
+    "expenses": [],
+    "calendar": {
+      "events": []
+    },
+    "analytics": {
+      "period_reports": []
+    },
+    "recipes": {
+      "library": {}
+    },
+    "production": {
+      "batches": [],
+      "plans": []
+    },
+    "kds": {
+      "tasks": [],
+      "station_routes": {}
+    },
+    "staff": {
+      "roster": {},
+      "schedules": [],
+      "shifts": [],
+      "payroll": [],
+      "hours": []
+    },
+    "procurement": {
+      "suppliers": {},
+      "po_history": []
+    }
+  }
+}
