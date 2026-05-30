@@ -434,9 +434,9 @@ async def procurement_raise_po(
 
     Primitives used:
       ConstraintEngine  — enforces quantity_kg > 0 and total_kes > 0
-      PawaLedger        — deducts 0 pawa (free operator)
-      StateAccessor     — creates PO record in procurement.purchase_orders
-      EventBus          — fires event.procurement.po_raised
+      PawaLedger — deducts 0 pawa (free operator)
+      StateAccessor — creates PO record in procurement.purchase_orders
+      EventBus — fires event.procurement.po_raised
 
     params:
       signal_id   -- the supply signal to raise PO against (must be PASSED)

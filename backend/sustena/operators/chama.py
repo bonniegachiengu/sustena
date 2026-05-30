@@ -355,16 +355,16 @@ async def chama_loan_disburse(
     """
     Disburse funds for a Council-approved loan.
 
-    Pre-condition (runtime): loan must exist AND status must be "PASSED".
+    Pre-condition (runtime): loan must exist, AND status must be "PASSED".
     The constraint is dynamic (depends on loan_id param), so it is checked
-    in the operator body rather than declared in the constraints list —
-    same pattern as budget.spend's pocket-balance check.
+    in the operator body rather than declared in the constraint list —
+    the same pattern as budget.spend's pocket-balance check.
 
     Primitives used:
       ConstraintEngine  — no static constraints (runtime-only)
-      PawaLedger        — deducts 0 pawa (free operator)
-      StateAccessor     — updates loan status → DISBURSED, decrements fund
-      EventBus          — fires event.chama.loan_disbursed
+      PawaLedger — deducts 0 pawa (free operator)
+      StateAccessor — updates loan status → DISBURSED, decrements fund
+      EventBus — fires event.chama.loan_disbursed
 
     params:
       loan_id -- the loan to disburse (must have status "PASSED")
@@ -465,9 +465,9 @@ async def chama_loan_repay(
 
     Primitives used:
       ConstraintEngine  — enforces amount > 0
-      PawaLedger        — deducts 0 pawa (free operator)
-      StateAccessor     — increments loan.repaid; marks REPAID when fully settled
-      EventBus          — fires event.chama.loan_repayment_recorded
+      PawaLedger — deducts 0 pawa (free operator)
+      StateAccessor — increments loan.repaid; marks REPAID when fully settled
+      EventBus — fires event.chama.loan_repayment_recorded
 
     params:
       loan_id -- loan being repaid
@@ -579,9 +579,9 @@ async def chama_fine_record(
 
     Primitives used:
       ConstraintEngine  — enforces amount > 0 AND reason IN rules.fine_reasons
-      PawaLedger        — deducts 0 pawa (free operator)
-      StateAccessor     — decrements member.balance, appends fine record
-      EventBus          — fires event.chama.fine_recorded
+      PawaLedger — deducts 0 pawa (free operator)
+      StateAccessor — decrements member.balance, appends fine record
+      EventBus — fires event.chama.fine_recorded
 
     params:
       member_id -- member being fined
@@ -670,9 +670,9 @@ async def chama_meeting_schedule(
 
     Primitives used:
       ConstraintEngine  — no constraints (any date/agenda is valid)
-      PawaLedger        — deducts 0 pawa (free operator)
-      StateAccessor     — appends meeting to chama.meetings list
-      EventBus          — fires event.chama.meeting_scheduled
+      PawaLedger — deducts 0 pawa (free operator)
+      StateAccessor — appends meeting to chama.meetings list
+      EventBus — fires event.chama.meeting_scheduled
 
     params:
       date   -- ISO date or human-readable date string (e.g. "2026-06-01")
@@ -749,9 +749,9 @@ async def chama_dividend_calculate(ctx: OperatorContext) -> OperatorResult:
 
     Primitives used:
       ConstraintEngine  — no constraints (read-only, always permitted)
-      PawaLedger        — deducts 0 pawa (free operator)
-      StateAccessor     — reads chama.members and chama.fund.total
-      EventBus          — no events (read-only)
+      PawaLedger — deducts 0 pawa (free operator)
+      StateAccessor — reads chama.members and chama.fund.total
+      EventBus — no events (read-only)
     """
     # 1. ConstraintEngine — no constraints
     # 2. PawaLedger

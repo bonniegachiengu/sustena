@@ -107,8 +107,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 220.50104904174805,
-    "collapsed": true
+    "width": 220.50104904174805
   },
   "right": {
     "id": "8bfd5add7ee55f56",
@@ -200,7 +199,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 445.5
+    "width": 326.5
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -215,17 +214,17 @@
   },
   "active": "ae0fa1554aa887d5",
   "lastOpenFiles": [
-    "backend/tests/__pycache__/test_procurement_operators.cpython-311-pytest-9.0.3.pyc",
-    "backend/sustena/operators/__pycache__/procurement.cpython-311.pyc",
-    "backend/tests/sedfhUB8o",
-    "backend/sustena/operators/__pycache__/procurement.cpython-310.pyc",
-    "backend/sustena/operators/__pycache__/__init__.cpython-310.pyc.130485949874544",
-    "backend/sustena/operators/__init__.py.tmp.27132.88859566a3d6",
-    "backend/tests/__pycache__/test_procurement_operators.cpython-310-pytest-9.0.3.pyc",
-    "backend/tests/__pycache__/test_procurement_operators.cpython-310-pytest-9.0.3.pyc.13",
-    "backend/tests/test_procurement_operators.py",
-    "backend/sustena/operators/__init__.py.tmp.27132.2a22b7bc1fe1",
-    "backend/sustena/operators/procurement.py",
+    "backend/sustena/operatives/mentor.py.tmp.25292.e60ce88d5212",
+    "backend/sustena/operatives/base.py.tmp.25292.84b832f459c1",
+    "backend/sustena/core/__pycache__/council.cpython-310.pyc",
+    "backend/sustena/operatives/__pycache__/mentor.cpython-310.pyc",
+    "backend/sustena/operatives/__pycache__/mentor.cpython-310.pyc.138461486592400",
+    "backend/sustena/operatives/__pycache__/__init__.cpython-310.pyc",
+    "backend/sustena/operatives/__pycache__/base.cpython-310.pyc",
+    "backend/sustena/operatives/__pycache__",
+    "backend/tests/__pycache__/test_operative_runtime.cpython-310-pytest-9.0.3.pyc",
+    "backend/tests/test_operative_runtime.py",
+    "backend/tests/test_operative_runtime.py.tmp.396.35c007165d92",
     "docs/Bonnie_Master_Roadmap.md",
     "vyyb/Technical Brief & Project Summary.md",
     "frontend/README.md",
