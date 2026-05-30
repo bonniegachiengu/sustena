@@ -39,6 +39,7 @@ REQUIRED_BUDGET_OPERATORS = [
 CALENDAR_OPERATORS = [
     "homestead.calendar.add_event",
     "homestead.calendar.upcoming_events",
+    "homestead.calendar.remove_event",
 ]
 
 
@@ -53,7 +54,7 @@ def spec() -> dict:
 
 
 @pytest.fixture(scope="module")
-def operator_names(spec) -> set[str]:
+def operator_names(spec) -> set:
     return {op["name"] for op in spec["operators"]}
 
 
@@ -121,10 +122,10 @@ def test_each_operator_has_pawa_cost(spec):
 
 # ── Operatives ────────────────────────────────────────────────────────────────
 
-def test_operatives_contains_mentor_and_protege(spec):
+def test_operatives_contains_all_council_members(spec):
     operatives = spec["operatives"]
-    assert "mentor" in operatives, "operatives must include 'mentor'"
-    assert "protege" in operatives, "operatives must include 'protege'"
+    for expected in ["mentor", "protege", "navigator", "attache"]:
+        assert expected in operatives, f"operatives must include '{expected}'"
 
 
 # ── Invariants ────────────────────────────────────────────────────────────────
@@ -172,7 +173,8 @@ def test_default_state_has_finances(spec):
 
 def test_default_state_has_empty_pockets(spec):
     pockets = spec["default_state"]["finances"]["pockets"]
-    assert isinstance(pockets, list)
+    # pockets is now a dict keyed by pocket name (matches budget.py storage)
+    assert isinstance(pockets, dict)
     assert len(pockets) == 0, "default_state pockets must start empty"
 
 

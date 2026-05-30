@@ -46,7 +46,13 @@ PROCUREMENT_OPERATORS = [
     "procurement.confirm_delivery",
 ]
 
-ALL_KNOWN_OPERATORS = BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS  # extend as epics ship
+CALENDAR_OPERATORS = [
+    "homestead.calendar.add_event",
+    "homestead.calendar.upcoming_events",
+    "homestead.calendar.remove_event",
+]
+
+ALL_KNOWN_OPERATORS = BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS  # extend as epics ship
 
 
 class TestRegistryCompleteness:

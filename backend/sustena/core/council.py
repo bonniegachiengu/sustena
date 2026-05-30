@@ -342,27 +342,3 @@ class CouncilSession:
             if p.get("id") == proposal_id:
                 return p
         return None
-            Returns 0.0 if no operative voted YES.
-        """
-        yes_utilities = [
-            float(v.get("utility", 0.5))
-            for v in votes.values()
-            if v.get("vote") == "YES"
-        ]
-
-        if not yes_utilities:
-            return 0.0
-
-        # Geometric mean
-        log_sum = sum(math.log(max(u, 1e-9)) for u in yes_utilities)
-        return math.exp(log_sum / len(yes_utilities))
-
-    # ── Internal helpers ───────────────────────────────────────────────────────
-
-    def _get_proposal(self, proposal_id: str) -> dict | None:
-        """Retrieve a proposal dict from state by ID."""
-        proposals: list[dict] = self.state.get("council_proposals", [])
-        for p in proposals:
-            if p.get("id") == proposal_id:
-                return p
-        return None
