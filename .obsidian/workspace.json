@@ -49,8 +49,7 @@
               "title": "Technical Brief & Project Summary"
             }
           }
-        ],
-        "currentTab": 2
+        ]
       }
     ],
     "direction": "vertical"
@@ -107,7 +106,8 @@
       }
     ],
     "direction": "horizontal",
-    "width": 220.50104904174805
+    "width": 220.50104904174805,
+    "collapsed": true
   },
   "right": {
     "id": "8bfd5add7ee55f56",
@@ -185,13 +185,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "vyyb/Technical Brief & Project Summary.md",
+                "file": "docs/Bonnie_Master_Roadmap.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of Technical Brief & Project Summary"
+              "title": "Outline of Bonnie_Master_Roadmap"
             }
           }
         ],
@@ -212,21 +212,21 @@
       "bases:Create new base": false
     }
   },
-  "active": "ae0fa1554aa887d5",
+  "active": "573068049587cebe",
   "lastOpenFiles": [
+    "backend/tests/__pycache__/test_homestead_spec.cpython-310-pytest-9.0.3.pyc",
+    "backend/tests/__pycache__/test_homestead_spec.cpython-310-pytest-9.0.3.pyc.6",
+    "backend/tests/test_homestead_spec.py",
+    "sustena/sustains/homestead.json",
+    "sustena/sustains/homestead.json.tmp.7704.3c196c686c75",
+    "sustena/sustains",
+    "vyyb/Technical Brief & Project Summary.md",
     "backend/sustena/operatives/mentor.py.tmp.25292.e60ce88d5212",
     "backend/sustena/operatives/base.py.tmp.25292.84b832f459c1",
     "backend/sustena/core/__pycache__/council.cpython-310.pyc",
     "backend/sustena/operatives/__pycache__/mentor.cpython-310.pyc",
     "backend/sustena/operatives/__pycache__/mentor.cpython-310.pyc.138461486592400",
-    "backend/sustena/operatives/__pycache__/__init__.cpython-310.pyc",
-    "backend/sustena/operatives/__pycache__/base.cpython-310.pyc",
-    "backend/sustena/operatives/__pycache__",
-    "backend/tests/__pycache__/test_operative_runtime.cpython-310-pytest-9.0.3.pyc",
-    "backend/tests/test_operative_runtime.py",
-    "backend/tests/test_operative_runtime.py.tmp.396.35c007165d92",
     "docs/Bonnie_Master_Roadmap.md",
-    "vyyb/Technical Brief & Project Summary.md",
     "frontend/README.md",
     "backend/venv/Lib/site-packages/anthropic/lib/foundry.md",
     "backend/venv/Lib/site-packages/httpcore-1.0.9.dist-info/licenses/LICENSE.md",

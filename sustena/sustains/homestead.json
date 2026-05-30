@@ -1,0 +1,249 @@
+{
+  "id": "homestead",
+  "version": "1.0.0",
+  "display_name": "Homestead",
+  "description": "The personal and household sustain. Tracks shared finances (liquid balance, budget pockets, income, savings goals), household members, calendar events, and alerts. The primary sustain for individual and family financial sovereignty on Sustena XII.",
+
+  "state_schema": {
+    "members": {
+      "type": "array",
+      "description": "Registered household members.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id":        { "type": "string", "description": "UUID" },
+          "name":      { "type": "string" },
+          "role":      { "type": "string", "enum": ["owner", "member", "guest"] },
+          "joined_at": { "type": "string", "format": "date-time" }
+        },
+        "required": ["id", "name", "role", "joined_at"]
+      }
+    },
+
+    "finances": {
+      "type": "object",
+      "properties": {
+        "liquid": {
+          "type": "object",
+          "description": "Unallocated liquid balance — money not yet assigned to any pocket.",
+          "properties": {
+            "balance": { "type": "number", "minimum": 0 }
+          },
+          "required": ["balance"]
+        },
+
+        "pockets": {
+          "type": "array",
+          "description": "Named budget pockets. Each pocket holds a portion of allocated funds.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":      { "type": "string", "description": "Pocket label e.g. food, rent, emergency" },
+              "allocated": { "type": "number", "minimum": 0, "description": "Total moved into this pocket from liquid" },
+              "spent":     { "type": "number", "minimum": 0, "description": "Amount deducted via budget.spend" },
+              "balance":   { "type": "number", "description": "Derived: allocated - spent" }
+            },
+            "required": ["name", "allocated", "spent", "balance"]
+          }
+        },
+
+        "income": {
+          "type": "object",
+          "description": "Income tracking — most recent recording per source.",
+          "properties": {
+            "amount":        { "type": "number", "minimum": 0 },
+            "frequency":     { "type": "string", "enum": ["once", "daily", "weekly", "monthly"] },
+            "last_recorded": { "type": "string", "format": "date-time" }
+          },
+          "required": ["amount", "frequency", "last_recorded"]
+        },
+
+        "goals": {
+          "type": "array",
+          "description": "Savings goals tracked by the household.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":           { "type": "string" },
+              "target_amount":  { "type": "number", "minimum": 0 },
+              "current_amount": { "type": "number", "minimum": 0 },
+              "deadline":       { "type": "string", "format": "date" }
+            },
+            "required": ["name", "target_amount", "current_amount", "deadline"]
+          }
+        }
+      },
+      "required": ["liquid", "pockets", "income", "goals"]
+    },
+
+    "calendar": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id":          { "type": "string" },
+              "title":       { "type": "string" },
+              "date":        { "type": "string", "format": "date-time" },
+              "description": { "type": "string" }
+            },
+            "required": ["id", "title", "date"]
+          }
+        }
+      },
+      "required": ["events"]
+    },
+
+    "alerts": {
+      "type": "array",
+      "description": "System and operative-generated alerts for household members.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id":         { "type": "string" },
+          "type":       { "type": "string", "description": "e.g. budget_warning, goal_milestone, income_due" },
+          "message":    { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "read":       { "type": "boolean" }
+        },
+        "required": ["id", "type", "message", "created_at", "read"]
+      }
+    }
+  },
+
+  "operators": [
+    {
+      "name": "budget.record_income",
+      "description": "Record an income transaction and credit the liquid balance.",
+      "params": ["amount", "source", "frequency"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "budget.allocate",
+      "description": "Move an amount from liquid balance into a named budget pocket.",
+      "params": ["pocket_name", "amount", "period"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "budget.spend",
+      "description": "Record a spend against a pocket.",
+      "params": ["pocket_name", "amount", "description", "category"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "budget.transfer",
+      "description": "Move an amount from one pocket to another.",
+      "params": ["from_pocket", "to_pocket", "amount"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "budget.summary",
+      "description": "Return a budget ring ResponseWidget showing all pockets and key metrics.",
+      "params": [],
+      "pawa_cost": 0
+    },
+    {
+      "name": "homestead.calendar.add_event",
+      "description": "Add an event to the household calendar.",
+      "params": ["title", "date", "description"],
+      "pawa_cost": 0,
+      "status": "NOT_IMPLEMENTED — operator not yet registered in sustena/operators/. Flag for Epic 1.3.2."
+    },
+    {
+      "name": "homestead.calendar.upcoming_events",
+      "description": "Return upcoming calendar events within a given window.",
+      "params": ["days"],
+      "pawa_cost": 0,
+      "status": "NOT_IMPLEMENTED — operator not yet registered in sustena/operators/. Flag for Epic 1.3.2."
+    }
+  ],
+
+  "operatives": ["mentor", "protege"],
+
+  "invariants": [
+    {
+      "id": "liquid_non_negative",
+      "expression": "finances.liquid.balance >= 0",
+      "description": "Liquid balance can never go below zero. budget.allocate enforces this before mutating state."
+    },
+    {
+      "id": "pocket_allocated_non_negative",
+      "expression": "ALL finances.pockets[*].allocated >= 0",
+      "description": "No pocket may have a negative allocated amount. Transfer and allocate operators enforce this."
+    }
+  ],
+
+  "ui_schema": {
+    "sustain_home": {
+      "widget": "sustain_home"
+    }
+  },
+
+  "access_policy": {
+    "owner_ids": "{{owner_ids}}"
+  },
+
+  "default_state": {
+    "members": [],
+    "finances": {
+      "liquid": {
+        "balance": 0.0
+      },
+      "pockets": [],
+      "income": {
+        "amount": 0.0,
+        "frequency": "monthly",
+        "last_recorded": null
+      },
+      "goals": []
+    },
+    "calendar": {
+      "events": []
+    },
+    "alerts": []
+  },
+
+  "parameters": [
+    {
+      "name": "owner_ids",
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of user IDs who have owner (Level 0) access to this sustain. Required at instantiation — at least one owner must be specified.",
+      "required": true
+    },
+    {
+      "name": "initial_income",
+      "type": "number",
+      "description": "Starting monthly income amount (KES). Used during onboarding to seed finances.income.amount. Defaults to 0 if not provided.",
+      "required": false,
+      "default": 0.0
+    },
+    {
+      "name": "initial_goal_name",
+      "type": "string",
+      "description": "Name of the first savings goal (e.g. 'Emergency fund'). Optional — collected during onboarding flow.",
+      "required": false
+    },
+    {
+      "name": "initial_goal_amount",
+      "type": "number",
+      "description": "Target amount for the first savings goal (KES). Only used if initial_goal_name is also provided.",
+      "required": false
+    },
+    {
+      "name": "initial_goal_deadline",
+      "type": "string",
+      "format": "date",
+      "description": "Target date for the first savings goal (ISO 8601 date). Only used if initial_goal_name is also provided.",
+      "required": false
+    }
+  ],
+
+  "_notes": {
+    "calendar_operators_missing": "homestead.calendar.add_event and homestead.calendar.upcoming_events are declared in this spec but NOT yet implemented in sustena/operators/. They must be created in Epic 1.3.2 before any calendar operator calls will succeed.",
+    "pocket_schema_note": "The current budget.py implementation stores pockets as a dict keyed by name (finances.pockets.<name>). This spec declares pockets as an array for clarity and Pydantic validation. The SustainEngine or a migration step must reconcile these on instantiation.",
+    "protege_note": "The 'protege' operative is declared but not yet implemented (mentor.py exists; protege.py does not). Flag for Epic 1.3.x."
+  }
+}
