@@ -29,7 +29,8 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
-import jwt as pyjwt
+from jose import jwt, JWTError
+from jose.exceptions import ExpiredSignatureError
 
 from sustena.config import settings
 from sustena.core.sustain_engine import SustainEngine
@@ -72,14 +73,14 @@ def get_current_user(
 
     token = credentials.credentials
     try:
-        payload = pyjwt.decode(
+        payload = jwt.decode(
             token,
             settings.secret_key,
             algorithms=["HS256"],
         )
-    except pyjwt.ExpiredSignatureError:
+    except ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
-    except pyjwt.InvalidTokenError:
+    except JWTError:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     if "user_id" not in payload:

@@ -258,7 +258,7 @@ import json as _json
 from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 from unittest.mock import AsyncMock, MagicMock
 
-import jwt as pyjwt
+from jose import jwt as pyjwt
 import pytest
 from httpx import AsyncClient, ASGITransport
 
