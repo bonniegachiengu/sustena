@@ -37,6 +37,7 @@ CHAMA_OPERATORS = [
     "chama.fine.record",
     "chama.meeting.schedule",
     "chama.dividend.calculate",
+    "chama.rotation.advance",
 ]
 
 PROCUREMENT_OPERATORS = [
@@ -114,3 +115,43 @@ class TestOperatorMetadata:
     def test_name_is_namespaced(self, name):
         """Operator name must contain at least one dot: 'domain.action'."""
         assert "." in name, f"'{name}' is not namespaced"
+
+    @pytest.mark.parametrize("name", ALL_KNOWN_OPERATORS)
+    def test_pawa_cost_present(self, name):
+        """Every registered operator must declare a pawa_cost."""
+        meta = OPERATOR_REGISTRY.get(name)
+        assert meta is not None, f"Operator '{name}' not found in registry."
+        assert hasattr(meta, "pawa_cost"), f"Operator '{name}' missing pawa_cost."
+        assert isinstance(meta.pawa_cost, (int, float)), (
+            f"Operator '{name}' pawa_cost must be int or float, got {type(meta.pawa_cost)}."
+        )
+
+    @pytest.mark.parametrize("name", ALL_KNOWN_OPERATORS)
+    def test_license_tier_present(self, name):
+        """Every registered operator must declare a license_tier string."""
+        meta = OPERATOR_REGISTRY.get(name)
+        assert meta is not None
+        assert hasattr(meta, "license_tier"), f"Operator '{name}' missing license_tier."
+        assert isinstance(meta.license_tier, str), (
+            f"Operator '{name}' license_tier must be a string."
+        )
+
+    @pytest.mark.parametrize("name", ALL_KNOWN_OPERATORS)
+    def test_author_present(self, name):
+        """Every registered operator must declare an author string."""
+        meta = OPERATOR_REGISTRY.get(name)
+        assert meta is not None
+        assert hasattr(meta, "author"), f"Operator '{name}' missing author."
+        assert isinstance(meta.author, str) and meta.author, (
+            f"Operator '{name}' author must be a non-empty string."
+        )
+
+    @pytest.mark.parametrize("name", ALL_KNOWN_OPERATORS)
+    def test_side_effects_is_list(self, name):
+        """Every registered operator must declare side_effects as a list."""
+        meta = OPERATOR_REGISTRY.get(name)
+        assert meta is not None
+        assert hasattr(meta, "side_effects"), f"Operator '{name}' missing side_effects."
+        assert isinstance(meta.side_effects, list), (
+            f"Operator '{name}' side_effects must be a list."
+        )

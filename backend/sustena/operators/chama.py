@@ -803,3 +803,158 @@ async def chama_dividend_calculate(ctx: OperatorContext) -> OperatorResult:
 
     # 4. EventBus — no events for read-only operator
     return OperatorResult.ok(widget)
+
+
+# ── chama.rotation.advance ─────────────────────────────────────────────────────
+
+@sustena_operator(
+    name="chama.rotation.advance",
+    description=(
+        "Advance the chama rotation. Marks the current rotation entry as 'paid', "
+        "transfers the payout from pool.balance to the recipient, posts a journal "
+        "entry (Dr Pool Balance / Cr Member Disbursement), and moves to the next period."
+    ),
+    constraints=[],   # runtime: pending entry must exist for current_period
+    side_effects=["event.chama.rotation.advanced"],
+    pawa_cost=0,
+    license_tier="free",
+    author="sustena_core",
+    ui_schema={
+        "widget_type": "transaction_confirmation",
+        "fields": [
+            {"label": "Period", "source": "state.rotation.current_period", "display": "text"},
+            {"label": "Recipient", "source": "result.recipient_member_id", "display": "text"},
+            {"label": "Amount", "source": "result.amount", "display": "currency"},
+        ],
+        "ctas": ["View Rotation Schedule", "View Pool"],
+    },
+)
+async def chama_rotation_advance(ctx: OperatorContext) -> OperatorResult:
+    """
+    Advance the rotation schedule by one period.
+
+    Runtime constraints (checked in body):
+      1. rotation.schedule must have at least one entry with status 'pending'.
+      2. pool.balance must be >= the rotation amount for the current entry.
+
+    On success:
+      - Sets the matching entry's status to 'paid'.
+      - Decrements pool.balance by the rotation amount.
+      - Increments pool.total_disbursed_mtd.
+      - Posts a journal entry: Dr Pool Balance / Cr Member Disbursement.
+      - Sets rotation.current_period to the NEXT pending period (or None if done).
+      - Fires event.chama.rotation.advanced.
+
+    Primitives used:
+      ConstraintEngine  — no static constraints (all runtime)
+      PawaLedger — deducts 0 pawa (free operator)
+      StateAccessor — reads schedule, mutates pool and rotation state
+      EventBus — fires event.chama.rotation.advanced
+    """
+    params: dict = {}
+
+    # 1. ConstraintEngine — no static constraints
+    fail = _check_constraints("chama.rotation.advance", ctx, params)
+    if fail:
+        return fail
+
+    # 2. PawaLedger
+    fail = await _charge_pawa("chama.rotation.advance", ctx)
+    if fail:
+        return fail
+
+    # 3. StateAccessor — runtime constraint: find pending rotation entry
+    schedule: list = ctx.state.get("rotation.schedule", [])
+    current_period: str | None = ctx.state.get("rotation.current_period")
+
+    # Find the first pending entry matching the current period, or just the
+    # first pending entry if current_period is None.
+    pending_entry: dict | None = None
+    for entry in schedule:
+        if entry.get("status") == "pending":
+            if current_period is None or entry.get("period") == current_period:
+                pending_entry = entry
+                break
+
+    if pending_entry is None:
+        return OperatorResult.fail(
+            reason=(
+                f"No pending rotation entry found for period '{current_period}'. "
+                "Cannot advance rotation."
+            ),
+            constraint_violated="rotation_pending_entry_exists",
+        )
+
+    rotation_amount = pending_entry.get("amount", 0.0)
+    recipient_id = pending_entry.get("recipient_member_id")
+    period = pending_entry.get("period")
+
+    pool_balance: float = ctx.state.get("pool.balance", 0.0)
+
+    if rotation_amount > pool_balance:
+        return OperatorResult.fail(
+            reason=(
+                f"Pool balance (KES {pool_balance:,.0f}) is insufficient for rotation "
+                f"payout of KES {rotation_amount:,.0f} to member '{recipient_id}'."
+            ),
+            constraint_violated="pool_sufficient_for_rotation",
+        )
+
+    # Mutate rotation entry in-place (live reference in state._data)
+    pending_entry["status"] = "paid"
+
+    # Update pool balances
+    ctx.state.decrement("pool.balance", rotation_amount)
+    ctx.state.increment("pool.total_disbursed_mtd", rotation_amount)
+
+    # Post journal entry: Dr Pool Balance / Cr Member Disbursement
+    journal_entry = {
+        "id": str(uuid.uuid4()),
+        "description": f"Rotation payout — period {period} — member {recipient_id}",
+        "date": ctx.timestamp.isoformat(),
+        "lines": [
+            {
+                "account": "Pool Balance",
+                "debit": rotation_amount,
+                "credit": 0.0,
+            },
+            {
+                "account": "Member Disbursement",
+                "debit": 0.0,
+                "credit": rotation_amount,
+            },
+        ],
+    }
+
+    if not ctx.state.exists("accounts.journal_entries"):
+        ctx.state.set("accounts.journal_entries", [])
+    ctx.state.append("accounts.journal_entries", journal_entry)
+
+    # Advance current_period to the next pending entry (or None if all done)
+    next_period: str | None = None
+    for entry in schedule:
+        if entry.get("status") == "pending" and entry.get("period") != period:
+            next_period = entry.get("period")
+            break
+    ctx.state.set("rotation.current_period", next_period)
+
+    # 4. EventBus
+    await ctx.events.publish(
+        "event.chama.rotation.advanced",
+        {
+            "period": period,
+            "recipient_member_id": recipient_id,
+            "amount": rotation_amount,
+            "pool_balance_remaining": ctx.state.get("pool.balance"),
+            "next_period": next_period,
+        },
+    )
+
+    return OperatorResult.ok({
+        "period": period,
+        "recipient_member_id": recipient_id,
+        "amount": rotation_amount,
+        "pool_balance_remaining": ctx.state.get("pool.balance"),
+        "next_period": next_period,
+        "journal_entry_id": journal_entry["id"],
+    })

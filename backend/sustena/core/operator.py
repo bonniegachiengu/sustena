@@ -131,6 +131,11 @@ class OperatorResult:
     def succeeded(self) -> bool:
         return self.status == "ok"
 
+    # Alias kept for backwards compatibility (stale bytecode in __pycache__)
+    @property
+    def success(self) -> bool:
+        return self.status == "ok"
+
     @property
     def failed(self) -> bool:
         return self.status == "failed"
