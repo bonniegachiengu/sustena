@@ -214,6 +214,7 @@
   },
   "active": "573068049587cebe",
   "lastOpenFiles": [
+    "README.md",
     "apps/api/tests/test_budget_operators.py.tmp.28228.259b42f39761",
     "apps/api/pyproject.toml.tmp.10456.a7d4a4f8c5e5",
     "apps/api/venv/Lib/site-packages/pip-26.1.1.dist-info/licenses/src/pip/_vendor/truststore/LICENSE",
@@ -224,7 +225,6 @@
     "apps/api/venv/Lib/site-packages/pip-26.1.1.dist-info/licenses/src/pip/_vendor/resolvelib/LICENSE",
     "apps/api/venv/Lib/site-packages/pip-26.1.1.dist-info/licenses/src/pip/_vendor/pyproject_hooks/LICENSE",
     "apps/api/venv/Lib/site-packages/pip-26.1.1.dist-info/licenses/src/pip/_vendor/requests/LICENSE",
-    "apps/api/venv/Lib/site-packages/pip-26.1.1.dist-info/licenses/src/pip/_vendor/packaging/LICENSE.APACHE",
     "apps/api/venv/Lib/site-packages/pip-26.1.1.dist-info/licenses/src/pip/_vendor/idna/LICENSE.md",
     "apps/api/venv/Lib/site-packages/httpx-0.28.1.dist-info/licenses/LICENSE.md",
     "apps/api/venv/Lib/site-packages/starlette-1.2.1.dist-info/licenses/LICENSE.md",

@@ -1,0 +1,72 @@
+# ── Private strategic docs — never public ─────────────────────────────────────
+docs/Bonnie_Master_Roadmap.md
+docs/Brian_Master_Roadmap.md
+docs/Sustena_XII_Master_Strategy.md
+docs/Sustena_Document_Analysis.md
+docs/Sustena_Investor_Challenges.md
+docs/Sustena_XII_Entity_Structure_Kenya.md
+
+# ── Entire private directories ─────────────────────────────────────────────────
+archive/
+Briefs/
+
+# ── Financial spreadsheets ────────────────────────────────────────────────────
+*.xlsx
+*.xls
+.~lock.*
+
+# ── Secrets and environment ───────────────────────────────────────────────────
+backend/.env
+*.env
+!*.env.example
+service-account*.json
+*-credentials.json
+
+# ── Database files ────────────────────────────────────────────────────────────
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+backend/whatsapp_mock_outbox.jsonl
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.mypy_cache/
+.ruff_cache/
+backend/.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+backend/venv/
+backend/.venv/
+
+# ── Node / frontend ───────────────────────────────────────────────────────────
+apps/web/node_modules/
+apps/web/dist/
+apps/web/.next/
+apps/web/out/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Obsidian workspace (local-only UI state) ──────────────────────────────────
+.obsidian/workspace.json
