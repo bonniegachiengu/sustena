@@ -1,0 +1,591 @@
+{
+  "id": "colosso",
+  "version": "1.0.0",
+  "display_name": "Colosso",
+  "description": "Financial Services fork of the Biashara sustain. Inherits all Biashara domains and adds member onboarding with KYC, loan book management (origination, disbursement, repayment), trust scoring, and compliance tracking. Designed for SACCOs, MFIs, and community lending institutions operating in East Africa.",
+  "extends": "biashara",
+  "state_schema": {
+    "members": {
+      "type": "object",
+      "description": "Member (borrower/customer) profiles keyed by member_id. Includes KYC status.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "member_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string"
+          },
+          "id_number": {
+            "type": "string"
+          },
+          "member_type": {
+            "type": "string",
+            "enum": [
+              "borrower",
+              "saver",
+              "both"
+            ]
+          },
+          "kyc_status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "VERIFIED",
+              "REJECTED",
+              "SUSPENDED"
+            ]
+          },
+          "joined_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "member_id",
+          "name",
+          "phone",
+          "kyc_status"
+        ]
+      }
+    },
+    "credit": {
+      "type": "object",
+      "description": "Loan book and repayment history.",
+      "properties": {
+        "loan_book": {
+          "type": "array",
+          "description": "All loan records (active and closed).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "loan_id": {
+                "type": "string"
+              },
+              "member_id": {
+                "type": "string"
+              },
+              "principal": {
+                "type": "number",
+                "minimum": 0
+              },
+              "outstanding": {
+                "type": "number",
+                "minimum": 0
+              },
+              "interest_rate": {
+                "type": "number",
+                "minimum": 0
+              },
+              "term_days": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "loan_type": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "APPROVED",
+                  "DISBURSED",
+                  "ACTIVE",
+                  "CLOSED",
+                  "DEFAULTED"
+                ]
+              },
+              "originated_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "disbursed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "due_date": {
+                "type": "string",
+                "format": "date"
+              }
+            },
+            "required": [
+              "loan_id",
+              "member_id",
+              "principal",
+              "outstanding",
+              "status"
+            ]
+          }
+        },
+        "repayment_history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "repayment_id": {
+                "type": "string"
+              },
+              "loan_id": {
+                "type": "string"
+              },
+              "amount": {
+                "type": "number",
+                "minimum": 0
+              },
+              "principal_portion": {
+                "type": "number",
+                "minimum": 0
+              },
+              "interest_portion": {
+                "type": "number",
+                "minimum": 0
+              },
+              "payment_method": {
+                "type": "string"
+              },
+              "reference": {
+                "type": "string"
+              },
+              "recorded_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "repayment_id",
+              "loan_id",
+              "amount",
+              "recorded_at"
+            ]
+          }
+        }
+      },
+      "required": [
+        "loan_book",
+        "repayment_history"
+      ]
+    },
+    "trust_scores": {
+      "type": "object",
+      "description": "Trust scores keyed by member_id. Updated by colosso.trust.compute_score.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "member_id": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "UNRATED",
+              "BRONZE",
+              "SILVER",
+              "GOLD",
+              "PLATINUM"
+            ]
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "factors": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "member_id",
+          "score",
+          "tier"
+        ]
+      }
+    },
+    "compliance": {
+      "type": "object",
+      "description": "KYC records and compliance flag ledger.",
+      "properties": {
+        "kyc_records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kyc_id": {
+                "type": "string"
+              },
+              "member_id": {
+                "type": "string"
+              },
+              "kyc_status": {
+                "type": "string"
+              },
+              "verified_by": {
+                "type": "string"
+              },
+              "documents": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "recorded_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "kyc_id",
+              "member_id",
+              "kyc_status",
+              "recorded_at"
+            ]
+          }
+        },
+        "flags": {
+          "type": "array",
+          "description": "Compliance flags (AML, fraud, etc.).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "flag_id": {
+                "type": "string"
+              },
+              "member_id": {
+                "type": "string"
+              },
+              "flag_type": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "LOW",
+                  "MEDIUM",
+                  "HIGH",
+                  "CRITICAL"
+                ]
+              },
+              "raised_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "resolved": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "flag_id",
+              "member_id",
+              "flag_type",
+              "severity",
+              "raised_at"
+            ]
+          }
+        }
+      },
+      "required": [
+        "kyc_records",
+        "flags"
+      ]
+    }
+  },
+  "operators": [
+    {
+      "name": "biashara.inventory.restock",
+      "description": "Record a stock restock event, increasing item quantity and posting a journal entry (Dr Inventory / Cr Accounts Payable).",
+      "params": [
+        "item_id",
+        "quantity",
+        "unit_cost",
+        "vendor_id"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.inventory.adjust",
+      "description": "Adjust inventory quantity by a delta (positive or negative) with a required reason. Posts a journal entry for the adjustment.",
+      "params": [
+        "item_id",
+        "quantity_delta",
+        "reason"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.orders.place",
+      "description": "Place a new customer order. Validates item availability and creates an active order record.",
+      "params": [
+        "items",
+        "customer_id",
+        "payment_method"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.orders.fulfill",
+      "description": "Fulfill an active order: deduct inventory, post revenue journal entries, move order to history.",
+      "params": [
+        "order_id",
+        "outlet_id"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.purchases.record",
+      "description": "Record a supplier purchase: update inventory and post Dr Inventory / Cr AP journal entry.",
+      "params": [
+        "item_id",
+        "quantity",
+        "unit_cost",
+        "vendor_id",
+        "invoice_ref"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.po.raise",
+      "description": "Raise a Purchase Order to a vendor for items not yet received.",
+      "params": [
+        "vendor_id",
+        "line_items",
+        "expected_delivery_date"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.po.receive",
+      "description": "Receive goods against an open Purchase Order, updating inventory and AP.",
+      "params": [
+        "po_id",
+        "received_lines"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.accounts.journal_entry",
+      "description": "Post a manual double-entry journal entry. Validates that debit total == credit total per entry.",
+      "params": [
+        "description",
+        "lines",
+        "date"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.tax.calculate_vat",
+      "description": "Calculate VAT on a given amount at the applicable rate and return the breakdown.",
+      "params": [
+        "amount",
+        "vat_rate",
+        "inclusive"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.assets.depreciate",
+      "description": "Run periodic depreciation on all depreciable assets, posting depreciation journal entries and updating book values.",
+      "params": [
+        "period",
+        "method"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "biashara.expenses.record",
+      "description": "Record a business expense and post the corresponding journal entry (Dr Expense / Cr Cash or AP).",
+      "params": [
+        "amount",
+        "category",
+        "description",
+        "paid_to",
+        "payment_method"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "colosso.members.onboard",
+      "description": "Onboard a new member (borrower/customer profile). Creates a member record with KYC status PENDING and initialises their trust score entry.",
+      "params": [
+        "name",
+        "phone",
+        "id_number",
+        "member_type"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "colosso.members.kyc",
+      "description": "Record a KYC verification result for a member. Updates kyc_status in members and compliance.kyc_records.",
+      "params": [
+        "member_id",
+        "kyc_status",
+        "verified_by",
+        "documents"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "colosso.credit.originate_loan",
+      "description": "Originate a new loan for a KYC-verified member. Validates trust score threshold and credit policy before creating the loan record.",
+      "params": [
+        "member_id",
+        "principal",
+        "term_days",
+        "interest_rate",
+        "loan_type"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "colosso.credit.disburse",
+      "description": "Disburse an approved loan to the member. Posts the disbursement journal entry (Dr Loan Receivable / Cr Cash) and updates loan status to DISBURSED.",
+      "params": [
+        "loan_id",
+        "disbursement_method",
+        "reference"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "colosso.credit.repay",
+      "description": "Record a loan repayment. Applies payment to principal and interest, posts journal entry, and appends to repayment_history.",
+      "params": [
+        "loan_id",
+        "amount",
+        "payment_method",
+        "reference"
+      ],
+      "pawa_cost": 0
+    },
+    {
+      "name": "colosso.trust.compute_score",
+      "description": "Recompute the trust score for a member based on repayment history, KYC status, and behavioural signals. Updates trust_scores[member_id].",
+      "params": [
+        "member_id"
+      ],
+      "pawa_cost": 0
+    }
+  ],
+  "operatives": [
+    "mentor",
+    "attache",
+    "curator"
+  ],
+  "invariants": [
+    {
+      "id": "journal_balanced",
+      "expression": "ALL accounts.journal_entries[*]: SUM(lines[*].debit) == SUM(lines[*].credit)",
+      "description": "Inherited from Biashara. Every journal entry must balance."
+    },
+    {
+      "id": "inventory_qty_non_negative",
+      "expression": "ALL inventory.items[*].qty >= 0",
+      "description": "Inherited from Biashara."
+    },
+    {
+      "id": "loan_outstanding_non_negative",
+      "expression": "ALL credit.loan_book[*].outstanding >= 0",
+      "description": "No loan outstanding balance may go negative. colosso.credit.repay enforces this."
+    },
+    {
+      "id": "kyc_before_loan",
+      "expression": "ALL credit.loan_book[*]: members[loan.member_id].kyc_status == VERIFIED",
+      "description": "Loans may only be originated for members with kyc_status VERIFIED."
+    }
+  ],
+  "ui_schema": {
+    "sustain_home": {
+      "widget": "sustain_home"
+    }
+  },
+  "access_policy": {
+    "owner_ids": "{{owner_ids}}"
+  },
+  "default_state": {
+    "inventory": {
+      "items": {},
+      "movements": []
+    },
+    "accounts": {
+      "chart": {},
+      "journal_entries": [],
+      "journal_lines": []
+    },
+    "parties": {},
+    "orders": {
+      "active": [],
+      "history": []
+    },
+    "purchases": {
+      "active": [],
+      "history": []
+    },
+    "purchase_orders": {
+      "active": [],
+      "history": []
+    },
+    "assets": {},
+    "expenses": [],
+    "calendar": {
+      "events": []
+    },
+    "analytics": {
+      "period_reports": []
+    },
+    "members": {},
+    "credit": {
+      "loan_book": [],
+      "repayment_history": []
+    },
+    "trust_scores": {},
+    "compliance": {
+      "kyc_records": [],
+      "flags": []
+    }
+  },
+  "parameters": [
+    {
+      "name": "owner_ids",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of user IDs with owner (Level 0) access.",
+      "required": true
+    },
+    {
+      "name": "institution_name",
+      "type": "string",
+      "description": "Name of the lending institution (e.g. Colosso SACCO).",
+      "required": true
+    },
+    {
+      "name": "currency",
+      "type": "string",
+      "description": "ISO 4217 currency code.",
+      "required": false,
+      "default": "KES"
+    },
+    {
+      "name": "regulatory_license",
+      "type": "string",
+      "description": "Regulatory licence number (e.g. CBK deposit-taking licence, SASRA registration). Required for compliance audit trail.",
+      "required": true
+    }
+  ],
+  "_notes": {
+    "epic": "Epic 1.5.1 — Colosso Financial Services sustain spec, fork of Biashara.",
+    "trust_scores": "Trust scores (0-1000, tiered) gate loan origination. colosso.trust.compute_score recomputes on each repayment.",
+    "kyc_before_loan": "The kyc_before_loan invariant is enforced at the operator level in colosso.credit.originate_loan.",
+    "compliance": "AML and fraud flags live in compliance.flags. Curators surface these to institution owners."
+  }
+}
