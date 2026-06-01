@@ -302,7 +302,7 @@ function NodeInspector({ node }) {
 /* ───────────────────────────────────────────────────────────
    CONTROLLER PANEL — proposal queue + terminal
    ─────────────────────────────────────────────────────────── */
-function ControllerPanel({ tick, openModal }) {
+function ControllerPanel({ tick, sustain, openModal }) {
   // Universal control state
   const [autonomy, setAutonomy] = dUseState(0);       // 0-100, threshold for auto-execute
   const [pawaCeiling, setPawaCeiling] = dUseState(8500);
@@ -447,7 +447,7 @@ function ControllerPanel({ tick, openModal }) {
       {/* Terminal + IoT + Rollback */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 14, minHeight: 0 }}>
         <Card title="OPERATOR CONSOLE" sub="DIRECT INVOCATION" padded={false}>
-          <ControllerTerminal tick={tick} />
+          <ControllerTerminal tick={tick} sustain={sustain} />
         </Card>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>
@@ -1046,10 +1046,10 @@ function parseCommand(raw) {
   return { operator, params };
 }
 
-function ControllerTerminal({ tick }) {
+function ControllerTerminal({ tick, sustain }) {
   const BOOT_LINES = [
     { t: 'meta', text: 'sustena.controller · interactive shell · type "help"' },
-    { t: 'meta', text: 'sustain · homestead.bonnie · privilege L0' },
+    { t: 'meta', text: `sustain · ${sustain?.id || 'homestead.bonnie'} · privilege L0` },
     { t: 'meta', text: 'connected to /devui/console/execute' },
   ];
   const [lines, setLines] = dUseState(BOOT_LINES);
@@ -1089,20 +1089,24 @@ function ControllerTerminal({ tick }) {
     const { operator, params } = parseCommand(cmd);
 
     try {
-      const result = await api.post('/devui/console/execute', {
-        sustain_id: 'homestead.bonnie',
+      const resp = await api.post('/devui/console/execute', {
+        sustain_id: sustain?.id || 'homestead.bonnie',
         operator_id: operator,
         params,
       });
 
+      // resp shape: { status, data: { result: { status, data: { delta, ... } }, events, ... }, timestamp }
+      const payload   = resp?.data || {};
+      const opResult  = payload?.result?.data || {};
+      const delta     = opResult?.delta || {};
+      const events    = payload?.events || [];
+
       // Show delta fields
-      const delta = result.delta || result.state_delta || {};
       Object.entries(delta).forEach(([field, val]) => {
         addLine('exec', `[ΔSTATE] ${field}: ${val}`);
       });
 
       // Show emitted events
-      const events = result.events || [];
       events.forEach(e => {
         const ts = e.timestamp ? new Date(e.timestamp).toISOString().slice(11, 19) + 'Z' : formatClock(new Date());
         addLine('event', `[EVENT] ${e.type || e.name || 'UNKNOWN'} · ${JSON.stringify(e.data || {})} · t=${ts}`);
@@ -1112,8 +1116,8 @@ function ControllerTerminal({ tick }) {
         addLine('check', '[OK] executed · no state delta');
       }
 
-      const ms = result.duration_ms ?? '—';
-      const pawa = result.pawa_cost ?? result.pawa ?? '—';
+      const ms   = opResult?.duration_ms ?? '—';
+      const pawa = opResult?.pawa_cost ?? opResult?.pawa ?? '—';
       addLine('meta', `∴ committed in ${ms}ms · pawa −${pawa}`);
     } catch (err) {
       addLine('danger', `[ERROR] ${err.message || 'API unreachable'}`);
