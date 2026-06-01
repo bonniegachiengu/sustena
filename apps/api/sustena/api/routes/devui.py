@@ -89,6 +89,14 @@ class SimulateRequest(BaseModel):
     )
 
 
+class PreviewWidgetRequest(BaseModel):
+    spec_json: dict = Field(description="A ui_schema dict or operator spec containing ui_schema")
+    mock_state: dict = Field(
+        default_factory=dict,
+        description="Optional mock state for source resolution: {inputs: {...}, state: {...}}",
+    )
+
+
 # ── 1. GET /devui/sustains ────────────────────────────────────────────────────
 
 @router.get("/sustains", summary="List sustains for the selector dropdown")
@@ -534,3 +542,62 @@ async def state_stream_path(websocket: WebSocket, sustain_id: str):
             await websocket.close()
         except Exception:
             pass
+
+
+# ── 6. GET /devui/widgets ─────────────────────────────────────────────────────
+
+@router.get("/widgets", summary="List all registered widget types")
+async def list_widgets(_: str = Depends(verify_admin)) -> dict:
+    """
+    Returns all widget types registered in the WidgetTypeRegistry.
+    Used by the UIParser Preview tab and the Mycelium Library.
+    """
+    from sustena.core.widget_registry import widget_registry
+    return ok({"widgets": widget_registry.list_all()})
+
+
+# ── 7. POST /devui/preview-widget ────────────────────────────────────────────
+
+@router.post("/preview-widget", summary="Render a widget from a spec JSON (dev console preview)")
+async def preview_widget(
+    body: PreviewWidgetRequest,
+    _: str = Depends(verify_admin),
+) -> dict:
+    """
+    Accepts a ui_schema (or full operator spec) and optional mock state,
+    returns a rendered ResponseWidget dict.
+
+    Used by the dev console UI Preview tab (debounced 500ms POST on every edit).
+    """
+    from sustena.core.uiparser import UISchemaParser
+    parser = UISchemaParser()
+
+    ui_schema_dict = body.spec_json.get("ui_schema", body.spec_json)
+    mock_inputs = body.mock_state.get("inputs", {})
+
+    try:
+        schema = parser.parse(ui_schema_dict)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid ui_schema: {exc}")
+
+    resolved_fields = []
+    for f in schema.fields:
+        value = parser.resolve_source(f.source, mock_inputs, body.mock_state)
+        resolved_fields.append({
+            "label": f.label,
+            "value": value,
+            "display": f.display,
+            "colour_rule": f.colour_rule,
+        })
+
+    widget = {
+        "type": schema.widget_type,
+        "data": {
+            "fields": resolved_fields,
+            "ctas": schema.ctas,
+            **({"chart": schema.chart} if schema.chart else {}),
+        },
+        "summary": f"Preview: {schema.widget_type}",
+    }
+
+    return ok({"widget": widget})
