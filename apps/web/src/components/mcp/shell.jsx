@@ -125,6 +125,7 @@ function App() {
       <OrchieFAB
         open={orchieOpen}
         onToggle={() => setOrchieOpen(o => !o)}
+        sustainId={sustainId}
       />
 
       <Footer tick={tick} />
@@ -367,8 +368,8 @@ function LeftNav({ panels, active, onSelect, collapsed, onToggle, pageLinks }) {
 }
 
 /* ─── Orchie FAB + Drawer ─────────────────────────────────── */
-function OrchieFAB({ open, onToggle }) {
-  const { messages, thinking, onMessageDone, send, restart } = useStreamedConversation(ORCHIE_DEMO, true, 1400);
+function OrchieFAB({ open, onToggle, sustainId = 'homestead.bonnie' }) {
+  const { messages, thinking, onMessageDone, send, restart } = useStreamedConversation(ORCHIE_DEMO, true, 1400, sustainId);
   const [input, setInput] = dUseState('');
   const [unread, setUnread] = dUseState(0);
   const scrollerRef = dUseRef(null);

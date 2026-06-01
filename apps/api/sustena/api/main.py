@@ -145,9 +145,13 @@ async def health():
 from sustena.api.routes import whatsapp, dev
 from sustena.api.routes import sustains, operators, council, users
 from sustena.api.routes import devui
+from sustena.api.routes import orchie
 
 # WhatsApp webhook (always mounted)
 app.include_router(whatsapp.router, prefix="/webhook", tags=["whatsapp"])
+
+# Orchie conversational interface
+app.include_router(orchie.router, prefix="/orchie", tags=["orchie"])
 
 # REST v1 resources
 app.include_router(sustains.router,  prefix="/api/v1/sustains",  tags=["sustains"])

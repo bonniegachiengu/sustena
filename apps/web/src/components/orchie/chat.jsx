@@ -511,8 +511,10 @@ function OrchieThinking({ size = 'sm' }) {
   );
 }
 
-/* Streamed conversation hook — plays scripted messages with delays */
-function useStreamedConversation(script, autoStart = true, baseDelay = 1200) {
+/* Streamed conversation hook — plays scripted messages with delays, then routes
+   live user messages to POST /orchie/message on the real API.
+*/
+function useStreamedConversation(script, autoStart = true, baseDelay = 1200, sustainId = 'homestead.bonnie') {
   const [shown, setShown] = oUseState([]);
   const [thinking, setThinking] = oUseState(false);
   const idxRef = oUseRef(0);
@@ -542,15 +544,27 @@ function useStreamedConversation(script, autoStart = true, baseDelay = 1200) {
     setTimeout(() => playNext(), baseDelay);
   };
 
-  const send = (text) => {
+  const send = async (text) => {
     setShown(s => [...s, { role: 'user', text }]);
     setThinking(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch('http://localhost:8000/orchie/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sustain_id: sustainId, message: text }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
       setThinking(false);
-      // Loop back to a relevant assistant reply
-      const reply = pickReply(text);
-      setShown(s => [...s, reply]);
-    }, 900 + Math.random() * 800);
+      setShown(s => [...s, { role: 'assistant', text: data.reply }]);
+    } catch (err) {
+      setThinking(false);
+      setShown(s => [...s, {
+        role: 'assistant',
+        text: 'Orchie is offline — start the API server and try again.',
+        widget: null,
+      }]);
+    }
   };
 
   const restart = () => {
