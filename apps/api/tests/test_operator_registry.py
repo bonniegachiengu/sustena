@@ -103,6 +103,12 @@ VISUALIZE_OPERATORS = [
     "visualize.constraint_health",
 ]
 
+SIMULATE_OPERATORS = [
+    "simulate.fork",
+    "simulate.run_path",
+    "simulate.score",
+]
+
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + BIASHARA_OPERATORS + VYYB_OPERATORS  # Epic 1.5.2
@@ -110,6 +116,7 @@ ALL_KNOWN_OPERATORS = (
     + API_OPERATORS                        # Sprint 3.1
     + MONITOR_OPERATORS                    # Sprint 3.2
     + VISUALIZE_OPERATORS                  # Sprint 3.3
+    + SIMULATE_OPERATORS                   # Sprint 3.4
 )
 
 
