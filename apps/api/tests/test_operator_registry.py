@@ -79,9 +79,17 @@ VYYB_OPERATORS = [
     "vyyb.procurement.receive_po",
 ]
 
+UI_RENDER_OPERATORS = [
+    "ui.render.operator_card",
+    "ui.render.operative_dashboard",
+    "ui.render.sustain_home",
+    "ui.render.preview",
+]
+
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + BIASHARA_OPERATORS + VYYB_OPERATORS  # Epic 1.5.2
+    + UI_RENDER_OPERATORS                  # Sprint 2 UIParser
 )
 
 
