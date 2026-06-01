@@ -1,5 +1,5 @@
 # Sustena XII — Backend
-
+![CI](https://github.com/bonniegachiengu/sustena/actions/workflows/ci.yml/badge.svg)
 > Human-agent reality interface. 7 primitives. Any describable system.
 
 ## Quick start (Windows / PowerShell)

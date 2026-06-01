@@ -1,0 +1,50 @@
+# Badge (add to README.md):
+# ![CI](https://github.com/bonniegachiengu/sustena/actions/workflows/ci.yml/badge.svg)
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-api:
+    name: Backend Tests (pytest)
+    runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: development
+      ANTHROPIC_API_KEY: mock
+      SECRET_KEY: ci-test-secret
+      ADMIN_TOKEN: ci-admin-token
+      DATABASE_URL: sqlite:///./test.db
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r apps/api/requirements.txt
+
+      - name: Run tests
+        run: cd apps/api && python -m pytest tests/ -v --tb=short
+
+  build-web:
+    name: Frontend Build (Vite)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install and build
+        run: cd apps/web && npm ci && npm run build
