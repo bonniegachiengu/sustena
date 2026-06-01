@@ -92,11 +92,17 @@ API_OPERATORS = [
     "api.webhook_listen",
 ]
 
+MONITOR_OPERATORS = [
+    "monitor.state_path",
+    "monitor.constraint",
+]
+
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + BIASHARA_OPERATORS + VYYB_OPERATORS  # Epic 1.5.2
     + UI_RENDER_OPERATORS                  # Sprint 2 UIParser
     + API_OPERATORS                        # Sprint 3.1
+    + MONITOR_OPERATORS                    # Sprint 3.2
 )
 
 
