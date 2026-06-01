@@ -320,9 +320,12 @@ function ControllerPanel({ tick, openModal }) {
           <span className="label-11">PROPOSAL QUEUE · PASSED COUNCIL</span>
           <span className="meta-10">{PROPOSALS.length} AWAITING EXECUTION</span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-          {PROPOSALS.map((p, i) => <ProposalCard key={p.id} p={p} delay={i * 80} onClick={() => openModal(p)} />)}
-        </div>
+        {PROPOSALS.length === 0
+          ? <div style={{ padding: '16px 0', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)', textAlign: 'center' }}>No data — seed via SEED panel</div>
+          : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+              {PROPOSALS.map((p, i) => <ProposalCard key={p.id} p={p} delay={i * 80} onClick={() => openModal(p)} />)}
+            </div>
+        }
       </div>
 
       {/* Universal controls bar */}
@@ -1191,15 +1194,14 @@ function ControllerTerminal({ tick }) {
 }
 
 function IotList() {
-  const devices = [
-    { topic: 'mqtt/pantry/oil_scale',        last: '2s ago',  status: 'ok', value: '0.4 L' },
-    { topic: 'mqtt/pantry/maize_scale',      last: '5s ago',  status: 'ok', value: '2.8 kg' },
-    { topic: 'mqtt/outlet-01/temperature',   last: '1s ago',  status: 'ok', value: '4.1 °C' },
-    { topic: 'mqtt/outlet-01/grill_burner',  last: '0s ago',  status: 'ok', value: 'ON · 220°C' },
-    { topic: 'mqtt/mkulima/soil_moisture',   last: '48s ago', status: 'warn', value: '12% · low' },
-  ];
+  const devices = [];  // populated from MQTT / device API
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {devices.length === 0 && (
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)', padding: '8px 0' }}>
+          No devices online — seed via SEED panel
+        </span>
+      )}
       {devices.map((d, i) => (
         <button key={i} onClick={() => window.confirmAction?.({
           title: `${d.topic}`,
@@ -1734,8 +1736,458 @@ function Stat({ label, value }) {
   );
 }
 
+/* ───────────────────────────────────────────────────────────
+   SEED PANEL — inject real sustain data through the UI
+   ─────────────────────────────────────────────────────────── */
+function SeedPanel() {
+  /* ── local state ── */
+  const [sustainId,   setSustainId]   = dUseState('homestead.bonnie');
+  const [label,       setLabel]       = dUseState('Bonnie\'s Homestead');
+  const [type,        setType]        = dUseState('household');
+  const [description, setDescription] = dUseState('');
+
+  const [pocketSid,   setPocketSid]   = dUseState('homestead.bonnie');
+  const [pocketName,  setPocketName]  = dUseState('');
+  const [allocation,  setAllocation]  = dUseState('');
+  const [ceiling,     setCeiling]     = dUseState('');
+  const [sessionPockets, setSessionPockets] = dUseState([]);
+
+  const [operativeSid, setOperativeSid] = dUseState('homestead.bonnie');
+  const [operatives,   setOperatives]   = dUseState({
+    mentor: false, protege: false, curator: false,
+    attache: false, navigator: false, clerk: false,
+  });
+
+  const [evSid,   setEvSid]   = dUseState('homestead.bonnie');
+  const [evType,  setEvType]  = dUseState('received');
+  const [evAmt,   setEvAmt]   = dUseState('');
+  const [evDesc,  setEvDesc]  = dUseState('');
+
+  const [status,        setStatus]        = dUseState(null);
+  const [statusLoading, setStatusLoading] = dUseState(false);
+
+  /* ── helpers ── */
+  const flash = (msg, tone = 'ok') => window.flash?.(msg, tone);
+
+  const inputStyle = {
+    width: '100%', boxSizing: 'border-box',
+    background: 'var(--bg-base)',
+    border: '1px solid var(--border-mid)',
+    borderRadius: 'var(--radius-sm)',
+    padding: '7px 10px',
+    fontFamily: 'var(--mono)', fontSize: 11,
+    color: 'var(--text-primary)',
+    outline: 'none',
+  };
+
+  const selectStyle = { ...inputStyle, cursor: 'pointer' };
+
+  const labelStyle = {
+    display: 'block', marginBottom: 5,
+    fontFamily: 'var(--mono)', fontSize: 9,
+    color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase',
+  };
+
+  const fieldStyle = { display: 'flex', flexDirection: 'column', gap: 0 };
+
+  const sectionHead = (title, sub) => (
+    <div style={{ marginBottom: 14 }}>
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+        letterSpacing: '0.1em', color: 'var(--text-primary)', textTransform: 'uppercase' }}>{title}</span>
+      {sub && <span style={{ fontFamily: 'var(--mono)', fontSize: 9,
+        color: 'var(--text-muted)', marginLeft: 8 }}>{sub}</span>}
+    </div>
+  );
+
+  /* ── actions ── */
+  async function submitSustain() {
+    try {
+      await api.post('/seed/sustain', {
+        id: sustainId.trim(), label: label.trim(),
+        type, description: description.trim(),
+      });
+      flash(`Sustain "${sustainId}" seeded`, 'ok');
+      setPocketSid(sustainId.trim());
+      setOperativeSid(sustainId.trim());
+      setEvSid(sustainId.trim());
+      loadStatus();
+    } catch (e) {
+      flash(e.message, 'danger');
+    }
+  }
+
+  async function addPocket() {
+    if (!pocketName.trim()) { flash('Pocket name required', 'amber'); return; }
+    try {
+      await api.post('/seed/pocket', {
+        sustain_id: pocketSid.trim(), name: pocketName.trim(),
+        allocation: parseFloat(allocation) || 0,
+        ceiling: parseFloat(ceiling) || 0,
+        currency: 'KES',
+      });
+      flash(`Pocket "${pocketName}" added`, 'ok');
+      setSessionPockets(p => [...p, {
+        sustain_id: pocketSid, name: pocketName,
+        allocation: parseFloat(allocation) || 0,
+        ceiling: parseFloat(ceiling) || 0,
+      }]);
+      setPocketName(''); setAllocation(''); setCeiling('');
+      loadStatus();
+    } catch (e) {
+      flash(e.message, 'danger');
+    }
+  }
+
+  async function toggleOperative(opId, enabled) {
+    setOperatives(o => ({ ...o, [opId]: enabled }));
+    try {
+      await api.post('/seed/operative', {
+        sustain_id: operativeSid.trim(),
+        operative_id: opId,
+        config: {},
+        enabled,
+      });
+      flash(`${opId} ${enabled ? 'enabled' : 'disabled'}`, 'ok');
+    } catch (e) {
+      setOperatives(o => ({ ...o, [opId]: !enabled }));
+      flash(e.message, 'danger');
+    }
+  }
+
+  async function injectEvent() {
+    if (!evAmt || isNaN(parseFloat(evAmt))) { flash('Valid amount required', 'amber'); return; }
+    try {
+      await api.post('/seed/event', {
+        sustain_id: evSid.trim(), type: evType,
+        amount: parseFloat(evAmt),
+        description: evDesc.trim(), metadata: {},
+      });
+      flash(`Event injected · KES ${parseFloat(evAmt).toLocaleString()}`, 'ok');
+      setEvAmt(''); setEvDesc('');
+      loadStatus();
+    } catch (e) {
+      flash(e.message, 'danger');
+    }
+  }
+
+  async function loadStatus() {
+    setStatusLoading(true);
+    try {
+      const res = await api.get('/seed/status');
+      setStatus(res.data);
+    } catch (e) {
+      flash('Status fetch failed', 'amber');
+    } finally {
+      setStatusLoading(false);
+    }
+  }
+
+  dUseEffect(() => { loadStatus(); }, []);
+
+  /* ── operative config ── */
+  const OPERATIVES = [
+    { id: 'mentor',    label: 'Mentor',    color: 'var(--node-operative)' },
+    { id: 'protege',   label: 'Protégé',   color: 'var(--node-operative)' },
+    { id: 'curator',   label: 'Curator',   color: 'var(--node-operative)' },
+    { id: 'attache',   label: 'Attaché',   color: 'var(--node-operative)' },
+    { id: 'navigator', label: 'Navigator', color: 'var(--node-operative)' },
+    { id: 'clerk',     label: 'Clerk',     color: 'var(--node-operative)' },
+  ];
+
+  /* ── render ── */
+  return (
+    <div className="panel-enter" style={{
+      height: '100%', overflow: 'auto',
+      padding: '28px 32px',
+      display: 'flex', flexDirection: 'column', gap: 0,
+    }}>
+      {/* Header */}
+      <div style={{ marginBottom: 28 }}>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+          letterSpacing: '0.12em', color: 'var(--amber)', textTransform: 'uppercase',
+        }}>SEED</span>
+        <span style={{
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)',
+          marginLeft: 10,
+        }}>inject real sustain data · no SQL required</span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+
+        {/* ── LEFT COLUMN ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* 1. Sustain form */}
+          <div style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-md)', padding: 18,
+          }}>
+            {sectionHead('SUSTAIN', 'create or update')}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>ID</label>
+                <input style={inputStyle} value={sustainId} placeholder="homestead.bonnie"
+                  onChange={e => setSustainId(e.target.value)} />
+              </div>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>LABEL</label>
+                <input style={inputStyle} value={label} placeholder="Bonnie's Homestead"
+                  onChange={e => setLabel(e.target.value)} />
+              </div>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>TYPE</label>
+                <select style={selectStyle} value={type} onChange={e => setType(e.target.value)}>
+                  <option value="household">Household</option>
+                  <option value="business">Business</option>
+                  <option value="chama">Chama</option>
+                  <option value="farm">Farm</option>
+                </select>
+              </div>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>DESCRIPTION</label>
+                <input style={inputStyle} value={description} placeholder="Optional description"
+                  onChange={e => setDescription(e.target.value)} />
+              </div>
+              <button onClick={submitSustain} style={{
+                marginTop: 4, padding: '7px 0',
+                fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.1em', textTransform: 'uppercase',
+                background: 'var(--amber)', color: 'var(--bg-base)',
+                border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                transition: 'opacity var(--t-fast)',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.85'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+              >SEED SUSTAIN</button>
+            </div>
+          </div>
+
+          {/* 2. Pocket form */}
+          <div style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-md)', padding: 18,
+          }}>
+            {sectionHead('POCKET', 'allocation bucket')}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>SUSTAIN ID</label>
+                <input style={inputStyle} value={pocketSid} onChange={e => setPocketSid(e.target.value)} />
+              </div>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>POCKET NAME</label>
+                <input style={inputStyle} value={pocketName} placeholder="e.g. groceries"
+                  onChange={e => setPocketName(e.target.value)} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>ALLOCATION (KES)</label>
+                  <input style={inputStyle} type="number" value={allocation} placeholder="5000"
+                    onChange={e => setAllocation(e.target.value)} />
+                </div>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>CEILING (KES)</label>
+                  <input style={inputStyle} type="number" value={ceiling} placeholder="8000"
+                    onChange={e => setCeiling(e.target.value)} />
+                </div>
+              </div>
+              <button onClick={addPocket} style={{
+                marginTop: 4, padding: '7px 0',
+                fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.1em', textTransform: 'uppercase',
+                background: 'transparent', color: 'var(--teal)',
+                border: '1px solid var(--teal)', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                transition: 'all var(--t-fast)',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,200,170,0.08)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+              >+ ADD POCKET</button>
+
+              {/* Session pocket list */}
+              {sessionPockets.length > 0 && (
+                <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ ...labelStyle, marginBottom: 4 }}>ADDED THIS SESSION</span>
+                  {sessionPockets.map((p, i) => (
+                    <div key={i} style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '5px 8px',
+                      background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border)',
+                    }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)' }}>{p.name}</span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>
+                        {p.allocation.toLocaleString()} / {p.ceiling.toLocaleString()} KES
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── RIGHT COLUMN ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* 3. Operatives */}
+          <div style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-md)', padding: 18,
+          }}>
+            {sectionHead('OPERATIVES', 'enable for sustain')}
+            <div style={{ marginBottom: 10 }}>
+              <label style={labelStyle}>SUSTAIN ID</label>
+              <input style={inputStyle} value={operativeSid} onChange={e => setOperativeSid(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {OPERATIVES.map(op => (
+                <label key={op.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '7px 10px',
+                  background: operatives[op.id] ? 'rgba(255,186,60,0.06)' : 'var(--bg-base)',
+                  border: `1px solid ${operatives[op.id] ? 'var(--amber-border)' : 'var(--border)'}`,
+                  borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                  transition: 'all var(--t-fast)',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={operatives[op.id]}
+                    onChange={e => toggleOperative(op.id, e.target.checked)}
+                    style={{ accentColor: 'var(--amber)', width: 13, height: 13, cursor: 'pointer' }}
+                  />
+                  <span style={{
+                    fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
+                    color: operatives[op.id] ? 'var(--amber)' : 'var(--text-secondary)',
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                    transition: 'color var(--t-fast)',
+                  }}>{op.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* 4. Event injector */}
+          <div style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-md)', padding: 18,
+          }}>
+            {sectionHead('EVENT INJECTOR', 'manual M-Pesa entry')}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>SUSTAIN ID</label>
+                <input style={inputStyle} value={evSid} onChange={e => setEvSid(e.target.value)} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>TYPE</label>
+                  <select style={selectStyle} value={evType} onChange={e => setEvType(e.target.value)}>
+                    <option value="received">Received</option>
+                    <option value="sent">Sent</option>
+                    <option value="purchase">Purchase</option>
+                    <option value="sale">Sale</option>
+                  </select>
+                </div>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>AMOUNT (KES)</label>
+                  <input style={inputStyle} type="number" value={evAmt} placeholder="1200"
+                    onChange={e => setEvAmt(e.target.value)} />
+                </div>
+              </div>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>DESCRIPTION</label>
+                <input style={inputStyle} value={evDesc} placeholder="e.g. Naivas groceries"
+                  onChange={e => setEvDesc(e.target.value)} />
+              </div>
+              <button onClick={injectEvent} style={{
+                marginTop: 4, padding: '7px 0',
+                fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600,
+                letterSpacing: '0.1em', textTransform: 'uppercase',
+                background: 'transparent', color: 'var(--node-event)',
+                border: '1px solid var(--node-event)', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                transition: 'all var(--t-fast)',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(120,180,255,0.08)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+              >INJECT EVENT</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. Seed status */}
+      <div style={{
+        marginTop: 20,
+        background: 'var(--bg-surface)', border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-md)', padding: 18,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          {sectionHead('SEED STATUS', 'currently in DB')}
+          <button onClick={loadStatus} style={{
+            fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.08em',
+            color: 'var(--text-muted)', background: 'transparent',
+            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+            padding: '3px 8px', cursor: 'pointer', textTransform: 'uppercase',
+          }}>{statusLoading ? '...' : 'REFRESH'}</button>
+        </div>
+
+        {!status && !statusLoading && (
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>
+            No data yet — seed a sustain above.
+          </span>
+        )}
+        {statusLoading && (
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)' }}>Loading…</span>
+        )}
+        {status && status.sustains && status.sustains.length === 0 && (
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>
+            No seeded sustains found.
+          </span>
+        )}
+        {status && status.sustains && status.sustains.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {/* Column headers */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr 80px 80px 80px',
+              gap: 8, padding: '0 8px 6px',
+              borderBottom: '1px solid var(--border)',
+            }}>
+              {['ID', 'NAME', 'POCKETS', 'EVENTS', 'OPERATIVES'].map(h => (
+                <span key={h} style={{ fontFamily: 'var(--mono)', fontSize: 8,
+                  color: 'var(--text-dim)', letterSpacing: '0.08em' }}>{h}</span>
+              ))}
+            </div>
+            {status.sustains.map(s => (
+              <div key={s.id} style={{
+                display: 'grid', gridTemplateColumns: '1fr 1fr 80px 80px 80px',
+                gap: 8, padding: '6px 8px',
+                background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border)',
+              }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 10,
+                  color: 'var(--amber)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {s.id}
+                </span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 10,
+                  color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {s.name}
+                </span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 11,
+                  color: 'var(--teal)', textAlign: 'center' }}>{s.pocket_count}</span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 11,
+                  color: 'var(--node-event)', textAlign: 'center' }}>{s.event_count}</span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 11,
+                  color: 'var(--node-operative)', textAlign: 'center' }}>{s.operative_count}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 Object.assign(window, {
-  EditorPanel, ControllerPanel, LibraryPanel,
+  EditorPanel, ControllerPanel, LibraryPanel, SeedPanel,
   LibraryMark,
   Knob, Slider, Stepper, VerticalScale, Segmented, BigToggle, RockerSwitch, LedGrid,
   OperativeLibCard, OperatorLibRow, SporeLibCard, WidgetLibCard, WidgetPreview, Stat,

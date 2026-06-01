@@ -146,6 +146,7 @@ from sustena.api.routes import whatsapp, dev
 from sustena.api.routes import sustains, operators, council, users
 from sustena.api.routes import devui
 from sustena.api.routes import orchie
+from sustena.api.routes import seed
 
 # WhatsApp webhook (always mounted)
 app.include_router(whatsapp.router, prefix="/webhook", tags=["whatsapp"])
@@ -163,3 +164,4 @@ app.include_router(users.router,     prefix="/api/v1/users",     tags=["users"])
 if settings.is_development:
     app.include_router(dev.router, prefix="/dev", tags=["dev"])
     app.include_router(devui.router, prefix="/devui", tags=["devui"])
+    app.include_router(seed.router, prefix="/seed", tags=["seed"])

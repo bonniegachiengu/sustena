@@ -1,104 +1,22 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-/* ── Data ─────────────────────────────────────────────────────── */
+/* ── Data — populated from Mycelium DB via API ─────────────────── */
 
-const OPERATIVES = [
-  { id: 'op-mentor',    name: 'Mentor',    author: 'sustena.core', version: '2.1.0', trust: 97, downloads: 8240, pawa: 'FREE', desc: 'Budget watchdog. Monitors spend rate, flags when reserve is at risk, proposes reallocation strategies before constraints break.', tags: ['finance', 'monitoring'], council: 'Fear' },
-  { id: 'op-curator',   name: 'Curator',   author: 'sustena.core', version: '1.8.2', trust: 94, downloads: 6120, pawa: 'FREE', desc: 'Shopping, portfolio, and procurement operative. Manages restock schedules, vendor selection, and quality filtering.', tags: ['procurement', 'inventory'], council: 'Disgust' },
-  { id: 'op-navigator', name: 'Navigator', author: 'sustena.core', version: '2.0.0', trust: 96, downloads: 5880, pawa: 'FREE', desc: 'Logistics, routing, and scheduling. Optimises delivery windows, flags friction, generates route proposals.', tags: ['logistics', 'routing'], council: 'Anger' },
-  { id: 'op-protege',   name: 'Protégé',   author: 'sustena.core', version: '1.5.0', trust: 92, downloads: 4340, pawa: 'FREE', desc: 'Calendar and task scheduling operative. Keeps the sustain\'s commitments visible and packed optimistically.', tags: ['scheduling', 'calendar'], council: 'Joy' },
-  { id: 'op-attache',   name: 'Attaché',   author: 'sustena.core', version: '1.4.1', trust: 91, downloads: 3760, pawa: 'FREE', desc: 'Network, relationships, and profiling. Tracks external contacts, surfaces relevant connections, remembers context.', tags: ['network', 'relationships'], council: 'Sadness' },
-  { id: 'op-sentinel',  name: 'Sentinel',  author: 'mkulima.dao',  version: '1.0.3', trust: 84, downloads: 1820, pawa: 240,    desc: 'Crop health and weather monitor for smallholder farms. Integrates satellite data and IoT soil sensors.', tags: ['agriculture', 'iot'], council: null },
-  { id: 'op-clerk',     name: 'Clerk',     author: 'colosso.core', version: '1.2.0', trust: 89, downloads: 2200, pawa: 'FREE', desc: 'Chama records and governance operative. Tracks contributions, rotation schedules, and DAO proposals.', tags: ['chama', 'governance'], council: null },
-  { id: 'op-herald',    name: 'Herald',    author: 'community',    version: '0.9.1', trust: 78, downloads: 980,  pawa: 180,    desc: 'Customer communication operative. Sends order confirmations, delivery ETAs, and promotional messages via WhatsApp.', tags: ['comms', 'marketing'], council: null },
-];
-
-const OPERATORS = [
-  { id: 'opr-mpesa',    name: 'M-Pesa Parser',         author: 'sustena.core', version: '3.0.0', trust: 99, downloads: 14200, pawa: 'FREE', desc: 'Parses M-Pesa SMS messages into structured transaction events. Extracts amount, counterparty, time, reference. Privacy-first: raw SMS destroyed after parsing.' },
-  { id: 'opr-pocket',   name: 'Pocket Shift',          author: 'sustena.core', version: '2.2.0', trust: 97, downloads: 9800,  pawa: 'FREE', desc: 'Reallocates budget between pockets subject to constraint validation. Emits PocketShifted event with full diff.' },
-  { id: 'opr-restock',  name: 'Restock Alert',         author: 'sustena.core', version: '1.6.0', trust: 95, downloads: 5400,  pawa: 'FREE', desc: 'Monitors inventory thresholds and emits RestockRequired events when items fall below configured minimum.' },
-  { id: 'opr-invoice',  name: 'Invoice Generator',     author: 'biashara.ops', version: '1.1.0', trust: 88, downloads: 2100,  pawa: 320,    desc: 'Generates structured invoices from sale events. KRA-compatible, M-Pesa-linkable. Emits InvoiceIssued event.' },
-  { id: 'opr-harvest',  name: 'Harvest Record',        author: 'mkulima.dao',  version: '1.0.1', trust: 82, downloads: 1240,  pawa: 'FREE', desc: 'Records crop harvest events with weight, quality grade, and destination. Updates farm plot state.' },
-  { id: 'opr-contrib',  name: 'Chama Contribution',    author: 'colosso.core', version: '2.0.0', trust: 96, downloads: 4600,  pawa: 'FREE', desc: 'Records a member contribution to the chama pool. Validates against cycle schedule and quorum constraints.' },
-  { id: 'opr-tip',      name: 'Strategy Tip Compute',  author: 'sustena.core', version: '1.3.0', trust: 93, downloads: 3200,  pawa: 'FREE', desc: 'Computes strategic tip probability for Orchie proposals using Feynman path integral scoring.' },
-];
-
-const SPORES = [
-  { id: 'spr-homestead', name: 'Homestead',   author: 'sustena.core', version: '2.0.0', trust: 99, downloads: 1240, pawa: 'FREE', desc: 'Complete household sustain template. Finance pockets, pantry, M-Pesa hooks, and 4 default operatives. Includes Homestead → Chama microsustain linkage.' },
-  { id: 'spr-chama',     name: 'Chama',       author: 'sustena.core', version: '1.3.0', trust: 98, downloads: 882,  pawa: 'FREE', desc: 'Group savings circle sustain. Contribution tracking, rotation schedule, DAO governance, and council voting.' },
-  { id: 'spr-biashara',  name: 'Biashara',    author: 'colosso.core', version: '1.1.0', trust: 93, downloads: 640,  pawa: 'FREE', desc: 'SME business intelligence sustain. Tracks sales, expenses, stock, and routes M-Pesa income into structured pockets.' },
-  { id: 'spr-mkulima',   name: 'Mkulima',     author: 'mkulima.dao',  version: '0.9.0', trust: 87, downloads: 310,  pawa: 'FREE', desc: 'Smallholder farm sustain. Crop calendars, soil monitoring, buyer pipeline, and produce marketplace listing.' },
-  { id: 'spr-vyyb',      name: 'Vyyb QSR',    author: 'vyyb.ops',     version: '1.0.0', trust: 91, downloads: 180,  pawa: 480,    desc: 'Quick service restaurant sustain. Recipe management, delivery dispatch, pantry tracking, and Vyyb marketplace integration.' },
-];
-
-const WIDGETS = [
-  { id: 'wgt-budgetring', name: 'Budget Ring',    author: 'sustena.ui', version: '1.0.2', trust: 92, downloads: 4200, pawa: 'FREE', desc: 'Animated donut chart showing pocket allocation. Configurable segments, real-time M-Pesa sync.' },
-  { id: 'wgt-gauge',      name: 'Burn Gauge',     author: 'sustena.ui', version: '1.1.0', trust: 94, downloads: 3180, pawa: 'FREE', desc: 'Live burn rate gauge with ceiling threshold. Pulses amber when >80% of budget rate consumed.' },
-  { id: 'wgt-proposal',   name: 'Proposal Card',  author: 'sustena.ui', version: '1.2.1', trust: 96, downloads: 2450, pawa: 'FREE', desc: 'Council proposal vote card with tally bar, quorum indicator, and ETA countdown.' },
-  { id: 'wgt-sparkline',  name: 'Pocket Spark',   author: 'sustena.ui', version: '0.8.0', trust: 85, downloads: 1820, pawa: 'FREE', desc: 'Miniature sparkline for a pocket\'s 30-day balance history. Colour-coded by trend direction.' },
-  { id: 'wgt-alert',      name: 'Alert Banner',   author: 'sustena.ui', version: '1.0.0', trust: 90, downloads: 2100, pawa: 'FREE', desc: 'Urgent constraint-breach banner. Full-width, severity-coloured, with quick-action link.' },
-];
-
-/* Products */
-const VYYB_PRODUCTS = [
-  { id: 'v-pilau',    name: 'Pilau (Full)', category: 'Rice Dishes', price: 180,  unit: 'KES/plate', trust: 97, seller: 'Vyyb Githurai',   sustain: 'vyyb',     desc: 'Nairobi-style pilau with beef, caramelised onions, and whole spices. Made fresh 08:00–18:00.', tags: ['halal', 'gluten-free'], emoji: '🍛' },
-  { id: 'v-ugali',    name: 'Ugali + Sukuma + Beef', category: 'Staples', price: 120, unit: 'KES/plate', trust: 99, seller: 'Vyyb Githurai', sustain: 'vyyb', desc: 'The standard. White maize ugali, braised sukuma wiki, and slow-cooked beef stew. Refills on ugali.', tags: ['gluten-free'], emoji: '🍽️' },
-  { id: 'v-smokie',   name: 'Smokie Pasua (2 pcs)', category: 'Street Snacks', price: 60, unit: 'KES', trust: 96, seller: 'Vyyb Githurai', sustain: 'vyyb', desc: 'Split smokies grilled on charcoal, stuffed with kachumbari and chilli sauce. Ready in 3 minutes.', tags: ['spicy'], emoji: '🌭' },
-  { id: 'v-mandazi',  name: 'Mandazi (4 pcs)', category: 'Baked', price: 40, unit: 'KES', trust: 95, seller: 'Vyyb Githurai', sustain: 'vyyb', desc: 'Light, coconut-infused Swahili mandazi. Baked 07:00–09:00. Pairs with chai.', tags: ['vegetarian', 'halal'], emoji: '🍩' },
-  { id: 'v-chai',     name: 'Chai (500ml)', category: 'Drinks', price: 30, unit: 'KES', trust: 98, seller: 'Vyyb Githurai', sustain: 'vyyb', desc: 'Full-milk masala chai with ginger and cardamom. The house tea. Always on.', tags: ['vegetarian', 'halal'], emoji: '☕' },
-  { id: 'v-combo',    name: 'Lunch Combo', category: 'Combos', price: 200, unit: 'KES/set', trust: 94, seller: 'Vyyb Githurai', sustain: 'vyyb', desc: 'Any main + chai + mandazi. Available 11:00–15:00 Mon–Sat. Delivery within 2km.', tags: ['best-value'], emoji: '📦' },
-];
-
-const MKULIMA_PRODUCTS = [
-  { id: 'm-sukuma',   name: 'Sukuma Wiki', category: 'Leafy Greens', price: 25,  unit: 'KES/bunch', trust: 92, seller: 'Kamau Farm · Limuru', sustain: 'mkulima', desc: 'Fresh-cut kale, harvested 05:00 same day. Pesticide-free. Minimum order 5 bunches.', tags: ['organic', 'same-day'], emoji: '🥬' },
-  { id: 'm-tomato',   name: 'Tomatoes (Grade A)', category: 'Vegetables', price: 80, unit: 'KES/kg', trust: 95, seller: 'Njoroge Farm · Kirinyaga', sustain: 'mkulima', desc: 'Roma tomatoes, Grade A. 65mm+ diameter, blemish-free. Available Mon/Wed/Fri.', tags: ['grade-a'], emoji: '🍅' },
-  { id: 'm-potato',   name: 'Irish Potatoes', category: 'Root Vegetables', price: 45, unit: 'KES/kg', trust: 90, seller: 'Mwangi Agri · Nyandarua', sustain: 'mkulima', desc: 'Shangi variety. Washed, sorted, 40mm+. 10kg minimum order. Delivery to Nairobi markets Tue/Thu.', tags: ['bulk-available'], emoji: '🥔' },
-  { id: 'm-avocado',  name: 'Hass Avocados', category: 'Fruits', price: 15, unit: 'KES/pc', trust: 88, seller: 'Wambui Grove · Murang\'a', sustain: 'mkulima', desc: 'Export-grade Hass avocados. 150g+. 3–5 days to ripeness at time of delivery.', tags: ['export-grade'], emoji: '🥑' },
-  { id: 'm-maize',    name: 'Green Maize (cobs)', category: 'Grains', price: 20, unit: 'KES/cob', trust: 93, seller: 'Odhiambo Farm · Siaya', sustain: 'mkulima', desc: 'Sweet yellow maize, 20cm+ cob. Harvested daily. Good for roasting and boiling.', tags: ['seasonal'], emoji: '🌽' },
-  { id: 'm-arrowroot',name: 'Arrowroot (Nduma)', category: 'Root Vegetables', price: 35, unit: 'KES/kg', trust: 86, seller: 'Karimi Farm · Meru', sustain: 'mkulima', desc: 'Large-corm arrowroot, 200g+/piece. Washed. Available year-round. Preferred by Nairobi hotels.', tags: ['restaurant-preferred'], emoji: '🌰' },
-];
+const OPERATIVES = [];
+const OPERATORS = [];
+const SPORES = [];
+const WIDGETS = [];
+const VYYB_PRODUCTS = [];
+const MKULIMA_PRODUCTS = [];
 
 const PRODUCTS_ALL = [
   ...VYYB_PRODUCTS.map(p => ({ ...p, source: 'vyyb' })),
   ...MKULIMA_PRODUCTS.map(p => ({ ...p, source: 'mkulima' })),
 ];
 
-/* ── Seed orders ──────────────────────────────────────────────── */
-const INITIAL_ORDERS = [
-  {
-    ref: 'SXI-DEMO01', date: '2026-05-26', time: '09:14',
-    items: [
-      { name: 'Mentor',        kind: 'operative', pawa: 'FREE', price: 0,   qty: 1, emoji: null },
-      { name: 'M-Pesa Parser', kind: 'operator',  pawa: 'FREE', price: 0,   qty: 1, emoji: null },
-      { name: 'Homestead',     kind: 'spore',     pawa: 'FREE', price: 0,   qty: 1, emoji: null },
-    ],
-    sustain: 'Sustena XII', productTotal: 0, paidPwaTotal: 0,
-    productStatus: null, packageStatus: 'LIVE',
-    deliveryAddr: '', payMethod: null, licenses: [],
-  },
-  {
-    ref: 'SXI-DEMO02', date: '2026-05-27', time: '13:48',
-    items: [
-      { name: 'Pilau (Full)',     kind: 'product', pawa: null, price: 180, qty: 2, emoji: '🍛' },
-      { name: 'Chai (500ml)',     kind: 'product', pawa: null, price: 30,  qty: 1, emoji: '☕' },
-    ],
-    sustain: null, productTotal: 390, paidPwaTotal: 0,
-    productStatus: 'DELIVERED', packageStatus: null,
-    deliveryAddr: 'Githurai 45, near the stage', payMethod: 'till', licenses: [],
-  },
-  {
-    ref: 'SXI-DEMO03', date: '2026-05-28', time: '08:02',
-    items: [
-      { name: 'Vyyb QSR',    kind: 'spore',   pawa: 480,  price: 0,   qty: 1, emoji: null },
-      { name: 'Lunch Combo', kind: 'product',  pawa: null, price: 200, qty: 3, emoji: '📦' },
-    ],
-    sustain: 'Vyyb', productTotal: 600, paidPwaTotal: 480,
-    productStatus: 'DELIVERING', packageStatus: 'SANDBOXED',
-    deliveryAddr: 'Westlands, Ring Road', payMethod: 'till',
-    licenses: [{ name: 'Vyyb QSR', key: 'LIC-ABCD1234' }],
-  },
-];
+/* Past orders — populated from API */
+const INITIAL_ORDERS = [];
 
 /* ── Trust bar ────────────────────────────────────────────────── */
 function TrustBar({ value, color }) {
@@ -361,7 +279,10 @@ function OrdersView({ orders }) {
           }}>{o.label}</button>
         ))}
       </div>
-      {filtered.map(o => <OrderCard key={o.ref} order={o} />)}
+      {filtered.length === 0
+        ? <div style={{ textAlign: 'center', padding: '40px 0', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>No orders yet — Waiting for API</div>
+        : filtered.map(o => <OrderCard key={o.ref} order={o} />)
+      }
     </div>
   );
 }
@@ -844,8 +765,8 @@ function ArenaPage() {
 
             {filtered.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '80px 20px', color: 'var(--text-muted)' }}>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 11, marginBottom: 8 }}>NO RESULTS</div>
-                <div style={{ fontSize: 12 }}>Try a different search term</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 11, marginBottom: 8 }}>NO PACKAGES YET</div>
+                <div style={{ fontSize: 12 }}>Waiting for API — seed via SEED panel</div>
               </div>
             ) : tab === 'products' ? (
               <div className="card-grid">

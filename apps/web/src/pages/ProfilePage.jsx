@@ -27,32 +27,15 @@ const PROFILE_DATA = {
   memberSince: '2026',
   titles: ['Sustena Architect', 'Sole Technical Co-founder'],
   stats: [
-    { value: 7,      label: 'Proposals\nPassed',   color: 'var(--text-primary)' },
-    { value: 12,     label: 'Operators\nBuilt',     color: 'var(--text-primary)' },
-    { value: '4.2K', label: 'Pawa\nEarned',         color: 'var(--text-primary)' },
+    { value: '—', label: 'Proposals\nPassed',   color: 'var(--text-primary)' },
+    { value: '—', label: 'Operators\nBuilt',     color: 'var(--text-primary)' },
+    { value: '—', label: 'Pawa\nEarned',         color: 'var(--text-primary)' },
   ],
-  memberships: [
-    { name: 'Sustena XII', role: 'Founder',  status: 'live'    },
-    { name: 'Vyyb',        role: 'Founder',  status: 'seed'    },
-    { name: 'Chama XII',   role: 'Member',   status: 'live'    },
-    { name: 'Colosso',     role: 'Observer', status: 'pending' },
-  ],
-  contributions: [
-    { date: '2026·05', label: 'Filed Sustena XII entity documentation', type: 'decision', sustain: 'Sustena XII' },
-    { date: '2026·05', label: 'Deployed Navigator operative — quorum tracking', type: 'build', sustain: 'Chama XII' },
-    { date: '2026·04', label: 'Passed SUS-0148 · pockets reallocation proposal', type: 'proposal', sustain: 'Sustena XII' },
-    { date: '2026·04', label: 'Deployed Mentor operative — burn rate monitoring', type: 'build', sustain: 'Sustena XII' },
-    { date: '2026·03', label: 'Deployed Curator operative — pantry & procurement', type: 'build', sustain: 'Vyyb' },
-    { date: '2026·03', label: 'Founded Sustena XII · 5 sustains initialised', type: 'milestone', sustain: 'Sustena XII' },
-    { date: '2026·01', label: 'Launched Vyyb Phase 1 · delivery dispatch system', type: 'milestone', sustain: 'Vyyb' },
-  ],
+  memberships: [],
+  contributions: [],
   balances: {
-    aggregate: { pawa: 16820, label: 'Total across sustains', trend: '+340 this cycle' },
-    perSustain: [
-      { name: 'Sustena XII', pawa: 8420,  score: 0.87, stake: 4.2 },
-      { name: 'Vyyb',        pawa: 2100,  score: 0.71, stake: 2.4 },
-      { name: 'Chama XII',   pawa: 6300,  score: 0.92, stake: 8.1 },
-    ],
+    aggregate: { pawa: 0, label: 'Total across sustains', trend: '—' },
+    perSustain: [],
   },
   privacy: { balancesPublic: false },
 };
@@ -236,6 +219,9 @@ function MembershipPills({ memberships }) {
 
 /* ── Contribution timeline — download(5).jpg pattern ─────── */
 function ContributionTimeline({ contributions }) {
+  if (contributions.length === 0) {
+    return <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>No history yet — Waiting for API</span>;
+  }
   return (
     <div style={{ position: 'relative', paddingLeft: 72 }}>
       {/* Single vertical connecting line */}

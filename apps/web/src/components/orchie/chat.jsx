@@ -30,91 +30,10 @@ function useTypewriter(text, speed = 30, onDone) {
 }
 
 /* ─── Scripted conversation ────────────────────────────────
-   A canonical demo flow that shows Orchie generating multiple widget types.
+   Scripted intro messages — cleared; Orchie opens with a blank slate
+   and responds via POST /orchie/message.
 */
-const ORCHIE_DEMO = [
-  {
-    role: 'assistant',
-    text: 'Habari, Bonnie. Mid-day briefing — three things landed since you last checked.',
-  },
-  {
-    role: 'assistant',
-    text: 'Your cash position right now:',
-    widget: { type: 'metric', data: { label: 'CASH · CONSOLIDATED', value: '184,250', unit: 'KSH', delta: { positive: false, value: '−4.2%', label: '7d' }, sub: 'runway ~ 42 days at current burn' } },
-  },
-  {
-    role: 'assistant',
-    text: "Here's how it's split across pockets — Food and Transport are eating most of it:",
-    widget: {
-      type: 'pie',
-      data: {
-        slices: [
-          { label: 'Food',      value: 38, color: '#E8A020' },
-          { label: 'Transport', value: 22, color: '#2ab8a0' },
-          { label: 'Utilities', value: 16, color: '#5090e0' },
-          { label: 'Health',    value: 11, color: '#9a7fb8' },
-          { label: 'Savings',   value: 8,  color: '#4caf80' },
-          { label: 'Other',     value: 5,  color: '#565250' },
-        ],
-        total: 'KSH 184,250',
-      },
-    },
-  },
-  {
-    role: 'assistant',
-    text: 'Burn rate is approaching the watchdog ceiling (KSH 4,500/day):',
-    widget: {
-      type: 'line',
-      data: {
-        series: [3120, 3280, 3410, 3520, 3680, 3840, 3920, 4010, 4080, 4140, 4180, 4214],
-        labels: ['D12', '', '', 'D15', '', '', 'D18', '', '', 'D21', '', 'NOW'],
-        threshold: 4500,
-        unit: 'KSH/day',
-      },
-    },
-  },
-  {
-    role: 'assistant',
-    text: "Pantry is at zero on matumbo — Mama Mboga in Githurai has it at KSH 280/kg, 12-min ETA. Approve?",
-    widget: {
-      type: 'mpesa',
-      data: {
-        recipient: 'MAMA MBOGA · GITHURAI',
-        amount: 'KSH 1,120',
-        memo: 'matumbo 4 kg · restock',
-        till: '5826141',
-        sustain: 'homestead.bonnie',
-      },
-    },
-  },
-  {
-    role: 'assistant',
-    text: 'Quick note — pantry oil is low too.',
-    widget: {
-      type: 'alert',
-      data: {
-        tone: 'amber',
-        title: 'Pantry threshold breach',
-        body: 'Cooking oil at 0.4 L · reorder threshold 0.5 L. Curator can batch this with the matumbo restock.',
-        actions: ['Batch', 'Dismiss'],
-      },
-    },
-  },
-  {
-    role: 'assistant',
-    text: "And one Council motion needs your eye before quorum closes:",
-    widget: {
-      type: 'proposal',
-      data: {
-        id: 'SUS-0148',
-        title: 'Advance Q3 disbursement to Carbon-R&D by 14 days',
-        for: 7, against: 2, abstain: 1, quorum: 10,
-        eta: '4h 22m',
-        score: 0.84,
-      },
-    },
-  },
-];
+const ORCHIE_DEMO = [];
 
 /* ─── Widget renderers ─────────────────────────────────────
    Compact-by-default; each takes a `size` hint ('sm' for sidebar, 'md' for mobile).

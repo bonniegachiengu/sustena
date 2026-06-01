@@ -21,6 +21,7 @@ const PANELS = [
   { id: 'editor',     label: 'EDITOR',     icon: 'agent',    sub: 'spec & graph' },
   { id: 'controller', label: 'CONTROLLER', icon: 'vault',    sub: 'approved execution' },
   { id: 'library',    label: 'LIBRARY',    icon: 'leaf',     sub: 'mycelium network' },
+  { id: 'seed',       label: 'SEED',       icon: 'plus',     sub: 'inject real data' },
 ];
 
 const PAGE_LINKS = [
@@ -147,6 +148,7 @@ function App() {
           onToggleRight={() => setEditRight(v => !v)} />}
         {panel === 'controller' && <ControllerPanel tick={tick} openModal={(p) => setModal({ kind: 'proposal', data: p })} />}
         {panel === 'library'    && <LibraryPanel openModal={(it, kind) => setModal({ kind: 'library', data: { item: it, kind } })} />}
+        {panel === 'seed'       && <SeedPanel />}
       </main>
 
       {/* Floating Orchie button + drawer */}

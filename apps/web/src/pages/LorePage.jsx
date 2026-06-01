@@ -7,7 +7,8 @@ const ENTRY_TYPES = {
   update:     { label: 'UPDATE'     },
 };
 
-const ENTRIES = [
+/* Blog entries — populated from API / CMS */
+const ENTRIES_TOMBSTONE = [
   {
     id: 'b001',
     type: 'vision',
@@ -99,6 +100,9 @@ const ENTRIES = [
     ],
   },
 ];
+
+/* Active entries — empty until API is wired */
+const ENTRIES = [];
 
 const CATEGORIES = [
   { id: 'all',        label: 'ALL',        count: ENTRIES.length },
@@ -193,17 +197,17 @@ function EntryReader({ entry }) {
 
 /* ── Main page — T boundary layout ──────────────────── */
 function LorePage() {
-  const [activeId, setActiveId] = useState(ENTRIES[0].id);
+  const [activeId, setActiveId] = useState(null);
   const [category, setCategory] = useState('all');
 
   const filtered = useMemo(() =>
     category === 'all' ? ENTRIES : ENTRIES.filter(e => e.type === category),
   [category]);
 
-  const active = ENTRIES.find(e => e.id === activeId) || ENTRIES[0];
+  const active = ENTRIES.find(e => e.id === activeId) || null;
 
   useEffect(() => {
-    if (!filtered.find(e => e.id === activeId)) setActiveId(filtered[0]?.id);
+    if (filtered.length > 0 && !filtered.find(e => e.id === activeId)) setActiveId(filtered[0]?.id);
   }, [category]);
 
   return (
@@ -227,9 +231,12 @@ function LorePage() {
           </div>
           {/* Entry list */}
           <div style={{ overflowY: 'auto', flex: 1 }}>
-            {filtered.map(entry => (
-              <EntryCard key={entry.id} entry={entry} active={entry.id === activeId} onSelect={setActiveId} />
-            ))}
+            {filtered.length === 0
+              ? <div style={{ padding: '24px 12px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)' }}>No entries yet</div>
+              : filtered.map(entry => (
+                  <EntryCard key={entry.id} entry={entry} active={entry.id === activeId} onSelect={setActiveId} />
+                ))
+            }
           </div>
           {/* Footer */}
           <div style={{ borderTop: '1px solid var(--border)', padding: '10px 0', textAlign: 'right' }}>
@@ -241,7 +248,7 @@ function LorePage() {
         <div style={{ overflow: 'hidden' }}>
           {active ? <EntryReader entry={active} /> : (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
-              <span className="label-10">select an entry</span>
+              <span className="label-10">No entries yet — Waiting for API</span>
             </div>
           )}
         </div>

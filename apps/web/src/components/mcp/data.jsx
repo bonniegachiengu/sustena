@@ -504,12 +504,7 @@ function CodeEditor({ operatorNode, onClose }) {
    Bottom: ambient activity animation
    ═══════════════════════════════════════════════════════════ */
 
-const ORCHIE_INTENTS = [
-  { text: 'Complete Vyyb Phase 1 setup',     confidence: 87, source: 'from task list',  id: 'i1' },
-  { text: 'Review morning briefing',          confidence: 92, source: 'from calendar',  id: 'i2' },
-  { text: 'Schedule delivery dispatch',       confidence: 74, source: 'from chat',      id: 'i3' },
-  { text: 'File Sustena XII entity docs',     confidence: 61, source: 'from task list', id: 'i4' },
-];
+const ORCHIE_INTENTS = [];  // populated from API
 
 /*
   OrchieExpansionPanel — full-page overlay (like Monitor/Simulator panels).
@@ -946,34 +941,10 @@ function OrchieActivityViz({ tick }) {
         )}
       </svg>
 
-      {/* Mini to-do checklist (ambient) */}
+      {/* Mini to-do checklist (ambient) — populated from API */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         <span className="label-10" style={{ fontSize: 9 }}>CURRENT TASKS</span>
-        {[
-          { done: true,              label: 'Morning briefing compiled' },
-          { done: true,              label: 'Council vote SUS-0148 tracked' },
-          { done: false, active: true, label: 'Fetching pantry state' },
-          { done: false, active: false, label: 'Awaiting M-Pesa confirm' },
-        ].map((t, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{
-              fontFamily: 'var(--mono)', fontSize: 10,
-              color: t.done ? 'var(--ok)' : t.active ? 'var(--amber)' : 'var(--text-dim)',
-            }}>
-              {t.done ? '✓' : t.active ? '⟳' : '○'}
-            </span>
-            <span style={{
-              fontFamily: 'var(--ui)', fontSize: 11,
-              color: t.done ? 'var(--text-muted)' : t.active ? 'var(--text-primary)' : 'var(--text-dim)',
-              textDecoration: t.done ? 'line-through' : 'none',
-            }}>
-              {t.label}
-            </span>
-            {t.active && (
-              <span className="pulse" style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--amber)', marginLeft: 2 }} />
-            )}
-          </div>
-        ))}
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>Waiting for API</span>
       </div>
     </div>
   );
@@ -985,129 +956,28 @@ function OrchieActivityViz({ tick }) {
 
 /* Sustains */
 const SUSTAINS = [
-  { id: 'homestead.bonnie', label: 'Homestead',    sub: 'bonnie',    status: 'live' },
-  { id: 'vyyb.hive',        label: 'Vyyb Hive',    sub: 'hive',      status: 'live' },
-  { id: 'mkulima.alpha',    label: 'Mkulima',      sub: 'alpha',     status: 'seed' },
-  { id: 'sustena.xii',      label: 'Sustena XII',  sub: 'core',      status: 'live' },
-  { id: 'chama.nairobi',    label: 'Chama Nairobi',sub: 'circle',    status: 'seed' },
+  { id: 'homestead.bonnie', label: 'Homestead', sub: 'bonnie', status: 'live' },
 ];
 
 /* State tree — used by monitor */
-const STATE_TREE = [
-  { path: 'finances.cash_position',    value: 184250,  target: 200000, fmt: 'ksh', cstr: 'ok',    desc: 'Consolidated cash' },
-  { path: 'finances.pockets.food',     value: 8420,    target: 10000,  fmt: 'ksh', cstr: 'amber', desc: 'Food pocket' },
-  { path: 'finances.pockets.transport',value: 4100,    target: 5000,   fmt: 'ksh', cstr: 'ok',    desc: 'Transport' },
-  { path: 'finances.burn_rate',        value: 4214,    target: 3500,   fmt: 'ksh', cstr: 'amber', desc: 'Avg KSH/day', lowerBetter: true },
-  { path: 'pantry.cooking_oil_L',      value: 0.4,     target: 5.0,    fmt: 'L',   cstr: 'red',   desc: 'Critically low' },
-  { path: 'pantry.tomatoes_kg',        value: 2.8,     target: 4.0,    fmt: 'kg',  cstr: 'ok',    desc: 'Fresh produce' },
-  { path: 'system.pawa_balance',       value: 8420,    target: 10000,  fmt: 'pwa', cstr: 'ok',    desc: 'Orchie tokens' },
-  { path: 'chama.contributions',       value: 198400,  target: 250000, fmt: 'ksh', cstr: 'ok',    desc: 'Pool balance' },
-  { path: 'system.api_p95_ms',         value: 428,     target: 400,    fmt: 'ms',  cstr: 'ok',    desc: 'Haiku inference', lowerBetter: true },
-  { path: 'council.quorum_pct',        value: 78,      target: 80,     fmt: '%',   cstr: 'amber', desc: 'Near threshold' },
-];
+const STATE_TREE = [];  // populated from /devui/state
 
-/* Operatives */
-const OPERATIVES = [
-  {
-    id: 'op-mentor', name: 'Mentor', role: 'Strategic advisor · finance',
-    status: 'active', confidence: 88, pawa: 42, task: 'Monitoring burn rate deviation from weekly plan. Flagged 3 anomalies.',
-    subtasks: [
-      { name: 'Analyse burn trajectory', done: true, progress: 100 },
-      { name: 'Draft anomaly report', done: false, progress: 62 },
-      { name: 'Propose reallocation', done: false, progress: 0 },
-    ],
-  },
-  {
-    id: 'op-curator', name: 'Curator', role: 'Pantry & procurement',
-    status: 'alert', confidence: 71, pawa: 18, task: 'Cooking oil at critical threshold. Awaiting batch-order approval from Bonnie.',
-    subtasks: [
-      { name: 'Detect pantry breach', done: true, progress: 100 },
-      { name: 'Source vendor · Mama Mboga', done: true, progress: 100 },
-      { name: 'Await approval', done: false, progress: 35 },
-    ],
-  },
-  {
-    id: 'op-navigator', name: 'Navigator', role: 'Council & governance',
-    status: 'active', confidence: 94, pawa: 55, task: 'Tracking SUS-0148 quorum. 1h 22m to close. Drafted summary for Bonnie.',
-    subtasks: [
-      { name: 'Monitor vote SUS-0148', done: false, progress: 78 },
-      { name: 'Draft vote brief', done: true, progress: 100 },
-    ],
-  },
-  {
-    id: 'op-protege', name: 'Protégé', role: 'Learning · pattern recognition',
-    status: 'idle', confidence: 65, pawa: 8, task: 'Idle — observing Mentor\'s burn analysis to refine own models.',
-    subtasks: [
-      { name: 'Shadow Mentor', done: false, progress: 0 },
-    ],
-  },
-];
+/* Operatives — populated from /devui/state */
+const OPERATIVES = [];
 
-/* Sim nodes — updated with Orchie and improved labelling */
-const SIM_NODES = [
-  { id: 'state0',  type: 'state',      label: 'finances.cash',     x: 30,  y: 40  },
-  { id: 'state1',  type: 'state',      label: 'pantry.items',      x: 30,  y: 130 },
-  { id: 'state2',  type: 'state',      label: 'finances.burn',     x: 30,  y: 220 },
-  { id: 'gate0',   type: 'gate',       label: 'entry gate',        x: 30,  y: 310 },
-  { id: 'op0',     type: 'operator',   label: 'mpesa.parse',       x: 200, y: 40  },
-  { id: 'op1',     type: 'operator',   label: 'budget.allocate',   x: 200, y: 130 },
-  { id: 'op2',     type: 'operator',   label: 'pantry.consume',    x: 200, y: 220 },
-  { id: 'cstr0',   type: 'constraint', label: 'sum_constraint',    x: 380, y: 80  },
-  { id: 'cstr1',   type: 'constraint', label: 'balance_check',     x: 380, y: 200 },
-  { id: 'orchie',  type: 'operative',  label: 'ORCHIE',            x: 560, y: 130 },
-  { id: 'ev0',     type: 'event',      label: 'BUDGET_ALLOCATED',  x: 720, y: 60  },
-  { id: 'ev1',     type: 'event',      label: 'BURN_RATE_ALERT',   x: 720, y: 220 },
-];
+/* Sim nodes — populated from /devui/state */
+const SIM_NODES = [];
 
-const SIM_EDGES = [
-  ['state0','op0'], ['state1','op2'], ['state2','op2'],
-  ['gate0','op1'],
-  ['op0','op1'], ['op1','cstr0'], ['op2','cstr1'],
-  ['cstr0','orchie'], ['cstr1','orchie'],
-  ['orchie','ev0'], ['orchie','ev1'],
-];
+const SIM_EDGES = [];
 
-/* Scenario tree */
-const SCENARIO_TREE = [
-  { id: 'root', label: 'BASE · homestead.bonnie', score: null, children: [
-    { id: 'A', label: 'BRANCH A · nominal', score: 0.81, hot: true, children: [
-      { id: 'A1', label: 'A.1 · conserve',   score: 0.79 },
-      { id: 'A2', label: 'A.2 · optimise',   score: 0.87, hot: true },
-      { id: 'A3', label: 'A.3 · expand',     score: 0.62 },
-    ]},
-    { id: 'B', label: 'BRANCH B · austerity', score: 0.58, children: [
-      { id: 'B1', label: 'B.1 · freeze',     score: 0.51 },
-      { id: 'B2', label: 'B.2 · partial',    score: 0.61 },
-    ]},
-    { id: 'C', label: 'BRANCH C · growth',   score: 0.44 },
-    { id: 'D', label: 'BRANCH D · fork-D',   score: 0.68 },
-  ]},
-];
+/* Scenario tree — populated from /devui/simulate */
+const SCENARIO_TREE = [];
 
-/* Proposal data */
-const PROPOSALS = [
-  {
-    id: 'SUS-0148', sustain: 'homestead.bonnie',
-    title: 'Advance Q3 disbursement to Carbon-R&D by 14 days',
-    summary: 'Move the scheduled KSH 380,000 Q3 disbursement from the 28th to the 14th to unblock two grant windows and enable Vyyb Phase 1 procurement. Simulation shows 0.87 outcome score.',
-    cta: 'EXECUTE',
-    autonomy: 'HIGH',
-    cost: '42 pwa',
-    sim: { outcomeScore: 0.87, constraintPassRate: 1.0, runs: 100, projection: 'Cash reserves remain 12.4% above floor. Grant unlock by +9 days.' },
-    council: { for: 7, against: 2, abstain: 1 },
-    status: 'awaiting',
-  },
-];
+/* Proposal data — populated from API */
+const PROPOSALS = [];
 
-/* Event log generator */
-const LOG_EVENTS = [
-  { sustain: 'homestead',  operator: 'mpesa.parse',      delta: 'KSH 1,120 received · stk-4827', op: 'STATE+',  tone: 'ok' },
-  { sustain: 'vyyb.hive',  operator: 'budget.allocate',  delta: 'food ← KSH 2,400',              op: 'ΔSTATE',  tone: 'teal' },
-  { sustain: 'homestead',  operator: 'pantry.consume',   delta: 'oil −0.4 L · breach',           op: 'ALERT',   tone: 'danger' },
-  { sustain: 'sustena.xii',operator: 'council.vote',     delta: 'SUS-0148 · +1 YES',             op: 'VOTE',    tone: 'amber' },
-  { sustain: 'mkulima',    operator: 'field.log',        delta: 'harvest 12kg tomatoes',         op: 'STATE+',  tone: 'ok' },
-  { sustain: 'homestead',  operator: 'budget.compute',   delta: 'burn_rate → 4,214 KSH/d',       op: 'ΔSTATE',  tone: 'amber' },
-];
+/* Event log — populated from /devui/events */
+const LOG_EVENTS = [];
 
 function pickEvent(seed) {
   const i = seed % LOG_EVENTS.length;
@@ -1121,27 +991,12 @@ function pickEvent(seed) {
   };
 }
 
-/* Library items */
+/* Library items — populated from Mycelium network API */
 const LIBRARY_ITEMS = {
-  operatives: [
-    { name: 'Mentor',    author: 'sustena.core', version: '1.4.2', trust: 98, downloads: 4821, pawa: '42 pwa', desc: 'Strategic advisor with access to finance state. Monitors burn rate, drafts council proposals, surfaces anomalies.' },
-    { name: 'Curator',   author: 'sustena.core', version: '1.2.0', trust: 95, downloads: 3204, pawa: '18 pwa', desc: 'Pantry and procurement specialist. Manages supplier relationships, batch orders, and restock thresholds.' },
-    { name: 'Navigator', author: 'sustena.core', version: '1.3.1', trust: 97, downloads: 2918, pawa: '55 pwa', desc: 'Council and governance operative. Tracks proposals, monitors quorum, drafts council briefs.' },
-  ],
-  operators: [
-    { name: 'budget.allocate', author: 'sustena.core', version: '2.1.0', trust: 99, downloads: 11400, pawa: '0.02 pwa', desc: 'Allocate funds to a named pocket with sum and balance constraints. Emits BUDGET_ALLOCATED.' },
-    { name: 'mpesa.parse',     author: 'sustena.core', version: '1.0.8', trust: 98, downloads: 8320,  pawa: '0.01 pwa', desc: 'Parse incoming M-Pesa STK notifications and update cash position state.' },
-    { name: 'pantry.consume',  author: 'sustena.core', version: '1.1.2', trust: 97, downloads: 5614,  pawa: '0.01 pwa', desc: 'Record pantry item consumption and trigger threshold alerts.' },
-  ],
-  spores: [
-    { name: 'Homestead',  author: 'sustena.core', version: '2.0.0', trust: 99, downloads: 1240, pawa: 'FREE', desc: 'Complete household sustain template. Includes finance pockets, pantry, M-Pesa hooks, and 4 default operatives.' },
-    { name: 'Chama',      author: 'sustena.core', version: '1.3.0', trust: 98, downloads: 882,  pawa: 'FREE', desc: 'Group savings circle sustain. Includes contribution tracking, rotation schedule, and council governance.' },
-  ],
-  widgets: [
-    { name: 'Budget Ring',   author: 'sustena.ui', version: '1.0.2', trust: 92, downloads: 4200, pawa: 'FREE', desc: 'Animated donut chart showing pocket allocation.' },
-    { name: 'Burn Gauge',    author: 'sustena.ui', version: '1.1.0', trust: 94, downloads: 3180, pawa: 'FREE', desc: 'Live burn rate gauge with ceiling threshold.' },
-    { name: 'Proposal Card', author: 'sustena.ui', version: '1.2.1', trust: 96, downloads: 2450, pawa: 'FREE', desc: 'Council proposal vote card with tally bar.' },
-  ],
+  operatives: [],
+  operators:  [],
+  spores:     [],
+  widgets:    [],
 };
 
 function LibraryMark({ kind, size = 20 }) {

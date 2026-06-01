@@ -158,4 +158,4 @@ See `brand/` for the design system and UI mockup components — that's the clear
 
 ---
 
-<sub>A 365+ Ventures project · Nairobi</sub>
+<sub>A my.bg project · Nairobi</sub>

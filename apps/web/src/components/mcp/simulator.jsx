@@ -116,12 +116,11 @@ function SimulatorPanel({ tick, sustain, leftOpen = true, rightOpen = true, onTo
       }}>
         {/* Scenario tree */}
         {leftOpen && (
-          <Card title="SCENARIO TREE" sub="4 BRANCHES" padded={false} scroll>
-            <ScenarioTree
-              tree={SCENARIO_TREE}
-              selected={selectedBranch}
-              onSelect={setSelectedBranch}
-            />
+          <Card title="SCENARIO TREE" sub={SCENARIO_TREE.length ? `${SCENARIO_TREE[0]?.children?.length ?? 0} BRANCHES` : 'NO DATA'} padded={false} scroll>
+            {SCENARIO_TREE.length === 0
+              ? <div style={{ padding: 16, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)', textAlign: 'center' }}>No data — seed via SEED panel</div>
+              : <ScenarioTree tree={SCENARIO_TREE} selected={selectedBranch} onSelect={setSelectedBranch} />
+            }
           </Card>
         )}
 
@@ -317,18 +316,6 @@ function SimulatorCanvas({
 }
 
 /* State Diff right panel — wired to POST /devui/simulate */
-const MOCK_DIFFS = [
-  { field: 'finances.cash_position',   op: '−10,000 KSH', tone: 'amber' },
-  { field: 'finances.pockets.food',    op: 'no change',   tone: 'muted' },
-  { field: 'pantry.tomatoes_kg',       op: '+4 kg',       tone: 'ok' },
-  { field: 'system.pawa_balance',      op: '−42 pwa',     tone: 'amber' },
-];
-const MOCK_CSTRS = [
-  { name: 'reserve > 50,000',     status: 'PASS' },
-  { name: 'pockets.sum ≤ income', status: 'PASS' },
-  { name: 'no_negative_balance',  status: 'PASS' },
-  { name: 'cycle_quorum >= 80%',  status: 'PASS' },
-];
 
 function StateDiff({ tick, sustain, selectedBranch }) {
   const [result, setResult] = dUseState(null);
@@ -345,19 +332,19 @@ function StateDiff({ tick, sustain, selectedBranch }) {
       .catch(() => { setLoading(false); setRan(true); });
   };
 
-  // Derive display values from API result or fall back to mock
-  const score = result?.steps?.slice(-1)[0]?.score ?? result?.outcome_score ?? 0.87;
+  // Derive display values from API result only
+  const score = result?.steps?.slice(-1)[0]?.score ?? result?.outcome_score ?? null;
   const cstrs = result?.constraint_satisfaction
     ? Object.entries(result.constraint_satisfaction).map(([name, pass]) => ({ name, status: pass ? 'PASS' : 'FAIL' }))
-    : MOCK_CSTRS;
+    : [];
   const diffs = result?.steps?.flatMap(s =>
     Object.entries(s.delta || {}).map(([field, val]) => ({
       field,
       op: typeof val === 'number' ? (val >= 0 ? `+${val}` : `${val}`) : String(val),
       tone: typeof val === 'number' && val < 0 ? 'amber' : typeof val === 'number' && val > 0 ? 'ok' : 'muted',
     }))
-  ) || MOCK_DIFFS;
-  const pawaCost = result?.pawa_cost ?? (42 - (tick % 5));
+  ) || [];
+  const pawaCost = result?.pawa_cost ?? null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -386,45 +373,51 @@ function StateDiff({ tick, sustain, selectedBranch }) {
           OUTCOME · BRANCH {selectedBranch || 'A.2'}
         </span>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 36, fontWeight: 500, color: 'var(--teal)' }}>
-            {typeof score === 'number' ? score.toFixed(2) : score}
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 36, fontWeight: 500, color: score !== null ? 'var(--teal)' : 'var(--text-dim)' }}>
+            {score !== null ? (typeof score === 'number' ? score.toFixed(2) : score) : '—'}
           </span>
-          <span className="meta-10">/ 1.00 score</span>
+          {score !== null && <span className="meta-10">/ 1.00 score</span>}
         </div>
         {result && <span className="meta-10" style={{ color: 'var(--teal)', fontSize: 9 }}>● LIVE RESULT</span>}
-        {!result && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>rank · 1 of 100</span>}
+        {!result && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>Run simulation to see results</span>}
       </div>
 
       <div>
         <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>STATE Δ</span>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {diffs.map((d, i) => (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.field}</span>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: d.tone === 'ok' ? 'var(--teal)' : d.tone === 'amber' ? 'var(--amber)' : 'var(--text-muted)' }}>
-                {d.op}
-              </span>
+        {diffs.length === 0
+          ? <span className="meta-10" style={{ color: 'var(--text-dim)' }}>No data — seed via SEED panel</span>
+          : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {diffs.map((d, i) => (
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.field}</span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: d.tone === 'ok' ? 'var(--teal)' : d.tone === 'amber' ? 'var(--amber)' : 'var(--text-muted)' }}>
+                    {d.op}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+        }
       </div>
 
       <div>
         <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>CONSTRAINTS</span>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {cstrs.map((c, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)' }}>{c.name}</span>
-              <Badge tone={c.status === 'PASS' ? 'ok' : 'danger'}>{c.status}</Badge>
+        {cstrs.length === 0
+          ? <span className="meta-10" style={{ color: 'var(--text-dim)' }}>No data — seed via SEED panel</span>
+          : <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {cstrs.map((c, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)' }}>{c.name}</span>
+                  <Badge tone={c.status === 'PASS' ? 'ok' : 'danger'}>{c.status}</Badge>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+        }
       </div>
 
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <span className="label-10">PAWA COST</span>
-          <span className="val-12" style={{ color: 'var(--amber)' }}>{pawaCost} <span style={{ color: 'var(--text-muted)' }}>pwa</span></span>
+          <span className="val-12" style={{ color: 'var(--amber)' }}>{pawaCost !== null ? `${pawaCost} pwa` : <span style={{ color: 'var(--text-dim)' }}>—</span>}</span>
         </div>
       </div>
     </div>
