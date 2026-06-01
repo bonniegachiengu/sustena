@@ -101,71 +101,11 @@ async def list_sustains(_: str = Depends(verify_admin)) -> dict:
         from sustena.core.sustain_engine import SustainEngine
         engine = SustainEngine()
         raw = engine.list_all()
-        if raw:
-            return ok({"sustains": raw})
+        return ok({"sustains": raw})
     except Exception as exc:
-        logger.debug("SustainEngine.list_all not available: %s", exc)
+        logger.debug("SustainEngine.list_all failed: %s", exc)
 
-    # Stub fallback — shown when the DB has no seeded sustains
-    return ok({
-        "sustains": [
-            {
-                "id": "homestead.bonnie",
-                "label": "Homestead",
-                "sub": "bonnie",
-                "status": "live",
-                "score": 84,
-                "pockets": {
-                    "food":      8420,
-                    "transport": 4100,
-                    "savings":   22000,
-                    "rent":      15000,
-                },
-                "active_operatives": ["mentor", "curator", "navigator"],
-                "pawa_balance": 8420,
-            },
-            {
-                "id": "vyyb.hive",
-                "label": "Vyyb Hive",
-                "sub": "hive",
-                "status": "live",
-                "score": 91,
-                "pockets": {"events": 45000, "talent": 18000, "operations": 9400},
-                "active_operatives": ["mentor", "navigator"],
-                "pawa_balance": 3210,
-            },
-            {
-                "id": "mkulima.alpha",
-                "label": "Mkulima",
-                "sub": "alpha",
-                "status": "seed",
-                "score": 55,
-                "pockets": {"inputs": 12000, "harvest": 0},
-                "active_operatives": [],
-                "pawa_balance": 500,
-            },
-            {
-                "id": "sustena.xii",
-                "label": "Sustena XII",
-                "sub": "core",
-                "status": "live",
-                "score": 99,
-                "pockets": {"ops": 80000, "dev": 40000},
-                "active_operatives": ["mentor", "curator", "navigator", "protege", "attache"],
-                "pawa_balance": 99999,
-            },
-            {
-                "id": "chama.nairobi",
-                "label": "Chama Nairobi",
-                "sub": "circle",
-                "status": "seed",
-                "score": 61,
-                "pockets": {"pool": 198400, "emergency": 25000},
-                "active_operatives": ["curator"],
-                "pawa_balance": 1200,
-            },
-        ]
-    })
+    return ok({"sustains": []})
 
 
 # ── 2. GET /devui/state?sustain_id= ──────────────────────────────────────────

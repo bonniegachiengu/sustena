@@ -955,9 +955,7 @@ function OrchieActivityViz({ tick }) {
    ═══════════════════════════════════════════════════════════ */
 
 /* Sustains */
-const SUSTAINS = [
-  { id: 'homestead.bonnie', label: 'Homestead', sub: 'bonnie', status: 'live' },
-];
+const SUSTAINS = [];  // populated from GET /devui/sustains — no hardcoded entries
 
 /* State tree — used by monitor */
 const STATE_TREE = [];  // populated from /devui/state

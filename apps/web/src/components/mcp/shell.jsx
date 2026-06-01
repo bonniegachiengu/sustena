@@ -106,7 +106,7 @@ function App() {
   }, [t.tickRate]);
 
   const sustains   = apiSustains.length ? apiSustains : SUSTAINS;
-  const sustain    = sustains.find(s => s.id === sustainId) || sustains[0];
+  const sustain    = sustains.find(s => s.id === sustainId) || sustains[0] || { id: '', label: '—', sub: 'no sustains', status: 'seed' };
   const sysStats   = liveState?.state?.system || {};
   const pawaBalance = sysStats.pawa_balance ?? null;
 
