@@ -116,6 +116,7 @@ def _find_in_list(lst: list, id_field: str, id_value: str) -> "dict | None":
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "production_batch_widget",
         "fields": [
@@ -250,6 +251,7 @@ async def vyyb_production_start_batch(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "production_batch_widget",
         "fields": [
@@ -345,6 +347,7 @@ async def vyyb_production_complete_batch(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "kds_widget",
         "fields": [
@@ -412,6 +415,7 @@ async def vyyb_kds_dispatch_task(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "kds_widget",
         "fields": [
@@ -473,6 +477,7 @@ async def vyyb_kds_complete_task(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "staff_card",
         "fields": [
@@ -543,6 +548,7 @@ async def vyyb_staff_clock_in(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "staff_card",
         "fields": [
@@ -622,6 +628,7 @@ async def vyyb_staff_clock_out(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "staff_card",
         "fields": [
@@ -687,6 +694,7 @@ async def vyyb_staff_schedule_shift(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "po_card",
         "fields": [
@@ -772,6 +780,7 @@ async def vyyb_procurement_raise_po(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "po_card",
         "fields": [

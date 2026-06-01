@@ -149,6 +149,7 @@ def _find_po(ctx: OperatorContext, po_id: str) -> dict | None:
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "signal_card",
         "fields": [
@@ -269,6 +270,7 @@ async def mkulima_broadcast_supply_signal(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "signal_card",
         "fields": [
@@ -408,6 +410,7 @@ async def mkulima_receive_signal(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "po_card",
         "fields": [
@@ -530,6 +533,7 @@ async def procurement_raise_po(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "delivery_confirmation_card",
         "fields": [

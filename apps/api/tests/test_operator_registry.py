@@ -202,3 +202,14 @@ class TestOperatorMetadata:
         assert isinstance(meta.side_effects, list), (
             f"Operator '{name}' side_effects must be a list."
         )
+
+    @pytest.mark.parametrize("name", ALL_KNOWN_OPERATORS)
+    def test_protocol_present_and_valid(self, name):
+        """Every registered operator must declare a valid protocol. Sprint 3.7."""
+        meta = OPERATOR_REGISTRY.get(name)
+        assert meta is not None
+        assert hasattr(meta, "protocol"), f"Operator '{name}' missing protocol."
+        valid = {"rpc", "event_driven", "polling", "streaming"}
+        assert meta.protocol in valid, (
+            f"Operator '{name}' protocol '{meta.protocol}' not in {valid}."
+        )

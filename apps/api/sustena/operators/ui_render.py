@@ -30,6 +30,7 @@ _parser = UISchemaParser()
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={},
 )
 async def ui_render_operator_card(
@@ -86,6 +87,7 @@ async def ui_render_operator_card(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={},
 )
 async def ui_render_operative_dashboard(
@@ -138,6 +140,7 @@ async def ui_render_operative_dashboard(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={},
 )
 async def ui_render_sustain_home(
@@ -191,6 +194,7 @@ async def ui_render_sustain_home(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={},
 )
 async def ui_render_preview(

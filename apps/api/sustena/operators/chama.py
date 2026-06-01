@@ -134,6 +134,7 @@ def _find_loan(ctx: OperatorContext, loan_id: str) -> dict | None:
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "transaction_confirmation",
         "fields": [
@@ -231,6 +232,7 @@ async def chama_contribution_record(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "proposal_card",
         "fields": [
@@ -338,6 +340,7 @@ async def chama_loan_request(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "transaction_confirmation",
         "fields": [
@@ -445,6 +448,7 @@ async def chama_loan_disburse(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "transaction_confirmation",
         "fields": [
@@ -554,6 +558,7 @@ async def chama_loan_repay(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "transaction_confirmation",
         "fields": [
@@ -651,6 +656,7 @@ async def chama_fine_record(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "meeting_card",
         "fields": [
@@ -730,6 +736,7 @@ async def chama_meeting_schedule(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "dividend_table",
         "fields": [
@@ -819,6 +826,7 @@ async def chama_dividend_calculate(ctx: OperatorContext) -> OperatorResult:
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "transaction_confirmation",
         "fields": [

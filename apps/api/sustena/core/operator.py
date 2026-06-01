@@ -13,6 +13,7 @@ Usage:
     @sustena_operator(
         name="budget.allocate",
         description="Allocate an amount to a budget pocket",
+        protocol="rpc",
         constraints=["params.amount > 0", "finances.liquid.balance >= params.amount"],
         side_effects=["event.finances.pocket_allocated"],
         pawa_cost=0,
@@ -169,6 +170,7 @@ class OperatorResult:
 def sustena_operator(
     name: str,
     description: str,
+    protocol: str,
     constraints: list[str] | None = None,
     post_constraints: list[str] | None = None,
     side_effects: list[str] | None = None,
@@ -177,7 +179,6 @@ def sustena_operator(
     author: str = "sustena_core",
     min_privilege: int = 1,
     ui_schema: dict | None = None,
-    protocol: str = "rpc",
 ) -> Callable:
     """
     Decorator that registers an async operator function in OPERATOR_REGISTRY.

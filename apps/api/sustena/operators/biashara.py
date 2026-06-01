@@ -130,6 +130,7 @@ def _find_in_list(lst: list, id_field: str, id_value: str) -> "dict | None":
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "inventory_card",
         "fields": [
@@ -223,6 +224,7 @@ async def biashara_inventory_restock(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "inventory_card",
         "fields": [
@@ -314,6 +316,7 @@ async def biashara_inventory_adjust(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "order_card",
         "fields": [
@@ -407,6 +410,7 @@ async def biashara_orders_place(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "order_card",
         "fields": [
@@ -516,6 +520,7 @@ async def biashara_orders_fulfill(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "transaction_confirmation",
         "fields": [
@@ -618,6 +623,7 @@ async def biashara_purchases_record(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "po_card",
         "fields": [
@@ -698,6 +704,7 @@ async def biashara_po_raise(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "po_card",
         "fields": [
@@ -784,6 +791,7 @@ async def biashara_po_receive(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "journal_entry_card",
         "fields": [
@@ -861,6 +869,7 @@ async def biashara_accounts_journal_entry(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "vat_summary_card",
         "fields": [
@@ -941,6 +950,7 @@ async def biashara_tax_calculate_vat(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "asset_card",
         "fields": [
@@ -1028,6 +1038,7 @@ async def biashara_assets_depreciate(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "transaction_confirmation",
         "fields": [

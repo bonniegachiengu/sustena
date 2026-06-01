@@ -109,6 +109,7 @@ async def _charge_pawa(operator_name: str, ctx: OperatorContext) -> OperatorResu
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "transaction_confirmation",
         "fields": [
@@ -193,6 +194,7 @@ async def budget_record_income(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "budget_allocation_card",
         "fields": [
@@ -277,6 +279,7 @@ async def budget_allocate(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "transaction_confirmation",
         "fields": [
@@ -389,6 +392,7 @@ async def budget_spend(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "transaction_confirmation",
         "fields": [
@@ -483,6 +487,7 @@ async def budget_transfer(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "budget_ring",
         "fields": [

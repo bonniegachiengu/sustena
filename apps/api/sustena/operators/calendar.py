@@ -89,6 +89,7 @@ async def _charge_pawa(operator_name: str, ctx: OperatorContext) -> OperatorResu
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "calendar_event_card",
         "fields": [
@@ -187,6 +188,7 @@ async def calendar_add_event(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "calendar_list",
         "fields": [
@@ -262,6 +264,7 @@ async def calendar_upcoming_events(
     pawa_cost=0,
     license_tier="free",
     author="sustena_core",
+    protocol="rpc",
     ui_schema={
         "widget_type": "confirmation",
         "fields": [
