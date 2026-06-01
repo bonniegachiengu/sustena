@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Run startup tasks before yielding, shutdown tasks after."""
     logger.info("Starting Sustena XII -- %s", settings.environment)
+    from sustena.core.claude_client import get_claude_client
+    _client = get_claude_client()
+    _mode = "mock mode (zero API calls)" if _client.__class__.__name__ == "MockClaudeClient" else "live mode"
+    logger.info("Claude client: %s", _mode)
     await init_db()
     yield
     logger.info("Sustena XII shutting down.")
