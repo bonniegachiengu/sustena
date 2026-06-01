@@ -11,3 +11,4 @@ from sustena.operators import vyyb         # noqa: F401  (registers vyyb.* opera
 from sustena.operators import ui_render    # noqa: F401  (registers ui.render.* operators)
 from sustena.operators import api_ops      # noqa: F401  (registers api.* operators)
 from sustena.operators import monitor      # noqa: F401  (registers monitor.* operators)
+from sustena.operators import visualize    # noqa: F401  (registers visualize.* operators)
