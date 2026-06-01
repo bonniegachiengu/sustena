@@ -18,7 +18,7 @@ jobs:
       ANTHROPIC_API_KEY: mock
       SECRET_KEY: ci-test-secret
       ADMIN_TOKEN: ci-admin-token
-      DATABASE_URL: sqlite:///./test.db
+      DATABASE_URL: sqlite+aiosqlite:///./test.db
 
     steps:
       - uses: actions/checkout@v4

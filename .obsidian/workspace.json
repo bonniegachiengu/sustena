@@ -214,6 +214,7 @@
   },
   "active": "573068049587cebe",
   "lastOpenFiles": [
+    "apps/api/sustena/db/schema.py.tmp.30268.36bcd58009e8",
     "apps/web/src/lib/sedTwm6uO",
     "apps/web/src/lib/sedOkd12m",
     "apps/web/src/components/mcp/shell.jsx.tmp.18684.1cfc2adac78a",
@@ -225,7 +226,6 @@
     "apps/web/node_modules/@rollup/rollup-openharmony-arm64",
     "apps/web/node_modules/@rollup/rollup-win32-ia32-msvc",
     "apps/web/node_modules/@rollup/rollup-linux-x64-musl",
-    "apps/web/node_modules/@rollup/rollup-openbsd-x64",
     "docs/Reorientation_Report_31May2026.md",
     "README.md",
     "apps/api/venv/Lib/site-packages/pip-26.1.1.dist-info/licenses/src/pip/_vendor/idna/LICENSE.md",

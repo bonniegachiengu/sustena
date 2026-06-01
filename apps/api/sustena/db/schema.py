@@ -155,10 +155,14 @@ _engine: AsyncEngine | None = None
 def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
+        db_url = settings.database_url
+        # Ensure SQLite uses the async aiosqlite driver
+        if "sqlite" in db_url and "aiosqlite" not in db_url:
+            db_url = db_url.replace("sqlite://", "sqlite+aiosqlite://", 1)
         _engine = create_async_engine(
-            settings.database_url,
+            db_url,
             echo=settings.is_development,
-            connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {},
+            connect_args={"check_same_thread": False} if "sqlite" in db_url else {},
         )
     return _engine
 
