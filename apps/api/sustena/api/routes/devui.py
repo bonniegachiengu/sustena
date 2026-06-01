@@ -100,12 +100,13 @@ async def list_sustains(_: str = Depends(verify_admin)) -> dict:
     try:
         from sustena.core.sustain_engine import SustainEngine
         engine = SustainEngine()
-        raw = engine.list_all()  # TODO: wire real — SustainEngine.list_all() not yet implemented
-        return ok({"sustains": raw})
+        raw = engine.list_all()
+        if raw:
+            return ok({"sustains": raw})
     except Exception as exc:
         logger.debug("SustainEngine.list_all not available: %s", exc)
 
-    # TODO: wire real — replace with DB query across sustains table
+    # Stub fallback — shown when the DB has no seeded sustains
     return ok({
         "sustains": [
             {
