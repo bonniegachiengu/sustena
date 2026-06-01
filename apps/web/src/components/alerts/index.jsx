@@ -1,3 +1,4 @@
+import React from 'react';
 /* Sustena — Alerts & Modal System
    AlertModal: full-overlay urgent alerts with priority queue
    SustainPanel: full-page slide-in panel from right (75vw desktop, 100vw mobile)

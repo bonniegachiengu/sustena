@@ -1,3 +1,4 @@
+import React from 'react';
 /* Sustena — core primitives: logo, icons, frames, badges, hero readouts */
 
 const { useState, useEffect, useRef, useMemo } = React;

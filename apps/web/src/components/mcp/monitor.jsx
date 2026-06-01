@@ -1,3 +1,4 @@
+import React from 'react';
 /* Monitor panel — live observability. Two columns: live state stream + event log. Operative cards below. */
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;

@@ -1,6 +1,6 @@
 # Sustena XII
 
-> Human-agent reality interface. 7 primitives. Any describable system.
+> The operating system for Kenyan household and business sustains. Operators, Operatives, Council DAO, and Orchie — built on React and FastAPI.
 
 Phase 0-A
 
@@ -27,7 +27,7 @@ State · Operator · Constraint · Event · Time · Consensus · Operative
 Everything in the system is composed from these. A budget is a State. A deposit is an Event. A spending rule is a Constraint. An Orchie conversation is an Operative executing Operators.
 
 ```
- User (WhatsApp / Web)
+ User (React Web / React Native)
         │
         ▼
    ┌─────────┐
@@ -137,9 +137,9 @@ make test-cov      # with coverage report
 | Backend | Python 3.12, FastAPI, SQLAlchemy, Alembic |
 | AI | Anthropic Claude (Haiku for parsing, Sonnet for reasoning) |
 | Database | SQLite (local dev) → Cloud Firestore (production) |
-| Messaging | WhatsApp Business API (mock in dev) |
+| Frontend | React + Vite + TypeScript (web), React Native (mobile, planned) |
 | Deploy | Google Cloud Run via Cloud Build |
-| Frontend | React, Vite, TypeScript *(in progress)* |
+| Mobile | React Native *(planned)* |
 | Design | Sustena Design System — amber/teal on near-black |
 
 ---
@@ -148,7 +148,7 @@ make test-cov      # with coverage report
 
 **Phase 0-A — actively building.**
 
-The 7-primitive engine is implemented. Homestead and Vyyb operators are the first live sustains. Orchie (Claude-backed) parses WhatsApp messages and executes operator logic. SQLite in dev, Firestore sync wired. Cloud Run deploy pipeline working.
+The 7-primitive engine is implemented. Homestead and Vyyb operators are the first live sustains. Orchie (Claude-backed) parses user input from the React web app and executes operator logic. SQLite in dev, Firestore sync wired. Cloud Run deploy pipeline working.
 
 See `brand/` for the design system and UI mockup components — that's the clearest visual preview of where this is heading.
 

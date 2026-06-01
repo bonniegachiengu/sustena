@@ -197,31 +197,6 @@ button { background: none; border: none; cursor: pointer; }
 .nav-link .nav-id { color: var(--text-dim); margin-left: auto; font-size: 9px; }
 .nav-link.active .nav-id { color: var(--amber-dim); }
 
-/* ─── Docs TOC sidebar — right-aligned variant ─── */
-.doc-toc .nav-link {
-  text-align: right;
-  padding: 5px 12px;
-  font-size: 10px;
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0.06em;
-}
-.doc-toc .nav-link.active::before {
-  left: auto;
-  right: 0;
-}
-.doc-toc .nav-section {
-  text-align: right;
-  padding: 12px 12px 4px;
-  font-family: var(--mono);
-  font-size: 9px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--text-dim);
-  display: block;
-}
-
 /* ─── Status badge ─── */
 .badge {
   display: inline-flex; align-items: center; gap: 5px;
@@ -238,66 +213,6 @@ button { background: none; border: none; cursor: pointer; }
 .badge-danger { color: var(--danger); border-color: rgba(224,80,80,0.3); background: rgba(224,80,80,0.08); }
 .badge-muted  { color: var(--text-muted); border-color: var(--border); }
 .badge-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-
-/* ─── Arena badge variants ─── */
-.badge-operative { color: var(--node-operative); border-color: rgba(176,120,64,0.35); background: rgba(176,120,64,0.08); }
-.badge-operator  { color: var(--node-operator);  border-color: rgba(80,144,224,0.35); background: rgba(80,144,224,0.08); }
-.badge-spore     { color: var(--node-state);     border-color: var(--teal-border);    background: var(--teal-glow); }
-.badge-widget    { color: var(--node-event);     border-color: rgba(224,80,80,0.3);   background: rgba(224,80,80,0.07); }
-.badge-product   { color: var(--ok);             border-color: rgba(76,175,128,0.3);  background: rgba(76,175,128,0.08); }
-.badge-free      { color: var(--ok);             border-color: rgba(76,175,128,0.3);  background: rgba(76,175,128,0.08); }
-.badge-pawa      { color: var(--amber);          border-color: var(--amber-border);   background: var(--amber-glow); }
-
-/* ─── Arena card grid ─── */
-@keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-.fade-up { animation: fadeUp 0.35s ease-out both; }
-.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-.card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  transition: border-color var(--t-fast), background var(--t-fast);
-  cursor: pointer;
-}
-.card:hover { border-color: var(--border-mid); background: var(--bg-raised); }
-.trust-bar { height: 2px; background: var(--bg-overlay); border-radius: 1px; margin-top: 8px; overflow: hidden; }
-.trust-fill { height: 100%; border-radius: 1px; }
-.product-img { width: 100%; height: 120px; background: var(--bg-overlay); border-radius: var(--radius-sm); margin-bottom: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-
-/* ─── Arena tab buttons ─── */
-.tab-btn {
-  padding: 10px 16px;
-  font-family: var(--mono); font-size: 11px; font-weight: 500;
-  letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--text-muted);
-  border-bottom: 2px solid transparent;
-  transition: all var(--t-fast);
-  background: none; border-top: none; border-left: none; border-right: none;
-  cursor: pointer;
-}
-.tab-btn.active { color: var(--text-primary); border-bottom-color: var(--teal); }
-.tab-btn:hover:not(.active) { color: var(--text-secondary); }
-
-/* ─── Doc typography ─── */
-.doc-h1 { font-family: var(--ui); font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25; color: var(--text-primary); margin-bottom: 16px; }
-.doc-h2 { font-family: var(--ui); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; color: var(--text-primary); margin: 40px 0 12px; }
-.doc-h3 { font-family: var(--ui); font-size: 14px; font-weight: 600; letter-spacing: -0.005em; line-height: 1.4; color: var(--text-primary); margin: 28px 0 8px; }
-.doc-p { font-family: var(--ui); font-size: 14px; color: var(--text-secondary); line-height: 1.75; margin-bottom: 14px; }
-.doc-lead { font-family: var(--ui); font-size: 16px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 24px; }
-.doc-quote { border-left: 3px solid var(--amber); padding: 12px 20px; margin: 24px 0; background: var(--amber-glow); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
-.doc-quote p { font-family: var(--ui); font-size: 14px; font-style: italic; color: var(--text-primary); line-height: 1.65; margin: 0; }
-.doc-quote cite { display: block; margin-top: 8px; font-family: var(--mono); font-size: 10px; color: var(--text-muted); letter-spacing: 0.08em; font-style: normal; }
-.doc-code { display: block; font-family: var(--mono); font-size: 12px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px 20px; margin: 16px 0; line-height: 1.7; color: var(--teal); overflow-x: auto; white-space: pre; }
-.doc-inline-code { font-family: var(--mono); font-size: 12px; background: var(--bg-overlay); padding: 1px 5px; border-radius: 3px; color: var(--amber); }
-.doc-table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 13px; }
-.doc-table th { font-family: var(--mono); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); border-bottom: 1px solid var(--border-mid); padding: 8px 12px; text-align: left; }
-.doc-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--text-secondary); vertical-align: top; line-height: 1.55; }
-.doc-table td strong { color: var(--text-primary); font-weight: 500; }
-.doc-table tr:hover td { background: rgba(255,255,255,0.015); }
-.doc-divider { height: 1px; background: var(--border); margin: 48px 0; }
-.tenet { border-left: 2px solid var(--border-mid); padding: 0 0 0 16px; margin-bottom: 20px; transition: border-color var(--t-fast); }
-.tenet:hover { border-left-color: var(--border-light); }
 
 /* ─── Toast ─── */
 @keyframes toastIn {

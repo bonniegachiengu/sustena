@@ -1,3 +1,4 @@
+import React from 'react';
 /* Editor + Controller + Library panels (consolidated) */
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;

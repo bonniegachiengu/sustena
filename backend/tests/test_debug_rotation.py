@@ -1,1 +1,0 @@
-"""Debug scaffolding — no tests."""

@@ -144,6 +144,7 @@ async def health():
 
 from sustena.api.routes import whatsapp, dev
 from sustena.api.routes import sustains, operators, council, users
+from sustena.api.routes import devui
 
 # WhatsApp webhook (always mounted)
 app.include_router(whatsapp.router, prefix="/webhook", tags=["whatsapp"])
@@ -157,4 +158,4 @@ app.include_router(users.router,     prefix="/api/v1/users",     tags=["users"])
 # Dev-only simulation and inspection endpoints
 if settings.is_development:
     app.include_router(dev.router, prefix="/dev", tags=["dev"])
-    logger.info("Dev endpoints mounted at /dev/* (development mode)")
+    app.include_router(devui.router, prefix="/devui", tags=["devui"])

@@ -1,3 +1,5 @@
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
 /* Mycelium Control Panel — app shell, nav, state, Tweaks integration */
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
@@ -20,7 +22,13 @@ const PANELS = [
   { id: 'library',    label: 'LIBRARY',    icon: 'leaf',     sub: 'mycelium network' },
 ];
 
+const PAGE_LINKS = [
+  { id: 'lore',    label: 'LORE',    icon: 'ledger',  sub: 'operational journal', href: '/lore' },
+  { id: 'profile', label: 'PROFILE', icon: 'council', sub: 'identity & history',  href: '/profile' },
+];
+
 function App() {
+  const navigate = useNavigate();
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [panel, setPanel] = dUseState(t.panel || 'monitor');
   const [sustainId, setSustainId] = dUseState(t.sustain || 'homestead.bonnie');
@@ -96,6 +104,7 @@ function App() {
       <LeftNav
         panels={PANELS} active={panel} onSelect={switchPanel}
         collapsed={navCollapsed} onToggle={() => setNavCollapsed(c => !c)}
+        pageLinks={PAGE_LINKS}
       />
 
       <main style={{ gridArea: 'main', overflow: 'hidden', minHeight: 0, position: 'relative' }}>
@@ -157,7 +166,7 @@ function App() {
         <TweakSlider label="Tick rate" value={t.tickRate} min={250} max={3000} step={250} unit="ms"
           onChange={(v) => setTweak('tickRate', v)} />
         <TweakSection label="Orchie" />
-        <TweakButton label="Open full Orchie (mobile)" onClick={() => window.open('Orchie.html', '_blank')} />
+        <TweakButton label="Open full Orchie (mobile)" onClick={() => window.open('/pages/orchie-panel.html', '_blank')} />
         <TweakSection label="Atmosphere" />
         <TweakToggle label="Background grain" value={t.showGrain}
           onChange={(v) => setTweak('showGrain', v)} />
@@ -254,7 +263,8 @@ function TopBar({ clock, sustain, sustains, onSustainChange }) {
 }
 
 /* ─── Left nav ────────────────────────────────────────────── */
-function LeftNav({ panels, active, onSelect, collapsed, onToggle }) {
+function LeftNav({ panels, active, onSelect, collapsed, onToggle, pageLinks }) {
+  const navigate = useNavigate();
   return (
     <aside style={{
       gridArea: 'rail',
@@ -312,6 +322,19 @@ function LeftNav({ panels, active, onSelect, collapsed, onToggle }) {
           </button>
         ) : (
           <button key={p.id} className={`nav-link ${active === p.id ? 'active' : ''}`} onClick={() => onSelect(p.id)}>
+            <Icon name={p.icon} size={14} />
+            <span>{p.label}</span>
+          </button>
+        ))}
+        {(pageLinks || []).map(p => collapsed ? (
+          <button key={p.id} className="nav-link"
+            title={`${p.label} · ${p.sub}`}
+            onClick={() => navigate(p.href)}
+            style={{ padding: '9px 0', justifyContent: 'center', borderRadius: 'var(--radius-sm)' }}>
+            <Icon name={p.icon} size={15} />
+          </button>
+        ) : (
+          <button key={p.id} className="nav-link" onClick={() => navigate(p.href)}>
             <Icon name={p.icon} size={14} />
             <span>{p.label}</span>
           </button>
@@ -412,7 +435,7 @@ function OrchieFAB({ open, onToggle }) {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <FabBtn onClick={restart} title="Restart"><Icon name="replay" size={11} /></FabBtn>
-              <FabBtn onClick={() => window.open('Orchie.html', '_blank')} title="Open mobile"><Icon name="expand" size={11} /></FabBtn>
+              <FabBtn onClick={() => window.open('/pages/orchie-panel.html', '_blank')} title="Open mobile"><Icon name="expand" size={11} /></FabBtn>
               <FabBtn onClick={onToggle} title="Close"><Icon name="x" size={11} /></FabBtn>
             </div>
           </header>
@@ -477,6 +500,25 @@ function OrchieFAB({ open, onToggle }) {
             }}><Icon name="send" size={12} /></button>
           </div>
         </div>
+      )}
+
+      {/* LISTEN pill — shown only when FAB drawer is closed */}
+      {!open && (
+        <button title="Listen" style={{
+          position: 'fixed', right: 20, bottom: 98, zIndex: 951,
+          padding: '5px 14px',
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
+          color: 'var(--teal)',
+          background: 'var(--bg-raised)',
+          border: '1px solid var(--teal)',
+          borderRadius: 12,
+          boxShadow: '0 0 10px rgba(0,200,180,0.15)',
+          cursor: 'pointer',
+          transition: 'all var(--t-fast)',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--teal)'; e.currentTarget.style.color = 'var(--bg-base)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-raised)'; e.currentTarget.style.color = 'var(--teal)'; }}
+        >LISTEN</button>
       )}
 
       {/* FAB button */}
@@ -658,11 +700,7 @@ function ModalMetric({ label, value, sub, tone }) {
   );
 }
 
-/* Helpers */
-function formatClock(d) {
-  const pad = n => n.toString().padStart(2, '0');
-  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-}
+/* formatClock defined in data.jsx */
 
 /* ─── Generic Confirm Modal ──────────────────────────────── */
 function ConfirmModal({ opts, onClose }) {
@@ -927,4 +965,4 @@ function bumpVersion(v, delta) {
   return v;
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+export default App;

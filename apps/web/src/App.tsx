@@ -1,31 +1,67 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+/**
+ * App.tsx — Sustena XII Mycelium Control Panel
+ *
+ * Loading order matters: each file assigns components to window globals
+ * that the next file in the chain references. Shell is last and exports App.
+ */
 
-// Placeholder pages — to be implemented
-const MCPMonitor = () => <div>MCP Monitor</div>
-const MCPEditor = () => <div>MCP Editor</div>
-const MCPSimulator = () => <div>MCP Simulator</div>
-const MCPController = () => <div>MCP Controller</div>
-const MCPLibrary = () => <div>MCP Library</div>
-const OrchiePage = () => <div>Orchie</div>
-const ArenaPage = () => <div>Arena</div>
-const ProfilePage = () => <div>Profile</div>
-const LorePage = () => <div>Lore</div>
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 
-export default function App() {
+// 1. Core primitives
+import './components/core/index.jsx'
+
+// 2. Tweaks panel
+import './components/ui/tweaks-panel.jsx'
+
+// 3. Orchie chat
+import './components/orchie/chat.jsx'
+
+// 4. MCP data models + DAG primitives
+import './components/mcp/data.jsx'
+
+// 5. Monitor panel
+import './components/mcp/monitor.jsx'
+
+// 6. Editor + Controller + Library panels
+import './components/mcp/other.jsx'
+
+// 6b. Profile page (legacy window global)
+import './components/ui/profile.jsx'
+
+// 6c. Journal / Lore page (legacy window global)
+import './components/ui/journal.jsx'
+
+// 7. Simulator panel
+import './components/mcp/simulator.jsx'
+
+// 8. App shell
+import ShellApp from './components/mcp/shell.jsx'
+
+// Page routes
+import ProfilePage from './pages/ProfilePage'
+import LoreLayout from './pages/LoreLayout'
+import LorePage from './pages/LorePage'
+import JournalPage from './pages/JournalPage'
+import ArenaPage from './pages/ArenaPage'
+import DocsPage from './pages/DocsPage'
+
+function RootApp() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Navigate to="/mcp/monitor" replace />} />
-        <Route path="/mcp/monitor" element={<MCPMonitor />} />
-        <Route path="/mcp/editor" element={<MCPEditor />} />
-        <Route path="/mcp/simulator" element={<MCPSimulator />} />
-        <Route path="/mcp/controller" element={<MCPController />} />
-        <Route path="/mcp/library" element={<MCPLibrary />} />
-        <Route path="/orchie" element={<OrchiePage />} />
-        <Route path="/arena" element={<ArenaPage />} />
+        <Route path="/" element={<ShellApp />} />
         <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/lore" element={<LorePage />} />
+        {/* Arena — standalone with its own full header */}
+        <Route path="/arena" element={<ArenaPage />} />
+        {/* Lore section — shared top nav via LoreLayout */}
+        <Route element={<LoreLayout />}>
+          <Route path="/lore" element={<LorePage />} />
+          <Route path="/journal" element={<JournalPage />} />
+          <Route path="/docs" element={<DocsPage />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   )
 }
+
+export default RootApp

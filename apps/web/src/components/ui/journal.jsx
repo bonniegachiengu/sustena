@@ -1,3 +1,4 @@
+import React from 'react';
 /*
   /journal — Sustena XII operational journal.
   Design intent: minimal editorial layout inspired by brand/inspirations/Blog/
@@ -34,7 +35,7 @@ const JOURNAL_ENTRIES = [
     body: [
       { type: 'lead', text: 'After running 3 simulation branches, the Haiku model at $0.80/MTok keeps Pawa burn within the 28/hr budget while sustaining 92% intent accuracy on the test corpus.' },
       { type: 'h2', text: 'Why this matters' },
-      { type: 'p', text: 'Orchie's inference cost is the primary Pawa drain. At current usage patterns (≈ 218 ops/min rolling average), Sonnet would put us at 94 Pawa/hr — breaking the constraint reserve > 50,000 within 6 weeks.' },
+      { type: 'p', text: 'Orchie\'s inference cost is the primary Pawa drain. At current usage patterns (~218 ops/min rolling average), Sonnet would put us at 94 Pawa/hr — breaking the constraint reserve > 50,000 within 6 weeks.' },
       { type: 'p', text: 'Branch A.2 showed Haiku + local state cache reduces token usage by 34% with no detectable drop in structured output quality across the decision, update, and note entry types.' },
       { type: 'h2', text: 'Constraints satisfied' },
       { type: 'sidenote', anchor: 'system.pawa_balance', note: 'Current balance: 8,420 pwa' },

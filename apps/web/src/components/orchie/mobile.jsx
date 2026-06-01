@@ -1,3 +1,4 @@
+import React from 'react';
 /* Orchie mobile — full screen iOS frame, dark, chat with animated widgets */
 
 const { useState: mUseState, useEffect: mUseEffect, useRef: mUseRef } = React;

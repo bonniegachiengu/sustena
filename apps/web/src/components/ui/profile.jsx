@@ -1,3 +1,4 @@
+import React from 'react';
 /*
   Profile — person or entity profile page.
   Design language: dark hero + earthy palette (soil brown, warm amber, forest green).

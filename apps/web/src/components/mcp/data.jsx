@@ -1,3 +1,4 @@
+import React from 'react';
 /* Sustena — Shared data models + DAG rendering components
    DagNode (Step 6: text-first, icon secondary, min 13px labels)
    DagEdges (Step 6: reduced opacity, selected highlight)
@@ -1193,7 +1194,9 @@ Object.assign(window, {
   /* Data */
   SUSTAINS, STATE_TREE, OPERATIVES, PROPOSALS,
   SIM_NODES, SIM_EDGES, SCENARIO_TREE,
-  LIBRARY_ITEMS, NODE_STYLES,
+  LIBRARY_ITEMS,
+  LIBRARY: LIBRARY_ITEMS,  /* alias used by LibraryPanel in other.jsx */
+  NODE_STYLES,
   pickEvent, LibraryMark, WidgetPreview,
   useTweaks, formatClock,
 });

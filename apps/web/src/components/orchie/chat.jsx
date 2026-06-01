@@ -1,3 +1,4 @@
+import React from 'react';
 /* Orchie — shared chat + widget renderer. Used by sidebar (compact) and mobile (full). */
 
 const { useState: oUseState, useEffect: oUseEffect, useRef: oUseRef, useMemo: oUseMemo } = React;

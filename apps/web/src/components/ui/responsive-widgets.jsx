@@ -1,3 +1,4 @@
+import React from 'react';
 /* Sustena — Responsive Digital Asset Widgets
    AirTicket, Voucher, Certificate, Badge, Poster, Thumbnail
    All widgets open a ResponsiveWidgetModal on click.

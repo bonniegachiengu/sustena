@@ -1,3 +1,4 @@
+import React from 'react';
 /* Simulator panel — forked execution with scenario tree, animated DAG, state diff. */
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
