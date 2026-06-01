@@ -446,9 +446,7 @@ function ControllerPanel({ tick, sustain, openModal }) {
 
       {/* Terminal + IoT + Rollback */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 14, minHeight: 0 }}>
-        <Card title="OPERATOR CONSOLE" sub="DIRECT INVOCATION" padded={false}>
-          <ControllerTerminal tick={tick} sustain={sustain} />
-        </Card>
+        <OperatorConsoleCard tick={tick} sustain={sustain} />
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>
           <Card title="IOT · CONNECTED DEVICES" sub="5 ONLINE" padded scroll>
@@ -1044,6 +1042,176 @@ function parseCommand(raw) {
     params[k] = isNaN(num) ? v : num;
   });
   return { operator, params };
+}
+
+/* ── OperatorConsoleCard — tab toggle between CONSOLE and UI PREVIEW ─────── */
+function OperatorConsoleCard({ tick, sustain }) {
+  const [tab, setTab] = dUseState('console');
+  const tabStyle = (id) => ({
+    padding: '4px 10px',
+    fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 500, letterSpacing: '0.08em',
+    color: tab === id ? 'var(--amber)' : 'var(--text-muted)',
+    background: tab === id ? 'var(--amber-glow)' : 'transparent',
+    border: `1px solid ${tab === id ? 'var(--amber-border)' : 'var(--border)'}`,
+    borderRadius: 'var(--radius-sm)',
+    transition: 'all var(--t-fast)',
+  });
+  return (
+    <Card
+      title={tab === 'console' ? 'OPERATOR CONSOLE' : 'UI PREVIEW'}
+      sub={tab === 'console' ? 'DIRECT INVOCATION' : 'SPEC → WIDGET'}
+      padded={false}
+      actions={
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button style={tabStyle('console')} onClick={() => setTab('console')}>CONSOLE</button>
+          <button style={tabStyle('preview')} onClick={() => setTab('preview')}>UI PREVIEW</button>
+        </div>
+      }
+    >
+      {tab === 'console'
+        ? <ControllerTerminal tick={tick} sustain={sustain} />
+        : <UIPreviewPanel sustain={sustain} />}
+    </Card>
+  );
+}
+
+/* ── UIPreviewPanel — paste spec JSON, see rendered widget ───────────────── */
+function UIPreviewPanel({ sustain }) {
+  const DEFAULT_SPEC = JSON.stringify({
+    widget_type: 'budget_allocation_card',
+    fields: [
+      { label: 'Pocket', source: 'inputs.pocket_name', display: 'text' },
+      { label: 'Amount', source: 'inputs.amount', display: 'currency' },
+      { label: 'Remaining', source: 'state.finances.liquid.balance', display: 'currency' },
+    ],
+    ctas: ['View Budget', 'Allocate Another'],
+  }, null, 2);
+
+  const [specText, setSpecText] = dUseState(DEFAULT_SPEC);
+  const [mockText, setMockText] = dUseState(JSON.stringify({ inputs: { pocket_name: 'food', amount: 3000 } }, null, 2));
+  const [result, setResult] = dUseState(null);
+  const [error, setError] = dUseState(null);
+  const [loading, setLoading] = dUseState(false);
+  const debounceRef = dUseRef(null);
+
+  const runPreview = dUseRef(async (spec, mock) => {
+    let specJson, mockState;
+    try { specJson = JSON.parse(spec); } catch { setError('Invalid spec JSON'); return; }
+    try { mockState = JSON.parse(mock || '{}'); } catch { setError('Invalid mock state JSON'); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.post('/devui/preview-widget', {
+        spec_json: specJson,
+        mock_state: mockState,
+      });
+      setResult(res?.data?.widget || null);
+    } catch (err) {
+      setError(err.message || 'API error');
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  const schedulePreview = (spec, mock) => {
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => runPreview.current(spec, mock), 500);
+  };
+
+  dUseEffect(() => { schedulePreview(specText, mockText); }, [specText, mockText]);
+
+  const fields = result?.data?.fields || [];
+  const ctas   = result?.data?.ctas || [];
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: '100%', minHeight: 0 }}>
+      {/* Left — editors */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0, borderRight: '1px solid var(--border)', overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            <span className="label-10" style={{ fontSize: 9 }}>SPEC JSON</span>
+          </div>
+          <textarea
+            value={specText}
+            onChange={e => { setSpecText(e.target.value); schedulePreview(e.target.value, mockText); }}
+            spellCheck={false}
+            style={{
+              flex: 1, resize: 'none',
+              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)',
+              background: 'var(--bg-base)', border: 'none', outline: 'none',
+              padding: '8px 10px', lineHeight: 1.5,
+            }}
+          />
+        </div>
+        <div style={{ flex: '0 0 100px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            <span className="label-10" style={{ fontSize: 9 }}>MOCK STATE</span>
+          </div>
+          <textarea
+            value={mockText}
+            onChange={e => { setMockText(e.target.value); schedulePreview(specText, e.target.value); }}
+            spellCheck={false}
+            style={{
+              flex: 1, resize: 'none',
+              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)',
+              background: 'var(--bg-base)', border: 'none', outline: 'none',
+              padding: '8px 10px', lineHeight: 1.5,
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Right — rendered widget preview */}
+      <div style={{ padding: 14, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {loading && (
+          <span className="t-meta" style={{ animation: 'pulse 0.8s ease-in-out infinite', fontSize: 10 }}>⟳ rendering…</span>
+        )}
+        {error && (
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--danger)' }}>{error}</span>
+        )}
+        {result && !loading && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="label-10" style={{ color: 'var(--teal)', fontSize: 9 }}>● LIVE</span>
+              <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{result.type}</span>
+            </div>
+            <div style={{
+              background: 'var(--bg-base)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)', padding: 12,
+              display: 'flex', flexDirection: 'column', gap: 8,
+            }}>
+              {fields.map((f, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: i < fields.length - 1 ? '1px solid var(--border)' : 'none', paddingBottom: 6 }}>
+                  <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{f.label}</span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: f.value == null ? 'var(--text-dim)' : 'var(--text-primary)' }}>
+                    {f.value == null ? '—' : String(f.value)}
+                  </span>
+                </div>
+              ))}
+              {ctas.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                  {ctas.map((c, i) => (
+                    <span key={i} style={{
+                      padding: '3px 8px',
+                      fontFamily: 'var(--mono)', fontSize: 9,
+                      color: 'var(--amber)', border: '1px solid var(--amber-border)',
+                      borderRadius: 'var(--radius-sm)', background: 'var(--amber-glow)',
+                    }}>{c}</span>
+                  ))}
+                </div>
+              )}
+              {result.summary && (
+                <span className="meta-10" style={{ color: 'var(--text-dim)', fontSize: 9, borderTop: '1px solid var(--border)', paddingTop: 6 }}>{result.summary}</span>
+              )}
+            </div>
+          </>
+        )}
+        {!result && !loading && !error && (
+          <span className="meta-10" style={{ color: 'var(--text-dim)' }}>Edit spec to render preview</span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ControllerTerminal({ tick, sustain }) {
