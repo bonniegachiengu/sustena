@@ -209,8 +209,10 @@ async def get_state(
                 "rice_kg":       3.0,
             },
             "system": {
-                "pawa_balance": 8420,
-                "api_p95_ms":   428,
+                "pawa_balance":    8420,
+                "api_p95_ms":      428,
+                "ops_per_min":     12,
+                "orchie_load_pct": 23,
             },
             "council": {
                 "quorum_pct": 78,
@@ -442,7 +444,7 @@ async def state_stream_query(
                         "burn_rate": 4214,
                         "pockets": {"food": 8420, "transport": 4100},
                     },
-                    "system": {"pawa_balance": 8420, "api_p95_ms": 428},
+                    "system": {"pawa_balance": 8420, "api_p95_ms": 428, "ops_per_min": 12, "orchie_load_pct": 23},
                 }
 
             await websocket.send_json({

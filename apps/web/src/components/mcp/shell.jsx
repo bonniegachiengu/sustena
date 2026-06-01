@@ -41,6 +41,7 @@ function App() {
   const [orchieOpen, setOrchieOpen] = dUseState(t.showOrchie ?? false);
   const [navCollapsed, setNavCollapsed] = dUseState(false);
   const [liveState, setLiveState] = dUseState(null);  // pushed from WS
+  const [apiSustains, setApiSustains] = dUseState([]);
   const wsRef = dUseRef(null);
 
   // Per-panel side-rail visibility (Sim & Editor)
@@ -62,6 +63,13 @@ function App() {
 
   dUseEffect(() => setPanel(t.panel), [t.panel]);
   dUseEffect(() => setSustainId(t.sustain), [t.sustain]);
+
+  // Fetch sustain list once on mount
+  dUseEffect(() => {
+    api.get('/devui/sustains')
+      .then(d => { const list = d?.data?.sustains || []; if (list.length) setApiSustains(list); })
+      .catch(() => {});
+  }, []);
 
   // WebSocket — open on mount and whenever sustainId changes, close on unmount/change
   dUseEffect(() => {
@@ -97,7 +105,10 @@ function App() {
     return () => clearInterval(id);
   }, [t.tickRate]);
 
-  const sustain = SUSTAINS.find(s => s.id === sustainId) || SUSTAINS[0];
+  const sustains   = apiSustains.length ? apiSustains : SUSTAINS;
+  const sustain    = sustains.find(s => s.id === sustainId) || sustains[0];
+  const sysStats   = liveState?.state?.system || {};
+  const pawaBalance = sysStats.pawa_balance ?? null;
 
   const switchPanel = (id) => {
     setPanel(id);
@@ -128,16 +139,17 @@ function App() {
     }}>
       <TopBar
         clock={clock} sustain={sustain}
-        sustains={SUSTAINS} onSustainChange={(id) => { setSustainId(id); setTweak('sustain', id); }}
+        sustains={sustains} onSustainChange={(id) => { setSustainId(id); setTweak('sustain', id); }}
       />
       <LeftNav
         panels={PANELS} active={panel} onSelect={switchPanel}
         collapsed={navCollapsed} onToggle={() => setNavCollapsed(c => !c)}
         pageLinks={PAGE_LINKS}
+        pawaBalance={pawaBalance}
       />
 
       <main style={{ gridArea: 'main', overflow: 'hidden', minHeight: 0, position: 'relative' }}>
-        {panel === 'monitor'    && <MonitorPanel tick={tick} sustain={sustain} liveState={liveState} />}
+        {panel === 'monitor'    && <MonitorPanel tick={tick} sustain={sustain} liveState={liveState} sustains={sustains} />}
         {panel === 'simulator'  && <SimulatorPanel tick={tick} sustain={sustain}
           leftOpen={simLeft} rightOpen={simRight}
           onToggleLeft={() => setSimLeft(v => !v)}
@@ -158,7 +170,7 @@ function App() {
         sustainId={sustainId}
       />
 
-      <Footer tick={tick} />
+      <Footer tick={tick} stats={sysStats} />
 
       {modal?.kind === 'proposal' && <ProposalModal p={modal.data} onClose={() => setModal(null)} />}
       {modal?.kind === 'library' && <LibraryModal data={modal.data} onClose={() => setModal(null)} />}
@@ -294,7 +306,7 @@ function TopBar({ clock, sustain, sustains, onSustainChange }) {
 }
 
 /* ─── Left nav ────────────────────────────────────────────── */
-function LeftNav({ panels, active, onSelect, collapsed, onToggle, pageLinks }) {
+function LeftNav({ panels, active, onSelect, collapsed, onToggle, pageLinks, pawaBalance }) {
   const navigate = useNavigate();
   return (
     <aside style={{
@@ -379,18 +391,24 @@ function LeftNav({ panels, active, onSelect, collapsed, onToggle, pageLinks }) {
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span className="label-10">PAWA</span>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 18, fontWeight: 500, color: 'var(--amber)' }}>—</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 18, fontWeight: 500, color: 'var(--amber)' }}>
+              {pawaBalance != null ? pawaBalance.toLocaleString() : '—'}
+            </span>
             <span className="meta-10">balance</span>
           </div>
           <div style={{ height: 2, background: 'var(--bg-base)', borderRadius: 1, marginTop: 4 }}>
-            <div style={{ width: '0%', height: '100%', background: 'var(--amber)' }} />
+            <div style={{ width: pawaBalance != null ? `${Math.min(100, (pawaBalance / 10000) * 100)}%` : '0%', height: '100%', background: 'var(--amber)', transition: 'width 0.6s ease' }} />
           </div>
-          <span className="meta-10" style={{ fontSize: 9, color: 'var(--text-muted)' }}>—</span>
+          <span className="meta-10" style={{ fontSize: 9, color: 'var(--text-muted)' }}>
+            {pawaBalance != null ? `${Math.round((pawaBalance / 10000) * 100)}% capacity` : '—'}
+          </span>
         </div>
       ) : (
         <div style={{ padding: '10px 0', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
           <span className="meta-10" style={{ fontSize: 9, color: 'var(--text-muted)' }}>PWA</span>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--amber)' }}>—</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--amber)' }}>
+            {pawaBalance != null ? pawaBalance.toLocaleString() : '—'}
+          </span>
         </div>
       )}
     </aside>
@@ -597,7 +615,11 @@ function FabBtn({ children, onClick, title }) {
 }
 
 /* ─── Footer telemetry ────────────────────────────────────── */
-function Footer({ tick }) {
+function Footer({ tick, stats = {} }) {
+  const latency    = stats.api_p95_ms != null ? `${stats.api_p95_ms}ms` : '—';
+  const opsPerMin  = stats.ops_per_min != null ? stats.ops_per_min : '—';
+  const orchieLoad = stats.orchie_load_pct != null ? `${stats.orchie_load_pct}%` : '—';
+  const events     = stats.event_count != null ? stats.event_count : '—';
   return (
     <footer style={{
       gridArea: 'footer',
@@ -612,13 +634,13 @@ function Footer({ tick }) {
         <span className="meta-10" style={{ color: 'var(--teal)' }}>NOMINAL</span>
       </div>
       <FSep />
-      <FTick label="LATENCY" value="—" />
+      <FTick label="LATENCY" value={latency} />
       <FSep />
-      <FTick label="OPS / MIN" value="—" />
+      <FTick label="OPS / MIN" value={opsPerMin} />
       <FSep />
-      <FTick label="ORCHIE LOAD" value="—" />
+      <FTick label="ORCHIE LOAD" value={orchieLoad} />
       <FSep />
-      <FTick label="EVENTS" value="—" />
+      <FTick label="EVENTS" value={events} />
       <FSep />
       <FTick label="GAS" value="—" />
       <div style={{ flex: 1 }} />

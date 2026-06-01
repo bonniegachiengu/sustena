@@ -110,7 +110,7 @@ function useStreamHealth(wsStatus) {
   return                               { status: 'OFFLINE', color: 'var(--text-muted)', lag: '—' };
 }
 
-function MonitorPanel({ tick, sustain, liveState }) {
+function MonitorPanel({ tick, sustain, liveState, sustains }) {
   // liveState is pushed from shell.jsx via the WS stream (may be null on first render)
   const [apiData, setApiData]   = dUseState(null);   // last good GET /devui/state result
   const [loading, setLoading]   = dUseState(true);
@@ -206,8 +206,9 @@ function MonitorPanel({ tick, sustain, liveState }) {
   }, [tick, offline]);
 
   // Hero metrics from API or fallback
-  const pawaBalance = apiData?.state?.system?.pawa_balance ?? null;
-  const activeSustains = SUSTAINS.filter(s => s.status === 'live').length;
+  const pawaBalance    = apiData?.state?.system?.pawa_balance ?? null;
+  const opsPerMin      = apiData?.state?.system?.ops_per_min ?? null;
+  const activeSustains = (sustains && sustains.length ? sustains : SUSTAINS).filter(s => s.status === 'live').length;
 
   return (
     <div className="panel-enter" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 18, padding: '24px 28px' }}>
@@ -248,7 +249,7 @@ function MonitorPanel({ tick, sustain, liveState }) {
       {!loading && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
           <HeroTile label="ACTIVE SUSTAINS" value={activeSustains} sub="in scope" tone="ok" />
-          <HeroTile label="OPERATORS / MIN" value={apiData?.ops_per_min ?? '—'} live sub="rolling 60s" />
+          <HeroTile label="OPERATORS / MIN" value={opsPerMin ?? '—'} live={opsPerMin != null} sub="rolling 60s" />
           <HeroTile label="API P95" value={apiData?.state?.system?.api_p95_ms != null ? `${apiData.state.system.api_p95_ms}` : '—'} unit={apiData?.state?.system?.api_p95_ms != null ? 'ms' : ''} live sub="haiku · inference" />
           <HeroTile label="PAWA BALANCE" value={pawaBalance != null ? pawaBalance : '—'} unit={pawaBalance != null ? 'pwa' : ''} sub="orchie tokens" tone="default" />
         </div>
