@@ -139,10 +139,20 @@ All 5 tasks done and committed:
   - Tab toggle: CONSOLE / UI PREVIEW
   - Left: editable spec JSON + mock state; Right: live rendered widget (500ms debounce)
 
-### Sprint 3 — NEXT: Operators + Protocols
+### Sprint 3 ✅ — Operators + Protocols
+All 7 tasks done and committed:
+- [x] 3.1 `api.*` operators — `api.get`, `api.post`, `api.webhook_listen`
+- [x] 3.2 `monitor.*` operators — `monitor.state_path`, `monitor.constraint`
+- [x] 3.3 `visualize.*` operators — `visualize.pocket_ring`, `visualize.event_feed`, `visualize.constraint_health`
+- [x] 3.4 `simulate.*` operators — `simulate.fork`, `simulate.run_path`, `simulate.score`
+- [x] 3.5 `edit.*` operators — `edit.state_patch`, `edit.operator_spec`
+- [x] 3.6 `control.*` operators — `control.execute_approved`, `control.rollback`
+- [x] 3.7 `protocol` field required on `OperatorMeta` (3rd arg in `@sustena_operator`); all 44 existing operators back-filled with `protocol="rpc"`
+
+### Sprint 4 — NEXT: Operator UIs
 See `docs/Sustena_XII_Roadmap_Jun2026.md` for full task list.
-Tasks 3.1–3.7 cover: `api.*`, `monitor.*`, `visualize.*`, `simulate.*`, `edit.*`,
-`control.*` operators, plus `protocol` field on `OperatorMeta`.
+Tasks 4.1–4.4 cover: protocol-aware Operator Console, Monitor Panel widget grid,
+Simulate Panel with `simulate.*` operators, Control Panel proposal execution.
 
 ---
 
