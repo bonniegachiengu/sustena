@@ -1,105 +1,265 @@
 import React from 'react';
+import { api } from '../../lib/api.js';
 /* Monitor panel — live observability. Two columns: live state stream + event log. Operative cards below. */
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
 
-/* Stream health derived from tick — simulates a periodic stale scenario */
-function useStreamHealth(tick) {
-  return dUseMemo(() => {
-    // Simulate delayed/stale occasionally
-    if (tick % 47 < 4) return { status: 'STALE', color: 'var(--danger)', lag: '>10s' };
-    if (tick % 31 < 5) return { status: 'DELAYED', color: 'var(--amber)', lag: '3–6s' };
-    return { status: 'LIVE', color: 'var(--teal)', lag: '28ms' };
-  }, [tick]);
+/* ─── helpers to normalise API state → STATE_TREE shape ─── */
+function apiStateToStateTree(apiState) {
+  if (!apiState) return null;
+  const rows = [];
+  // pockets
+  const pockets = apiState.pockets || {};
+  Object.entries(pockets).forEach(([k, v]) => {
+    rows.push({
+      path: `finances.pockets.${k}`,
+      value: v,
+      target: null,
+      fmt: 'ksh',
+      cstr: 'ok',
+      desc: `${k} pocket`,
+    });
+  });
+  // pawa_balance
+  if (apiState.pawa_balance != null) {
+    rows.push({
+      path: 'system.pawa_balance',
+      value: apiState.pawa_balance,
+      target: 10000,
+      fmt: 'pwa',
+      cstr: apiState.pawa_balance < 2000 ? 'red' : apiState.pawa_balance < 5000 ? 'amber' : 'ok',
+      desc: 'Orchie tokens',
+    });
+  }
+  // score
+  if (apiState.score != null) {
+    rows.push({
+      path: 'system.score',
+      value: apiState.score,
+      target: 1,
+      fmt: '',
+      cstr: apiState.score >= 0.8 ? 'ok' : apiState.score >= 0.6 ? 'amber' : 'red',
+      desc: 'Sustain score',
+    });
+  }
+  return rows.length ? rows : null;
 }
 
-function MonitorPanel({ tick, sustain }) {
-  const streamHealth = useStreamHealth(tick);
+function apiOperativesToCards(operatives) {
+  if (!operatives || !operatives.length) return null;
+  return operatives.map(o => ({
+    id: o.id || o.name,
+    name: o.name || o.id,
+    role: o.role || '',
+    status: o.status || 'active',
+    confidence: o.confidence ?? 80,
+    pawa: o.pawa ?? 0,
+    task: o.task || o.current_task || '',
+    subtasks: o.subtasks || [],
+  }));
+}
 
-  // Animated state values that occasionally tick — also synthesize 7-point history
-  const stateVals = dUseMemo(() => STATE_TREE.map((s, i) => {
-    const live = s.value + (s.fmt === 'ksh' ? Math.sin(tick * 0.1 + i) * (s.value * 0.001) : 0);
-    // 7-point sparkline: last 7 readings (synthetic)
-    const sparkline = Array.from({ length: 7 }).map((_, t) => {
-      const ago = 6 - t;
-      const base = s.value;
-      if (s.fmt === 'ksh' || s.fmt === 'pwa') {
-        return base + Math.sin((tick - ago * 4) * 0.1 + i) * (base * 0.005);
-      }
-      if (s.fmt === '%' || s.fmt === 'L' || s.fmt === 'kg') {
-        return base + Math.sin((tick - ago * 4) * 0.15 + i) * (base * 0.03);
-      }
-      return base + Math.sin((tick - ago * 4) * 0.12 + i) * (base * 0.02);
+function apiEventsToLogEntries(events) {
+  if (!events || !events.length) return null;
+  const pad = n => n.toString().padStart(2, '0');
+  return events.slice(0, 24).map((e, i) => {
+    const d = e.timestamp ? new Date(e.timestamp) : new Date();
+    const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    return {
+      key: e.id || i,
+      time,
+      sustain: e.sustain || '',
+      operator: e.operator || e.type || '',
+      delta: e.delta || e.message || JSON.stringify(e.data || {}),
+      op: e.op || e.type || 'EVT',
+      tone: e.tone || 'teal',
+    };
+  });
+}
+
+/* Stream health: LIVE when ws is connected, STALE/DELAYED otherwise */
+function useStreamHealth(wsStatus) {
+  if (wsStatus === 'connected') return { status: 'LIVE',    color: 'var(--teal)',   lag: 'ws' };
+  if (wsStatus === 'stale')     return { status: 'STALE',   color: 'var(--danger)', lag: '>10s' };
+  return                               { status: 'OFFLINE', color: 'var(--text-muted)', lag: '—' };
+}
+
+function MonitorPanel({ tick, sustain, liveState }) {
+  // liveState is pushed from shell.jsx via the WS stream (may be null on first render)
+  const [apiData, setApiData]   = dUseState(null);   // last good GET /devui/state result
+  const [loading, setLoading]   = dUseState(true);
+  const [offline, setOffline]   = dUseState(false);
+  const [wsStatus, setWsStatus] = dUseState('connecting');
+
+  // Initial fetch
+  dUseEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.get(`/devui/state?sustain_id=${encodeURIComponent(sustain.id)}`)
+      .then(d => { if (!cancelled) { setApiData(d); setLoading(false); setOffline(false); } })
+      .catch(() => { if (!cancelled) { setLoading(false); setOffline(true); } });
+    return () => { cancelled = true; };
+  }, [sustain.id]);
+
+  // Re-fetch on tick (every ~5s at 1s tick rate)
+  dUseEffect(() => {
+    if (tick === 0 || tick % 5 !== 0) return;
+    api.get(`/devui/state?sustain_id=${encodeURIComponent(sustain.id)}`)
+      .then(d => { setApiData(d); setOffline(false); setWsStatus('connected'); })
+      .catch(() => setOffline(true));
+  }, [tick, sustain.id]);
+
+  // Merge liveState (from WS) when available
+  dUseEffect(() => {
+    if (liveState && liveState.sustain_id === sustain.id) {
+      setApiData(liveState);
+      setOffline(false);
+      setWsStatus('connected');
+    }
+  }, [liveState, sustain.id]);
+
+  const streamHealth = useStreamHealth(offline ? 'stale' : wsStatus);
+
+  // Derive display data — fall back to mock when offline
+  const stateRows = dUseMemo(() => {
+    const fromApi = apiStateToStateTree(apiData);
+    if (fromApi) {
+      return fromApi.map((s, i) => {
+        const live = s.value;
+        const sparkline = Array.from({ length: 7 }).map((_, t) => {
+          const ago = 6 - t;
+          return s.value + Math.sin((tick - ago * 4) * 0.1 + i) * (s.value * 0.003);
+        });
+        return { ...s, live, sparkline };
+      });
+    }
+    // Fallback: use MOCK data
+    return STATE_TREE.map((s, i) => {
+      const live = s.value + (s.fmt === 'ksh' ? Math.sin(tick * 0.1 + i) * (s.value * 0.001) : 0);
+      const sparkline = Array.from({ length: 7 }).map((_, t) => {
+        const ago = 6 - t;
+        const base = s.value;
+        if (s.fmt === 'ksh' || s.fmt === 'pwa') return base + Math.sin((tick - ago * 4) * 0.1 + i) * (base * 0.005);
+        if (s.fmt === '%' || s.fmt === 'L' || s.fmt === 'kg') return base + Math.sin((tick - ago * 4) * 0.15 + i) * (base * 0.03);
+        return base + Math.sin((tick - ago * 4) * 0.12 + i) * (base * 0.02);
+      });
+      return { ...s, live, sparkline };
     });
-    return { ...s, live, sparkline };
-  }), [tick]);
+  }, [apiData, tick]);
 
-  // Synthetic event stream — accumulate
+  const operatives = dUseMemo(() =>
+    apiOperativesToCards(apiData?.operatives) || OPERATIVES,
+  [apiData]);
+
+  // Event log: accumulate API events, fall back to synthetic
   const [logEntries, setLogEntries] = dUseState(() =>
     Array.from({ length: 8 }).map((_, i) => pickEvent(i + 1000))
   );
   dUseEffect(() => {
-    if (tick === 0) return;
-    if (tick % 3 === 0) {
-      const next = pickEvent(tick + 4321);
-      setLogEntries(prev => [next, ...prev].slice(0, 24));
+    const fromApi = apiEventsToLogEntries(apiData?.events);
+    if (fromApi && fromApi.length) {
+      setLogEntries(fromApi);
     }
-  }, [tick]);
+  }, [apiData]);
+  // Keep synthetic trickle when offline
+  dUseEffect(() => {
+    if (!offline || tick === 0 || tick % 3 !== 0) return;
+    const next = pickEvent(tick + 4321);
+    setLogEntries(prev => [next, ...prev].slice(0, 24));
+  }, [tick, offline]);
+
+  // Hero metrics from API or fallback
+  const pawaBalance = apiData?.pawa_balance ?? (8420 - tick % 60);
+  const activeSustains = SUSTAINS.filter(s => s.status === 'live').length;
 
   return (
     <div className="panel-enter" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 18, padding: '24px 28px' }}>
       {/* Stream health pill row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <StreamHealthPill health={streamHealth} tick={tick} />
+        {offline && (
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)',
+            padding: '2px 7px', border: '1px solid var(--border)',
+            borderRadius: 10, opacity: 0.7,
+          }}>OFFLINE · LAST KNOWN DATA</span>
+        )}
         <span className="meta-10" style={{ color: 'var(--text-muted)' }}>SUSTENA XII · MCP MONITOR · ALL SUSTAINS</span>
       </div>
+
+      {/* Loading skeleton */}
+      {loading && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          {[0,1,2,3].map(i => (
+            <div key={i} style={{
+              height: 80, borderRadius: 'var(--radius-md)',
+              background: 'var(--bg-surface)', border: '1px solid var(--border)',
+              animation: 'skeletonPulse 1.4s ease-in-out infinite',
+              animationDelay: `${i * 120}ms`,
+            }} />
+          ))}
+          <style>{`
+            @keyframes skeletonPulse {
+              0%,100% { opacity: 0.5; }
+              50%      { opacity: 1; }
+            }
+          `}</style>
+        </div>
+      )}
+
       {/* Hero strip: 4 sparse live metrics */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
-        <HeroTile label="ACTIVE SUSTAINS" value={SUSTAINS.filter(s => s.status === 'live').length} sub="of 5 in scope" tone="ok" />
-        <HeroTile label="OPERATORS / MIN" value={Math.round(218 + Math.sin(tick * 0.2) * 14)} live sub="rolling 60s" />
-        <HeroTile label="API P95" value={`${Math.round(412 + Math.sin(tick * 0.15) * 18)}`} unit="ms" live sub="haiku · inference" tone={tick % 17 < 3 ? 'amber' : 'default'} />
-        <HeroTile label="PAWA BURN" value={Math.round(28 + Math.sin(tick * 0.18) * 4)} unit="/hr" sub={`bal ${8420 - tick % 60}`} tone="default" />
-      </div>
+      {!loading && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+          <HeroTile label="ACTIVE SUSTAINS" value={activeSustains} sub="of 5 in scope" tone="ok" />
+          <HeroTile label="OPERATORS / MIN" value={Math.round(218 + Math.sin(tick * 0.2) * 14)} live sub="rolling 60s" />
+          <HeroTile label="API P95" value={`${apiData?.api_p95_ms ?? Math.round(412 + Math.sin(tick * 0.15) * 18)}`} unit="ms" live sub="haiku · inference" tone={tick % 17 < 3 ? 'amber' : 'default'} />
+          <HeroTile label="PAWA BALANCE" value={pawaBalance} unit="pwa" sub="orchie tokens" tone="default" />
+        </div>
+      )}
 
       {/* 2-col main: state stream + event log */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)', gap: 14, flex: 1, minHeight: 0 }}>
-        {/* Live State Stream */}
-        <Card title="LIVE STATE STREAM" sub={`${sustain.label}`} padded={false} scroll
-          actions={
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--teal)' }} />
-              <span className="meta-10" style={{ color: 'var(--teal)' }}>SYNC · 28ms</span>
-            </div>
-          }
-        >
-          {stateVals.map((s, i) => <StateRow key={s.path} s={s} delay={i * 30} />)}
-        </Card>
+      {!loading && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)', gap: 14, flex: 1, minHeight: 0 }}>
+          {/* Live State Stream */}
+          <Card title="LIVE STATE STREAM" sub={`${sustain.label}`} padded={false} scroll
+            actions={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className={offline ? '' : 'pulse'} style={{ width: 5, height: 5, borderRadius: '50%', background: offline ? 'var(--text-muted)' : 'var(--teal)', opacity: offline ? 0.5 : 1 }} />
+                <span className="meta-10" style={{ color: offline ? 'var(--text-muted)' : 'var(--teal)' }}>{offline ? 'OFFLINE' : 'SYNC · live'}</span>
+              </div>
+            }
+          >
+            {stateRows.map((s, i) => <StateRow key={s.path} s={s} delay={i * 30} />)}
+          </Card>
 
-        {/* Event Log Stream */}
-        <Card title="EVENT LOG · STREAM" sub={`LAST ${logEntries.length} · ALL SUSTAINS`} padded={false} scroll
-          actions={
-            <div style={{ display: 'flex', gap: 6 }}>
-              <TBtn active>ALL</TBtn>
-              <TBtn>OPS</TBtn>
-              <TBtn>AGENT</TBtn>
-              <TBtn>CSTR</TBtn>
-            </div>
-          }
-        >
-          {logEntries.map((e, i) => <LogRow key={e.key} e={e} first={i === 0} />)}
-        </Card>
-      </div>
+          {/* Event Log Stream */}
+          <Card title="EVENT LOG · STREAM" sub={`LAST ${logEntries.length} · ALL SUSTAINS`} padded={false} scroll
+            actions={
+              <div style={{ display: 'flex', gap: 6 }}>
+                <TBtn active>ALL</TBtn>
+                <TBtn>OPS</TBtn>
+                <TBtn>AGENT</TBtn>
+                <TBtn>CSTR</TBtn>
+              </div>
+            }
+          >
+            {logEntries.map((e, i) => <LogRow key={e.key} e={e} first={i === 0} />)}
+          </Card>
+        </div>
+      )}
 
       {/* Operative activity strip */}
-      <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-          <span className="label-11">OPERATIVE ACTIVITY</span>
-          <span className="meta-10">{OPERATIVES.filter(o => o.status === 'active').length} ACTIVE · {OPERATIVES.filter(o => o.status === 'alert').length} ALERT</span>
+      {!loading && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+            <span className="label-11">OPERATIVE ACTIVITY</span>
+            <span className="meta-10">{operatives.filter(o => o.status === 'active').length} ACTIVE · {operatives.filter(o => o.status === 'alert').length} ALERT</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+            {operatives.map((o, i) => <OperativeCard key={o.id} o={o} delay={i * 60} tick={tick} />)}
+          </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-          {OPERATIVES.map((o, i) => <OperativeCard key={o.id} o={o} delay={i * 60} tick={tick} />)}
-        </div>
-      </div>
+      )}
     </div>
   );
 }

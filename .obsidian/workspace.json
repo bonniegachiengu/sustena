@@ -214,17 +214,18 @@
   },
   "active": "573068049587cebe",
   "lastOpenFiles": [
-    "apps/api/tests/__pycache__/test_orchie_routes.cpython-311-pytest-9.0.3.pyc",
-    "apps/api/tests/__pycache__/test_orchie_routes.cpython-310-pytest-9.0.3.pyc",
-    "apps/api/tests/test_orchie_routes.py",
-    "apps/api/sustena/core/claude_client.py.tmp.27624.7b5803d7a60e",
-    "apps/api/sustena/core/__pycache__/claude_client.cpython-310.pyc",
-    "apps/api/sustena/api/routes/__pycache__/orchie.cpython-310.pyc",
-    "apps/api/sustena/core/__pycache__/claude_client.cpython-311.pyc",
-    "apps/api/sustena/api/routes/__pycache__/orchie.cpython-311.pyc",
-    "apps/web/src/components/mcp/shell.jsx.tmp.14600.cf42a87a5e0a",
-    "apps/web/src/components/orchie/chat.jsx.tmp.14600.39cdf8fa7215",
-    "apps/api/sustena/api/routes/orchie.py",
+    "apps/web/src/lib/sedTwm6uO",
+    "apps/web/src/lib/sedOkd12m",
+    "apps/web/src/components/mcp/shell.jsx.tmp.18684.1cfc2adac78a",
+    "apps/web/node_modules/@rollup/rollup-linux-x64-musl/rollup.linux-x64-musl.node",
+    "apps/web/node_modules/@rollup/rollup-linux-x64-musl/README.md",
+    "apps/web/node_modules/@rollup/rollup-linux-x64-musl/package.json",
+    "apps/web/node_modules/@rollup/rollup-android-arm-eabi",
+    "apps/web/node_modules/@rollup/rollup-win32-arm64-msvc",
+    "apps/web/node_modules/@rollup/rollup-openharmony-arm64",
+    "apps/web/node_modules/@rollup/rollup-win32-ia32-msvc",
+    "apps/web/node_modules/@rollup/rollup-linux-x64-musl",
+    "apps/web/node_modules/@rollup/rollup-openbsd-x64",
     "docs/Reorientation_Report_31May2026.md",
     "README.md",
     "apps/api/venv/Lib/site-packages/pip-26.1.1.dist-info/licenses/src/pip/_vendor/idna/LICENSE.md",
@@ -258,7 +259,6 @@
     "backend/venv/Lib/site-packages/anthropic/lib/foundry.md",
     "backend/venv/Lib/site-packages/httpcore-1.0.9.dist-info/licenses/LICENSE.md",
     "backend/venv/Lib/site-packages/httpx-0.28.1.dist-info/licenses/LICENSE.md",
-    "backend/venv/Lib/site-packages/starlette-1.2.0.dist-info/licenses/LICENSE.md",
-    "backend/venv/Lib/site-packages/uvicorn-0.48.0.dist-info/licenses/LICENSE.md"
+    "backend/venv/Lib/site-packages/starlette-1.2.0.dist-info/licenses/LICENSE.md"
   ]
 }

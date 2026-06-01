@@ -1,4 +1,5 @@
 import React from 'react';
+import { api } from '../../lib/api.js';
 /* Editor + Controller + Library panels (consolidated) */
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
@@ -1027,29 +1028,164 @@ function SmallMetric({ label, value, tone }) {
   );
 }
 
+/* Parse a shell-style command string into { operator, params }
+   e.g. "budget.allocate pocket=food amount=5000" */
+function parseCommand(raw) {
+  const parts = raw.trim().split(/\s+/);
+  const operator = parts[0];
+  const params = {};
+  parts.slice(1).forEach(p => {
+    const [k, ...vs] = p.split('=');
+    const v = vs.join('=');
+    const num = Number(v);
+    params[k] = isNaN(num) ? v : num;
+  });
+  return { operator, params };
+}
+
 function ControllerTerminal({ tick }) {
-  const lines = [
+  const BOOT_LINES = [
     { t: 'meta', text: 'sustena.controller · interactive shell · type "help"' },
     { t: 'meta', text: 'sustain · homestead.bonnie · privilege L0' },
-    { t: 'cmd',  text: 'budget.allocate pocket=food amount=5000 period=monthly' },
-    { t: 'check', text: '[CONSTRAINT CHECK] sum(allocated) = 47,500 ≤ 50,000  ✓' },
-    { t: 'check', text: '[CONSTRAINT CHECK] balance.cash >= 5,000              ✓' },
-    { t: 'exec',  text: '[EXECUTING] budget.pocket.food.allocated: 0 → 5,000' },
-    { t: 'event', text: '[EVENT] budget.allocated · pocket=food · amount=5000 · t=14:32:08Z' },
-    { t: 'meta', text: '∴ committed in 38ms · pawa −0.02' },
+    { t: 'meta', text: 'connected to /devui/console/execute' },
   ];
+  const [lines, setLines] = dUseState(BOOT_LINES);
+  const [input, setInput] = dUseState('');
+  const [busy, setBusy] = dUseState(false);
+  const [history, setHistory] = dUseState([]);
+  const [histIdx, setHistIdx] = dUseState(-1);
+  const inputRef = dUseRef(null);
+  const scrollRef = dUseRef(null);
+
+  const addLine = (t, text) => setLines(prev => [...prev, { t, text }]);
+
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }, 20);
+  };
+
+  const runCommand = async (raw) => {
+    if (!raw.trim()) return;
+    const cmd = raw.trim();
+
+    // Help command
+    if (cmd === 'help') {
+      addLine('meta', 'usage: <operator> [key=value ...]');
+      addLine('meta', 'e.g.:  budget.allocate pocket=food amount=5000');
+      addLine('meta', 'e.g.:  pantry.consume item=oil quantity=0.4');
+      scrollToBottom();
+      return;
+    }
+
+    setHistory(prev => [cmd, ...prev.slice(0, 49)]);
+    setHistIdx(-1);
+    addLine('cmd', cmd);
+    setBusy(true);
+
+    const { operator, params } = parseCommand(cmd);
+
+    try {
+      const result = await api.post('/devui/console/execute', {
+        sustain_id: 'homestead.bonnie',
+        operator_id: operator,
+        params,
+      });
+
+      // Show delta fields
+      const delta = result.delta || result.state_delta || {};
+      Object.entries(delta).forEach(([field, val]) => {
+        addLine('exec', `[ΔSTATE] ${field}: ${val}`);
+      });
+
+      // Show emitted events
+      const events = result.events || [];
+      events.forEach(e => {
+        const ts = e.timestamp ? new Date(e.timestamp).toISOString().slice(11, 19) + 'Z' : formatClock(new Date());
+        addLine('event', `[EVENT] ${e.type || e.name || 'UNKNOWN'} · ${JSON.stringify(e.data || {})} · t=${ts}`);
+      });
+
+      if (!Object.keys(delta).length && !events.length) {
+        addLine('check', '[OK] executed · no state delta');
+      }
+
+      const ms = result.duration_ms ?? '—';
+      const pawa = result.pawa_cost ?? result.pawa ?? '—';
+      addLine('meta', `∴ committed in ${ms}ms · pawa −${pawa}`);
+    } catch (err) {
+      addLine('danger', `[ERROR] ${err.message || 'API unreachable'}`);
+      // Fallback: show mock execution so the UI stays useful
+      addLine('check', '[FALLBACK] constraint checks skipped (offline)');
+      addLine('exec', `[MOCK] ${operator} · params: ${JSON.stringify(params)}`);
+    } finally {
+      setBusy(false);
+      scrollToBottom();
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      const cmd = input;
+      setInput('');
+      runCommand(cmd);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const idx = Math.min(histIdx + 1, history.length - 1);
+      setHistIdx(idx);
+      setInput(history[idx] || '');
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const idx = Math.max(histIdx - 1, -1);
+      setHistIdx(idx);
+      setInput(idx === -1 ? '' : history[idx] || '');
+    }
+  };
+
   return (
-    <div className="terminal" style={{ height: '100%' }}>
-      {lines.map((l, i) => (
-        <div key={i} className="t-line fade-up" style={{ animationDelay: `${i * 80}ms` }}>
-          {l.t === 'cmd' && <><span className="t-prompt">›</span> <span style={{ color: 'var(--text-primary)' }}>{l.text}</span></>}
-          {l.t === 'check' && <span className="t-ok">{l.text}</span>}
-          {l.t === 'exec' && <span style={{ color: 'var(--amber)' }}>{l.text}</span>}
-          {l.t === 'event' && <span style={{ color: 'var(--node-event)' }}>{l.text}</span>}
-          {l.t === 'meta' && <span className="t-meta">{l.text}</span>}
-        </div>
-      ))}
-      <div className="t-line"><span className="t-prompt">›</span> <span className="t-cursor" /></div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Scrollable output */}
+      <div ref={scrollRef} className="terminal" style={{ flex: 1, overflowY: 'auto' }}>
+        {lines.map((l, i) => (
+          <div key={i} className="t-line">
+            {l.t === 'cmd'    && <><span className="t-prompt">›</span> <span style={{ color: 'var(--text-primary)' }}>{l.text}</span></>}
+            {l.t === 'check'  && <span className="t-ok">{l.text}</span>}
+            {l.t === 'exec'   && <span style={{ color: 'var(--amber)' }}>{l.text}</span>}
+            {l.t === 'event'  && <span style={{ color: 'var(--node-event)' }}>{l.text}</span>}
+            {l.t === 'meta'   && <span className="t-meta">{l.text}</span>}
+            {l.t === 'danger' && <span style={{ color: 'var(--danger)' }}>{l.text}</span>}
+          </div>
+        ))}
+        {busy && (
+          <div className="t-line">
+            <span className="t-meta" style={{ animation: 'pulse 0.8s ease-in-out infinite' }}>⟳ executing…</span>
+          </div>
+        )}
+      </div>
+      {/* Input row */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '6px 14px',
+        borderTop: '1px solid var(--border)',
+        background: 'var(--bg-surface)',
+        flexShrink: 0,
+      }}>
+        <span className="t-prompt" style={{ flexShrink: 0 }}>›</span>
+        <input
+          ref={inputRef}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={busy}
+          placeholder={busy ? 'executing…' : 'operator key=val …'}
+          spellCheck={false}
+          style={{
+            flex: 1,
+            fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-primary)',
+            background: 'transparent', border: 'none', outline: 'none',
+            caretColor: 'var(--amber)',
+          }}
+        />
+      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../../lib/api.js';
 /* Mycelium Control Panel — app shell, nav, state, Tweaks integration */
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
@@ -38,6 +39,9 @@ function App() {
   const [toasts, setToasts] = dUseState([]);   // [{id, text, tone}]
   const [orchieOpen, setOrchieOpen] = dUseState(t.showOrchie ?? false);
   const [navCollapsed, setNavCollapsed] = dUseState(false);
+  const [liveState, setLiveState] = dUseState(null);  // pushed from WS
+  const wsRef = dUseRef(null);
+
   // Per-panel side-rail visibility (Sim & Editor)
   const [simLeft, setSimLeft] = dUseState(true);
   const [simRight, setSimRight] = dUseState(true);
@@ -57,6 +61,30 @@ function App() {
 
   dUseEffect(() => setPanel(t.panel), [t.panel]);
   dUseEffect(() => setSustainId(t.sustain), [t.sustain]);
+
+  // WebSocket — open on mount and whenever sustainId changes, close on unmount/change
+  dUseEffect(() => {
+    // Close any existing socket
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    const socket = api.ws(
+      sustainId,
+      (data) => setLiveState(data),
+      () => {
+        // Reconnect after 3s if closed unexpectedly
+        setTimeout(() => {
+          if (wsRef.current === socket) wsRef.current = null;
+        }, 3000);
+      }
+    );
+    wsRef.current = socket;
+    return () => {
+      socket.close();
+      wsRef.current = null;
+    };
+  }, [sustainId]);
 
   // Tick loop
   dUseEffect(() => {
@@ -108,7 +136,7 @@ function App() {
       />
 
       <main style={{ gridArea: 'main', overflow: 'hidden', minHeight: 0, position: 'relative' }}>
-        {panel === 'monitor'    && <MonitorPanel tick={tick} sustain={sustain} />}
+        {panel === 'monitor'    && <MonitorPanel tick={tick} sustain={sustain} liveState={liveState} />}
         {panel === 'simulator'  && <SimulatorPanel tick={tick} sustain={sustain}
           leftOpen={simLeft} rightOpen={simRight}
           onToggleLeft={() => setSimLeft(v => !v)}

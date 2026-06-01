@@ -1,4 +1,5 @@
 import React from 'react';
+import { api } from '../../lib/api.js';
 /* Simulator panel — forked execution with scenario tree, animated DAG, state diff. */
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
@@ -153,8 +154,8 @@ function SimulatorPanel({ tick, sustain, leftOpen = true, rightOpen = true, onTo
 
         {/* State Diff */}
         {rightOpen && (
-          <Card title="STATE DIFF" sub={`+12 / −3`} padded scroll>
-            <StateDiff tick={tick} />
+          <Card title="STATE DIFF" sub={`BRANCH ${selectedBranch}`} padded scroll>
+            <StateDiff tick={tick} sustain={sustain} selectedBranch={selectedBranch} />
           </Card>
         )}
       </div>
@@ -315,31 +316,83 @@ function SimulatorCanvas({
   );
 }
 
-/* State Diff right panel */
-function StateDiff({ tick }) {
-  const diffs = [
-    { field: 'finances.cash_position',   before: 184250, after: 174250, op: '−10,000 KSH', tone: 'amber' },
-    { field: 'finances.pockets.food',    before: 8420,   after: 8420,   op: 'no change',   tone: 'muted' },
-    { field: 'pantry.tomatoes_kg',       before: 4,      after: 8,      op: '+4 kg',       tone: 'ok' },
-    { field: 'chama.contributions',      before: 198400, after: 198400, op: 'no change',   tone: 'muted' },
-    { field: 'system.pawa_balance',      before: 8420,   after: 8378,   op: '−42 pwa',     tone: 'amber' },
-  ];
-  const cstrs = [
-    { name: 'reserve > 50,000',     status: 'PASS' },
-    { name: 'pockets.sum ≤ income', status: 'PASS' },
-    { name: 'no_negative_balance',  status: 'PASS' },
-    { name: 'cycle_quorum >= 80%',  status: 'PASS' },
-  ];
+/* State Diff right panel — wired to POST /devui/simulate */
+const MOCK_DIFFS = [
+  { field: 'finances.cash_position',   op: '−10,000 KSH', tone: 'amber' },
+  { field: 'finances.pockets.food',    op: 'no change',   tone: 'muted' },
+  { field: 'pantry.tomatoes_kg',       op: '+4 kg',       tone: 'ok' },
+  { field: 'system.pawa_balance',      op: '−42 pwa',     tone: 'amber' },
+];
+const MOCK_CSTRS = [
+  { name: 'reserve > 50,000',     status: 'PASS' },
+  { name: 'pockets.sum ≤ income', status: 'PASS' },
+  { name: 'no_negative_balance',  status: 'PASS' },
+  { name: 'cycle_quorum >= 80%',  status: 'PASS' },
+];
+
+function StateDiff({ tick, sustain, selectedBranch }) {
+  const [result, setResult] = dUseState(null);
+  const [loading, setLoading] = dUseState(false);
+  const [ran, setRan] = dUseState(false);
+
+  const runSim = () => {
+    setLoading(true);
+    api.post('/devui/simulate', {
+      sustain_id: sustain?.id || 'homestead.bonnie',
+      proposal: [{ operator: 'budget.allocate', params: { pocket_name: 'food', amount: 5000 } }],
+    })
+      .then(d => { setResult(d); setLoading(false); setRan(true); })
+      .catch(() => { setLoading(false); setRan(true); });
+  };
+
+  // Derive display values from API result or fall back to mock
+  const score = result?.steps?.slice(-1)[0]?.score ?? result?.outcome_score ?? 0.87;
+  const cstrs = result?.constraint_satisfaction
+    ? Object.entries(result.constraint_satisfaction).map(([name, pass]) => ({ name, status: pass ? 'PASS' : 'FAIL' }))
+    : MOCK_CSTRS;
+  const diffs = result?.steps?.flatMap(s =>
+    Object.entries(s.delta || {}).map(([field, val]) => ({
+      field,
+      op: typeof val === 'number' ? (val >= 0 ? `+${val}` : `${val}`) : String(val),
+      tone: typeof val === 'number' && val < 0 ? 'amber' : typeof val === 'number' && val > 0 ? 'ok' : 'muted',
+    }))
+  ) || MOCK_DIFFS;
+  const pawaCost = result?.pawa_cost ?? (42 - (tick % 5));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Run simulation button */}
       <div>
-        <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>OUTCOME · BRANCH A.2</span>
+        <button
+          onClick={runSim}
+          disabled={loading}
+          style={{
+            width: '100%', padding: '8px 0',
+            fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.07em',
+            color: loading ? 'var(--text-dim)' : 'var(--bg-base)',
+            background: loading ? 'var(--bg-overlay)' : 'var(--amber)',
+            border: `1px solid ${loading ? 'var(--border)' : 'var(--amber)'}`,
+            borderRadius: 'var(--radius-sm)',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            transition: 'all var(--t-fast)',
+          }}
+        >
+          {loading ? '⟳ SIMULATING…' : ran ? '↺ RE-SIMULATE' : '▶ RUN SIMULATION'}
+        </button>
+      </div>
+
+      <div>
+        <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>
+          OUTCOME · BRANCH {selectedBranch || 'A.2'}
+        </span>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 36, fontWeight: 500, color: 'var(--teal)' }}>0.87</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 36, fontWeight: 500, color: 'var(--teal)' }}>
+            {typeof score === 'number' ? score.toFixed(2) : score}
+          </span>
           <span className="meta-10">/ 1.00 score</span>
         </div>
-        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>rank · 1 of 100</span>
+        {result && <span className="meta-10" style={{ color: 'var(--teal)', fontSize: 9 }}>● LIVE RESULT</span>}
+        {!result && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>rank · 1 of 100</span>}
       </div>
 
       <div>
@@ -362,7 +415,7 @@ function StateDiff({ tick }) {
           {cstrs.map((c, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)' }}>{c.name}</span>
-              <Badge tone="ok">{c.status}</Badge>
+              <Badge tone={c.status === 'PASS' ? 'ok' : 'danger'}>{c.status}</Badge>
             </div>
           ))}
         </div>
@@ -371,7 +424,7 @@ function StateDiff({ tick }) {
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <span className="label-10">PAWA COST</span>
-          <span className="val-12" style={{ color: 'var(--amber)' }}>{42 - (tick % 5)} <span style={{ color: 'var(--text-muted)' }}>pwa</span></span>
+          <span className="val-12" style={{ color: 'var(--amber)' }}>{pawaCost} <span style={{ color: 'var(--text-muted)' }}>pwa</span></span>
         </div>
       </div>
     </div>
