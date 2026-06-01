@@ -104,26 +104,38 @@ VITE_API_BASE_URL=http://localhost:8000
 VITE_ADMIN_TOKEN=dev-admin-token
 ```
 
-**Current state:** Shell + all panels built. Mock data was cleared on 1 June 2026.
-Frontend makes no API calls yet — Sprint 1 wires it.
+**Current state:** Shell + all panels built. Sprint 1.1 + 1.2 complete — Monitor
+panel and sustain selector are wired to real API. No hardcoded stubs remain.
 
 ---
 
 ## Current sprint: Sprint 1 — "Sustena Runs"
 
-Sprint 0 is complete (864/864 tests pass, seed script works, list_all() implemented).
+Sprint 0 complete (865/865 tests pass).  
+**seed_homestead.py deleted — sustena.db cleared — starting fresh, no pre-seeded data.**
 
-**Sprint 1 goal:** Web UI shows real Homestead data. Orchie replies in mock mode. No LLM.
+**Sprint 1 goal:** Web UI shows real data. Orchie replies in mock mode. No LLM.
 
 Tasks:
-- [ ] Wire Monitor panel → `GET /devui/state?sustain_id=...` + `WS /devui/state-stream`
-- [ ] Wire sustain selector → `GET /devui/sustains`
-- [ ] Wire Operator Console → `POST /devui/console/execute`
-- [ ] Wire Orchie chat → `POST /orchie/message`
-- [ ] Verify `ANTHROPIC_API_KEY=mock` logs "mock mode" at startup
+- [x] 1.1 Wire Monitor panel → `GET /devui/state` + `WS /devui/state-stream`
+- [x] 1.2 Wire sustain selector → `GET /devui/sustains`
+- [ ] 1.3 Wire Operator Console → `POST /devui/console/execute`
+- [ ] 1.4 Wire Orchie chat → `POST /orchie/message`
+- [ ] 1.5 Verify `ANTHROPIC_API_KEY=mock` logs "mock mode" at startup
 
-**Definition of done:** Open localhost:5173, see real Homestead pocket data, type in
-Orchie chat, get a reply, check server logs show zero Anthropic API calls.
+**What was wired in 1.1 + 1.2 (all in `monitor.jsx` + `shell.jsx`):**
+- Monitor GET + WS normalised into `{ state, events, operatives, constraints }`
+- `apiStateToStateTree` reads `finances.pockets`, `pantry.*`, `system.*`
+- All 4 HeroTiles live: ACTIVE SUSTAINS, OPERATORS/MIN, API P95, PAWA BALANCE
+- LeftNav PAWA balance + progress bar from `liveState.state.system.pawa_balance`
+- Footer LATENCY, OPS/MIN, ORCHIE LOAD from `liveState.state.system.*`
+- Sustain selector fetches from API on mount; falls back to `[]` when empty
+- Null-safe sustain fallback: `{ id: '', label: '—', sub: 'no sustains', status: 'seed' }`
+- Pre-existing truncations fixed: `shell.jsx` LibraryModal, `monitor.jsx` OperativeCard,
+  `other.jsx` null bytes
+
+**Definition of done:** Open localhost:5173, selector shows only real sustains,
+type in Orchie chat, get a reply, server logs show zero Anthropic API calls.
 
 ---
 
