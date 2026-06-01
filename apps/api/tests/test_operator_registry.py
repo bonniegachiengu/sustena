@@ -114,6 +114,11 @@ EDIT_OPERATORS = [
     "edit.operator_spec",
 ]
 
+CONTROL_OPERATORS = [
+    "control.execute_approved",
+    "control.rollback",
+]
+
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + BIASHARA_OPERATORS + VYYB_OPERATORS  # Epic 1.5.2
@@ -123,6 +128,7 @@ ALL_KNOWN_OPERATORS = (
     + VISUALIZE_OPERATORS                  # Sprint 3.3
     + SIMULATE_OPERATORS                   # Sprint 3.4
     + EDIT_OPERATORS                       # Sprint 3.5
+    + CONTROL_OPERATORS                    # Sprint 3.6
 )
 
 

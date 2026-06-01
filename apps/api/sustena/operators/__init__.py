@@ -14,3 +14,4 @@ from sustena.operators import monitor      # noqa: F401  (registers monitor.* op
 from sustena.operators import visualize    # noqa: F401  (registers visualize.* operators)
 from sustena.operators import simulate_ops # noqa: F401  (registers simulate.* operators)
 from sustena.operators import edit_ops     # noqa: F401  (registers edit.* operators)
+from sustena.operators import control_ops  # noqa: F401  (registers control.* operators)
