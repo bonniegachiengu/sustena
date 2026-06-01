@@ -52,14 +52,13 @@ sustena/
   db/schema.py    SQLAlchemy tables + async engine singleton (_engine)
   config.py       Pydantic BaseSettings (extra="ignore") — reads .env
   scripts/
-    seed_homestead.py   Seeds Bonnie's Homestead sustain into sustena.db
+    (seed scripts removed — sustains are created via the API)
 ```
 
 ### Running
 ```bash
 # From apps/api/
 pip install -r requirements.txt
-python -m sustena.scripts.seed_homestead   # first time only — delete sustena.db first
 uvicorn sustena.api.main:app --reload --port 8000
 ```
 
@@ -182,7 +181,6 @@ This isn't implemented yet — it's on the roadmap.
 cd apps/api
 python -m pytest tests/ -q              # run all tests
 uvicorn sustena.api.main:app --reload   # start server
-python -m sustena.scripts.seed_homestead  # seed Homestead sustain
 
 # Frontend
 cd apps/web
