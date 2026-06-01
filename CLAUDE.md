@@ -1,7 +1,7 @@
 # Sustena XII — Claude Code Context
 
 > Read this before touching any code. It tells you where we are, how things are built,
-> and how Bonnie works. Everything here is current as of 1 June 2026.
+> and how Bonnie works. Everything here is current as of 2 June 2026.
 
 ---
 
@@ -17,7 +17,7 @@ directed graph of operator calls. LLMs are optional, pluggable nodes in that gra
 with zero API spend.
 
 Full strategy: `docs/Sustena_XII_Master_Strategy.md`  
-Current roadmap: `docs/Sustena_XII_Roadmap_Jun2026.md` ← read this for sprint state
+Current roadmap: `docs/Sustena_XII_Roadmap_Jun2026.md` ← read this for sprint detail
 
 ---
 
@@ -40,19 +40,21 @@ lore/           Public knowledge surface (journal, docs)
 ### Key directories
 ```
 sustena/
-  core/           7 primitives: state.py, constraints.py, events.py, pawa.py,
-                  operator.py, sustain_engine.py, council.py
-  operators/      budget.py, chama.py, procurement.py, vyyb.py, biashara.py, calendar.py
+  core/           7 primitives + UIParser:
+                    state.py, constraints.py, events.py, pawa.py,
+                    operator.py, sustain_engine.py, council.py,
+                    uiparser.py, widget_registry.py          ← added Sprint 2
+  operators/      budget.py, chama.py, procurement.py, vyyb.py,
+                  biashara.py, calendar.py,
+                  ui_render.py                              ← added Sprint 2
   operatives/     base.py, mentor.py, protege.py, attache.py, navigator.py,
                   curator.py, chama_secretary.py
   sustains/       homestead.json, vyyb.json, chama.json, biashara.json, colosso.json
   api/
-    main.py       FastAPI app, lifespan (init_db), CORS, logging
+    main.py       FastAPI app, lifespan (init_db + Claude client mode log), CORS
     routes/       sustains.py, devui.py, orchie.py, council.py, whatsapp.py, ...
   db/schema.py    SQLAlchemy tables + async engine singleton (_engine)
   config.py       Pydantic BaseSettings (extra="ignore") — reads .env
-  scripts/
-    (seed scripts removed — sustains are created via the API)
 ```
 
 ### Running
@@ -65,10 +67,10 @@ uvicorn sustena.api.main:app --reload --port 8000
 ### Testing
 ```bash
 # From apps/api/
-python -m pytest tests/ -q --tb=short     # 864 tests, all pass
+python -m pytest tests/ -q --tb=short     # 929 tests, all pass
 
 # Run specific file
-python -m pytest tests/test_sustain_engine.py -v
+python -m pytest tests/test_uiparser.py -v
 ```
 
 **Never use `pytest` directly** — always `python -m pytest` so the package path resolves.
@@ -104,45 +106,79 @@ VITE_API_BASE_URL=http://localhost:8000
 VITE_ADMIN_TOKEN=dev-admin-token
 ```
 
-**Current state:** Shell + all panels built. Sprint 1.1 + 1.2 complete — Monitor
-panel and sustain selector are wired to real API. No hardcoded stubs remain.
+**Current state:** Sprint 1 + Sprint 2 complete. All panels wired to real API.
+Controller panel has CONSOLE / UI PREVIEW tab toggle.
 
 ---
 
-## Current sprint: Sprint 1 — "Sustena Runs"
+## Sprint state
 
-Sprint 0 complete (865/865 tests pass).  
-**seed_homestead.py deleted — sustena.db cleared — starting fresh, no pre-seeded data.**
+### Sprint 0 ✅ — Pre-flight
+865 tests pass. DB schema live. CI green.
 
-**Sprint 1 goal:** Web UI shows real data. Orchie replies in mock mode. No LLM.
+### Sprint 1 ✅ — "Sustena Runs"
+All 5 tasks done and committed:
+- [x] 1.1 Monitor panel → `GET /devui/state` + `WS /devui/state-stream`
+- [x] 1.2 Sustain selector → `GET /devui/sustains`
+- [x] 1.3 Operator Console → `POST /devui/console/execute` (sustain_id dynamic, response parsing fixed)
+- [x] 1.4 Orchie chat → `POST /orchie/message` (uses `api.post`, not hardcoded fetch)
+- [x] 1.5 Startup log: `"Claude client: mock mode (zero API calls)"` in lifespan
 
-Tasks:
-- [x] 1.1 Wire Monitor panel → `GET /devui/state` + `WS /devui/state-stream`
-- [x] 1.2 Wire sustain selector → `GET /devui/sustains`
-- [ ] 1.3 Wire Operator Console → `POST /devui/console/execute`
-- [ ] 1.4 Wire Orchie chat → `POST /orchie/message`
-- [ ] 1.5 Verify `ANTHROPIC_API_KEY=mock` logs "mock mode" at startup
+### Sprint 2 ✅ — UIParser
+All 5 tasks done and committed:
+- [x] 2.1+2.2 `UISchema` dataclasses + `UISchemaParser` (`uiparser.py`)
+  - `parse(ui_schema_dict) → UISchema`
+  - `resolve_source(expr, inputs, state)` — handles `inputs.*`, `state.*`, `state.a - state.b`
+  - No dynamic code execution anywhere
+- [x] 2.3 `ui.render.*` operators (`ui_render.py`) — operator_card, operative_dashboard, sustain_home, preview
+  - All pawa_cost=0, no side_effects, registered in OPERATOR_REGISTRY
+- [x] 2.4 `WidgetTypeRegistry` (`widget_registry.py`) — 9 built-in types, Jinja2 + generic fallback
+  - `GET /devui/widgets` — list all widget types
+  - `POST /devui/preview-widget` — parse spec + mock state → ResponseWidget
+- [x] 2.5 UI Preview tab in Controller panel (`other.jsx`)
+  - Tab toggle: CONSOLE / UI PREVIEW
+  - Left: editable spec JSON + mock state; Right: live rendered widget (500ms debounce)
 
-**What was wired in 1.1 + 1.2 (all in `monitor.jsx` + `shell.jsx`):**
-- Monitor GET + WS normalised into `{ state, events, operatives, constraints }`
-- `apiStateToStateTree` reads `finances.pockets`, `pantry.*`, `system.*`
-- All 4 HeroTiles live: ACTIVE SUSTAINS, OPERATORS/MIN, API P95, PAWA BALANCE
-- LeftNav PAWA balance + progress bar from `liveState.state.system.pawa_balance`
-- Footer LATENCY, OPS/MIN, ORCHIE LOAD from `liveState.state.system.*`
-- Sustain selector fetches from API on mount; falls back to `[]` when empty
-- Null-safe sustain fallback: `{ id: '', label: '—', sub: 'no sustains', status: 'seed' }`
-- Pre-existing truncations fixed: `shell.jsx` LibraryModal, `monitor.jsx` OperativeCard,
-  `other.jsx` null bytes
+### Sprint 3 — NEXT: Operators + Protocols
+See `docs/Sustena_XII_Roadmap_Jun2026.md` for full task list.
+Tasks 3.1–3.7 cover: `api.*`, `monitor.*`, `visualize.*`, `simulate.*`, `edit.*`,
+`control.*` operators, plus `protocol` field on `OperatorMeta`.
 
-**Definition of done:** Open localhost:5173, selector shows only real sustains,
-type in Orchie chat, get a reply, server logs show zero Anthropic API calls.
+---
+
+## UIParser — key facts (Sprint 2)
+
+### `ui_schema` block format (already on all existing operators)
+```python
+ui_schema={
+    "widget_type": "budget_allocation_card",
+    "fields": [
+        {"label": "Pocket",  "source": "inputs.pocket_name",           "display": "text"},
+        {"label": "Amount",  "source": "inputs.amount",                "display": "currency"},
+        {"label": "Balance", "source": "state.finances.liquid.balance", "display": "currency",
+         "colour_rule": "amber_if_below_20pct"},
+    ],
+    "ctas": ["View Budget"],
+    "chart": "donut",   # optional
+}
+```
+
+### `resolve_source` rules (Phase 1, no eval)
+- `"inputs.<key>"` → `operator_inputs[key]`
+- `"state.<dot.path>"` → `state.get(path)` (StateAccessor) or plain dict walk
+- `"state.<a> - state.<b>"` → numeric subtraction of two state paths
+
+### New devui endpoints
+- `GET  /devui/widgets` — list all registered widget types
+- `POST /devui/preview-widget` — body: `{spec_json, mock_state}` → `{widget: ResponseWidget}`
 
 ---
 
 ## Bonnie's patterns — follow these exactly
 
 ### Commits
-Conventional commits, **direct to main** (no feature branches, no PRs):
+Conventional commits, **direct to main** (no feature branches, no PRs).
+**Commit each sprint task before starting the next one.**
 ```
 feat(scope): description
 fix(scope): description
@@ -156,6 +192,7 @@ docs: description
 - Fix ALL failures before moving to the next task. Never defer test fixes.
 - `python -m pytest tests/ -q --tb=short` must pass clean before every commit.
 - Core coverage target: >90%.
+- `test_operator_registry.py` has `ALL_KNOWN_OPERATORS` — add new operators there when registering.
 
 ### No WhatsApp work
 WhatsApp stubs exist in the codebase and stay. No new WhatsApp development until
@@ -182,7 +219,14 @@ After seeding, the real data flows. All stubs have `# TODO: wire real` comments.
 
 ### Protocol types (Sprint 3 target)
 Every operator will declare `protocol`: `rpc | event_driven | polling | streaming`.
-This isn't implemented yet — it's on the roadmap.
+Not implemented yet — add to `OperatorMeta` in Sprint 3.7.
+
+### UIParser (Sprint 2 — done)
+`uiparser.py` owns `UISchema`, `UISchemaField`, `ResponseWidget`, `UISchemaParser`.
+`widget_registry.py` owns `WidgetTypeRegistry` (singleton: `widget_registry`).
+`ui_render.py` owns the four `ui.render.*` operators.
+All existing operators already have `ui_schema` blocks — the spec was established
+before UIParser was built.
 
 ---
 
@@ -191,7 +235,7 @@ This isn't implemented yet — it's on the roadmap.
 ```bash
 # Backend
 cd apps/api
-python -m pytest tests/ -q              # run all tests
+python -m pytest tests/ -q              # run all tests (929)
 uvicorn sustena.api.main:app --reload   # start server
 
 # Frontend
@@ -201,11 +245,16 @@ npm run build                           # production build
 
 # Useful API calls (dev)
 curl -H "Authorization: Bearer dev-admin-token" http://localhost:8000/devui/sustains
+curl -H "Authorization: Bearer dev-admin-token" http://localhost:8000/devui/widgets
 curl -H "Authorization: Bearer dev-admin-token" \
   "http://localhost:8000/devui/state?sustain_id=<id>"
 curl -X POST http://localhost:8000/orchie/message \
   -H "Content-Type: application/json" \
   -d '{"sustain_id":"<id>","message":"habari"}'
+curl -X POST http://localhost:8000/devui/preview-widget \
+  -H "Authorization: Bearer dev-admin-token" \
+  -H "Content-Type: application/json" \
+  -d '{"spec_json":{"widget_type":"budget_allocation_card","fields":[{"label":"Pocket","source":"inputs.pocket_name"}],"ctas":[]},"mock_state":{"inputs":{"pocket_name":"food"}}}'
 ```
 
 ---
@@ -217,4 +266,5 @@ curl -X POST http://localhost:8000/orchie/message \
 - Do not add `rootdir` to `pyproject.toml [tool.pytest.ini_options]` — it's not a valid key.
 - Do not write to `sustena.db` from tests — conftest.py uses `:memory:`.
 - Do not start Epics 1.12 (Monte Carlo), 1.13 (Mkulima), or 1.14 (Daraja) yet.
-  Sequence is: Sprint 1 wiring → Sprint 2 UIParser → Sprint 3 operators+protocols.
+  Sequence is: Sprint 3 operators+protocols → Sprint 4 operator UIs → Sprint 5 operative graphs.
+- Do not add a new operator without adding it to `ALL_KNOWN_OPERATORS` in `test_operator_registry.py`.
