@@ -317,6 +317,65 @@ class SustainEngine:
         """Return the current full state dict for the sustain (deep copy)."""
         return copy.deepcopy(self._load_state_dict(sustain_id))
 
+    # ── list_all ───────────────────────────────────────────────────────────────
+
+    def list_all(self) -> list[dict]:
+        """
+        Return a summary list of all sustain instances in the DB.
+
+        Each entry contains enough for the devui selector dropdown and the
+        Monitor panel hero tiles — id, template, name (label), status,
+        active operative count, and current pawa balance from state if present.
+
+        Used by GET /devui/sustains.
+        """
+        rows = self._db.execute(
+            "SELECT s.id, s.user_id, s.template_id, s.created_at, "
+            "       ss.state_json "
+            "FROM sustains s "
+            "LEFT JOIN sustain_states ss ON ss.sustain_id = s.id "
+            "ORDER BY s.created_at DESC"
+        ).fetchall()
+
+        result = []
+        for row in rows:
+            sustain_id   = row["id"]
+            template_id  = row["template_id"]
+            state: dict  = {}
+            if row["state_json"]:
+                try:
+                    state = json.loads(row["state_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Extract pocket summary from state if available
+            pockets: dict = {}
+            try:
+                raw_pockets = state.get("finances", {}).get("pockets", {})
+                pockets = {
+                    k: v.get("allocated", 0) if isinstance(v, dict) else v
+                    for k, v in raw_pockets.items()
+                }
+            except (AttributeError, TypeError):
+                pass
+
+            pawa_balance: int = state.get("system", {}).get("pawa_balance", 0)
+            active_operatives = list(self._operatives.get(sustain_id, {}).keys())
+
+            result.append({
+                "id":                sustain_id,
+                "label":             template_id.replace("_", " ").title(),
+                "sub":               row["user_id"],
+                "status":            "live",
+                "template_id":       template_id,
+                "created_at":        row["created_at"],
+                "pockets":           pockets,
+                "active_operatives": active_operatives,
+                "pawa_balance":      pawa_balance,
+            })
+
+        return result
+
     # ── execute_operator ───────────────────────────────────────────────────────
 
     async def execute_operator(

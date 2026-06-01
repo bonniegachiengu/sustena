@@ -210,10 +210,10 @@ function MonitorPanel({ tick, sustain, liveState }) {
       {/* Hero strip: 4 sparse live metrics */}
       {!loading && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
-          <HeroTile label="ACTIVE SUSTAINS" value={activeSustains} sub="of 5 in scope" tone="ok" />
-          <HeroTile label="OPERATORS / MIN" value={Math.round(218 + Math.sin(tick * 0.2) * 14)} live sub="rolling 60s" />
-          <HeroTile label="API P95" value={`${apiData?.api_p95_ms ?? Math.round(412 + Math.sin(tick * 0.15) * 18)}`} unit="ms" live sub="haiku · inference" tone={tick % 17 < 3 ? 'amber' : 'default'} />
-          <HeroTile label="PAWA BALANCE" value={pawaBalance} unit="pwa" sub="orchie tokens" tone="default" />
+          <HeroTile label="ACTIVE SUSTAINS" value={activeSustains} sub="in scope" tone="ok" />
+          <HeroTile label="OPERATORS / MIN" value={apiData?.ops_per_min ?? '—'} live sub="rolling 60s" />
+          <HeroTile label="API P95" value={apiData?.api_p95_ms ? `${apiData.api_p95_ms}` : '—'} unit={apiData?.api_p95_ms ? 'ms' : ''} live sub="haiku · inference" />
+          <HeroTile label="PAWA BALANCE" value={pawaBalance ?? '—'} unit={pawaBalance ? 'pwa' : ''} sub="orchie tokens" tone="default" />
         </div>
       )}
 
@@ -514,120 +514,4 @@ function OperativeCard({ o, delay, tick }) {
     <button onClick={() => window.confirmAction?.({
       title: `${o.name} · ${o.role}`,
       body: `${o.task}. Confidence ${o.confidence}%. Pawa burn ${o.pawa} / session. ${o.subtasks.length} subtasks tracked.`,
-      detail: o.subtasks.map(s => `${s.done ? '✓' : s.progress > 0 ? '⟳' : '○'} ${s.name}${s.progress > 0 && s.progress < 100 ? ` · ${s.progress}%` : ''}`).join('\n'),
-      ctaLabel: o.status === 'idle' ? 'WAKE' : 'PAUSE',
-      tone: 'amber',
-      onConfirm: () => window.flash?.(`${o.name} ${o.status === 'idle' ? 'woken' : 'paused'}`, 'info'),
-    })} className="fade-up lift" style={{
-      textAlign: 'left',
-      background: 'var(--bg-surface)',
-      border: '1px solid var(--border)',
-      borderRadius: 'var(--radius-md)',
-      padding: '12px 14px',
-      display: 'flex', flexDirection: 'column', gap: 10,
-      animationDelay: `${delay}ms`,
-      position: 'relative',
-      overflow: 'hidden',
-    }}>
-      {/* Status accent bar */}
-      <span style={{
-        position: 'absolute', top: 0, left: 0, right: 0, height: 2,
-        background: statusColor,
-        opacity: o.status === 'idle' ? 0.4 : 1,
-      }} />
-      {/* Live pulse for alert state */}
-      {o.status === 'alert' && (
-        <span style={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: 2,
-          background: statusColor,
-          animation: 'pulse 1.4s ease-in-out infinite',
-          filter: 'blur(2px)',
-        }} />
-      )}
-
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="pulse" style={{
-            width: 6, height: 6, borderRadius: '50%', background: statusColor,
-            boxShadow: o.status !== 'idle' ? `0 0 6px ${statusColor}` : 'none',
-          }} />
-          <span style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 500 }}>{o.name}</span>
-          <Badge tone={o.status === 'active' ? 'teal' : o.status === 'alert' ? 'amber' : 'muted'}>{o.status}</Badge>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500, color: 'var(--text-primary)' }}>
-            {Math.round(liveConfidence)}
-          </span>
-          <span className="meta-10">%</span>
-        </div>
-      </div>
-      <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{o.role}</span>
-
-      {/* Activity sparkline */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <svg width="100%" height="22" viewBox="0 0 120 22" preserveAspectRatio="none" style={{ flex: 1, overflow: 'visible' }}>
-          <polyline
-            points={series.map((v, i) => `${(i / (series.length - 1)) * 120},${22 - (v / 100) * 22}`).join(' ')}
-            fill="none" stroke={statusColor} strokeWidth="1"
-            opacity={o.status === 'idle' ? 0.4 : 0.85}
-          />
-          <circle
-            cx={120} cy={22 - (series[series.length - 1] / 100) * 22}
-            r="2" fill={statusColor}
-            style={{ filter: o.status !== 'idle' ? `drop-shadow(0 0 3px ${statusColor})` : 'none' }}
-          />
-        </svg>
-        <span className="meta-10" style={{ fontSize: 9, color: statusColor, minWidth: 30, textAlign: 'right' }}>
-          {Math.round(series[series.length - 1])} ops/s
-        </span>
-      </div>
-
-      <span style={{ fontSize: 12, color: 'var(--text-secondary)', minHeight: 30, lineHeight: 1.45 }}>{o.task}</span>
-
-      {/* Subtasks rail */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {o.subtasks.map((t, i) => {
-          const p = t === inProg ? animatedProgress : t.progress;
-          const isActive = p > 0 && p < 100;
-          return (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <span style={{
-                  fontFamily: 'var(--mono)', fontSize: 9,
-                  color: t.done ? 'var(--ok)' : (isActive ? statusColor : 'var(--text-muted)'),
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                }}>
-                  <span style={{
-                    display: 'inline-block',
-                    transform: isActive ? `rotate(${tick * 30}deg)` : 'none',
-                    transition: 'transform 200ms linear',
-                  }}>{t.done ? '✓' : (isActive ? '⟳' : '○')}</span>
-                  {t.name}
-                </span>
-                {isActive && <span className="meta-10" style={{ fontSize: 9, color: statusColor }}>{Math.round(p)}%</span>}
-              </div>
-              {isActive && (
-                <div style={{ height: 1.5, background: 'var(--bg-base)', borderRadius: 1, overflow: 'hidden' }}>
-                  <div style={{
-                    width: `${p}%`, height: '100%', background: statusColor, transition: 'width 300ms',
-                    boxShadow: `0 0 4px ${statusColor}`,
-                  }} />
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>PAWA</span>
-        <span className="val-12" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-          {(o.pawa + Math.sin(tick * 0.3 + o.id.charCodeAt(0)) * 4).toFixed(0)} <span style={{ color: 'var(--text-muted)' }}>/ session</span>
-        </span>
-      </div>
-    </button>
-  );
-}
-
-Object.assign(window, { MonitorPanel });
+      detail: o.subtasks.map(s => `${s.done ? '�

@@ -214,17 +214,18 @@
   },
   "active": "573068049587cebe",
   "lastOpenFiles": [
-    "apps/web/src/pages/ArenaPage.jsx.tmp.24264.fa3204ba70ec",
-    "apps/web/src/pages/ProfilePage.jsx.tmp.24264.c5ee59570e0b",
-    "apps/web/src/components/mcp/other.jsx.tmp.24264.7312514fb03b",
-    "apps/web/src/components/mcp/simulator.jsx.tmp.24264.4552a7bfd889",
-    "apps/web/src/components/mcp/simulator.jsx.tmp.24264.a9edc7bf6bcd",
-    "apps/web/src/components/mcp/simulator.jsx.tmp.24264.cbce9a97848a",
-    "apps/web/src/components/mcp/data.jsx.tmp.24264.a76e97414f49",
-    "apps/web/src/components/mcp/data.jsx.tmp.24264.f7912db287ad",
-    "apps/web/src/components/mcp/data.jsx.tmp.24264.906e0d356da4",
-    "apps/web/src/components/mcp/data.jsx.tmp.24264.f956ab74fe60",
-    "apps/web/src/components/mcp/data.jsx.tmp.17188.b8b0e82e3542",
+    "CLAUDE.md",
+    "apps/api/sustena/config.py.tmp.30252.83325bad8a3a",
+    "apps/api/sustena.db-journal",
+    "apps/api/sustena/scripts/__pycache__/seed_homestead.cpython-310.pyc",
+    "apps/api/sustena/scripts/__pycache__/seed_homestead.cpython-310.pyc.126512405261888",
+    "apps/api/sustena/scripts/__pycache__",
+    "apps/api/sustena/scripts/seed_homestead.py",
+    "apps/api/sustena/core/sustain_engine.py.tmp.30252.81debdf6a99f",
+    "apps/api/tests/__pycache__/conftest.cpython-310-pytest-9.0.3.pyc",
+    "apps/api/tests/__pycache__/conftest.cpython-310-pytest-9.0.3.pyc.8",
+    "apps/api/tests/conftest.py",
+    "docs/Sustena_XII_Roadmap_Jun2026.md",
     "apps/web/node_modules/@rollup/rollup-linux-x64-musl/README.md",
     "docs/Reorientation_Report_31May2026.md",
     "README.md",
@@ -258,7 +259,6 @@
     "frontend/README.md",
     "backend/venv/Lib/site-packages/anthropic/lib/foundry.md",
     "backend/venv/Lib/site-packages/httpcore-1.0.9.dist-info/licenses/LICENSE.md",
-    "backend/venv/Lib/site-packages/httpx-0.28.1.dist-info/licenses/LICENSE.md",
-    "backend/venv/Lib/site-packages/starlette-1.2.0.dist-info/licenses/LICENSE.md"
+    "backend/venv/Lib/site-packages/httpx-0.28.1.dist-info/licenses/LICENSE.md"
   ]
 }

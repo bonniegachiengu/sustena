@@ -379,18 +379,18 @@ function LeftNav({ panels, active, onSelect, collapsed, onToggle, pageLinks }) {
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span className="label-10">PAWA</span>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 18, fontWeight: 500, color: 'var(--amber)' }}>8,420</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 18, fontWeight: 500, color: 'var(--amber)' }}>—</span>
             <span className="meta-10">balance</span>
           </div>
           <div style={{ height: 2, background: 'var(--bg-base)', borderRadius: 1, marginTop: 4 }}>
-            <div style={{ width: '68%', height: '100%', background: 'var(--amber)' }} />
+            <div style={{ width: '0%', height: '100%', background: 'var(--amber)' }} />
           </div>
-          <span className="meta-10" style={{ fontSize: 9, color: 'var(--text-muted)' }}>−28 / hr</span>
+          <span className="meta-10" style={{ fontSize: 9, color: 'var(--text-muted)' }}>—</span>
         </div>
       ) : (
         <div style={{ padding: '10px 0', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
           <span className="meta-10" style={{ fontSize: 9, color: 'var(--text-muted)' }}>PWA</span>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--amber)' }}>8.4k</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--amber)' }}>—</span>
         </div>
       )}
     </aside>
@@ -612,15 +612,15 @@ function Footer({ tick }) {
         <span className="meta-10" style={{ color: 'var(--teal)' }}>NOMINAL</span>
       </div>
       <FSep />
-      <FTick label="LATENCY" value={`${28 + (tick % 7)}ms`} />
+      <FTick label="LATENCY" value="—" />
       <FSep />
-      <FTick label="OPS / MIN" value={218 + Math.round(Math.sin(tick * 0.2) * 14)} />
+      <FTick label="OPS / MIN" value="—" />
       <FSep />
-      <FTick label="ORCHIE LOAD" value={`${42 + (tick % 14)}%`} />
+      <FTick label="ORCHIE LOAD" value="—" />
       <FSep />
-      <FTick label="EVENTS" value={`#${(8429112 + tick).toLocaleString()}`} />
+      <FTick label="EVENTS" value="—" />
       <FSep />
-      <FTick label="GAS" value={`${14 + (tick % 5)} gwei`} />
+      <FTick label="GAS" value="—" />
       <div style={{ flex: 1 }} />
       <FTick label="LAST SYNC" value={`T-${tick % 60}s`} />
       <FSep />
@@ -940,60 +940,4 @@ operatives: 4 default (Mentor, Protégé, Curator, Navigator)`}
               <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>LIVE PREVIEW</span>
               <div style={{
                 height: 200, background: 'var(--bg-base)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                <div style={{ transform: 'scale(2.2)' }}>
-                  <WidgetPreview name={item.name} />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Version history */}
-          <div>
-            <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>VERSION HISTORY</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-              {[
-                { v: item.version, when: '14 Feb 2026', notes: 'Performance · 12% latency reduction' },
-                { v: bumpVersion(item.version, -1), when: '02 Jan 2026', notes: 'Bug fix · constraint edge-case' },
-                { v: bumpVersion(item.version, -2), when: '21 Dec 2025', notes: 'New: ui_schema variant' },
-              ].map((h, i) => (
-                <div key={i} style={{ display: 'grid', gridTemplateColumns: '90px 110px 1fr', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border)', alignItems: 'baseline' }}>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: i === 0 ? accent : 'var(--text-primary)' }}>v{h.v}</span>
-                  <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{h.when}</span>
-                  <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-secondary)' }}>{h.notes}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <footer style={{ padding: '14px 22px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-          <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{item.author} · published to Mycelium</span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <PBtn variant="ghost" onClick={onClose}>CLOSE</PBtn>
-            <PBtn variant="ghost" onClick={() => { window.flash(`${item.name} bookmarked`, 'info'); }}>BOOKMARK</PBtn>
-            <PBtn onClick={() => {
-              window.confirmAction({
-                title: `${installLabel} · ${item.name}?`,
-                body: `Pull ${item.name} from the Mycelium and register it in your local sustain. License: ${item.pawa}.`,
-                ctaLabel: installLabel,
-                tone: 'amber',
-                onConfirm: () => { onClose(); window.flash(`${item.name} installed · ${item.downloads + 1} active`, 'ok'); },
-              });
-            }}>{installLabel}</PBtn>
-          </div>
-        </footer>
-      </div>
-    </div>
-  );
-}
-
-function bumpVersion(v, delta) {
-  const [maj, min, pat] = v.split('.').map(n => parseInt(n) || 0);
-  if (delta === -1) return `${maj}.${min}.${Math.max(0, pat - 2)}`;
-  if (delta === -2) return `${maj}.${Math.max(0, min - 1)}.0`;
-  return v;
-}
-
-export default App;
+                borderRadius: 'var(--radius-md)', display: 'flex', alignIt

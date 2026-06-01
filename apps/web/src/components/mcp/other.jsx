@@ -304,11 +304,11 @@ function NodeInspector({ node }) {
    ─────────────────────────────────────────────────────────── */
 function ControllerPanel({ tick, openModal }) {
   // Universal control state
-  const [autonomy, setAutonomy] = dUseState(62);       // 0-100, threshold for auto-execute
+  const [autonomy, setAutonomy] = dUseState(0);       // 0-100, threshold for auto-execute
   const [pawaCeiling, setPawaCeiling] = dUseState(8500);
-  const [timelock, setTimelock] = dUseState(48);       // hours
+  const [timelock, setTimelock] = dUseState(0);       // hours
   const [execMode, setExecMode] = dUseState('GUARDED'); // GUARDED | LIVE | HOLD
-  const [throttle, setThrottle] = dUseState(0.7);      // 0-1
+  const [throttle, setThrottle] = dUseState(0);      // 0-1
   const [opsEnabled, setOpsEnabled] = dUseState({ mentor: true, protege: true, curator: true, navigator: false });
   const [emergency, setEmergency] = dUseState(false);
 
@@ -394,7 +394,7 @@ function ControllerPanel({ tick, openModal }) {
               />
               <VerticalScale
                 label="BURN" param="rate-Σ"
-                value={4214} min={0} max={6000} ceiling={4500}
+                value={0} min={0} max={6000} ceiling={0}
                 unit="KSH/D"
                 tick={tick}
               />
@@ -2192,3 +2192,4 @@ Object.assign(window, {
   Knob, Slider, Stepper, VerticalScale, Segmented, BigToggle, RockerSwitch, LedGrid,
   OperativeLibCard, OperatorLibRow, SporeLibCard, WidgetLibCard, WidgetPreview, Stat,
 });
+     

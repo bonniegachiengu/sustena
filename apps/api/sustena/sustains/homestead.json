@@ -329,7 +329,9 @@
       "income": {
         "amount": 0.0,
         "frequency": "monthly",
-        "last_recorded": null
+        "last_recorded": null,
+        "monthly_total": 0.0,
+        "sources": []
       },
       "goals": []
     },
