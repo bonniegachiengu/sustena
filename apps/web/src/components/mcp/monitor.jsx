@@ -5,43 +5,68 @@ import { api } from '../../lib/api.js';
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
 
 /* ─── helpers to normalise API state → STATE_TREE shape ─── */
-function apiStateToStateTree(apiState) {
-  if (!apiState) return null;
+function apiStateToStateTree(state) {
+  if (!state) return null;
   const rows = [];
-  // pockets
-  const pockets = apiState.pockets || {};
+
+  // finances.pockets — value may be a number or {allocated, target, status}
+  const pockets = state.finances?.pockets || {};
   Object.entries(pockets).forEach(([k, v]) => {
+    const allocated = typeof v === 'object' ? (v.allocated ?? 0) : v;
+    const target = typeof v === 'object' ? (v.target ?? null) : null;
+    const st = typeof v === 'object' ? (v.status || 'ok') : 'ok';
     rows.push({
       path: `finances.pockets.${k}`,
-      value: v,
-      target: null,
+      value: allocated,
+      target,
       fmt: 'ksh',
-      cstr: 'ok',
+      cstr: st === 'amber' ? 'amber' : st === 'fail' ? 'red' : 'ok',
       desc: `${k} pocket`,
     });
   });
-  // pawa_balance
-  if (apiState.pawa_balance != null) {
+
+  // pantry — numeric entries only
+  const pantry = state.pantry || {};
+  Object.entries(pantry).forEach(([k, v]) => {
+    if (typeof v !== 'number') return;
+    const fmt = k.endsWith('_L') ? 'L' : k.endsWith('_kg') ? 'kg' : '';
+    rows.push({
+      path: `pantry.${k}`,
+      value: v,
+      target: null,
+      fmt,
+      cstr: 'ok',
+      desc: k.replace(/_/g, ' '),
+    });
+  });
+
+  // system.pawa_balance
+  if (state.system?.pawa_balance != null) {
+    const pb = state.system.pawa_balance;
     rows.push({
       path: 'system.pawa_balance',
-      value: apiState.pawa_balance,
+      value: pb,
       target: 10000,
       fmt: 'pwa',
-      cstr: apiState.pawa_balance < 2000 ? 'red' : apiState.pawa_balance < 5000 ? 'amber' : 'ok',
+      cstr: pb < 2000 ? 'red' : pb < 5000 ? 'amber' : 'ok',
       desc: 'Orchie tokens',
     });
   }
-  // score
-  if (apiState.score != null) {
+
+  // system.api_p95_ms
+  if (state.system?.api_p95_ms != null) {
+    const ms = state.system.api_p95_ms;
     rows.push({
-      path: 'system.score',
-      value: apiState.score,
-      target: 1,
-      fmt: '',
-      cstr: apiState.score >= 0.8 ? 'ok' : apiState.score >= 0.6 ? 'amber' : 'red',
-      desc: 'Sustain score',
+      path: 'system.api_p95_ms',
+      value: ms,
+      target: 500,
+      fmt: 'ms',
+      cstr: ms > 800 ? 'red' : ms > 500 ? 'amber' : 'ok',
+      desc: 'API latency p95',
+      lowerBetter: true,
     });
   }
+
   return rows.length ? rows : null;
 }
 
@@ -53,7 +78,7 @@ function apiOperativesToCards(operatives) {
     role: o.role || '',
     status: o.status || 'active',
     confidence: o.confidence ?? 80,
-    pawa: o.pawa ?? 0,
+    pawa: o.pawa ?? o.pawa_session ?? 0,
     task: o.task || o.current_task || '',
     subtasks: o.subtasks || [],
   }));
@@ -65,13 +90,14 @@ function apiEventsToLogEntries(events) {
   return events.slice(0, 24).map((e, i) => {
     const d = e.timestamp ? new Date(e.timestamp) : new Date();
     const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    const payloadStr = e.payload ? JSON.stringify(e.payload) : '';
     return {
       key: e.id || i,
       time,
-      sustain: e.sustain || '',
-      operator: e.operator || e.type || '',
-      delta: e.delta || e.message || JSON.stringify(e.data || {}),
-      op: e.op || e.type || 'EVT',
+      sustain: e.sustain || e.sustain_id || '',
+      operator: e.operator || e.event_name || e.type || '',
+      delta: e.delta || e.message || payloadStr || JSON.stringify(e.data || {}),
+      op: e.op || (e.event_name ? 'EVT' : e.type) || 'EVT',
       tone: e.tone || 'teal',
     };
   });
@@ -91,12 +117,23 @@ function MonitorPanel({ tick, sustain, liveState }) {
   const [offline, setOffline]   = dUseState(false);
   const [wsStatus, setWsStatus] = dUseState('connecting');
 
+  // Normalise GET /devui/state response → { state, events, operatives, constraints }
+  const normaliseGetResponse = (d) => {
+    const payload = d?.data || {};
+    return {
+      state: payload.state || null,
+      events: payload.events || [],
+      operatives: payload.operatives || [],
+      constraints: payload.constraints || [],
+    };
+  };
+
   // Initial fetch
   dUseEffect(() => {
     let cancelled = false;
     setLoading(true);
     api.get(`/devui/state?sustain_id=${encodeURIComponent(sustain.id)}`)
-      .then(d => { if (!cancelled) { setApiData(d); setLoading(false); setOffline(false); } })
+      .then(d => { if (!cancelled) { setApiData(normaliseGetResponse(d)); setLoading(false); setOffline(false); } })
       .catch(() => { if (!cancelled) { setLoading(false); setOffline(true); } });
     return () => { cancelled = true; };
   }, [sustain.id]);
@@ -105,14 +142,14 @@ function MonitorPanel({ tick, sustain, liveState }) {
   dUseEffect(() => {
     if (tick === 0 || tick % 5 !== 0) return;
     api.get(`/devui/state?sustain_id=${encodeURIComponent(sustain.id)}`)
-      .then(d => { setApiData(d); setOffline(false); setWsStatus('connected'); })
+      .then(d => { setApiData(normaliseGetResponse(d)); setOffline(false); setWsStatus('connected'); })
       .catch(() => setOffline(true));
   }, [tick, sustain.id]);
 
-  // Merge liveState (from WS) when available
+  // Merge liveState (from WS) — update state only, preserve events/operatives from REST
   dUseEffect(() => {
-    if (liveState && liveState.sustain_id === sustain.id) {
-      setApiData(liveState);
+    if (liveState && liveState.sustain_id === sustain.id && liveState.state) {
+      setApiData(prev => ({ ...prev, state: liveState.state }));
       setOffline(false);
       setWsStatus('connected');
     }
@@ -122,7 +159,7 @@ function MonitorPanel({ tick, sustain, liveState }) {
 
   // Derive display data — fall back to mock when offline
   const stateRows = dUseMemo(() => {
-    const fromApi = apiStateToStateTree(apiData);
+    const fromApi = apiStateToStateTree(apiData?.state);
     if (fromApi) {
       return fromApi.map((s, i) => {
         const live = s.value;
@@ -169,7 +206,7 @@ function MonitorPanel({ tick, sustain, liveState }) {
   }, [tick, offline]);
 
   // Hero metrics from API or fallback
-  const pawaBalance = apiData?.pawa_balance ?? (8420 - tick % 60);
+  const pawaBalance = apiData?.state?.system?.pawa_balance ?? null;
   const activeSustains = SUSTAINS.filter(s => s.status === 'live').length;
 
   return (
@@ -212,8 +249,8 @@ function MonitorPanel({ tick, sustain, liveState }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
           <HeroTile label="ACTIVE SUSTAINS" value={activeSustains} sub="in scope" tone="ok" />
           <HeroTile label="OPERATORS / MIN" value={apiData?.ops_per_min ?? '—'} live sub="rolling 60s" />
-          <HeroTile label="API P95" value={apiData?.api_p95_ms ? `${apiData.api_p95_ms}` : '—'} unit={apiData?.api_p95_ms ? 'ms' : ''} live sub="haiku · inference" />
-          <HeroTile label="PAWA BALANCE" value={pawaBalance ?? '—'} unit={pawaBalance ? 'pwa' : ''} sub="orchie tokens" tone="default" />
+          <HeroTile label="API P95" value={apiData?.state?.system?.api_p95_ms != null ? `${apiData.state.system.api_p95_ms}` : '—'} unit={apiData?.state?.system?.api_p95_ms != null ? 'ms' : ''} live sub="haiku · inference" />
+          <HeroTile label="PAWA BALANCE" value={pawaBalance != null ? pawaBalance : '—'} unit={pawaBalance != null ? 'pwa' : ''} sub="orchie tokens" tone="default" />
         </div>
       )}
 
@@ -513,5 +550,60 @@ function OperativeCard({ o, delay, tick }) {
   return (
     <button onClick={() => window.confirmAction?.({
       title: `${o.name} · ${o.role}`,
-      body: `${o.task}. Confidence ${o.confidence}%. Pawa burn ${o.pawa} / session. ${o.subtasks.length} subtasks tracked.`,
-      detail: o.subtasks.map(s => `${s.done ? '�
+      body: `${o.task}. Confidence ${o.confidence}%. Pawa burn ${o.pawa} / session.`,
+      ctaLabel: 'VIEW DETAILS',
+    })} style={{
+      display: 'flex', flexDirection: 'column', gap: 8,
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', padding: '12px 14px',
+      textAlign: 'left', width: '100%',
+      transition: 'border-color var(--t-fast)',
+      cursor: 'pointer',
+    }}
+    className="fade-up"
+    style2={{ animationDelay: `${delay}ms` }}
+    onMouseEnter={e => e.currentTarget.style.borderColor = statusColor}
+    onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+    >
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusColor, boxShadow: `0 0 5px ${statusColor}`, flexShrink: 0 }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '0.04em' }}>{o.name}</span>
+        </div>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: statusColor, letterSpacing: '0.06em' }}>{o.status.toUpperCase()}</span>
+      </div>
+
+      {/* Role */}
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>{o.role}</span>
+
+      {/* Confidence bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, height: 3, background: 'var(--bg-base)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{
+            width: `${liveConfidence}%`, height: '100%',
+            background: liveConfidence >= 80 ? 'var(--teal)' : liveConfidence >= 60 ? 'var(--amber)' : 'var(--danger)',
+            borderRadius: 2, transition: 'width 0.4s ease',
+          }} />
+        </div>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)', minWidth: 28 }}>{Math.round(liveConfidence)}%</span>
+      </div>
+
+      {/* Task */}
+      <span style={{
+        fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>{o.task}</span>
+
+      {/* Activity sparkline */}
+      <svg width="100%" height="18" viewBox={`0 0 ${series.length * 6} 18`} preserveAspectRatio="none" style={{ display: 'block' }}>
+        {series.map((v, i) => {
+          const barH = Math.max(2, (v / 100) * 16);
+          return <rect key={i} x={i * 6} y={18 - barH} width={4} height={barH} fill={statusColor} opacity={0.5 + (i / series.length) * 0.5} rx={1} />;
+        })}
+      </svg>
+    </button>
+  );
+}
+
+window.MonitorPanel = MonitorPanel;

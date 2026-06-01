@@ -940,4 +940,21 @@ operatives: 4 default (Mentor, Protégé, Curator, Navigator)`}
               <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>LIVE PREVIEW</span>
               <div style={{
                 height: 200, background: 'var(--bg-base)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)', display: 'flex', alignIt
+                borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <WidgetPreview name={item.name} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <footer style={{ padding: '14px 22px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <PBtn variant="ghost" onClick={onClose}>CANCEL</PBtn>
+          <PBtn onClick={() => { onClose(); window.flash?.(`${item.name} installed`, 'ok'); }}>{installLabel}</PBtn>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+export default App;
