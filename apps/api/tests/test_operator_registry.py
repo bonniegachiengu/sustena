@@ -109,6 +109,11 @@ SIMULATE_OPERATORS = [
     "simulate.score",
 ]
 
+EDIT_OPERATORS = [
+    "edit.state_patch",
+    "edit.operator_spec",
+]
+
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + BIASHARA_OPERATORS + VYYB_OPERATORS  # Epic 1.5.2
@@ -117,6 +122,7 @@ ALL_KNOWN_OPERATORS = (
     + MONITOR_OPERATORS                    # Sprint 3.2
     + VISUALIZE_OPERATORS                  # Sprint 3.3
     + SIMULATE_OPERATORS                   # Sprint 3.4
+    + EDIT_OPERATORS                       # Sprint 3.5
 )
 
 

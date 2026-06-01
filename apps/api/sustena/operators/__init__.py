@@ -13,3 +13,4 @@ from sustena.operators import api_ops      # noqa: F401  (registers api.* operat
 from sustena.operators import monitor      # noqa: F401  (registers monitor.* operators)
 from sustena.operators import visualize    # noqa: F401  (registers visualize.* operators)
 from sustena.operators import simulate_ops # noqa: F401  (registers simulate.* operators)
+from sustena.operators import edit_ops     # noqa: F401  (registers edit.* operators)
