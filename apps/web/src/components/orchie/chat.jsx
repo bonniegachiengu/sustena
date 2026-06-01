@@ -1,4 +1,5 @@
 import React from 'react';
+import { api } from '../../lib/api.js';
 /* Orchie — shared chat + widget renderer. Used by sidebar (compact) and mobile (full). */
 
 const { useState: oUseState, useEffect: oUseEffect, useRef: oUseRef, useMemo: oUseMemo } = React;
@@ -467,13 +468,7 @@ function useStreamedConversation(script, autoStart = true, baseDelay = 1200, sus
     setShown(s => [...s, { role: 'user', text }]);
     setThinking(true);
     try {
-      const res = await fetch('http://localhost:8000/orchie/message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sustain_id: sustainId, message: text }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await api.post('/orchie/message', { sustain_id: sustainId, message: text });
       setThinking(false);
       setShown(s => [...s, { role: 'assistant', text: data.reply }]);
     } catch (err) {
