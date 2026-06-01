@@ -86,10 +86,17 @@ UI_RENDER_OPERATORS = [
     "ui.render.preview",
 ]
 
+API_OPERATORS = [
+    "api.get",
+    "api.post",
+    "api.webhook_listen",
+]
+
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + BIASHARA_OPERATORS + VYYB_OPERATORS  # Epic 1.5.2
     + UI_RENDER_OPERATORS                  # Sprint 2 UIParser
+    + API_OPERATORS                        # Sprint 3.1
 )
 
 

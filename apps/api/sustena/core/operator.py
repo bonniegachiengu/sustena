@@ -58,6 +58,7 @@ class OperatorMeta:
     author: str = "sustena_core"
     min_privilege: int = 1              # Minimum sustain access tier required (0=owner, 1=member, ...)
     ui_schema: dict = field(default_factory=dict)
+    protocol: str = "rpc"               # rpc | event_driven | polling | streaming
 
 
 # ── Operator context ──────────────────────────────────────────────────────────
@@ -176,6 +177,7 @@ def sustena_operator(
     author: str = "sustena_core",
     min_privilege: int = 1,
     ui_schema: dict | None = None,
+    protocol: str = "rpc",
 ) -> Callable:
     """
     Decorator that registers an async operator function in OPERATOR_REGISTRY.
@@ -209,6 +211,7 @@ def sustena_operator(
             author=author,
             min_privilege=min_privilege,
             ui_schema=ui_schema or {},
+            protocol=protocol,
         )
 
         if name in OPERATOR_REGISTRY:
