@@ -271,6 +271,16 @@ operative.spawn(template_id, calibration_data)
 
 ## Bonnie's patterns — follow these exactly
 
+### Sprint subtask cadence — MANDATORY gate between every task
+After completing each numbered sprint subtask (e.g. 6.1, 6.2, …):
+1. `python -m pytest tests/ -q --tb=short` — all pass, zero failures.
+2. `git commit` with conventional commit message.
+3. `git push origin main`.
+4. Update CLAUDE.md: mark the task `[x]` in the sprint state, update the test count.
+5. **STOP. Tell Bonnie what was built and what comes next. Wait for explicit go-ahead.**
+
+Do not begin the next subtask until Bonnie replies. One subtask per conversation turn.
+
 ### Commits
 Conventional commits, **direct to main** (no feature branches, no PRs).
 **Commit each sprint task before starting the next one.**
