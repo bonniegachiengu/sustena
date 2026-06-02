@@ -177,19 +177,10 @@ class TestEvaluate:
     async def test_pocket_at_85pct_creates_proposal(self):
         """
         Trigger event.finances.pocket_spent with food pocket at 85%.
-        evaluate() should return an OperativeProposal (not None).
+        evaluate() returns an OperativeProposal via the graph — no LLM call.
         """
         state  = _make_state(food_allocated=5000.0, food_spent=4250.0)  # 85%
-        mentor = _make_mentor(
-            state,
-            claude_response=json.dumps({
-                "action":    "reallocate",
-                "pocket":    "food",
-                "amount":    500.0,
-                "rationale": "Food pocket at 85% — top up from liquid.",
-            }),
-        )
-
+        mentor = _make_mentor(state)
         trigger = {
             "pocket":    "food",
             "amount":    250.0,
@@ -201,60 +192,29 @@ class TestEvaluate:
         assert isinstance(proposal, OperativeProposal)
 
     @pytest.mark.asyncio
-    async def test_evaluate_calls_llm_with_haiku_model(self):
-        """evaluate() must use Haiku (the cheap model)."""
+    async def test_evaluate_does_not_call_llm(self):
+        """Sprint 5.3: evaluate() uses the graph — zero Anthropic API calls."""
         state  = _make_state(food_allocated=5000.0, food_spent=4300.0)
-        mentor = _make_mentor(
-            state,
-            claude_response=json.dumps({
-                "action": "alert", "pocket": "food", "amount": None,
-                "rationale": "No liquid to reallocate.",
-            }),
-        )
-
-        trigger = {"pocket": "food", "amount": 100.0}
-        await mentor.evaluate(trigger)
-
-        call_kwargs = mentor.claude_client.messages.create.call_args
-        assert call_kwargs.kwargs.get("model") == HAIKU or call_kwargs.args[0] == HAIKU
+        mentor = _make_mentor(state)
+        await mentor.evaluate({"pocket": "food", "amount": 100.0})
+        mentor.claude_client.messages.create.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_evaluate_logs_token_count(self):
-        """After evaluate(), log entries should contain token count."""
+    async def test_evaluate_produces_no_llm_log_entries(self):
+        """Graph-based evaluate() generates no LLM log entries."""
         state  = _make_state(food_allocated=5000.0, food_spent=4300.0)
-        mentor = _make_mentor(
-            state,
-            claude_response=json.dumps({
-                "action": "alert", "pocket": "food", "amount": None,
-                "rationale": "Alert.",
-            }),
-        )
+        mentor = _make_mentor(state)
         await mentor.evaluate({"pocket": "food", "amount": 100.0})
-
         entries = mentor.flush_log_entries()
-        assert len(entries) >= 1
-        entry = entries[0]
-        assert entry["llm_tokens_used"] == 40   # 15 input + 25 output (mock)
-        assert entry["model"] == HAIKU
+        assert len(entries) == 0
 
     @pytest.mark.asyncio
     async def test_evaluate_returns_none_when_no_pockets_over_threshold(self):
-        """Food at 40% → evaluate() should return None (no proposal warranted)."""
+        """Food at 40% → evaluate() returns None (no proposal warranted)."""
         state  = _make_state(food_allocated=5000.0, food_spent=2000.0)
         mentor = _make_mentor(state)
-        trigger = {"pocket": "food", "amount": 100.0}
-        proposal = await mentor.evaluate(trigger)
-        assert proposal is None
-
-    @pytest.mark.asyncio
-    async def test_evaluate_falls_back_on_llm_json_error(self):
-        """If LLM returns non-JSON, evaluate() should still return an alert proposal."""
-        state  = _make_state(food_allocated=5000.0, food_spent=4300.0)
-        mentor = _make_mentor(state, claude_response="not valid json at all")
         proposal = await mentor.evaluate({"pocket": "food", "amount": 100.0})
-        # Should fall back to alert
-        assert proposal is not None
-        assert proposal.operator_name == "sustena.alert"
+        assert proposal is None
 
 
 # ── Council integration tests ─────────────────────────────────────────────────
@@ -347,10 +307,11 @@ class TestCouncilSession:
 
     @pytest.mark.asyncio
     async def test_collect_votes_multiple_operatives(self):
-        """Two operatives → two vote records."""
+        """Two operatives → two vote records. mentor2 uses low-liquid state → votes NO."""
         state   = _make_state()
         council = self._make_council(state)
 
+        # Small amount → stays above floor → YES
         pid = council.create_proposal(
             sustain_id="test-sustain",
             proposed_by="mentor",
@@ -358,14 +319,19 @@ class TestCouncilSession:
             input_params={"pocket_name": "food", "amount": 500.0},
         )
 
-        mentor1 = _make_mentor(
-            state,
-            claude_response=json.dumps({"vote": "YES", "reasoning": "OK", "utility": 0.8}),
-        )
-        mentor2 = _make_mentor(
-            state,
-            claude_response=json.dumps({"vote": "NO", "reasoning": "Risk", "utility": 0.2}),
-        )
+        mentor1 = _make_mentor(state)  # liquid=45000, amount=500 → above floor → YES
+
+        # mentor2 has very low liquid: any reallocation breaches floor
+        low_liquid_state = StateAccessor({
+            "finances": {
+                "liquid": {"balance": 1000.0},   # well below 10% floor (5000)
+                "pockets": {"food": {"allocated": 5000.0, "spent": 4250.0, "limit": 5000.0}},
+                "income":  {"sources": [], "monthly_total": 50000.0},
+            },
+            "council_proposals": [],
+            "council_votes": [],
+        })
+        mentor2 = _make_mentor(low_liquid_state)
         mentor2.operative_id = "mentor_2"
 
         await council.collect_votes(pid, [mentor1, mentor2])
@@ -616,15 +582,10 @@ class TestMentorDeliberate:
         mentor.claude_client.messages.create.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_deliberate_yes_uses_haiku_model(self):
-        """When LLM is used in deliberate(), it must use Haiku."""
+    async def test_deliberate_yes_does_not_call_llm(self):
+        """Sprint 5.3: deliberate() YES vote uses graph — zero Anthropic API calls."""
         state  = _make_state()
-        mentor = _make_mentor(
-            state,
-            claude_response=json.dumps({
-                "vote": "YES", "reasoning": "Looks good.", "utility": 0.8
-            }),
-        )
+        mentor = _make_mentor(state)
 
         proposal = {
             "operator_name": "budget.reallocate",
@@ -632,10 +593,7 @@ class TestMentorDeliberate:
         }
         vote = await mentor.deliberate(context={}, proposal=proposal)
         assert vote.vote == VoteChoice.YES
-
-        call_kwargs = mentor.claude_client.messages.create.call_args
-        used_model = call_kwargs.kwargs.get("model") or (call_kwargs.args[0] if call_kwargs.args else None)
-        assert used_model == HAIKU
+        mentor.claude_client.messages.create.assert_not_called()
 
 
 # ── Log entries (operators_log sink) ─────────────────────────────────────────
@@ -644,54 +602,21 @@ class TestMentorDeliberate:
 class TestOperativeLogEntries:
 
     @pytest.mark.asyncio
-    async def test_log_entries_record_haiku_model(self):
-        """After any LLM call, log entries must record model=HAIKU."""
+    async def test_evaluate_produces_no_log_entries(self):
+        """Sprint 5.3: graph-based evaluate() generates no LLM log entries."""
         state  = _make_state(food_allocated=5000.0, food_spent=4300.0)
-        mentor = _make_mentor(
-            state,
-            claude_response=json.dumps({
-                "action": "alert", "pocket": "food", "amount": None,
-                "rationale": "Budget warning.",
-            }),
-        )
+        mentor = _make_mentor(state)
         await mentor.evaluate({"pocket": "food", "amount": 100.0})
-
         entries = mentor.flush_log_entries()
-        assert any(e.get("model") == HAIKU for e in entries)
-
-    @pytest.mark.asyncio
-    async def test_log_entries_record_token_count(self):
-        """Token count in log must match mock (input=15 output=25 total=40)."""
-        state  = _make_state(food_allocated=5000.0, food_spent=4300.0)
-        mentor = _make_mentor(
-            state,
-            claude_response=json.dumps({
-                "action": "alert", "pocket": "food", "amount": None,
-                "rationale": "Budget warning.",
-            }),
-        )
-        await mentor.evaluate({"pocket": "food", "amount": 100.0})
-
-        entries = mentor.flush_log_entries()
-        assert len(entries) >= 1
-        entry = entries[0]
-        assert entry["input_tokens"]    == 15
-        assert entry["output_tokens"]   == 25
-        assert entry["llm_tokens_used"] == 40
+        assert len(entries) == 0
 
     @pytest.mark.asyncio
     async def test_flush_clears_log_entries(self):
-        """flush_log_entries() should clear entries on second call."""
+        """flush_log_entries() returns empty list on second call."""
         state  = _make_state(food_allocated=5000.0, food_spent=4300.0)
-        mentor = _make_mentor(
-            state,
-            claude_response=json.dumps({
-                "action": "alert", "pocket": "food", "amount": None, "rationale": "Warn."
-            }),
-        )
+        mentor = _make_mentor(state)
         await mentor.evaluate({"pocket": "food", "amount": 100.0})
-
         first  = mentor.flush_log_entries()
         second = mentor.flush_log_entries()
-        assert len(first)  >= 1
-        assert len(second) == 0
+        assert first  == []
+        assert second == []

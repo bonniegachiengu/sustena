@@ -196,7 +196,9 @@ class OperativeGraph:
                 "[OperativeGraph] step=%d node='%s' operator='%s'",
                 step, current_id, node.operator_name,
             )
-            last_result = await op_meta.fn(context, **node.kwargs)
+            # Resolve $-prefixed string kwargs as dot-path references into accumulated
+            resolved_kwargs = _resolve_dynamic_kwargs(node.kwargs, accumulated)
+            last_result = await op_meta.fn(context, **resolved_kwargs)
             accumulated[current_id] = last_result.data
 
             if current_id == self.exit_node:
@@ -344,6 +346,28 @@ def _resolve_placeholders(kwargs: dict, cal: dict, node_id: str) -> dict:
                 _resolve_str(item, cal, node_id, key) if isinstance(item, str) else item
                 for item in value
             ]
+        else:
+            result[key] = value
+    return result
+
+
+def _resolve_dynamic_kwargs(kwargs: dict, accumulated: dict) -> dict:
+    """
+    Replace $-prefixed string kwargs with accumulated node results.
+
+    "$trigger_event"           → accumulated["trigger_event"]
+    "$node_id.field.path"      → accumulated["node_id"]["field"]["path"]
+
+    Non-string and non-$-prefixed values are returned unchanged.
+    """
+    result: dict = {}
+    for key, value in kwargs.items():
+        if isinstance(value, str) and value.startswith("$"):
+            path = value[1:]
+            resolved = _get_nested(accumulated, path)
+            result[key] = resolved if resolved is not None else value
+        elif isinstance(value, dict):
+            result[key] = _resolve_dynamic_kwargs(value, accumulated)
         else:
             result[key] = value
     return result

@@ -10,22 +10,19 @@ Responsibility:
   - Vote YES on proposals that improve the budget position; NO if a proposal
     would push liquid balance below 10% of monthly income.
 
-Utility function: minimise deviation of each pocket's spend rate from the
-  planned rate (i.e. keep all pockets close to their proportional target).
+Sprint 5 rewrite: evaluate() and deliberate() now run OperativeGraph instances
+rather than calling the LLM directly. No Anthropic API calls unless an llm.*
+node is explicitly added to the graph.
 
-Disagreement point: status quo (no change) — used in Nash bargaining.
-
-should_evaluate() threshold: any pocket balance < 20% of allocation.
-  This check is O(n) over pockets — zero LLM calls.
+should_evaluate() is unchanged — threshold check, zero LLM calls.
 """
 
-import json
 import logging
 from typing import Any
 
+from sustena.core.operative_graph import OperativeGraph, OperativeNode, OperativeEdge
 from sustena.core.state import StateAccessor
 from sustena.operatives.base import (
-    HAIKU,
     BaseOperative,
     OperativeProposal,
     OperativeVote,
@@ -36,14 +33,57 @@ logger = logging.getLogger(__name__)
 
 # ── Thresholds ─────────────────────────────────────────────────────────────────
 
-# should_evaluate triggers when remaining < WARN_THRESHOLD * allocated
-WARN_THRESHOLD    = 0.20   # 20% remaining → operative wakes up
+WARN_THRESHOLD   = 0.20   # should_evaluate triggers at remaining < 20%
+ACTION_THRESHOLD = 0.80   # mentor.evaluate_budget acts at spent > 80%
+LIQUID_FLOOR     = 0.10   # mentor.deliberate_budget hard-NO below 10% income
 
-# evaluate() proposes action when pocket is >80% spent
-ACTION_THRESHOLD  = 0.80   # 80% spent
 
-# deliberate() rejects proposals that push liquid < LIQUID_FLOOR * income
-LIQUID_FLOOR      = 0.10   # 10% of monthly income
+def _build_evaluation_graph(action_threshold: float, liquid_floor: float) -> OperativeGraph:
+    """
+    Build the evaluation OperativeGraph for MentorOperative.
+
+    Graph: single node — mentor.evaluate_budget scans pockets and returns
+    proposal data deterministically. No LLM.
+    """
+    return OperativeGraph(
+        nodes={
+            "evaluate": OperativeNode(
+                node_id="evaluate",
+                operator_name="mentor.evaluate_budget",
+                kwargs={
+                    "action_threshold": action_threshold,
+                    "liquid_floor": liquid_floor,
+                },
+            ),
+        },
+        edges=[],
+        entry_node="evaluate",
+        exit_node="evaluate",
+    )
+
+
+def _build_deliberation_graph(liquid_floor: float) -> OperativeGraph:
+    """
+    Build the deliberation OperativeGraph for MentorOperative.
+
+    Graph: single node — mentor.deliberate_budget applies rule-based vote logic.
+    $trigger_event injects the proposal dict at runtime. No LLM.
+    """
+    return OperativeGraph(
+        nodes={
+            "deliberate": OperativeNode(
+                node_id="deliberate",
+                operator_name="mentor.deliberate_budget",
+                kwargs={
+                    "proposal_dict": "$trigger_event",
+                    "liquid_floor": liquid_floor,
+                },
+            ),
+        },
+        edges=[],
+        entry_node="deliberate",
+        exit_node="deliberate",
+    )
 
 
 class MentorOperative(BaseOperative):
@@ -63,17 +103,25 @@ class MentorOperative(BaseOperative):
         config: dict,
         state_accessor: StateAccessor,
         claude_client: Any,
+        sustain_id: str = "unknown",
+        user_id: str = "system",
     ) -> None:
-        super().__init__(config, state_accessor, claude_client)
+        super().__init__(config, state_accessor, claude_client, sustain_id, user_id)
         self._warn_threshold   = config.get("warn_threshold",   WARN_THRESHOLD)
         self._action_threshold = config.get("action_threshold", ACTION_THRESHOLD)
         self._liquid_floor     = config.get("liquid_floor",     LIQUID_FLOOR)
 
-    # ── should_evaluate — ZERO LLM CALLS ──────────────────────────────────────
+        # Build graphs — no LLM nodes; fully deterministic
+        self.evaluation_graph   = _build_evaluation_graph(
+            self._action_threshold, self._liquid_floor
+        )
+        self.deliberation_graph = _build_deliberation_graph(self._liquid_floor)
+
+    # ── should_evaluate — ZERO LLM CALLS (unchanged) ─────────────────────────
 
     def should_evaluate(self, state: StateAccessor) -> bool:
         """
-        Return True if any pocket has the remaining balance < warn_threshold of
+        Return True if any pocket has remaining balance < warn_threshold of
         its allocation. O(n) dict scan — no LLM, no I/O.
         """
         pockets: dict = state.get("finances.pockets", {})
@@ -93,108 +141,22 @@ class MentorOperative(BaseOperative):
                 return True
         return False
 
-    # ── evaluate ──────────────────────────────────────────────────────────────
+    # ── evaluate — graph-based, no LLM ───────────────────────────────────────
 
     async def evaluate(self, trigger_event: dict) -> OperativeProposal | None:
         """
-        Triggered by event.finances.pocket_spent.
-
-        Scans all pockets for >80% utilisation. If found, calls Claude Haiku
-        to reason about whether to propose budget.reallocate or surface an alert.
-
-        Returns an OperativeProposal if action is warranted, else None.
+        Run the evaluation graph (mentor.evaluate_budget).
+        Returns None when no pockets exceed the action threshold.
+        Returns OperativeProposal otherwise — no LLM call.
         """
-        pockets: dict = self.state.get("finances.pockets", {})
-        monthly_income = self.state.get("finances.income.monthly_total", 0.0)
-        liquid_balance = self.state.get("finances.liquid.balance", 0.0)
-
-        # Find pockets that are >80% spent
-        over_threshold = []
-        for name, data in pockets.items():
-            if not isinstance(data, dict):
-                continue
-            allocated = data.get("allocated", 0.0)
-            spent     = data.get("spent",     0.0)
-            if allocated <= 0:
-                continue
-            pct = spent / allocated
-            if pct > self._action_threshold:
-                over_threshold.append({
-                    "pocket":    name,
-                    "allocated": allocated,
-                    "spent":     spent,
-                    "pct":       round(pct * 100, 1),
-                    "remaining": allocated - spent,
-                })
-
-        if not over_threshold:
+        ctx = self._build_operator_context()
+        proposal = await self.evaluation_graph.run(ctx, trigger_event)
+        exit_data = proposal.simulation_results.get(self.evaluation_graph.exit_node, {})
+        if not exit_data.get("has_action", True):
             return None
+        return proposal
 
-        system_prompt = self._build_system_prompt(monthly_income, liquid_balance)
-
-        user_message = (
-            f"Trigger event: {json.dumps(trigger_event)}\n\n"
-            f"Pockets over {int(self._action_threshold * 100)}% utilisation:\n"
-            f"{json.dumps(over_threshold, indent=2)}\n\n"
-            "Propose either:\n"
-            "  A) budget.reallocate — if liquid balance allows a top-up.\n"
-            "  B) alert — if no reallocation is possible.\n\n"
-            "Respond ONLY with valid JSON:\n"
-            '{"action": "reallocate" | "alert", "pocket": "<name>", '
-            '"amount": <float_or_null>, "rationale": "<brief>"}'
-        )
-
-        raw = await self._call_claude(system_prompt, user_message, model=HAIKU)
-
-        try:
-            parsed = json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            # Fallback: generate a simple alert proposal
-            logger.warning("[mentor] LLM returned non-JSON; falling back to alert")
-            parsed = {
-                "action":    "alert",
-                "pocket":    over_threshold[0]["pocket"],
-                "amount":    None,
-                "rationale": f"Pocket '{over_threshold[0]['pocket']}' is over 80% spent.",
-            }
-
-        action   = parsed.get("action", "alert")
-        pocket   = parsed.get("pocket", over_threshold[0]["pocket"])
-        amount   = parsed.get("amount")
-        rationale = parsed.get("rationale", "Budget threshold breached.")
-
-        if action == "reallocate" and amount and liquid_balance >= amount:
-            return OperativeProposal(
-                operator_name="budget.reallocate",
-                input_params={
-                    "pocket_name": pocket,
-                    "amount":      float(amount),
-                    "reason":      f"MentorOperative: {rationale}",
-                },
-                rationale=rationale,
-                simulation_results={
-                    "pockets_over_threshold": over_threshold,
-                    "liquid_before":          liquid_balance,
-                    "liquid_after":           liquid_balance - float(amount),
-                },
-            )
-        else:
-            # Alert proposal — no operator call, just surface to user
-            return OperativeProposal(
-                operator_name="sustena.alert",
-                input_params={
-                    "message":  rationale,
-                    "pockets":  over_threshold,
-                    "severity": "warn",
-                },
-                rationale=rationale,
-                simulation_results={
-                    "pockets_over_threshold": over_threshold,
-                    "liquid_balance":          liquid_balance,
-                },
-            )
-
-    # ── deliberate ────────────────────────────────────────────────────────────
+    # ── deliberate — graph-based, no LLM ─────────────────────────────────────
 
     async def deliberate(
         self,
@@ -202,107 +164,19 @@ class MentorOperative(BaseOperative):
         proposal: dict,
     ) -> OperativeVote:
         """
-        Vote on a Council proposal.
-
-        Vote YES if:
-          - The proposal improves budget position (reduces pocket overspend),
-            AND liquid balance after execution remains >= LIQUID_FLOOR * income.
-
-        Vote NO if:
-          - The proposal would push liquid balance below LIQUID_FLOOR * income.
-
-        Vote ABSTAIN if:
-          - The proposal is unrelated to finances.
+        Run the deliberation graph (mentor.deliberate_budget).
+        Returns OperativeVote extracted from graph exit node data — no LLM call.
         """
-        operator_name = proposal.get("operator_name", "")
-
-        # If not a finance-related operator, abstain
-        if not operator_name.startswith(("budget.", "sustena.alert")):
-            return OperativeVote(
-                vote=VoteChoice.ABSTAIN,
-                reasoning="Proposal is outside MentorOperative's domain (budget/finance).",
-                utility=0.5,
-            )
-
-        monthly_income = self.state.get("finances.income.monthly_total", 0.0)
-        liquid_balance = self.state.get("finances.liquid.balance",       0.0)
-        floor_amount   = monthly_income * self._liquid_floor
-
-        # Hard NO: would push liquid below floor
-        input_params = proposal.get("input_params", {})
-        proposed_amount = float(input_params.get("amount", 0) or 0)
-
-        if proposed_amount > 0 and (liquid_balance - proposed_amount) < floor_amount:
-            reasoning = (
-                f"NO: executing this proposal would reduce liquid balance from "
-                f"KES {liquid_balance:,.0f} to KES {liquid_balance - proposed_amount:,.0f}, "
-                f"below the 10% income floor of KES {floor_amount:,.0f}."
-            )
-            return OperativeVote(
-                vote=VoteChoice.NO,
-                reasoning=reasoning,
-                utility=0.1,
-            )
-
-        # Use LLM for nuanced YES/ABSTAIN reasoning
-        system_prompt = self._build_system_prompt(monthly_income, liquid_balance)
-
-        user_message = (
-            f"Council proposal to evaluate:\n{json.dumps(proposal, indent=2)}\n\n"
-            f"Additional context:\n{json.dumps(context, indent=2)}\n\n"
-            "Vote YES if this improves the budget position or keeps all constraints.\n"
-            "Vote NO if it worsens the budget position or violates constraints.\n"
-            "Vote ABSTAIN if you cannot determine the impact.\n\n"
-            "Respond ONLY with valid JSON:\n"
-            '{"vote": "YES" | "NO" | "ABSTAIN", "reasoning": "<brief>", "utility": <0.0-1.0>}'
+        ctx = self._build_operator_context()
+        graph_proposal = await self.deliberation_graph.run(ctx, proposal)
+        exit_data = graph_proposal.simulation_results.get(
+            self.deliberation_graph.exit_node, {}
         )
-
-        raw = await self._call_claude(system_prompt, user_message, model=HAIKU)
-
+        vote_str = str(exit_data.get("vote", "ABSTAIN")).upper()
         try:
-            parsed = json.loads(raw)
-            vote_str = parsed.get("vote", "ABSTAIN").upper()
-            vote      = VoteChoice(vote_str) if vote_str in VoteChoice.__members__ else VoteChoice.ABSTAIN
-            reasoning = parsed.get("reasoning", "LLM deliberation complete.")
-            utility   = float(parsed.get("utility", 0.5))
-            utility   = max(0.0, min(1.0, utility))  # clamp to [0, 1]
-        except (json.JSONDecodeError, ValueError, KeyError) as exc:
-            logger.warning("[mentor] deliberate LLM parse error: %s", exc)
-            vote      = VoteChoice.ABSTAIN
-            reasoning = "Could not parse LLM deliberation response; defaulting to ABSTAIN."
-            utility   = 0.5
-
+            vote = VoteChoice(vote_str)
+        except ValueError:
+            vote = VoteChoice.ABSTAIN
+        reasoning = exit_data.get("reasoning", graph_proposal.rationale)
+        utility = max(0.0, min(1.0, float(exit_data.get("utility", 0.5))))
         return OperativeVote(vote=vote, reasoning=reasoning, utility=utility)
-
-    # ── Internal helpers ───────────────────────────────────────────────────────
-
-    def _build_system_prompt(self, monthly_income: float, liquid_balance: float = 0.0) -> str:
-        """Build the MentorOperative system prompt with income, liquid balance,
-        pocket allocations, and spending history."""
-        pockets_raw: dict = self.state.get("finances.pockets", {})
-        pocket_lines: list[str] = []
-        for name, data in pockets_raw.items():
-            if isinstance(data, dict):
-                allocated = data.get("allocated", 0.0)
-                spent     = data.get("spent",     0.0)
-                remaining = allocated - spent
-                pct_spent = (spent / allocated * 100) if allocated > 0 else 0.0
-                pocket_lines.append(
-                    f"  {name}: allocated={allocated:,.0f}, spent={spent:,.0f}, "
-                    f"remaining={remaining:,.0f} ({pct_spent:.1f}% spent)"
-                )
-
-        pocket_block = "\n".join(pocket_lines) if pocket_lines else "  (no pockets set)"
-
-        return (
-            "You are MentorOperative, the budget watchdog for a Sustena sustain.\n"
-            "Your role: monitor budget pockets and propose reallocations or alerts.\n\n"
-            f"User monthly income: KES {monthly_income:,.0f}\n"
-            f"Current liquid balance: KES {liquid_balance:,.0f}\n\n"
-            f"Pocket allocations and spending history:\n{pocket_block}\n\n"
-            f"Constraints:\n"
-            f"  - Liquid balance must never fall below 10% of income "
-            f"(floor = KES {monthly_income * self._liquid_floor:,.0f}).\n"
-            f"  - A pocket is 'at risk' when spent > {int(self._action_threshold * 100)}% of allocated.\n\n"
-            "Always respond with valid JSON only. No markdown, no prose."
-        )
