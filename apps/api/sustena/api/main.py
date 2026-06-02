@@ -45,12 +45,6 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Startup seed failed (non-fatal): %s", exc)
 
-    # Seed demo arena products
-    try:
-        from sustena.api.routes.arena import seed_demo_products
-        await seed_demo_products()
-    except Exception as exc:
-        logger.warning("Arena product seed failed (non-fatal): %s", exc)
 
     yield
     logger.info("Sustena XII shutting down.")

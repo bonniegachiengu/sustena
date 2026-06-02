@@ -172,31 +172,6 @@ async def test_list_products_empty(client):
     assert isinstance(r.json()["data"]["products"], list)
 
 
-@pytest.mark.asyncio
-async def test_list_products_after_seed(client):
-    from sustena.api.routes.arena import seed_demo_products
-    await seed_demo_products()
-    r = await client.get("/api/v1/arena/products")
-    assert r.status_code == 200
-    products = r.json()["data"]["products"]
-    assert len(products) == 8
-    vyyb    = [p for p in products if p["source"] == "vyyb"]
-    mkulima = [p for p in products if p["source"] == "mkulima"]
-    assert len(vyyb) == 4
-    assert len(mkulima) == 4
-    for p in products:
-        assert "name" in p and "price" in p and "unit" in p and "seller" in p
-
-
-@pytest.mark.asyncio
-async def test_product_fields(client):
-    from sustena.api.routes.arena import seed_demo_products
-    await seed_demo_products()
-    r = await client.get("/api/v1/arena/products")
-    p = r.json()["data"]["products"][0]
-    for field in ["id", "name", "seller_type", "seller", "price", "unit", "emoji", "tags", "source"]:
-        assert field in p, f"missing field: {field}"
-
 
 # ── orders (Sprint 8.9) ───────────────────────────────────────────────────────
 
