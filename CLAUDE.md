@@ -205,7 +205,7 @@ Sprint 8.7  Lore CMS + Journal API ✅     ← 8.6
 Sprint 8.8  Library + Spore flow ✅       ← 8.2 + 8.6
 Sprint 8.9  Arena products + publishing ✅ ← 8.6 + 8.8
 Sprint 8.10 Profile telemetry + Ctrl ✅   ← 8.6 + 8.2
-Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
+Sprint 8.11 Council panel polish + WS ✅  ← 8.3 + 8.10
 ```
 
 **Key new DB tables (to add to `schema.py`):**
@@ -297,13 +297,21 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 - ✅ `ProfilePage.jsx` — `SignInPanel` now supports SIGN IN / REGISTER mode toggle with display name field; REGISTER + SIGN IN buttons in header and unauthenticated body.
 - ✅ 14 new tests in `test_arena.py`. **1568 tests total.**
 
+**Sprint 8.11 status (2 Jun 2026):**
+- ✅ `council.py` — added `GET /` root route (fixes `test_council_stub_route_reachable`).
+- ✅ `ControllerPanel` — replaced hardcoded `PROPOSALS` with real `GET /api/v1/council/{id}/proposals?status=PASSED`; 15s polling; empty state "council is quiet · no proposals in motion".
+- ✅ `_transformProposal()` — maps API response shape to `ProposalCard`/`ProposalModal` props (id, sustain, title, summary, autonomy, cta, cost, sim, council).
+- ✅ `ProposalCard` — per-councillor vote tally bar + expandable breakdown (operative_id, vote, reasoning truncated). Expand toggle stops card click propagation.
+- ✅ `ProposalModal` — null-safe sim metrics (2-col fallback when no simulation); `votes.breakdown` renders COUNCILLOR BREAKDOWN section; EXECUTE button wired to `control.execute_approved` via API (not just flash).
+- ✅ 8 new tests in `test_council_routes.py`. **1585 tests total.**
+
 **New routes added in Sprints 8–11:**
 - `POST /api/v1/users/register`, `POST /api/v1/users/login`, `GET /api/v1/users/me`, `GET /api/v1/users/me/stats`, `GET /api/v1/users/me/activity`
 - `GET|POST|PUT /api/v1/lore/entries`, `POST /api/v1/lore/entries/{id}/publish`
 - `GET|POST|PUT|DELETE /api/v1/journal/entries`
 - `GET /api/v1/arena/packages`, `POST /api/v1/arena/packages`, `GET /api/v1/arena/packages/{id}`, `GET /api/v1/arena/products`, `POST|GET /api/v1/arena/orders`
 - `GET /devui/library`, `GET /devui/sustain/{id}/graph`, `GET /devui/sustain/{id}/operators`
-- `GET|POST /api/v1/council/{sustain_id}/proposals`
+- `GET / | GET|POST /{sustain_id}/proposals | GET|POST /{sustain_id}/proposals/{id}/vote` (council)
 
 ---
 
