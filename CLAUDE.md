@@ -200,6 +200,7 @@ ui_schema={
 ### Commits
 Conventional commits, **direct to main** (no feature branches, no PRs).
 **Commit each sprint task before starting the next one.**
+**Push to GitHub (`git push origin main`) immediately after every commit — no exceptions.**
 ```
 feat(scope): description
 fix(scope): description
