@@ -1,7 +1,7 @@
 # Sustena XII — Claude Code Context
 
 > Read this before touching any code. It tells you where we are, how things are built,
-> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 5).
+> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 6.1).
 
 ---
 
@@ -168,7 +168,7 @@ All 4 tasks done and committed (1162 tests):
 - [x] 4.4 Control Panel — `ProposalCard` calls `control.execute_approved`; `RollbackPanel` calls `control.rollback`; both confirm before executing
 
 ### Sprint 5 ✅ — Operative Networks (LLM-Optional Base Layer)
-All 7 tasks done and committed (1245 tests):
+All 7 tasks done and committed (1245 tests — 1269 after Sprint 6.1):
 - [x] 5.1 `OperativeGraph` base layer — `CalibrationError`, `Condition`, `OperativeNode`, `OperativeEdge`, `OperativeGraph` in `core/operative_graph.py`. `from_spec()` with `{{placeholder}}` resolution and inline defaults. `$dot.path` dynamic kwargs for runtime value injection.
 - [x] 5.2 `BaseOperative` uses `OperativeGraph` — optional `evaluation_graph`/`deliberation_graph` attributes. Default `evaluate()`/`deliberate()` dispatch to graphs. `_build_operator_context()` helper added.
 - [x] 5.3 Mentor rewritten as graph-of-operators — `mentor.evaluate_budget` + `mentor.deliberate_budget` operators replace all `_call_claude()` calls. Zero Anthropic API calls.
@@ -177,10 +177,10 @@ All 7 tasks done and committed (1245 tests):
 - [x] 5.6 Graph specs for all Council operatives — 11 JSON files in `operatives/graphs/` covering Mentor, Protégé, Attaché, Curator, Navigator, Orchie (evaluation + deliberation each).
 - [x] 5.7 `operative.spawn` operator — loads template, resolves `{{placeholder}}` from `calibration_data` + live state, returns `instantiated_spec`. `CalibrationError` propagates as `OperatorResult.fail`.
 
-### Sprint 6 — NEXT: Today List + Morning Brief
+### Sprint 6 — IN PROGRESS: Today List + Morning Brief
 See `docs/Sustena_XII_Roadmap_Jun2026.md` for full task list.
-Tasks 6.1–6.4:
-- [ ] 6.1 `homestead.tasks.*` operators — add, complete, list, carryover. State at `tasks.items`. Update homestead.json.
+Tasks 6.1–6.4 (1269 tests):
+- [x] 6.1 `homestead.tasks.*` operators — add, complete, list, carryover. State at `tasks.items`. homestead.json updated.
 - [ ] 6.2 `orchie.morning_brief` operator — aggregates calendar, tasks, proposals, finances into a `morning_brief_card` ResponseWidget + `brief_text`.
 - [ ] 6.3 Orchie session init — on web app mount, auto-POST `orchie.morning_brief` and render result as first Orchie chat message.
 - [ ] 6.4 Orchie Panel — full-page view opened by expanding the Orchie chat bubble. Layout:
