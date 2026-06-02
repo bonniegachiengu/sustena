@@ -10,8 +10,11 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
+from sustena.config import settings
 from sustena.db.schema import init_db, metadata, get_engine
 from sustena.api.main import app
+
+ADMIN_TOKEN = settings.admin_token
 
 
 # ── fixture ───────────────────────────────────────────────────────────────────
@@ -189,7 +192,7 @@ async def test_list_orders_authenticated(auth_client):
 async def test_devui_library_empty(client):
     r = await client.get(
         "/devui/library",
-        headers={"Authorization": "Bearer dev-admin-token"},
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     assert r.status_code == 200
     data = r.json()["data"]
@@ -215,7 +218,7 @@ async def test_devui_library_groups_by_kind(auth_client):
 
     r = await client.get(
         "/devui/library",
-        headers={"Authorization": "Bearer dev-admin-token"},
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     assert r.status_code == 200
     data = r.json()["data"]
