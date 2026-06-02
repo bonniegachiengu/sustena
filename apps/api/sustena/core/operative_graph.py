@@ -39,10 +39,14 @@ Placeholder resolution in from_spec():
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext, OperatorResult
-from sustena.operatives.base import OperativeProposal
+
+if TYPE_CHECKING:
+    # Import only for type checkers — not at runtime to avoid circular imports.
+    # operative_graph.py → operatives/base.py → operatives/__init__.py → mentor.py → operative_graph.py
+    from sustena.operatives.base import OperativeProposal
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +162,7 @@ class OperativeGraph:
         self,
         context: OperatorContext,
         trigger_event: dict,
-    ) -> OperativeProposal:
+    ) -> "OperativeProposal":
         """
         Execute the graph starting from entry_node.
 
@@ -220,7 +224,7 @@ class OperativeGraph:
 
             current_id = next_id
 
-        return self._build_proposal(last_result, accumulated)
+        return self._build_proposal(last_result, accumulated)  # type: ignore[return-value]
 
     # ── from_spec ─────────────────────────────────────────────────────────────
 
@@ -284,13 +288,16 @@ class OperativeGraph:
         self,
         last_result: OperatorResult | None,
         accumulated: dict[str, Any],
-    ) -> OperativeProposal:
+    ) -> "OperativeProposal":
         """
         Construct an OperativeProposal from the graph's accumulated results.
 
         The exit node's result data is checked first for operator_name / input_params /
         rationale fields. Falls back to last_result, then to generic defaults.
         """
+        # Lazy import to avoid circular dependency at module level.
+        from sustena.operatives.base import OperativeProposal  # noqa: PLC0415
+
         exit_data = accumulated.get(self.exit_node, {})
         last_data = last_result.data if last_result else {}
 

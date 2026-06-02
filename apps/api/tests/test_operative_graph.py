@@ -1,7 +1,7 @@
 """
 tests/test_operative_graph.py
 
-Sprint 5 — OperativeGraph tests.
+Sprint 5 — OperativeGraph + OperativeRuntime tests.
 
 Coverage:
   - Condition.evaluate() — all comparison operators
@@ -14,8 +14,13 @@ Coverage:
   - OperativeGraph.from_spec(spec, calibration_data) — resolves {{placeholder}} tokens
   - OperativeGraph.from_spec() — raises CalibrationError on unresolved required placeholder
   - OperativeGraph.from_spec() — inline default {{key|fallback}} used when key absent
+  - BaseOperative — evaluate/deliberate dispatch to graphs when set
+  - OperativeRuntime — event_driven dispatch fires on EventBus event
+  - OperativeRuntime — polling dispatch fires on start_polling() schedule
+  - OperativeRuntime — rpc run_once() executes graph directly
 """
 
+import asyncio
 import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock
@@ -675,3 +680,167 @@ class TestBaseOperativeGraphIntegration:
 
         with pytest.raises(NotImplementedError, match="deliberation_graph"):
             await op.deliberate({}, {})
+
+
+# ── OperativeRuntime protocol dispatch tests (Task 5.4) ───────────────────────
+
+
+class TestOperativeRuntimeProtocolDispatch:
+    """
+    Verify that OperativeRuntime dispatches graphs correctly based on protocol.
+    """
+
+    def _make_runtime_graph(self, test_operators) -> OperativeGraph:
+        """Single-node graph using test.step_c (rpc protocol) as the entry."""
+        return OperativeGraph(
+            nodes={"result": OperativeNode("result", "test.step_c", kwargs={
+                "operator_name": "budget.reallocate",
+                "rationale": "runtime-dispatch test",
+            })},
+            edges=[],
+            entry_node="result",
+            exit_node="result",
+        )
+
+    def _context_factory(self) -> OperatorContext:
+        from sustena.core.state import StateAccessor
+        from sustena.core.events import EventBus
+        from sustena.core.pawa import PawaLedger
+        from sustena.core.operator import OperatorContext
+        from datetime import datetime
+        return OperatorContext(
+            state=StateAccessor({}),
+            events=EventBus(sustain_id="test-sustain"),
+            pawa=PawaLedger(),
+            sustain_id="test-sustain",
+            user_id="test-user",
+            timestamp=datetime.utcnow(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_rpc_run_once_executes_directly(self, test_operators):
+        """rpc: run_once() executes the graph immediately."""
+        from sustena.core.operative_runtime import OperativeRuntime
+
+        graph = self._make_runtime_graph(test_operators)
+        bus = EventBus(sustain_id="test-sustain")
+        runtime = OperativeRuntime(graph, bus, self._context_factory)
+
+        proposal = await runtime.run_once({"trigger": "direct"})
+        assert proposal.rationale == "runtime-dispatch test"
+
+    @pytest.mark.asyncio
+    async def test_event_driven_fires_on_event(self, test_operators):
+        """event_driven: graph runs when the registered event fires on EventBus."""
+        from sustena.core.operative_runtime import OperativeRuntime
+        from sustena.core.operator import OperatorMeta
+
+        # Register a test entry operator with event_driven protocol
+        async def ev_entry(ctx: OperatorContext) -> OperatorResult:
+            return OperatorResult.ok({
+                "operator_name": "sustena.event_result",
+                "rationale": "event_driven fired",
+            })
+
+        OPERATOR_REGISTRY["test.ev_entry"] = OperatorMeta(
+            name="test.ev_entry",
+            description="Event-driven test entry",
+            fn=ev_entry,
+            protocol="event_driven",
+        )
+        try:
+            graph = OperativeGraph(
+                nodes={"entry": OperativeNode("entry", "test.ev_entry")},
+                edges=[],
+                entry_node="entry",
+                exit_node="entry",
+            )
+            bus = EventBus(sustain_id="test-sustain")
+            runtime = OperativeRuntime(graph, bus, self._context_factory)
+            runtime.register(event_filter="event.finances.pocket_spent")
+
+            # Publishing the event should trigger the graph
+            await bus.publish(
+                "event.finances.pocket_spent",
+                {"pocket": "food", "pct": 0.85},
+            )
+
+            proposals = runtime.collect_proposals()
+            assert len(proposals) == 1
+            assert proposals[0].rationale == "event_driven fired"
+        finally:
+            OPERATOR_REGISTRY.pop("test.ev_entry", None)
+
+    @pytest.mark.asyncio
+    async def test_polling_fires_on_schedule(self, test_operators):
+        """polling: start_polling() runs the graph at the configured interval."""
+        from sustena.core.operative_runtime import OperativeRuntime
+        from sustena.core.operator import OperatorMeta
+
+        call_count = {"n": 0}
+
+        async def poll_entry(ctx: OperatorContext) -> OperatorResult:
+            call_count["n"] += 1
+            return OperatorResult.ok({"operator_name": "sustena.poll_result",
+                                      "rationale": f"poll #{call_count['n']}"})
+
+        OPERATOR_REGISTRY["test.poll_entry"] = OperatorMeta(
+            name="test.poll_entry",
+            description="Polling test entry",
+            fn=poll_entry,
+            protocol="polling",
+        )
+        try:
+            graph = OperativeGraph(
+                nodes={"entry": OperativeNode("entry", "test.poll_entry")},
+                edges=[],
+                entry_node="entry",
+                exit_node="entry",
+            )
+            bus = EventBus(sustain_id="test-sustain")
+            runtime = OperativeRuntime(graph, bus, self._context_factory)
+            runtime.register(interval_s=0)  # 0s interval for immediate repeat
+
+            task = asyncio.create_task(runtime.start_polling())
+            # Let it run at least twice
+            await asyncio.sleep(0.05)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+            assert call_count["n"] >= 1
+            proposals = runtime.collect_proposals()
+            assert len(proposals) >= 1
+        finally:
+            OPERATOR_REGISTRY.pop("test.poll_entry", None)
+
+    @pytest.mark.asyncio
+    async def test_register_event_driven_no_error(self, test_operators):
+        """register() for an event_driven entry node completes without error."""
+        from sustena.core.operative_runtime import OperativeRuntime
+        from sustena.core.operator import OperatorMeta
+
+        async def ev_noop(ctx: OperatorContext) -> OperatorResult:
+            return OperatorResult.ok({"operator_name": "noop", "rationale": "noop"})
+
+        OPERATOR_REGISTRY["test.ev_noop"] = OperatorMeta(
+            name="test.ev_noop",
+            description="Event-driven noop",
+            fn=ev_noop,
+            protocol="event_driven",
+        )
+        try:
+            graph = OperativeGraph(
+                nodes={"entry": OperativeNode("entry", "test.ev_noop")},
+                edges=[],
+                entry_node="entry",
+                exit_node="entry",
+            )
+            bus = EventBus(sustain_id="test-sustain")
+            runtime = OperativeRuntime(graph, bus, self._context_factory)
+            runtime.register(event_filter="event.finances.pocket_spent")
+            assert runtime._registered is True
+        finally:
+            OPERATOR_REGISTRY.pop("test.ev_noop", None)
