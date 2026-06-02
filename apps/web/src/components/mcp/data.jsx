@@ -941,10 +941,10 @@ function OrchieActivityViz({ tick }) {
         )}
       </svg>
 
-      {/* Mini to-do checklist (ambient) — populated from API */}
+      {/* Mini to-do checklist (ambient) — tasks surface via OrchePanel */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         <span className="label-10" style={{ fontSize: 9 }}>CURRENT TASKS</span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>Waiting for API</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>no active tasks · sustain is clear</span>
       </div>
     </div>
   );

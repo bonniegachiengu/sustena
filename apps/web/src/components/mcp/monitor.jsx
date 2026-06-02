@@ -157,7 +157,7 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
 
   const streamHealth = useStreamHealth(offline ? 'stale' : wsStatus);
 
-  // Derive display data — fall back to mock when offline
+  // Derive display data — fall back to empty when offline
   const stateRows = dUseMemo(() => {
     const fromApi = apiStateToStateTree(apiData?.state);
     if (fromApi) {
@@ -170,7 +170,7 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
         return { ...s, live, sparkline };
       });
     }
-    // Fallback: use MOCK data
+    // Fallback: nothing to show
     return STATE_TREE.map((s, i) => {
       const live = s.value + (s.fmt === 'ksh' ? Math.sin(tick * 0.1 + i) * (s.value * 0.001) : 0);
       const sparkline = Array.from({ length: 7 }).map((_, t) => {

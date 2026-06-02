@@ -1,22 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-/* ── Data — populated from Mycelium DB via API ─────────────────── */
-
-const OPERATIVES = [];
-const OPERATORS = [];
-const SPORES = [];
-const WIDGETS = [];
-const VYYB_PRODUCTS = [];
-const MKULIMA_PRODUCTS = [];
-
-const PRODUCTS_ALL = [
-  ...VYYB_PRODUCTS.map(p => ({ ...p, source: 'vyyb' })),
-  ...MKULIMA_PRODUCTS.map(p => ({ ...p, source: 'mkulima' })),
-];
-
-/* Past orders — populated from API */
-const INITIAL_ORDERS = [];
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
 
 /* ── Trust bar ────────────────────────────────────────────────── */
 function TrustBar({ value, color }) {
@@ -280,7 +265,7 @@ function OrdersView({ orders }) {
         ))}
       </div>
       {filtered.length === 0
-        ? <div style={{ textAlign: 'center', padding: '40px 0', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>No orders yet — Waiting for API</div>
+        ? <div style={{ padding: '40px 0', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>no orders matching this filter</div>
         : filtered.map(o => <OrderCard key={o.ref} order={o} />)
       }
     </div>
@@ -595,7 +580,54 @@ function ArenaPage() {
   const [productFilter, setProductFilter] = useState('all');
   const [cart, setCart] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
-  const [orders, setOrders] = useState(INITIAL_ORDERS);
+  const [orders, setOrders] = useState([]);
+
+  // Package catalogue — loaded from /api/v1/arena/packages (Sprint 8.9)
+  const [operatives, setOperatives] = useState([]);
+  const [operators, setOperators] = useState([]);
+  const [spores, setSpores] = useState([]);
+  const [widgets, setWidgets] = useState([]);
+  // Product catalogue — loaded from /api/v1/arena/products (Sprint 8.9)
+  const [vyyb, setVyyb] = useState([]);
+  const [mkulima, setMkulima] = useState([]);
+  const productsAll = useMemo(() => [
+    ...vyyb.map(p => ({ ...p, source: 'vyyb' })),
+    ...mkulima.map(p => ({ ...p, source: 'mkulima' })),
+  ], [vyyb, mkulima]);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/v1/arena/packages`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.data?.packages) return;
+        const pkgs = data.data.packages;
+        setOperatives(pkgs.filter(p => p.kind === 'operative'));
+        setOperators(pkgs.filter(p => p.kind === 'operator'));
+        setSpores(pkgs.filter(p => p.kind === 'spore'));
+        setWidgets(pkgs.filter(p => p.kind === 'widget'));
+      })
+      .catch(() => {});
+
+    fetch(`${API_BASE}/api/v1/arena/products`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.data?.products) return;
+        const prods = data.data.products;
+        setVyyb(prods.filter(p => p.seller_type === 'vyyb'));
+        setMkulima(prods.filter(p => p.seller_type === 'mkulima'));
+      })
+      .catch(() => {});
+
+    const token = localStorage.getItem('sustena_token');
+    if (token) {
+      fetch(`${API_BASE}/api/v1/arena/orders`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data?.data?.orders) setOrders(data.data.orders); })
+        .catch(() => {});
+    }
+  }, []);
 
   function addOrder(order) { setOrders(prev => [order, ...prev]); }
 
@@ -622,22 +654,22 @@ function ArenaPage() {
   const cartCount = cart.reduce((s, c) => s + c.qty, 0);
 
   const TABS = [
-    { id: 'operatives', label: 'Operatives', count: OPERATIVES.length,    accent: 'var(--node-operative)' },
-    { id: 'operators',  label: 'Operators',  count: OPERATORS.length,     accent: 'var(--node-operator)' },
-    { id: 'spores',     label: 'Spores',     count: SPORES.length,        accent: 'var(--teal)' },
-    { id: 'widgets',    label: 'Widgets',    count: WIDGETS.length,       accent: 'var(--node-event)' },
-    { id: 'products',   label: 'Products',   count: PRODUCTS_ALL.length,  accent: 'var(--ok)' },
-    { id: 'orders',     label: 'My Orders',  count: orders.length,        accent: 'var(--text-secondary)' },
+    { id: 'operatives', label: 'Operatives', count: operatives.length,   accent: 'var(--node-operative)' },
+    { id: 'operators',  label: 'Operators',  count: operators.length,    accent: 'var(--node-operator)' },
+    { id: 'spores',     label: 'Spores',     count: spores.length,       accent: 'var(--teal)' },
+    { id: 'widgets',    label: 'Widgets',    count: widgets.length,      accent: 'var(--node-event)' },
+    { id: 'products',   label: 'Products',   count: productsAll.length,  accent: 'var(--ok)' },
+    { id: 'orders',     label: 'My Orders',  count: orders.length,       accent: 'var(--text-secondary)' },
   ];
 
   const q = search.toLowerCase().trim();
 
   const filtered = useMemo(() => {
-    const pool = { operatives: OPERATIVES, operators: OPERATORS, spores: SPORES, widgets: WIDGETS, products: PRODUCTS_ALL }[tab] || [];
-    let results = q ? pool.filter(i => i.name.toLowerCase().includes(q) || i.desc.toLowerCase().includes(q) || (i.tags || []).some(t => t.includes(q))) : pool;
+    const pool = { operatives, operators, spores, widgets, products: productsAll }[tab] || [];
+    let results = q ? pool.filter(i => i.name?.toLowerCase().includes(q) || i.desc?.toLowerCase().includes(q) || (i.tags || []).some(t => t.includes(q))) : pool;
     if (tab === 'products' && productFilter !== 'all') results = results.filter(i => i.source === productFilter);
     return results;
-  }, [tab, q, productFilter]);
+  }, [tab, q, productFilter, operatives, operators, spores, widgets, productsAll]);
 
   const activeTab = TABS.find(t => t.id === tab);
 
@@ -764,9 +796,8 @@ function ArenaPage() {
             {tab === 'products' && <ProductBar filter={productFilter} onFilter={setProductFilter} />}
 
             {filtered.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '80px 20px', color: 'var(--text-muted)' }}>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 11, marginBottom: 8 }}>NO PACKAGES YET</div>
-                <div style={{ fontSize: 12 }}>Waiting for API — seed via SEED panel</div>
+              <div style={{ padding: '80px 0', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>
+                {q ? `no ${tab} matching "${search}"` : `no ${tab} in the mycelium yet`}
               </div>
             ) : tab === 'products' ? (
               <div className="card-grid">
