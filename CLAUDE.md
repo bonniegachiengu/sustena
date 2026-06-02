@@ -198,7 +198,7 @@ Part of Sprint 11 below. ProposalCard in `other.jsx` needs per-councillor vote b
 Sprint 8.1  GitHub cleanup + scroll        — no deps
 Sprint 8.2  Engine singleton               — UNBLOCKS all panels
 Sprint 8.3  Monitor real widgets           ← 8.2
-Sprint 8.4  Simulator DAG                 ← 8.2
+Sprint 8.4  Simulator DAG ✅              ← 8.2
 Sprint 8.5  Editor real graph             ← 8.2
 Sprint 8.6  Auth/Users (register/login)   ← 8.2; UNBLOCKS 8.7–8.10
 Sprint 8.7  Lore CMS + Journal API        ← 8.6
@@ -239,6 +239,14 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 - ✅ `MonitorPanel` (`monitor.jsx`) — empty-state "no operatives reporting · all thresholds nominal" when operatives list is empty.
 - ✅ 9 new tests in `test_devui_routes.py`. 1455 tests pass.
 
+**Sprint 8.4 status (2 Jun 2026):**
+- ✅ `GET /devui/sustain/{id}/operators` — returns spec-allowed operators with name, description, params, pawa_cost, and protocol from OPERATOR_REGISTRY.
+- ✅ `SimulatorPanel` proposal textarea starts empty (no hardcoded `budget.allocate` stub step).
+- ✅ ADD STEP section — clickable operator chips fetched from the new endpoint, wired to the live `sustain_id` from the TopBar selector.
+- ✅ `ProposalDag` component — sequential DAG view using `DagNode` + `DagEdges`; shows steps with completed highlighting after pipeline run.
+- ✅ `sustain_id` wired throughout `StateDiff` via the `sustain` prop (no more hardcoded fallback in API call).
+- ✅ 9 new tests in `TestSustainOperators`. 1464 tests pass.
+
 **CI schema fix (2 Jun 2026, post-8.3):**
 - ✅ `schema.py` `sustains` table was missing `template_id` column used by `SustainEngine`. In CI (file-based `test.db`), SQLAlchemy's `init_db()` runs first and creates the table without that column; `SustainEngine._ensure_tables()` then skips `CREATE TABLE IF NOT EXISTS`, leaving `template_id` absent. Fix: added `template_id` (nullable) and made seed-only columns (`sustain_type`, `name`, `template_version`, `is_active`) nullable so both writers can INSERT their respective column subsets without conflict. 1455 tests pass locally and in CI. Root cause: `conftest.py` uses `os.environ.setdefault(...)` which is a no-op when CI already has `DATABASE_URL` set.
 
@@ -251,7 +259,7 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 - `GET|POST|PUT /api/v1/lore/entries`, `POST /api/v1/lore/entries/{id}/publish`
 - `GET|POST|PUT|DELETE /api/v1/journal/entries`
 - `GET|POST /api/v1/arena/packages`, `GET /api/v1/arena/products`, `POST /api/v1/arena/orders`
-- `GET /devui/library`, `GET /devui/sustain/{id}/graph`
+- `GET /devui/library`, `GET /devui/sustain/{id}/graph`, `GET /devui/sustain/{id}/operators`
 - `GET|POST /api/v1/council/{sustain_id}/proposals`
 
 ---
