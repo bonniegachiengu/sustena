@@ -232,6 +232,13 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 - ✅ `conftest.py` — resets engine singleton between test modules.
 - ✅ 18 new tests in `test_engine_singleton.py`. 1446 tests pass.
 
+**Sprint 8.3 status (2 Jun 2026):**
+- ✅ Removed `_MONITOR_STUB_STATE` from `devui.py` — `get_monitor_widgets` and `simulate_pipeline` use `{}` when engine has no state.
+- ✅ `get_monitor_widgets` passes real constraint expressions (from `evaluate_constraints`) to `visualize.constraint_health`.
+- ✅ `GET /devui/sustain/{id}/graph` — Orchie + council operative nodes and delegation edges for Orchie panel graph tree.
+- ✅ `MonitorPanel` (`monitor.jsx`) — empty-state "no operatives reporting · all thresholds nominal" when operatives list is empty.
+- ✅ 9 new tests in `test_devui_routes.py`. 1455 tests pass.
+
 **Controller panel UI fixes (2 Jun 2026, post-8.2):**
 - ✅ Universal Controls instrument frames were clipped at the bottom — added `flexShrink:0` to the Card and removed `minHeight:0` from `Instrument` (`other.jsx`).
 - ✅ [E-HLD] EXEC MODE column too narrow (130px) — LIVE button overflowed the instrument frame; widened to 165px.
