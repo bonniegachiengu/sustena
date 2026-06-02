@@ -32,6 +32,88 @@ function EditorPanel({ sustain, leftOpen = true, rightOpen = true, onToggleLeft,
   const [mode, setMode] = dUseState('graph');
   const selectedNode = EDITOR_NODES.find(n => n.id === selectedId);
 
+  const [liveState, setLiveState] = dUseState(null);
+  const [stateLoading, setStateLoading] = dUseState(false);
+  const [realOps, setRealOps] = dUseState([]);
+
+  const [patchText, setPatchText] = dUseState('[{"op":"replace","path":"","value":null}]');
+  const [patchResult, setPatchResult] = dUseState(null);
+  const [patchApplying, setPatchApplying] = dUseState(false);
+  const [patchError, setPatchError] = dUseState(null);
+
+  const [opName, setOpName] = dUseState('');
+  const [opField, setOpField] = dUseState('description');
+  const [opValue, setOpValue] = dUseState('');
+  const [opResult, setOpResult] = dUseState(null);
+  const [opApplying, setOpApplying] = dUseState(false);
+
+  const sustainId = sustain?.id;
+
+  dUseEffect(() => {
+    if (!sustainId) return;
+    setStateLoading(true);
+    api.get(`/devui/state?sustain_id=${encodeURIComponent(sustainId)}`)
+      .then(d => setLiveState(d?.data?.state || {}))
+      .catch(() => setLiveState({}))
+      .finally(() => setStateLoading(false));
+    api.get(`/devui/sustain/${encodeURIComponent(sustainId)}/operators`)
+      .then(d => setRealOps(d?.data?.operators || []))
+      .catch(() => {});
+  }, [sustainId]);
+
+  const refreshState = async () => {
+    if (!sustainId) return;
+    try {
+      const d = await api.get(`/devui/state?sustain_id=${encodeURIComponent(sustainId)}`);
+      setLiveState(d?.data?.state || {});
+    } catch {}
+  };
+
+  const applyPatch = async () => {
+    let patch;
+    try { patch = JSON.parse(patchText); } catch { setPatchError('Invalid JSON'); return; }
+    setPatchApplying(true);
+    setPatchError(null);
+    setPatchResult(null);
+    try {
+      const res = await api.post('/devui/console/execute', {
+        sustain_id: sustainId || 'homestead.bonnie',
+        operator_id: 'edit.state_patch',
+        params: { patch },
+      });
+      const data = res?.data?.result?.data || {};
+      setPatchResult(data);
+      await refreshState();
+      window.flash?.(`Patch applied · ${data.applied_count ?? 0} ops`, 'ok');
+    } catch (err) {
+      setPatchError(err.message || 'API error');
+    } finally {
+      setPatchApplying(false);
+    }
+  };
+
+  const applyOpSpec = async () => {
+    if (!opName.trim()) { window.flash?.('Operator name required', 'amber'); return; }
+    setOpApplying(true);
+    setOpResult(null);
+    try {
+      const res = await api.post('/devui/console/execute', {
+        sustain_id: sustainId || 'homestead.bonnie',
+        operator_id: 'edit.operator_spec',
+        params: { operator_name: opName.trim(), field: opField, value: opValue },
+      });
+      const data = res?.data?.result?.data || {};
+      setOpResult(data);
+      window.flash?.(`${opName} · ${opField} updated`, 'ok');
+    } catch (err) {
+      window.flash?.(`Op spec edit failed: ${err.message}`, 'danger');
+    } finally {
+      setOpApplying(false);
+    }
+  };
+
+  const paletteOps = realOps.length ? realOps.map(o => o.name) : [];
+
   return (
     <div className="panel-enter" style={{
       display: 'grid',
@@ -86,10 +168,14 @@ function EditorPanel({ sustain, leftOpen = true, rightOpen = true, onToggleLeft,
         </div>
 
         <div style={{ marginTop: 24, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-          <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>LIBRARY</span>
+          <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>OPERATORS</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {['budget.allocate', 'mpesa.parse', 'chama.contribution', 'pantry.consume'].map(o => (
-              <button key={o} style={{
+            {paletteOps.length === 0 ? (
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)', padding: '4px 0' }}>
+                no operators · sustain is clear
+              </span>
+            ) : paletteOps.slice(0, 8).map(o => (
+              <button key={o} onClick={() => { setMode('op-spec'); setOpName(o); }} style={{
                 textAlign: 'left', padding: '6px 8px',
                 fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)',
                 background: 'transparent', borderRadius: 'var(--radius-sm)',
@@ -107,43 +193,49 @@ function EditorPanel({ sustain, leftOpen = true, rightOpen = true, onToggleLeft,
 
       {/* Editor canvas */}
       <Card
-        title="GRAPH"
-        sub={`${sustain.label} · 11 NODES · 10 EDGES`}
+        title={mode === 'state' ? 'STATE EDITOR' : mode === 'op-spec' ? 'OP SPEC EDITOR' : 'GRAPH'}
+        sub={mode === 'graph'
+          ? `${sustain.label} · ${EDITOR_NODES.length} NODES · ${EDITOR_EDGES.length} EDGES`
+          : mode === 'state'
+          ? `${sustainId} · live state · edit.state_patch`
+          : 'edit.operator_spec · in-memory registry'}
         padded={false}
         actions={
           <div style={{ display: 'flex', gap: 6 }}>
             <TBtn active={mode === 'graph'} onClick={() => setMode('graph')}>GRAPH</TBtn>
-            <TBtn active={mode === 'text'} onClick={() => setMode('text')}>TEXT</TBtn>
-            <TBtn>AUTO-LAYOUT</TBtn>
+            <TBtn active={mode === 'state'} onClick={() => setMode('state')}>STATE</TBtn>
+            <TBtn active={mode === 'op-spec'} onClick={() => setMode('op-spec')}>OP SPEC</TBtn>
           </div>
         }
       >
         {mode === 'graph' ? (
           <EditorCanvas selectedId={selectedId} onSelect={setSelectedId} />
+        ) : mode === 'state' ? (
+          <StateEditorTab
+            sustain={sustain}
+            liveState={liveState}
+            stateLoading={stateLoading}
+            patchText={patchText}
+            onPatchChange={setPatchText}
+            patchResult={patchResult}
+            patchError={patchError}
+            patchApplying={patchApplying}
+            onApplyPatch={applyPatch}
+            onRefresh={refreshState}
+          />
         ) : (
-          <pre style={{
-            padding: 16, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-secondary)',
-            background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)', overflow: 'auto', height: '100%',
-            margin: 16,
-          }}>{`{
-  "operator": "budget.allocate",
-  "version": "2.1",
-  "inputs": {
-    "pocket_name": "string",
-    "amount": "number",
-    "period": "string"
-  },
-  "logic": "budget_allocate_fn",
-  "constraints": [
-    "sum_constraint",
-    "balance_constraint"
-  ],
-  "ui_schema": {
-    "sub_operator": "ui.render.operator_card",
-    "widget_type": "budget_allocation_card",
-    "fields": [...]
-  }
-}`}</pre>
+          <OpSpecEditorTab
+            opName={opName}
+            onOpNameChange={setOpName}
+            opField={opField}
+            onOpFieldChange={setOpField}
+            opValue={opValue}
+            onOpValueChange={setOpValue}
+            opResult={opResult}
+            opApplying={opApplying}
+            onApply={applyOpSpec}
+            realOps={realOps}
+          />
         )}
       </Card>
 
@@ -162,6 +254,175 @@ function EditorPanel({ sustain, leftOpen = true, rightOpen = true, onToggleLeft,
         {selectedNode ? <NodeInspector node={selectedNode} /> : <Empty label="NO SELECTION" sub="Click any node to inspect" />}
       </Card>
       )}
+    </div>
+  );
+}
+
+function StateEditorTab({ sustain, liveState, stateLoading, patchText, onPatchChange, patchResult, patchError, patchApplying, onApplyPatch, onRefresh }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: '100%', minHeight: 0 }}>
+      {/* Left — live state JSON */}
+      <div style={{ display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)', overflow: 'hidden' }}>
+        <div style={{ padding: '6px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="label-10" style={{ fontSize: 9 }}>LIVE STATE · {sustain?.id}</span>
+          <button onClick={onRefresh} style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, transition: 'color var(--t-fast)' }}
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--amber)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+          >↻ refresh</button>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
+          {stateLoading ? (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)' }}>loading…</span>
+          ) : liveState && Object.keys(liveState).length > 0 ? (
+            <pre style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
+              {JSON.stringify(liveState, null, 2)}
+            </pre>
+          ) : (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>
+              no state recorded yet
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Right — patch editor */}
+      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ padding: '6px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <span className="label-10" style={{ fontSize: 9 }}>PATCH OPS · edit.state_patch</span>
+        </div>
+        <div style={{ padding: '5px 12px', flexShrink: 0 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)' }}>
+            [&#123;"op":"replace|add|remove","path":"dot.path","value":...&#125;]
+          </span>
+        </div>
+        <textarea
+          value={patchText}
+          onChange={e => onPatchChange(e.target.value)}
+          spellCheck={false}
+          style={{
+            flex: 1, resize: 'none',
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)',
+            background: 'var(--bg-base)', border: 'none', outline: 'none',
+            padding: '8px 12px', lineHeight: 1.5,
+          }}
+        />
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {patchError && (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--danger)' }}>{patchError}</span>
+          )}
+          {patchResult && (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--teal)' }}>
+              ✓ {patchResult.applied_count} ops applied
+              {patchResult.error_count > 0 && <span style={{ color: 'var(--amber)' }}> · {patchResult.error_count} errors</span>}
+            </span>
+          )}
+          <button
+            onClick={onApplyPatch}
+            disabled={patchApplying}
+            style={{
+              padding: '7px 14px', alignSelf: 'flex-start',
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em',
+              background: patchApplying ? 'var(--bg-overlay)' : 'var(--amber)',
+              color: patchApplying ? 'var(--text-dim)' : 'var(--bg-base)',
+              border: `1px solid ${patchApplying ? 'var(--border)' : 'var(--amber)'}`,
+              borderRadius: 'var(--radius-sm)', cursor: patchApplying ? 'not-allowed' : 'pointer',
+              transition: 'all var(--t-fast)',
+            }}
+          >
+            {patchApplying ? '⟳ APPLYING…' : 'APPLY PATCH'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OpSpecEditorTab({ opName, onOpNameChange, opField, onOpFieldChange, opValue, onOpValueChange, opResult, opApplying, onApply, realOps }) {
+  const EDITABLE_FIELDS = ['description', 'pawa_cost', 'license_tier', 'author', 'ui_schema'];
+  return (
+    <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, overflow: 'auto', height: '100%', boxSizing: 'border-box' }}>
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+        Modify operator metadata in the in-memory OPERATOR_REGISTRY. Changes take effect immediately but are not persisted across server restarts.
+      </span>
+      <div>
+        <span className="label-10" style={{ display: 'block', marginBottom: 6 }}>OPERATOR</span>
+        {realOps.length > 0 && (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+            {realOps.slice(0, 6).map(o => (
+              <button key={o.name} onClick={() => onOpNameChange(o.name)} style={{
+                padding: '3px 8px', fontFamily: 'var(--mono)', fontSize: 9,
+                color: opName === o.name ? 'var(--amber)' : 'var(--text-muted)',
+                background: opName === o.name ? 'var(--amber-glow)' : 'transparent',
+                border: `1px solid ${opName === o.name ? 'var(--amber-border)' : 'var(--border)'}`,
+                borderRadius: 3, cursor: 'pointer', transition: 'all var(--t-fast)',
+              }}>{o.name}</button>
+            ))}
+          </div>
+        )}
+        <input
+          value={opName}
+          onChange={e => onOpNameChange(e.target.value)}
+          placeholder="e.g. budget.allocate"
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            background: 'var(--bg-base)', border: '1px solid var(--border-mid)',
+            borderRadius: 'var(--radius-sm)', padding: '7px 10px',
+            fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)', outline: 'none',
+          }}
+        />
+      </div>
+      <div>
+        <span className="label-10" style={{ display: 'block', marginBottom: 6 }}>FIELD</span>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {EDITABLE_FIELDS.map(f => (
+            <button key={f} onClick={() => onOpFieldChange(f)} style={{
+              padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 9,
+              color: opField === f ? 'var(--teal)' : 'var(--text-muted)',
+              background: opField === f ? 'rgba(42,184,160,0.1)' : 'transparent',
+              border: `1px solid ${opField === f ? 'var(--teal-border)' : 'var(--border)'}`,
+              borderRadius: 3, cursor: 'pointer', transition: 'all var(--t-fast)',
+            }}>{f}</button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <span className="label-10" style={{ display: 'block', marginBottom: 6 }}>NEW VALUE</span>
+        <input
+          value={opValue}
+          onChange={e => onOpValueChange(e.target.value)}
+          placeholder="new value…"
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            background: 'var(--bg-base)', border: '1px solid var(--border-mid)',
+            borderRadius: 'var(--radius-sm)', padding: '7px 10px',
+            fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)', outline: 'none',
+          }}
+        />
+      </div>
+      {opResult && (
+        <div style={{
+          background: 'var(--bg-base)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)', padding: '8px 12px',
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--teal)',
+        }}>
+          ✓ {opResult.operator_name} · {opResult.field}: {String(opResult.old_value)} → {String(opResult.new_value)}
+        </div>
+      )}
+      <button
+        onClick={onApply}
+        disabled={opApplying}
+        style={{
+          padding: '7px 14px', alignSelf: 'flex-start',
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em',
+          background: opApplying ? 'var(--bg-overlay)' : 'var(--teal)',
+          color: opApplying ? 'var(--text-dim)' : 'var(--bg-base)',
+          border: `1px solid ${opApplying ? 'var(--border)' : 'var(--teal)'}`,
+          borderRadius: 'var(--radius-sm)', cursor: opApplying ? 'not-allowed' : 'pointer',
+          transition: 'all var(--t-fast)',
+        }}
+      >
+        {opApplying ? '⟳ UPDATING…' : 'UPDATE SPEC'}
+      </button>
     </div>
   );
 }
@@ -2537,4 +2798,5 @@ Object.assign(window, {
   LibraryMark,
   Knob, Slider, Stepper, VerticalScale, Segmented, BigToggle, RockerSwitch, LedGrid,
   OperativeLibCard, OperatorLibRow, SporeLibCard, WidgetLibCard, WidgetPreview, Stat,
+  StateEditorTab, OpSpecEditorTab,
 });
