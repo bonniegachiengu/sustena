@@ -4,6 +4,11 @@ sustena/operatives/__init__.py
 Public API for the operatives package.
 """
 
+import pathlib
+
+# Directory containing JSON graph spec files for operatives (Sprint 5.5+)
+GRAPHS_DIR: pathlib.Path = pathlib.Path(__file__).parent / "graphs"
+
 from sustena.operatives.base import (
     BaseOperative,
     OperativeProposal,

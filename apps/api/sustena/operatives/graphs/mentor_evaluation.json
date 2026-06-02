@@ -1,0 +1,14 @@
+{
+  "entry": "evaluate",
+  "exit": "evaluate",
+  "nodes": {
+    "evaluate": {
+      "operator": "mentor.evaluate_budget",
+      "kwargs": {
+        "action_threshold": 0.80,
+        "liquid_floor": 0.10
+      }
+    }
+  },
+  "edges": []
+}

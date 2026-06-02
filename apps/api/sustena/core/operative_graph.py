@@ -282,6 +282,37 @@ class OperativeGraph:
             exit_node=exit_,
         )
 
+    # ── from_spec_file ────────────────────────────────────────────────────────
+
+    @classmethod
+    def from_spec_file(
+        cls,
+        spec_path: Any,  # str | Path — avoid pathlib import at type level
+        calibration_data: dict | None = None,
+    ) -> "OperativeGraph":
+        """
+        Load an OperativeGraph from a JSON file on disk.
+
+        Convenience wrapper around from_spec() for sustain spec integration.
+        The spec_path can be absolute or relative to the caller.
+
+        params:
+          spec_path       : path to the JSON graph spec file (str or pathlib.Path)
+          calibration_data: optional dict for {{placeholder}} resolution
+        """
+        import json
+        from pathlib import Path
+
+        path = Path(spec_path)
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Graph spec file not found: {path}. "
+                "Check that the path is absolute or relative to the graphs directory."
+            )
+        with path.open(encoding="utf-8") as fh:
+            spec_dict = json.load(fh)
+        return cls.from_spec(spec_dict, calibration_data)
+
     # ── Internal helpers ───────────────────────────────────────────────────────
 
     def _build_proposal(

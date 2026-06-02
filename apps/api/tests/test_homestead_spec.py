@@ -128,6 +128,32 @@ def test_operatives_contains_all_council_members(spec):
         assert expected in operatives, f"operatives must include '{expected}'"
 
 
+def test_operatives_is_dict_with_class_keys(spec):
+    """Sprint 5.5: operatives section is now a dict mapping name → {class, graphs?}."""
+    operatives = spec["operatives"]
+    assert isinstance(operatives, dict), "operatives must be a dict (Sprint 5.5)"
+    for name, entry in operatives.items():
+        assert isinstance(entry, dict), f"operative '{name}' entry must be a dict"
+        assert "class" in entry, f"operative '{name}' must declare a 'class' key"
+
+
+def test_mentor_operative_has_graph_references(spec):
+    """Mentor must declare evaluation_graph and deliberation_graph paths."""
+    mentor = spec["operatives"]["mentor"]
+    assert "evaluation_graph" in mentor, "mentor must declare evaluation_graph"
+    assert "deliberation_graph" in mentor, "mentor must declare deliberation_graph"
+
+
+def test_mentor_graph_files_exist(spec):
+    """The graph JSON files referenced in mentor must exist on disk."""
+    import pathlib
+    graphs_dir = pathlib.Path(__file__).parent.parent / "sustena" / "operatives" / "graphs"
+    mentor = spec["operatives"]["mentor"]
+    for key in ("evaluation_graph", "deliberation_graph"):
+        graph_path = graphs_dir / pathlib.Path(mentor[key]).name
+        assert graph_path.exists(), f"Graph file not found: {graph_path}"
+
+
 # ── Invariants ────────────────────────────────────────────────────────────────
 
 def test_invariants_is_non_empty_list(spec):

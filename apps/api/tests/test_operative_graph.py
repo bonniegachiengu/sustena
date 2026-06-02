@@ -685,6 +685,71 @@ class TestBaseOperativeGraphIntegration:
 # ── OperativeRuntime protocol dispatch tests (Task 5.4) ───────────────────────
 
 
+class TestFromSpecFile:
+    """Tests for OperativeGraph.from_spec_file() — Sprint 5.5."""
+
+    def _graphs_dir(self):
+        import pathlib
+        return pathlib.Path(__file__).parent.parent / "sustena" / "operatives" / "graphs"
+
+    def test_from_spec_file_loads_mentor_evaluation_graph(self):
+        """from_spec_file() loads mentor_evaluation.json correctly."""
+        import sustena.operators  # ensure operators are registered
+        graph = OperativeGraph.from_spec_file(
+            self._graphs_dir() / "mentor_evaluation.json"
+        )
+        assert graph.entry_node == "evaluate"
+        assert graph.exit_node == "evaluate"
+        assert "evaluate" in graph.nodes
+        assert graph.nodes["evaluate"].operator_name == "mentor.evaluate_budget"
+
+    def test_from_spec_file_loads_mentor_deliberation_graph(self):
+        """from_spec_file() loads mentor_deliberation.json correctly."""
+        import sustena.operators
+        graph = OperativeGraph.from_spec_file(
+            self._graphs_dir() / "mentor_deliberation.json"
+        )
+        assert graph.entry_node == "deliberate"
+        assert graph.exit_node == "deliberate"
+        assert graph.nodes["deliberate"].operator_name == "mentor.deliberate_budget"
+
+    @pytest.mark.asyncio
+    async def test_from_spec_file_runs_mentor_evaluation(self):
+        """Mentor evaluation graph loaded from file produces a proposal."""
+        import sustena.operators
+        from sustena.core.state import StateAccessor
+        from sustena.core.events import EventBus
+        from sustena.core.pawa import PawaLedger
+        from sustena.core.operator import OperatorContext
+        from datetime import datetime
+
+        graph = OperativeGraph.from_spec_file(
+            self._graphs_dir() / "mentor_evaluation.json"
+        )
+        state = StateAccessor({
+            "finances": {
+                "liquid": {"balance": 45000.0},
+                "pockets": {"food": {"allocated": 5000.0, "spent": 4250.0}},
+                "income": {"sources": [], "monthly_total": 50000.0},
+            }
+        })
+        ctx = OperatorContext(
+            state=state,
+            events=EventBus(sustain_id="test"),
+            pawa=PawaLedger(),
+            sustain_id="test",
+            user_id="test-user",
+            timestamp=datetime.utcnow(),
+        )
+        proposal = await graph.run(ctx, trigger_event={"pocket": "food", "amount": 100.0})
+        # Food at 85% → has_action True → reallocate proposal
+        assert proposal.operator_name == "budget.reallocate"
+
+    def test_from_spec_file_raises_on_missing_file(self):
+        with pytest.raises(FileNotFoundError):
+            OperativeGraph.from_spec_file("/no/such/file.json")
+
+
 class TestOperativeRuntimeProtocolDispatch:
     """
     Verify that OperativeRuntime dispatches graphs correctly based on protocol.
@@ -815,6 +880,12 @@ class TestOperativeRuntimeProtocolDispatch:
             assert len(proposals) >= 1
         finally:
             OPERATOR_REGISTRY.pop("test.poll_entry", None)
+
+    @pytest.mark.asyncio
+    async def test_from_spec_file_not_found_raises(self, test_operators):
+        """from_spec_file() raises FileNotFoundError when path does not exist."""
+        with pytest.raises(FileNotFoundError):
+            OperativeGraph.from_spec_file("/nonexistent/path/graph.json")
 
     @pytest.mark.asyncio
     async def test_register_event_driven_no_error(self, test_operators):

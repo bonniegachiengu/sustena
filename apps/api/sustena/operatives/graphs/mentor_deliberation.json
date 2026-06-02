@@ -1,0 +1,14 @@
+{
+  "entry": "deliberate",
+  "exit": "deliberate",
+  "nodes": {
+    "deliberate": {
+      "operator": "mentor.deliberate_budget",
+      "kwargs": {
+        "proposal_dict": "$trigger_event",
+        "liquid_floor": 0.10
+      }
+    }
+  },
+  "edges": []
+}

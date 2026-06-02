@@ -292,13 +292,25 @@
       "pawa_cost": 0
     }
   ],
-  "operatives": [
-    "mentor",
-    "protege",
-    "attache",
-    "navigator",
-    "curator"
-  ],
+  "operatives": {
+    "mentor": {
+      "class": "MentorOperative",
+      "evaluation_graph": "graphs/mentor_evaluation.json",
+      "deliberation_graph": "graphs/mentor_deliberation.json"
+    },
+    "protege": {
+      "class": "ProtegeOperative"
+    },
+    "attache": {
+      "class": "AttacheOperative"
+    },
+    "navigator": {
+      "class": "NavigatorOperative"
+    },
+    "curator": {
+      "class": "CuratorOperative"
+    }
+  },
   "invariants": [
     {
       "id": "liquid_non_negative",
