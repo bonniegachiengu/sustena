@@ -625,3 +625,57 @@ class TestSustainGraph:
     def test_different_sustain_id_echoed(self, client):
         r = client.get("/devui/sustain/vyyb.hive/graph", headers=AUTH_HEADER)
         assert r.json()["data"]["sustain_id"] == "vyyb.hive"
+
+
+# ---------------------------------------------------------------------------
+# GET /devui/sustain/{id}/operators   (Sprint 8.4)
+# ---------------------------------------------------------------------------
+
+class TestSustainOperators:
+    def test_returns_200(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/operators", headers=AUTH_HEADER)
+        assert r.status_code == 200
+
+    def test_requires_auth(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/operators")
+        assert r.status_code == 401
+
+    def test_response_has_status_ok(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/operators", headers=AUTH_HEADER)
+        assert r.json()["status"] == "ok"
+
+    def test_response_echoes_sustain_id(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/operators", headers=AUTH_HEADER)
+        assert r.json()["data"]["sustain_id"] == "homestead.bonnie"
+
+    def test_response_contains_operators_list(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/operators", headers=AUTH_HEADER)
+        data = r.json()["data"]
+        assert "operators" in data
+        assert isinstance(data["operators"], list)
+
+    def test_unknown_sustain_returns_empty_operators(self, client):
+        r = client.get("/devui/sustain/nonexistent.sustain/operators", headers=AUTH_HEADER)
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert data["operators"] == []
+
+    def test_operators_have_required_fields(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/operators", headers=AUTH_HEADER)
+        ops = r.json()["data"]["operators"]
+        for op in ops:
+            assert "name" in op
+            assert "description" in op
+            assert "params" in op
+            assert "pawa_cost" in op
+            assert "protocol" in op
+
+    def test_operators_protocol_values_are_valid(self, client):
+        valid = {"rpc", "event_driven", "polling", "streaming"}
+        r = client.get("/devui/sustain/homestead.bonnie/operators", headers=AUTH_HEADER)
+        for op in r.json()["data"]["operators"]:
+            assert op["protocol"] in valid
+
+    def test_different_sustain_id_echoed(self, client):
+        r = client.get("/devui/sustain/vyyb.hive/operators", headers=AUTH_HEADER)
+        assert r.json()["data"]["sustain_id"] == "vyyb.hive"

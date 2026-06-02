@@ -13,6 +13,7 @@ POST /devui/console/execute           — run an operator from the console
 POST /devui/simulate                  — forward-simulate a proposal
 WS   /devui/state-stream?sustain_id=  — real-time state push
 GET  /devui/sustain/{id}/graph        — operative council graph for a sustain
+GET  /devui/sustain/{id}/operators    — operators allowed by the sustain spec
 
 Legacy path-param routes are kept for backwards compatibility:
 GET  /devui/sustain/{id}/state
@@ -722,3 +723,52 @@ async def get_sustain_graph(
         "nodes":       nodes,
         "edges":       edges,
     })
+
+
+# ── 12. GET /devui/sustain/{id}/operators ─────────────────────────────────────
+
+@router.get("/sustain/{sustain_id}/operators", summary="Operators allowed by a sustain spec")
+async def get_sustain_operators(
+    sustain_id: str,
+    _: str = Depends(verify_admin),
+) -> dict:
+    """
+    Returns the operator list declared in the sustain's spec under the "operators"
+    key.  Each entry is augmented with the protocol field from OPERATOR_REGISTRY
+    when available.  Used by the SimulatorPanel operator-selector dropdown.
+    Returns an empty list when the sustain is unknown or has no operators declared.
+    """
+    spec = None
+    try:
+        from sustena.core.engine_singleton import get_shared_engine
+        engine = get_shared_engine()
+        spec = engine.get_spec(sustain_id)
+    except Exception as exc:
+        logger.debug("get_sustain_operators(%s) engine error: %s", sustain_id, exc)
+
+    if spec is None:
+        return ok({"sustain_id": sustain_id, "operators": []})
+
+    spec_ops = spec.get("operators", [])
+
+    try:
+        from sustena.core.operator import OPERATOR_REGISTRY
+        registry = OPERATOR_REGISTRY
+    except Exception:
+        registry = {}
+
+    result = []
+    for op in spec_ops:
+        name = op.get("name", "") if isinstance(op, dict) else str(op)
+        if not name:
+            continue
+        meta = registry.get(name)
+        result.append({
+            "name": name,
+            "description": op.get("description", meta.description if meta else ""),
+            "params": op.get("params", []),
+            "pawa_cost": op.get("pawa_cost", meta.pawa_cost if meta else 0),
+            "protocol": meta.protocol if meta else "rpc",
+        })
+
+    return ok({"sustain_id": sustain_id, "operators": result})

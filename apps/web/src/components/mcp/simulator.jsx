@@ -315,11 +315,48 @@ function SimulatorCanvas({
   );
 }
 
-/* ── StateDiff — uses simulate.fork → run_path → score pipeline ─────────── */
+/* ── ProposalDag — renders proposal steps as a sequential DAG ───────────── */
 
-const DEFAULT_PROPOSAL = [
-  { operator: 'budget.allocate', params: { pocket_name: 'food', amount: 5000 } },
-];
+function ProposalDag({ proposal, stepResults }) {
+  if (!proposal || proposal.length === 0) return null;
+  const NODE_W = 130, NODE_H = 46, GAP = 16;
+  const CANVAS_W = proposal.length * (NODE_W + GAP) + GAP;
+  const CANVAS_H = NODE_H + 20;
+
+  const nodes = proposal.map((step, i) => ({
+    id: `step${i}`,
+    x: GAP + i * (NODE_W + GAP),
+    y: 10,
+    type: 'operator',
+    label: (step.operator || '?').split('.').slice(-1)[0],
+  }));
+
+  const edges = nodes.slice(0, -1).map((n, i) => [n.id, nodes[i + 1].id]);
+
+  const completedIds = new Set(
+    (stepResults || []).map((s, i) => s.status === 'ok' ? `step${i}` : null).filter(Boolean)
+  );
+
+  return (
+    <div style={{ overflowX: 'auto', overflowY: 'visible' }}>
+      <div style={{ position: 'relative', width: CANVAS_W, height: CANVAS_H }}>
+        <DagEdges
+          nodes={nodes}
+          edges={edges}
+          activePath={[...completedIds]}
+          width={CANVAS_W}
+          height={CANVAS_H}
+        />
+        {nodes.map(node => (
+          <DagNode key={node.id} node={node} active={completedIds.has(node.id)} pulse={false} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+/* ── StateDiff — uses simulate.fork → run_path → score pipeline ─────────── */
 
 function StateDiff({ tick, sustain, selectedBranch }) {
   const [result, setResult] = dUseState(null);
@@ -327,8 +364,33 @@ function StateDiff({ tick, sustain, selectedBranch }) {
   const [ran, setRan] = dUseState(false);
   const [openStep, setOpenStep] = dUseState(null);
   const [goalMetric, setGoalMetric] = dUseState('minimize_budget_deviation');
-  const [proposalText, setProposalText] = dUseState(JSON.stringify(DEFAULT_PROPOSAL, null, 2));
+  const [proposalText, setProposalText] = dUseState('[]');
   const [proposalError, setProposalError] = dUseState(null);
+  const [allowedOps, setAllowedOps] = dUseState([]);
+
+  const sustainId = sustain?.id || 'homestead.bonnie';
+
+  dUseEffect(() => {
+    api.get(`/devui/sustain/${sustainId}/operators`)
+      .then(d => setAllowedOps(d?.data?.operators || []))
+      .catch(() => setAllowedOps([]));
+  }, [sustainId]);
+
+  const addOperatorStep = (opName) => {
+    try {
+      const current = JSON.parse(proposalText);
+      const base = Array.isArray(current) ? current : [];
+      setProposalText(JSON.stringify([...base, { operator: opName, params: {} }], null, 2));
+      setProposalError(null);
+    } catch {
+      setProposalText(JSON.stringify([{ operator: opName, params: {} }], null, 2));
+      setProposalError(null);
+    }
+  };
+
+  let parsedProposal = [];
+  try { parsedProposal = JSON.parse(proposalText); } catch {}
+  if (!Array.isArray(parsedProposal)) parsedProposal = [];
 
   const runPipeline = () => {
     let proposal;
@@ -341,7 +403,7 @@ function StateDiff({ tick, sustain, selectedBranch }) {
     }
     setLoading(true);
     api.post('/devui/simulate-pipeline', {
-      sustain_id: sustain?.id || 'homestead.bonnie',
+      sustain_id: sustainId,
       proposal,
       goal_metric: goalMetric,
     })
@@ -385,6 +447,39 @@ function StateDiff({ tick, sustain, selectedBranch }) {
         </select>
       </div>
 
+      {/* Operator selector */}
+      <div>
+        <span className="label-10" style={{ display: 'block', marginBottom: 4 }}>ADD STEP · ALLOWED OPERATORS</span>
+        {allowedOps.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {allowedOps.map(op => (
+              <button
+                key={op.name}
+                onClick={() => addOperatorStep(op.name)}
+                title={op.description}
+                style={{
+                  padding: '3px 8px',
+                  fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
+                  color: 'var(--text-secondary)',
+                  background: 'var(--bg-base)',
+                  border: '1px solid var(--border-mid)',
+                  borderRadius: 'var(--radius-sm)',
+                  cursor: 'pointer', transition: 'all var(--t-fast)',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--amber-border)'; e.currentTarget.style.color = 'var(--amber)'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-mid)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+              >
+                {op.name}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>
+            no operators available · select a sustain to load options
+          </span>
+        )}
+      </div>
+
       {/* Proposal editor */}
       <div>
         <span className="label-10" style={{ display: 'block', marginBottom: 4 }}>PROPOSAL · OPERATOR SEQUENCE</span>
@@ -421,6 +516,14 @@ function StateDiff({ tick, sustain, selectedBranch }) {
         {loading ? '⟳ SIMULATING…' : ran ? '↺ RE-SIMULATE' : '▶ RUN PIPELINE'}
       </button>
 
+      {/* Proposal DAG — shows when there are steps in the textarea */}
+      {parsedProposal.length > 0 && (
+        <div>
+          <span className="label-10" style={{ display: 'block', marginBottom: 6 }}>PROPOSAL DAG · {parsedProposal.length} STEP{parsedProposal.length !== 1 ? 'S' : ''}</span>
+          <ProposalDag proposal={parsedProposal} stepResults={result?.steps || []} />
+        </div>
+      )}
+
       {/* Score output */}
       <div>
         <span className="label-10" style={{ display: 'block', marginBottom: 6 }}>
@@ -442,7 +545,7 @@ function StateDiff({ tick, sustain, selectedBranch }) {
             {stepsOk}/{stepsRun} steps succeeded · fork {result?.fork_id?.slice(0, 8) ?? '—'}
           </span>
         )}
-        {!result && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>Run pipeline to see results</span>}
+        {!result && <span className="meta-10" style={{ color: 'var(--text-dim)' }}>no simulation run · add steps and click run pipeline</span>}
       </div>
 
       {/* Step accordion */}
