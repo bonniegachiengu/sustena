@@ -1214,6 +1214,14 @@ function UIPreviewPanel({ sustain }) {
   );
 }
 
+/* Protocol badge colour + label */
+const PROTOCOL_STYLE = {
+  rpc:          { color: 'var(--teal)',          label: 'RPC' },
+  event_driven: { color: 'var(--node-event)',    label: 'EVENT_DRIVEN' },
+  polling:      { color: 'var(--text-secondary)','label': 'POLLING' },
+  streaming:    { color: 'var(--amber)',         label: 'STREAMING' },
+};
+
 function ControllerTerminal({ tick, sustain }) {
   const BOOT_LINES = [
     { t: 'meta', text: 'sustena.controller · interactive shell · type "help"' },
@@ -1225,8 +1233,20 @@ function ControllerTerminal({ tick, sustain }) {
   const [busy, setBusy] = dUseState(false);
   const [history, setHistory] = dUseState([]);
   const [histIdx, setHistIdx] = dUseState(-1);
+  /* operator registry → protocol lookup */
+  const [opRegistry, setOpRegistry] = dUseState({});
+  /* streaming state: when a streaming operator result arrives, store it */
+  const [streamLines, setStreamLines] = dUseState([]);
+  const [streamOp, setStreamOp] = dUseState(null);
   const inputRef = dUseRef(null);
   const scrollRef = dUseRef(null);
+
+  /* load registry once on mount */
+  dUseEffect(() => {
+    api.get('/devui/registry/operators')
+      .then(d => setOpRegistry(d?.data?.operators || {}))
+      .catch(() => {});
+  }, []);
 
   const addLine = (t, text) => setLines(prev => [...prev, { t, text }]);
 
@@ -1287,9 +1307,30 @@ function ControllerTerminal({ tick, sustain }) {
       const ms   = opResult?.duration_ms ?? '—';
       const pawa = opResult?.pawa_cost ?? opResult?.pawa ?? '—';
       addLine('meta', `∴ committed in ${ms}ms · pawa −${pawa}`);
+
+      /* ── protocol badge ── */
+      const opMeta = opRegistry[operator] || {};
+      const protocol = opMeta.protocol || 'rpc';
+      const ps = PROTOCOL_STYLE[protocol] || PROTOCOL_STYLE.rpc;
+      /* proto line format: "LABEL·operatorName" */
+      addLine('proto', `${ps.label}·${operator}`);
+
+      if (protocol === 'streaming') {
+        setStreamOp(operator);
+        const events = opResult?.data?.events ?? opResult?.events ?? [];
+        setStreamLines(
+          events.length
+            ? events.map(e => `${e.event_name || e.type || '?'} · ${JSON.stringify(e.payload || e.data || {})}`)
+            : ['[STREAM] operator returned snapshot · no live events yet']
+        );
+        addLine('stream', '[STREAM OPEN] · live event feed active below');
+      } else if (protocol === 'event_driven') {
+        addLine('event', '[EVENT_DRIVEN] operator registered · waiting for trigger event');
+      } else if (protocol === 'polling') {
+        addLine('meta', '[POLLING] operator will re-run on its configured interval');
+      }
     } catch (err) {
       addLine('danger', `[ERROR] ${err.message || 'API unreachable'}`);
-      // Fallback: show mock execution so the UI stays useful
       addLine('check', '[FALLBACK] constraint checks skipped (offline)');
       addLine('exec', `[MOCK] ${operator} · params: ${JSON.stringify(params)}`);
     } finally {
@@ -1328,6 +1369,24 @@ function ControllerTerminal({ tick, sustain }) {
             {l.t === 'event'  && <span style={{ color: 'var(--node-event)' }}>{l.text}</span>}
             {l.t === 'meta'   && <span className="t-meta">{l.text}</span>}
             {l.t === 'danger' && <span style={{ color: 'var(--danger)' }}>{l.text}</span>}
+            {l.t === 'proto'  && (() => {
+              const sepIdx = l.text.indexOf('·');
+              const pLabel = sepIdx > -1 ? l.text.slice(0, sepIdx).trim() : l.text;
+              const opName = sepIdx > -1 ? l.text.slice(sepIdx + 1).trim() : '';
+              const ps = Object.values(PROTOCOL_STYLE).find(p => p.label === pLabel) || PROTOCOL_STYLE.rpc;
+              return (
+                <span style={{ color: 'var(--text-muted)', fontSize: 9 }}>
+                  ∴ protocol{' '}
+                  <span style={{
+                    color: ps.color, background: `${ps.color}18`,
+                    padding: '1px 5px', borderRadius: 3,
+                    fontWeight: 600, letterSpacing: '0.08em',
+                  }}>{pLabel}</span>
+                  {opName ? <span style={{ marginLeft: 4 }}>{opName}</span> : null}
+                </span>
+              );
+            })()}
+            {l.t === 'stream' && <span style={{ color: 'var(--amber)' }}>{l.text}</span>}
           </div>
         ))}
         {busy && (
@@ -1336,6 +1395,35 @@ function ControllerTerminal({ tick, sustain }) {
           </div>
         )}
       </div>
+
+      {/* Stream panel — shown when a streaming operator result is present */}
+      {streamOp && streamLines.length > 0 && (
+        <div style={{
+          flexShrink: 0,
+          borderTop: '1px solid var(--amber-border)',
+          background: 'var(--bg-base)',
+          maxHeight: 120, overflowY: 'auto',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '4px 14px',
+            borderBottom: '1px solid var(--border)',
+          }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--amber)', letterSpacing: '0.1em' }}>
+              ▶ STREAM · {streamOp}
+            </span>
+            <button onClick={() => { setStreamOp(null); setStreamLines([]); }} style={{
+              fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', background: 'transparent',
+            }}>✕</button>
+          </div>
+          {streamLines.map((l, i) => (
+            <div key={i} style={{ padding: '3px 14px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)' }}>
+              {l}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Input row */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 6,
