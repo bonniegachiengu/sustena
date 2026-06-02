@@ -11,9 +11,11 @@ conftest resets the engine before each function; init_db() recreates it).
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import create_async_engine
 
+import sustena.db.schema as _schema
 from sustena.api.main import app
-from sustena.db.schema import init_db
+from sustena.db.schema import _migrate_users_auth, metadata
 
 BASE = "http://test"
 
@@ -22,10 +24,26 @@ BASE = "http://test"
 
 @pytest.fixture
 async def client():
-    """Fresh in-memory DB + async HTTP client for each test function."""
-    await init_db()
+    """
+    Fresh in-memory DB for each test regardless of DATABASE_URL in the environment.
+    CI sets DATABASE_URL to a file-based test.db; conftest setdefault is a no-op there,
+    so we manually set an :memory: engine here to guarantee isolation.
+    """
+    mem_engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+    )
+    _schema._engine = mem_engine
+
+    async with mem_engine.begin() as conn:
+        await conn.run_sync(metadata.create_all)
+        await conn.run_sync(_migrate_users_auth)
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as c:
         yield c
+
+    _schema._engine = None
+    await mem_engine.dispose()
 
 
 async def _register(client, email="user@test.com", password="password123", display_name=None):
