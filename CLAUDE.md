@@ -200,7 +200,7 @@ Sprint 8.2  Engine singleton               — UNBLOCKS all panels
 Sprint 8.3  Monitor real widgets           ← 8.2
 Sprint 8.4  Simulator DAG ✅              ← 8.2
 Sprint 8.5  Editor real graph             ← 8.2
-Sprint 8.6  Auth/Users (register/login)   ← 8.2; UNBLOCKS 8.7–8.10
+Sprint 8.6  Auth/Users (register/login) ✅ ← 8.2; UNBLOCKS 8.7–8.10
 Sprint 8.7  Lore CMS + Journal API        ← 8.6
 Sprint 8.8  Library + Spore flow          ← 8.2 + 8.6
 Sprint 8.9  Arena products + publishing   ← 8.6 + 8.8
@@ -249,6 +249,12 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 
 **CI schema fix (2 Jun 2026, post-8.3):**
 - ✅ `schema.py` `sustains` table was missing `template_id` column used by `SustainEngine`. In CI (file-based `test.db`), SQLAlchemy's `init_db()` runs first and creates the table without that column; `SustainEngine._ensure_tables()` then skips `CREATE TABLE IF NOT EXISTS`, leaving `template_id` absent. Fix: added `template_id` (nullable) and made seed-only columns (`sustain_type`, `name`, `template_version`, `is_active`) nullable so both writers can INSERT their respective column subsets without conflict. 1455 tests pass locally and in CI. Root cause: `conftest.py` uses `os.environ.setdefault(...)` which is a no-op when CI already has `DATABASE_URL` set.
+
+**Sprint 8.6 status (2 Jun 2026):**
+- ✅ `schema.py` `users` table — added `email` (unique, nullable) + `password_hash`; made `phone_number` nullable; `_migrate_users_auth` sync migration recreates the table on old DBs using rename→recreate→copy→drop (SQLite cannot ALTER COLUMN).
+- ✅ `users.py` full rewrite — PBKDF2-SHA256 password hashing via stdlib `hashlib` (avoids passlib/bcrypt 5.x incompatibility); HS256 JWT with 30-day expiry via `python-jose`; `register`, `login`, `/me`, `/me/stats`, `/me/activity`.
+- ✅ 33 new tests in `test_users.py` using `AsyncClient` + explicit `init_db()` per function. 1497 tests total.
+- ✅ `test_api.py` stub test updated to reflect real register endpoint.
 
 **Controller panel UI fixes (2 Jun 2026, post-8.2):**
 - ✅ Universal Controls instrument frames were clipped at the bottom — added `flexShrink:0` to the Card and removed `minHeight:0` from `Instrument` (`other.jsx`).
