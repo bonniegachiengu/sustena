@@ -184,6 +184,52 @@ All 7 tasks done and committed (1245 tests — 1269 after Sprint 6.1):
 - [x] 7.4 `DelegatedVote` dataclass — sub-operative vote aggregation at councillor level. Each sub-operative result in `sandbox_results` is parsed into a `DelegatedVote(position: YES|NO|ABSTAIN, confidence: float, reasoning: str)`. Councillor aggregates them (weighted by confidence) to form its final `OperativeVote`. The aggregation logic lives in `core/council.py` (`aggregate_delegated_votes()`). 31 new tests. (1420 total)
 - [x] 7.5 Enriched `CouncilSession.collect_votes()` — wire the full flow end-to-end: relevance check → sandbox fork → sub-operative execution → `DelegatedVote` aggregation → councillor's final `OperativeVote`. The existing `deliberate()` interface on `BaseOperative` is still honoured as fallback when no sub-operatives produce votes. `delegated_votes` recorded on vote records. 8 new tests, 2 updated. (1428 total)
 
+### Sprint 7.6 — Council Panel UI (next after Sprint 7)
+Part of Sprint 11 below. ProposalCard in `other.jsx` needs per-councillor vote bars + expandable delegated_votes. Data available in `council_votes` (fork_id, sandbox_results, delegated_votes added 7.3–7.5).
+
+---
+
+### Sprints 8–11 🗓️ — Full Product Wiring (approved plan, 2 June 2026)
+
+**Goal:** Make every panel and page fully usable — real data, no stubs, scrollable.
+
+**Dependency order:**
+```
+Sprint 8.1  GitHub cleanup + scroll        — no deps
+Sprint 8.2  Engine singleton               — UNBLOCKS all panels
+Sprint 8.3  Monitor real widgets           ← 8.2
+Sprint 8.4  Simulator DAG                 ← 8.2
+Sprint 8.5  Editor real graph             ← 8.2
+Sprint 8.6  Auth/Users (register/login)   ← 8.2; UNBLOCKS 8.7–8.10
+Sprint 8.7  Lore CMS + Journal API        ← 8.6
+Sprint 8.8  Library + Spore flow          ← 8.2 + 8.6
+Sprint 8.9  Arena products + publishing   ← 8.6 + 8.8
+Sprint 8.10 Profile telemetry + Ctrl      ← 8.6 + 8.2
+Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
+```
+
+**Key new DB tables (to add to `schema.py`):**
+- `lore_entries` — public blog (draft/published, body_json blocks)
+- `journal_entries` — private user journal (DECISION/NOTE/REFLECTION/UPDATE, linked to sustain_id + operators_log.id)
+- `arena_packages` — operative/operator/spore/widget packages (kind, spec_json, trust_score)
+- `orders` — arena product orders
+
+**Journal vs Lore — they are different APIs:**
+- Journal (`/api/v1/journal/`): private, always authenticated, linked to sustains, types = DECISION/NOTE/REFLECTION/UPDATE, never published publicly
+- Lore (`/api/v1/lore/`): public-read, authenticated write, editorial content, types = VISION/TECHNICAL/REFLECTION/UPDATE, draft → published lifecycle
+
+**Core blocker (Sprint 8.2):** `devui.py` creates a new `SustainEngine()` per request (= `:memory:`, always empty). Fix: `engine_singleton.py` module with `get_shared_engine()` backed by persistent `sustena.db`. All 5 TODO stubs in `devui.py` resolve after this fix.
+
+**New routes added in Sprints 8–11:**
+- `POST /api/v1/users/register`, `POST /api/v1/users/login`, `GET /api/v1/users/me`, `GET /api/v1/users/me/stats`, `GET /api/v1/users/me/activity`
+- `GET|POST|PUT /api/v1/lore/entries`, `POST /api/v1/lore/entries/{id}/publish`
+- `GET|POST|PUT|DELETE /api/v1/journal/entries`
+- `GET|POST /api/v1/arena/packages`, `GET /api/v1/arena/products`, `POST /api/v1/arena/orders`
+- `GET /devui/library`, `GET /devui/sustain/{id}/graph`
+- `GET|POST /api/v1/council/{sustain_id}/proposals`
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:

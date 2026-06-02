@@ -43,7 +43,7 @@ export default function LoreLayout() {
       ...MONO_VARS,
       display: 'grid',
       gridTemplateRows: '44px 1fr',
-      height: '100vh',
+      minHeight: '100vh',
       background: 'var(--bg-base)',
       padding: '0 48px',
     }}>

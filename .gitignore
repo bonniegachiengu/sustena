@@ -10,6 +10,16 @@ docs/Sustena_XII_Entity_Structure_Kenya.md
 archive/
 Briefs/
 
+# ── Non-code content directories (keep locally, not in GitHub) ────────────────
+brand/
+vyyb/
+homestead/
+biashara/
+mkulima/
+colosso/
+scripts/
+lore/
+
 # ── Financial spreadsheets ────────────────────────────────────────────────────
 *.xlsx
 *.xls
@@ -27,6 +37,9 @@ backend/*.db
 backend/*.sqlite
 backend/*.sqlite3
 backend/whatsapp_mock_outbox.jsonl
+apps/api/sustena.db
+apps/api/*.db
+apps/api/whatsapp_mock_outbox.jsonl
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
@@ -50,6 +63,8 @@ coverage.xml
 # ── Virtual environments ──────────────────────────────────────────────────────
 backend/venv/
 backend/.venv/
+apps/api/venv/
+apps/api/.venv/
 
 # ── Node / frontend ───────────────────────────────────────────────────────────
 apps/web/node_modules/
@@ -70,3 +85,6 @@ desktop.ini
 
 # ── Obsidian workspace (local-only UI state) ──────────────────────────────────
 .obsidian/workspace.json
+.obsidian/app.json
+.obsidian/appearance.json
+.obsidian/core-plugins.json

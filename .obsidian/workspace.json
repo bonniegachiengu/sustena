@@ -214,17 +214,18 @@
   },
   "active": "573068049587cebe",
   "lastOpenFiles": [
+    "apps/web/src/pages/LoreLayout.jsx.tmp.27084.dc8bb5a3e02d",
+    "apps/web/src/pages/ArenaPage.jsx.tmp.27084.ef70a47a9c1e",
+    "apps/web/src/styles/globals.css.tmp.27084.db33ab3e2637",
+    "CLAUDE.md.tmp.27084.6bbbcad23ba2",
+    "CLAUDE.md.tmp.27084.b8065882e832",
+    "apps/api/tests/test_sandbox_simulation.py.tmp.27084.c95316560e1e",
+    "apps/api/tests/test_sandbox_simulation.py.tmp.27084.cae1412ca456",
+    "apps/api/tests/test_sandbox_simulation.py.tmp.27084.266143728614",
+    "apps/api/sustena/core/council.py.tmp.27084.0eba485e1153",
+    "CLAUDE.md.tmp.27084.6e7c03870667",
+    "apps/api/tests/__pycache__/test_delegated_votes.cpython-311-pytest-9.0.3.pyc",
     "CLAUDE.md",
-    "apps/api/sustena/config.py.tmp.30252.83325bad8a3a",
-    "apps/api/sustena.db-journal",
-    "apps/api/sustena/scripts/__pycache__/seed_homestead.cpython-310.pyc",
-    "apps/api/sustena/scripts/__pycache__/seed_homestead.cpython-310.pyc.126512405261888",
-    "apps/api/sustena/scripts/__pycache__",
-    "apps/api/sustena/scripts/seed_homestead.py",
-    "apps/api/sustena/core/sustain_engine.py.tmp.30252.81debdf6a99f",
-    "apps/api/tests/__pycache__/conftest.cpython-310-pytest-9.0.3.pyc",
-    "apps/api/tests/__pycache__/conftest.cpython-310-pytest-9.0.3.pyc.8",
-    "apps/api/tests/conftest.py",
     "docs/Sustena_XII_Roadmap_Jun2026.md",
     "apps/web/node_modules/@rollup/rollup-linux-x64-musl/README.md",
     "docs/Reorientation_Report_31May2026.md",
@@ -258,7 +259,6 @@
     "docs/Bonnie_Master_Roadmap.md",
     "frontend/README.md",
     "backend/venv/Lib/site-packages/anthropic/lib/foundry.md",
-    "backend/venv/Lib/site-packages/httpcore-1.0.9.dist-info/licenses/LICENSE.md",
-    "backend/venv/Lib/site-packages/httpx-0.28.1.dist-info/licenses/LICENSE.md"
+    "backend/venv/Lib/site-packages/httpcore-1.0.9.dist-info/licenses/LICENSE.md"
   ]
 }

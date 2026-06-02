@@ -61,8 +61,8 @@ html, body {
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  overflow: hidden;
-  height: 100vh;
+  /* No overflow:hidden or fixed height — ShellApp manages its own viewport via inline styles.
+     Page routes (/profile, /lore, /journal, /arena, /docs, /orchie-panel) scroll naturally. */
 }
 
 body::before {
@@ -76,7 +76,7 @@ body::before {
   z-index: 0;
 }
 
-#root { position: relative; z-index: 1; height: 100vh; overflow: hidden; }
+#root { position: relative; z-index: 1; }
 
 button, input, textarea { font-family: inherit; color: inherit; }
 button { background: none; border: none; cursor: pointer; }

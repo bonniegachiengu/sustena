@@ -672,7 +672,7 @@ function ArenaPage() {
   };
 
   return (
-    <div style={{ ...ARENA_VARS, display: 'grid', gridTemplateRows: '44px auto 1fr', height: '100vh', background: 'var(--bg-base)' }}>
+    <div style={{ ...ARENA_VARS, display: 'grid', gridTemplateRows: '44px auto 1fr', minHeight: '100vh', background: 'var(--bg-base)' }}>
 
       {/* Top nav — ARENA brand | BLOG ARENA DOCS | CART | DASHBOARD */}
       <header style={{ display: 'flex', alignItems: 'stretch', borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)', padding: '0 28px', flexShrink: 0 }}>

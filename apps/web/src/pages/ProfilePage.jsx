@@ -347,7 +347,7 @@ function ProfilePage({ onClose }) {
   };
 
   return (
-    <div style={{ ...monoVars, display: 'grid', gridTemplateRows: '44px 1fr', height: '100vh', background: 'var(--bg-base)', padding: '0 48px' }}>
+    <div style={{ ...monoVars, display: 'grid', gridTemplateRows: '44px 1fr', minHeight: '100vh', background: 'var(--bg-base)', padding: '0 48px' }}>
 
       {/* ── T-nav header ── */}
       <header style={{ display: 'grid', gridTemplateColumns: '200px 1fr', borderBottom: '1px solid var(--border)' }}>
