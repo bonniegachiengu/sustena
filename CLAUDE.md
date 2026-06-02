@@ -199,7 +199,7 @@ Sprint 8.1  GitHub cleanup + scroll        — no deps
 Sprint 8.2  Engine singleton               — UNBLOCKS all panels
 Sprint 8.3  Monitor real widgets           ← 8.2
 Sprint 8.4  Simulator DAG ✅              ← 8.2
-Sprint 8.5  Editor real graph             ← 8.2  ⚠️ SKIPPED — do next
+Sprint 8.5  Editor real graph ✅          ← 8.2
 Sprint 8.6  Auth/Users (register/login) ✅ ← 8.2; UNBLOCKS 8.7–8.10
 Sprint 8.7  Lore CMS + Journal API ✅     ← 8.6
 Sprint 8.8  Library + Spore flow          ← 8.2 + 8.6  ⚠️ do next

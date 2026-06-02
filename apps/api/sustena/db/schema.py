@@ -175,6 +175,28 @@ journal_entries = Table(
     Column("created_at", DateTime, default=datetime.utcnow, nullable=False),
 )
 
+# ── arena_packages ─────────────────────────────────────────────────────────────
+# Mycelium marketplace packages — operatives, operators, spores, widgets.
+# Read is public; write requires authentication.
+# kind: operative | operator | spore | widget
+arena_packages = Table(
+    "arena_packages",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("name", String(200), nullable=False),
+    Column("kind", String(20), nullable=False),          # operative | operator | spore | widget
+    Column("spec_json", Text, nullable=True),
+    Column("author_id", String(36), nullable=True),      # FK → users.id
+    Column("trust_score", Float, default=0.0, nullable=False),
+    Column("download_count", Integer, default=0, nullable=False),
+    Column("pawa_cost", Integer, default=0, nullable=False),
+    Column("is_free", Boolean, default=True, nullable=False),
+    Column("tags", Text, nullable=True),                  # JSON array string
+    Column("description", Text, nullable=True),
+    Column("version", String(20), default="1.0.0", nullable=False),
+    Column("created_at", DateTime, default=datetime.utcnow, nullable=False),
+)
+
 # ── council_votes ──────────────────────────────────────────────────────────────
 # Individual votes per proposal per operative/user.
 council_votes = Table(

@@ -725,7 +725,66 @@ async def get_sustain_graph(
     })
 
 
-# ── 12. GET /devui/sustain/{id}/operators ─────────────────────────────────────
+# ── 12. GET /devui/library ───────────────────────────────────────────────────
+
+@router.get("/library", summary="Arena packages grouped by kind for the Library panel")
+async def get_library(_: str = Depends(verify_admin)) -> dict:
+    """
+    Returns all arena_packages grouped by kind (operative, operator, spore, widget).
+    Used by the LibraryPanel in the DevUI. Falls back to empty groups when the
+    arena_packages table is empty or unavailable.
+    """
+    import json as _json
+    from sqlalchemy import text as _text
+    from sustena.db.schema import get_engine
+
+    groups: dict[str, list] = {"operative": [], "operator": [], "spore": [], "widget": []}
+    try:
+        db_engine = get_engine()
+        async with db_engine.connect() as conn:
+            rows = await conn.execute(
+                _text(
+                    "SELECT id, name, kind, author_id, trust_score, download_count, "
+                    "pawa_cost, is_free, version, tags, description, created_at "
+                    "FROM arena_packages ORDER BY trust_score DESC"
+                )
+            )
+            for r in rows:
+                kind = r[2]
+                tags = []
+                try:
+                    if r[9]:
+                        tags = _json.loads(r[9])
+                except Exception:
+                    pass
+                pkg = {
+                    "id":             r[0],
+                    "name":           r[1],
+                    "kind":           kind,
+                    "author":         r[3] or "unknown",
+                    "trust":          round((r[4] or 0) * 100),
+                    "downloads":      r[5] or 0,
+                    "pawa":           "free" if r[7] else r[6],
+                    "version":        r[8] or "1.0.0",
+                    "tags":           tags,
+                    "desc":           r[10] or "",
+                    "created_at":     r[11].isoformat() if hasattr(r[11], "isoformat") else str(r[11]),
+                }
+                if kind in groups:
+                    groups[kind].append(pkg)
+    except Exception as exc:
+        logger.warning("get_library failed: %s", exc)
+
+    return ok({
+        "operatives": groups["operative"],
+        "operators":  groups["operator"],
+        "spores":     groups["spore"],
+        "widgets":    groups["widget"],
+        "total":      sum(len(v) for v in groups.values()),
+    })
+
+
+# ── 13. GET /devui/sustain/{id}/operators ─────────────────────────────────────
 
 @router.get("/sustain/{sustain_id}/operators", summary="Operators allowed by a sustain spec")
 async def get_sustain_operators(

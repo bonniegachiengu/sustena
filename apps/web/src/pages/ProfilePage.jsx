@@ -136,11 +136,13 @@ function AggregateBalanceCard({ pawa }) {
   );
 }
 
-// ── Sign-in panel ─────────────────────────────────────────────
+// ── Sign-in / Register panel ─────────────────────────────────
 
-function SignInPanel({ open, onClose, onSuccess }) {
+function SignInPanel({ open, onClose, onSuccess, defaultMode = 'login' }) {
+  const [mode, setMode] = useState(defaultMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -150,29 +152,51 @@ function SignInPanel({ open, onClose, onSuccess }) {
     if (!email.trim() || !password) return;
     setLoading(true); setError('');
     try {
-      const res = await fetch(`${API_BASE}/api/v1/users/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim(), password }) });
-      const data = await res.json();
-      if (!res.ok) { setError(data.detail ?? 'Login failed'); return; }
-      localStorage.setItem('sustena_token', data.data.token);
-      onSuccess(data.data.token);
+      if (mode === 'login') {
+        const res = await fetch(`${API_BASE}/api/v1/users/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim(), password }) });
+        const data = await res.json();
+        if (!res.ok) { setError(data.detail ?? 'Login failed'); return; }
+        localStorage.setItem('sustena_token', data.data.token);
+        onSuccess(data.data.token);
+      } else {
+        if (!displayName.trim()) { setError('Display name required'); setLoading(false); return; }
+        const res = await fetch(`${API_BASE}/api/v1/users/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim(), password, display_name: displayName.trim() }) });
+        const data = await res.json();
+        if (!res.ok) { setError(data.detail ?? 'Registration failed'); return; }
+        localStorage.setItem('sustena_token', data.data.token);
+        onSuccess(data.data.token);
+      }
     } catch { setError('Connection error'); } finally { setLoading(false); }
   };
+
+  const switchMode = (m) => { setMode(m); setError(''); };
+
+  const panelHeight = mode === 'register' ? '52vh' : '44vh';
 
   return (
     <>
       {open && <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 800, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }} />}
-      <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, height: '44vh', zIndex: 900, background: 'var(--bg-surface)', borderTop: '1px solid var(--border-mid)', borderRadius: '12px 12px 0 0', display: 'flex', flexDirection: 'column', transform: open ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 0.35s cubic-bezier(0.22,0.61,0.36,1)', overflow: 'hidden' }}>
+      <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, height: panelHeight, zIndex: 900, background: 'var(--bg-surface)', borderTop: '1px solid var(--border-mid)', borderRadius: '12px 12px 0 0', display: 'flex', flexDirection: 'column', transform: open ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 0.35s cubic-bezier(0.22,0.61,0.36,1)', overflow: 'hidden' }}>
         <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 4px' }}><div style={{ width: 36, height: 3, borderRadius: 2, background: 'var(--border-mid)' }} /></div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 24px 12px', borderBottom: '1px solid var(--border)' }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--text-secondary)' }}>SIGN IN</span>
+          <div style={{ display: 'flex', gap: 0, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+            {['login', 'register'].map(m => (
+              <button key={m} onClick={() => switchMode(m)} style={{ padding: '5px 14px', fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', color: mode === m ? 'var(--text-primary)' : 'var(--text-muted)', background: mode === m ? 'var(--border-mid)' : 'transparent', border: 'none', cursor: 'pointer', transition: 'all var(--t-fast)' }}>
+                {m === 'login' ? 'SIGN IN' : 'REGISTER'}
+              </button>
+            ))}
+          </div>
           <button onClick={onClose} style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>CANCEL</button>
         </div>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '24px', gap: 12, maxWidth: 420 }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '20px 24px', gap: 10, maxWidth: 420 }}>
+          {mode === 'register' && (
+            <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="display name" style={inputStyle} />
+          )}
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email address" style={inputStyle} />
           <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="password" style={inputStyle} onKeyDown={e => e.key === 'Enter' && handleSubmit()} />
           {error && <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--danger)' }}>{error}</span>}
           <button onClick={handleSubmit} disabled={!email.trim() || !password || loading} style={{ padding: '8px 16px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500, letterSpacing: '0.08em', color: 'var(--text-primary)', background: 'var(--border-mid)', border: '1px solid var(--border-light)', borderRadius: 4, cursor: 'pointer', opacity: (!email.trim() || !password || loading) ? 0.4 : 1 }}>
-            {loading ? 'SIGNING IN…' : 'SIGN IN →'}
+            {loading ? (mode === 'login' ? 'SIGNING IN…' : 'CREATING…') : (mode === 'login' ? 'SIGN IN →' : 'CREATE ACCOUNT →')}
           </button>
         </div>
       </div>
@@ -187,6 +211,7 @@ function ProfilePage() {
   const [isPublic, setIsPublic] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
+  const [signInMode, setSignInMode] = useState('login');
   const [token, setToken] = useState(() => localStorage.getItem('sustena_token'));
   const [profile, setProfile] = useState(null);
   const [stats, setStats] = useState(null);
@@ -273,10 +298,16 @@ function ProfilePage() {
               onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
             >SETTINGS</button>
           ) : (
-            <button onClick={() => setShowSignIn(true)} style={{ display: 'flex', alignItems: 'center', padding: '0 16px', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', background: 'none', border: 'none', cursor: 'pointer', transition: 'color var(--t-fast)' }}
-              onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
-              onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
-            >SIGN IN</button>
+            <div style={{ display: 'flex', alignItems: 'stretch' }}>
+              <button onClick={() => { setSignInMode('login'); setShowSignIn(true); }} style={{ display: 'flex', alignItems: 'center', padding: '0 12px', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', background: 'none', border: 'none', cursor: 'pointer', transition: 'color var(--t-fast)' }}
+                onMouseEnter={e => e.currentTarget.style.color = 'var(--text-secondary)'}
+                onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
+              >SIGN IN</button>
+              <button onClick={() => { setSignInMode('register'); setShowSignIn(true); }} style={{ display: 'flex', alignItems: 'center', padding: '0 12px', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-primary)', background: 'var(--bg-raised)', border: 'none', borderLeft: '1px solid var(--border)', cursor: 'pointer', transition: 'color var(--t-fast)' }}
+                onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
+                onMouseLeave={e => e.currentTarget.style.color = 'var(--text-primary)'}
+              >REGISTER</button>
+            </div>
           )}
           <button onClick={() => navigate('/')} style={{ display: 'flex', alignItems: 'center', padding: '0 16px', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', background: 'none', border: 'none', cursor: 'pointer' }}>← DASHBOARD</button>
         </div>
@@ -284,10 +315,20 @@ function ProfilePage() {
 
       {/* Body */}
       {!token ? (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 16 }}>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.08em' }}>
             sign in to view your profile
           </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => { setSignInMode('login'); setShowSignIn(true); }} style={{ padding: '7px 18px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', color: 'var(--text-secondary)', background: 'transparent', border: '1px solid var(--border-mid)', borderRadius: 4, cursor: 'pointer', transition: 'all var(--t-fast)' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-light)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-mid)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+            >SIGN IN</button>
+            <button onClick={() => { setSignInMode('register'); setShowSignIn(true); }} style={{ padding: '7px 18px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', color: 'var(--text-primary)', background: 'var(--border-mid)', border: '1px solid var(--border-light)', borderRadius: 4, cursor: 'pointer', transition: 'all var(--t-fast)' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--border-light)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'var(--border-mid)'}
+            >CREATE ACCOUNT</button>
+          </div>
         </div>
       ) : loading ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
@@ -351,7 +392,7 @@ function ProfilePage() {
         data={{ displayName, email }}
         onSignOut={handleSignOut}
       />
-      <SignInPanel open={showSignIn} onClose={() => setShowSignIn(false)} onSuccess={handleSignedIn} />
+      <SignInPanel open={showSignIn} onClose={() => setShowSignIn(false)} onSuccess={handleSignedIn} defaultMode={signInMode} />
     </div>
   );
 }

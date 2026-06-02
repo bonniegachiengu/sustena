@@ -167,6 +167,7 @@ from sustena.api.routes import devui
 from sustena.api.routes import orchie
 from sustena.api.routes import seed
 from sustena.api.routes import lore, journal
+from sustena.api.routes import arena
 
 # WhatsApp webhook (always mounted)
 app.include_router(whatsapp.router, prefix="/webhook", tags=["whatsapp"])
@@ -181,6 +182,7 @@ app.include_router(council.router,   prefix="/api/v1/council",   tags=["council"
 app.include_router(users.router,     prefix="/api/v1/users",     tags=["users"])
 app.include_router(lore.router,      prefix="/api/v1/lore",      tags=["lore"])
 app.include_router(journal.router,   prefix="/api/v1/journal",   tags=["journal"])
+app.include_router(arena.router,     prefix="/api/v1/arena",     tags=["arena"])
 
 # Dev-only simulation and inspection endpoints
 if settings.is_development:

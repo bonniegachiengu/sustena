@@ -1880,8 +1880,24 @@ function LibraryPanel({ openModal }) {
   const [sortBy, setSortBy] = dUseState('trust'); // trust | downloads | name
   const [freeOnly, setFreeOnly] = dUseState(false);
   const [author, setAuthor] = dUseState('all');
+  const [libraryData, setLibraryData] = dUseState({ operatives: [], operators: [], spores: [], widgets: [] });
 
-  const items = LIBRARY[tab];
+  dUseEffect(() => {
+    api.get('/devui/library')
+      .then(d => {
+        const data = d?.data;
+        if (!data) return;
+        setLibraryData({
+          operatives: data.operatives || [],
+          operators:  data.operators  || [],
+          spores:     data.spores     || [],
+          widgets:    data.widgets    || [],
+        });
+      })
+      .catch(() => {});
+  }, []);
+
+  const items = libraryData[tab] || [];
 
   // Unique authors per tab
   const authors = dUseMemo(() => {
@@ -1941,7 +1957,7 @@ function LibraryPanel({ openModal }) {
             display: 'inline-flex', alignItems: 'center', gap: 6,
           }}>
             <LibraryMark kind={id} size={14} muted={tab !== id} />
-            {m.label} <span style={{ color: 'var(--text-muted)', marginLeft: 2 }}>{LIBRARY[id].length}</span>
+            {m.label} <span style={{ color: 'var(--text-muted)', marginLeft: 2 }}>{(libraryData[id] || []).length}</span>
             {tab === id && <span style={{ position: 'absolute', left: 14, right: 14, bottom: -1, height: 2, background: m.accent }} />}
           </button>
         ))}
@@ -2004,12 +2020,15 @@ function LibraryPanel({ openModal }) {
         flex: 1, minHeight: 0, overflow: 'auto', alignContent: 'start',
       }}>
         {filtered.length === 0
-          ? <Empty label="NO MATCH" sub="Try clearing some filters" />
+          ? <Empty
+              label={items.length === 0 ? 'mycelium is quiet · no packages yet' : 'NO MATCH'}
+              sub={items.length === 0 ? 'publish the first package above' : 'try clearing some filters'}
+            />
           : filtered.map((it, i) => {
-              if (tab === 'operatives') return <OperativeLibCard key={it.name} it={it} delay={i * 40} onClick={() => openModal(it, tab)} />;
-              if (tab === 'operators')  return <OperatorLibRow  key={it.name} it={it} delay={i * 30} onClick={() => openModal(it, tab)} />;
-              if (tab === 'spores')     return <SporeLibCard    key={it.name} it={it} delay={i * 40} onClick={() => openModal(it, tab)} />;
-              if (tab === 'widgets')    return <WidgetLibCard   key={it.name} it={it} delay={i * 40} onClick={() => openModal(it, tab)} />;
+              if (tab === 'operatives') return <OperativeLibCard key={it.id || it.name} it={it} delay={i * 40} onClick={() => openModal(it, tab)} />;
+              if (tab === 'operators')  return <OperatorLibRow  key={it.id || it.name} it={it} delay={i * 30} onClick={() => openModal(it, tab)} />;
+              if (tab === 'spores')     return <SporeLibCard    key={it.id || it.name} it={it} delay={i * 40} onClick={() => openModal(it, tab)} />;
+              if (tab === 'widgets')    return <WidgetLibCard   key={it.id || it.name} it={it} delay={i * 40} onClick={() => openModal(it, tab)} />;
             })}
       </div>
     </div>
