@@ -56,6 +56,14 @@ _OPERATIVE_MAP: dict[str, type] = {
     "curator":   CuratorOperative,
 }
 
+_OPERATIVE_ROLES: dict[str, str] = {
+    "mentor":    "Strategic advisor · finance",
+    "protege":   "Learning · pattern recognition",
+    "attache":   "Contacts & governance",
+    "navigator": "Logistics & routing",
+    "curator":   "Assets & procurement",
+}
+
 # ── Spec location ───────────────────────────────────────────────────────────────
 
 # sustena/sustains/ lives inside apps/api/sustena/sustains/
@@ -587,4 +595,65 @@ class SustainEngine:
             "SELECT template_id FROM sustains WHERE id = ?",
             (sustain_id,),
         ).fetchone()
-       
+        if row is None:
+            return None
+
+        try:
+            spec = self._load_spec(row["template_id"])
+        except ValueError:
+            return None
+
+        self._specs[sustain_id] = spec
+        return spec
+
+    # ── Public helpers (used by devui routes) ──────────────────────────────────
+
+    def get_spec(self, sustain_id: str) -> dict | None:
+        """Public accessor for the sustain spec (load from cache or disk)."""
+        return self._get_spec(sustain_id)
+
+    def get_operative_statuses(self, sustain_id: str) -> list[dict]:
+        """
+        Return a status entry for each operative declared in this sustain's spec.
+        Names are derived from the spec dict; confidence and task are None until
+        the runtime tracks them in a future sprint.
+        """
+        spec = self._get_spec(sustain_id)
+        if spec is None:
+            return []
+        operatives_cfg = spec.get("operatives", {})
+        names = list(operatives_cfg.keys()) if isinstance(operatives_cfg, dict) else list(operatives_cfg)
+        return [
+            {
+                "id": f"op-{name}",
+                "name": name.capitalize(),
+                "role": _OPERATIVE_ROLES.get(name, "operative"),
+                "status": "active",
+                "confidence": None,
+                "pawa_session": 0,
+                "task": None,
+            }
+            for name in names
+        ]
+
+    def evaluate_constraints(self, sustain_id: str) -> list[dict]:
+        """
+        Evaluate each invariant expression from the spec against the live state.
+        Returns [{"expr": ..., "status": "ok"|"fail", "value": None}].
+        """
+        spec = self._get_spec(sustain_id)
+        if spec is None:
+            return []
+        try:
+            state_dict = self._load_state_dict(sustain_id)
+        except ValueError:
+            return []
+        state = StateAccessor(state_dict)
+        from sustena.core.constraints import ConstraintEngine
+        constraint_engine = ConstraintEngine()
+        results = []
+        for inv in spec.get("invariants", []):
+            expr = inv.get("expression", "")
+            ok_flag, _ = constraint_engine.evaluate(expr, state)
+            results.append({"expr": expr, "status": "ok" if ok_flag else "fail", "value": None})
+        return results

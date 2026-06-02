@@ -30,6 +30,21 @@ async def lifespan(app: FastAPI):
     _mode = "mock mode (zero API calls)" if _client.__class__.__name__ == "MockClaudeClient" else "live mode"
     logger.info("Claude client: %s", _mode)
     await init_db()
+
+    # Seed one homestead sustain if the persistent DB is empty
+    try:
+        from sustena.core.engine_singleton import get_shared_engine
+        _engine = get_shared_engine()
+        if not _engine.list_all():
+            sid = _engine.instantiate(
+                "homestead",
+                "system",
+                {"owner_ids": ["system"]},
+            )
+            logger.info("Seeded homestead sustain on startup: %s", sid)
+    except Exception as exc:
+        logger.warning("Startup seed failed (non-fatal): %s", exc)
+
     yield
     logger.info("Sustena XII shutting down.")
 

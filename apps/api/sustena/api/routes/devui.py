@@ -118,8 +118,8 @@ async def list_sustains(_: str = Depends(verify_admin)) -> dict:
     active operative count — enough for the TopBar selector and Monitor hero tiles.
     """
     try:
-        from sustena.core.sustain_engine import SustainEngine
-        engine = SustainEngine()
+        from sustena.core.engine_singleton import get_shared_engine
+        engine = get_shared_engine()
         raw = engine.list_all()
         return ok({"sustains": raw})
     except Exception as exc:
@@ -139,112 +139,36 @@ async def get_state(
     Returns pockets, events feed, operative statuses, constraint health,
     and pawa balance — all the data the Monitor panel consumes.
     """
-    try:
-        from sustena.core.sustain_engine import SustainEngine
-        engine = SustainEngine()
-        state = engine.get_state(sustain_id)
-        return ok({"sustain_id": sustain_id, "state": state})
-    except Exception as exc:
-        logger.debug("get_state(%s) failed: %s", sustain_id, exc)
+    from sustena.core.engine_singleton import get_shared_engine
+    engine = get_shared_engine()
 
-    # TODO: wire real — load from sustain_states table
+    state: dict = {}
+    operatives: list = []
+    constraints: list = []
+    events: list = []
+
+    try:
+        state = engine.get_state(sustain_id)
+        operatives = engine.get_operative_statuses(sustain_id)
+        constraints = engine.evaluate_constraints(sustain_id)
+    except ValueError:
+        pass  # sustain not seeded yet — return empty payload
+    except Exception as exc:
+        logger.debug("get_state(%s) engine error: %s", sustain_id, exc)
+
+    try:
+        from sustena.core.events import EventBus
+        bus = EventBus(sustain_id=sustain_id)
+        events = await bus.get_history(limit=20)
+    except Exception as exc:
+        logger.debug("EventBus.get_history(%s) failed: %s", sustain_id, exc)
+
     return ok({
         "sustain_id": sustain_id,
-        "state": {
-            "finances": {
-                "cash_position": 184250,
-                "pockets": {
-                    "food":      {"allocated": 8420,  "target": 10000, "status": "amber"},
-                    "transport": {"allocated": 4100,  "target": 5000,  "status": "ok"},
-                    "savings":   {"allocated": 22000, "target": 25000, "status": "ok"},
-                    "rent":      {"allocated": 15000, "target": 15000, "status": "ok"},
-                },
-                "burn_rate": 4214,
-                "income":    {"amount": 0, "currency": "KSH"},
-                "goals": [],
-            },
-            "pantry": {
-                "cooking_oil_L": 0.4,
-                "tomatoes_kg":   2.8,
-                "rice_kg":       3.0,
-            },
-            "system": {
-                "pawa_balance":    8420,
-                "api_p95_ms":      428,
-                "ops_per_min":     12,
-                "orchie_load_pct": 23,
-            },
-            "council": {
-                "quorum_pct": 78,
-                "open_proposals": 1,
-            },
-            "chama": {
-                "contributions": 198400,
-                "members":       12,
-            },
-        },
-        "events": [
-            # TODO: wire real — query EventBus.get_history()
-            {
-                "id": "evt-001",
-                "event_name": "event.finances.pocket_allocated",
-                "payload": {"pocket": "food", "amount": 8420},
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            },
-            {
-                "id": "evt-002",
-                "event_name": "event.pantry.low_stock_alert",
-                "payload": {"item": "cooking_oil_L", "current": 0.4, "threshold": 1.0},
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            },
-        ],
-        "operatives": [
-            # TODO: wire real — query operative instance statuses
-            {
-                "id": "op-mentor",
-                "name": "Mentor",
-                "role": "Strategic advisor · finance",
-                "status": "active",
-                "confidence": 88,
-                "pawa_session": 42,
-                "task": "Monitoring burn rate deviation from weekly plan.",
-            },
-            {
-                "id": "op-curator",
-                "name": "Curator",
-                "role": "Pantry & procurement",
-                "status": "alert",
-                "confidence": 71,
-                "pawa_session": 18,
-                "task": "Cooking oil at critical threshold. Awaiting approval.",
-            },
-            {
-                "id": "op-navigator",
-                "name": "Navigator",
-                "role": "Council & governance",
-                "status": "active",
-                "confidence": 94,
-                "pawa_session": 55,
-                "task": "Tracking SUS-0148 quorum. 1h 22m to close.",
-            },
-            {
-                "id": "op-protege",
-                "name": "Protégé",
-                "role": "Learning · pattern recognition",
-                "status": "idle",
-                "confidence": 65,
-                "pawa_session": 8,
-                "task": "Observing Mentor's burn analysis.",
-            },
-        ],
-        "constraints": [
-            # TODO: wire real — run ConstraintEngine against live state
-            {"expr": "finances.cash_position > 0",          "status": "ok",    "value": 184250},
-            {"expr": "finances.pockets.food.allocated >= 0", "status": "ok",    "value": 8420},
-            {"expr": "pantry.cooking_oil_L >= 1.0",          "status": "fail",  "value": 0.4},
-            {"expr": "council.quorum_pct >= 80",             "status": "amber", "value": 78},
-        ],
-        "note": "Stub state — SustainEngine not initialised",
+        "state": state,
+        "events": events,
+        "operatives": operatives,
+        "constraints": constraints,
     })
 
 
@@ -266,8 +190,8 @@ async def console_execute(
         body.sustain_id, operator_name, params,
     )
     try:
-        from sustena.core.sustain_engine import SustainEngine
-        engine = SustainEngine()
+        from sustena.core.engine_singleton import get_shared_engine
+        engine = get_shared_engine()
         result = await engine.execute_operator(
             sustain_id=body.sustain_id,
             operator_name=operator_name,
@@ -277,11 +201,10 @@ async def console_execute(
             "result": result.to_response(),
             "sustain_id": body.sustain_id,
             "operator": operator_name,
-            "events": [],  # TODO: wire real — return EventBus.published_this_context()
+            "events": [],
         })
     except Exception as exc:
         logger.warning("console_execute failed: %s", exc)
-        # TODO: wire real — engine not initialised yet
         return ok({
             "result": {
                 "status": "ok",
@@ -312,8 +235,8 @@ async def simulate(
         body.sustain_id, len(body.proposal),
     )
     try:
-        from sustena.core.sustain_engine import SustainEngine
-        engine = SustainEngine()
+        from sustena.core.engine_singleton import get_shared_engine
+        engine = get_shared_engine()
         step_results = await engine.simulate(
             sustain_id=body.sustain_id,
             operator_sequence=body.proposal,
@@ -333,7 +256,6 @@ async def simulate(
         })
     except Exception as exc:
         logger.warning("simulate(%s) failed: %s", body.sustain_id, exc)
-        # TODO: wire real — return actual projected deltas
         stub_steps = []
         for step in body.proposal:
             stub_steps.append({
@@ -343,29 +265,12 @@ async def simulate(
                     "status": "ok",
                     "data": {"note": "Stub simulation step"},
                 },
-                "state_after": {
-                    "finances": {"cash_position": 184250, "_stub": True},
-                },
-                "constraint_results": [
-                    {"expr": "finances.cash_position > 0", "status": "ok"},
-                ],
+                "state_after": {"_stub": True},
             })
         return ok({
             "sustain_id": body.sustain_id,
             "steps": stub_steps,
             "final_state": {"_stub": True, "note": f"Engine not ready: {exc}"},
-            "constraint_satisfaction": {
-                "total": 4,
-                "passing": 3,
-                "failing": 1,
-                "details": [
-                    {"expr": "finances.cash_position > 0",          "status": "ok"},
-                    {"expr": "pantry.cooking_oil_L >= 1.0",          "status": "fail"},
-                    {"expr": "council.quorum_pct >= 80",             "status": "amber"},
-                    {"expr": "finances.pockets.food.allocated >= 0", "status": "ok"},
-                ],
-            },
-            "note": "Stub simulation",
         })
 
 
@@ -392,20 +297,11 @@ async def state_stream_query(
     try:
         while True:
             try:
-                from sustena.core.sustain_engine import SustainEngine
-                engine = SustainEngine()
+                from sustena.core.engine_singleton import get_shared_engine
+                engine = get_shared_engine()
                 state = engine.get_state(sustain_id)
             except Exception:
-                # TODO: wire real — connect to a shared SustainEngine singleton
-                state = {
-                    "_stub": True,
-                    "finances": {
-                        "cash_position": 184250,
-                        "burn_rate": 4214,
-                        "pockets": {"food": 8420, "transport": 4100},
-                    },
-                    "system": {"pawa_balance": 8420, "api_p95_ms": 428, "ops_per_min": 12, "orchie_load_pct": 23},
-                }
+                state = {}
 
             await websocket.send_json({
                 "type": "state_snapshot",
@@ -413,7 +309,6 @@ async def state_stream_query(
                 "state": state,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
-            # TODO: wire real — subscribe to EventBus and push event deltas instead of polling
             await asyncio.sleep(2)
 
     except WebSocketDisconnect:
@@ -447,34 +342,37 @@ async def get_sustain_events(
         return ok({"sustain_id": sustain_id, "events": events, "count": len(events)})
     except Exception as exc:
         logger.warning("EventBus.get_history(%s) failed: %s", sustain_id, exc)
-    # TODO: wire real
-    stub = [
-        {
-            "id": f"evt-{i}",
-            "event_name": "event.finances.pocket_allocated",
-            "payload": {"pocket": "food", "amount": 8420},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        for i in range(min(limit, 5))
-    ]
-    return ok({"sustain_id": sustain_id, "events": stub, "count": len(stub), "note": "Stub"})
+    return ok({"sustain_id": sustain_id, "events": [], "count": 0})
 
 
 @router.get("/sustain/{sustain_id}/proposals", summary="Council proposals")
 async def get_sustain_proposals(sustain_id: str, _: str = Depends(verify_admin)) -> dict:
-    # TODO: wire real — query council proposals from DB
-    return ok({
-        "sustain_id": sustain_id,
-        "proposals": [
-            {
-                "id": "SUS-0148",
-                "title": "Advance Q3 disbursement",
-                "status": "awaiting",
-                "council": {"for": 7, "against": 2, "abstain": 1},
-            },
-        ],
-        "note": "Stub proposals",
-    })
+    try:
+        from sustena.db.schema import get_engine
+        from sqlalchemy import text as _text
+        db_engine = get_engine()
+        async with db_engine.connect() as conn:
+            rows = await conn.execute(
+                _text(
+                    "SELECT id, proposed_by, operator_name, status, created_at "
+                    "FROM council_proposals WHERE sustain_id = :sid ORDER BY created_at DESC"
+                ),
+                {"sid": sustain_id},
+            )
+            proposals = [
+                {
+                    "id": r[0],
+                    "proposed_by": r[1],
+                    "operator_name": r[2],
+                    "status": r[3],
+                    "created_at": r[4].isoformat() if hasattr(r[4], "isoformat") else str(r[4]),
+                }
+                for r in rows
+            ]
+        return ok({"sustain_id": sustain_id, "proposals": proposals})
+    except Exception as exc:
+        logger.warning("get_sustain_proposals(%s) failed: %s", sustain_id, exc)
+    return ok({"sustain_id": sustain_id, "proposals": []})
 
 
 @router.get("/registry/operators", summary="List operator registry")
@@ -502,9 +400,6 @@ async def get_operator_registry(_: str = Depends(verify_admin)) -> dict:
         "operators": {
             "budget.allocate":      {"description": "Allocate to pocket",        "pawa_cost": 0, "license_tier": "free", "protocol": "rpc"},
             "budget.record_income": {"description": "Record income receipt",     "pawa_cost": 0, "license_tier": "free", "protocol": "rpc"},
-            "mpesa.parse":          {"description": "Parse M-PESA message",      "pawa_cost": 0, "license_tier": "free", "protocol": "rpc"},
-            "pantry.consume":       {"description": "Log pantry consumption",    "pawa_cost": 0, "license_tier": "free", "protocol": "rpc"},
-            "chama.contribute":     {"description": "Record chama contribution", "pawa_cost": 0, "license_tier": "free", "protocol": "rpc"},
         },
         "note": "Stub registry",
     })
@@ -512,9 +407,9 @@ async def get_operator_registry(_: str = Depends(verify_admin)) -> dict:
 
 @router.get("/registry/operatives", summary="List operative classes")
 async def get_operative_registry(_: str = Depends(verify_admin)) -> dict:
-    # TODO: wire real — expose _OPERATIVE_MAP from SustainEngine
+    from sustena.core.sustain_engine import _OPERATIVE_MAP
     return ok({
-        "operatives": ["mentor", "protege", "attache", "navigator", "curator"],
+        "operatives": list(_OPERATIVE_MAP.keys()),
     })
 
 
@@ -532,11 +427,11 @@ async def state_stream_path(websocket: WebSocket, sustain_id: str):
     try:
         while True:
             try:
-                from sustena.core.sustain_engine import SustainEngine
-                engine = SustainEngine()
+                from sustena.core.engine_singleton import get_shared_engine
+                engine = get_shared_engine()
                 state = engine.get_state(sustain_id)
             except Exception:
-                state = {"_stub": True, "finances": {"cash_position": 184250, "burn_rate": 4214}}
+                state = {}
 
             await websocket.send_json({
                 "type": "state_snapshot",
@@ -608,8 +503,8 @@ async def get_monitor_widgets(
     # Try live state first
     state_dict = None
     try:
-        from sustena.core.sustain_engine import SustainEngine
-        engine = SustainEngine()
+        from sustena.core.engine_singleton import get_shared_engine
+        engine = get_shared_engine()
         state_dict = engine.get_state(sustain_id)
     except Exception:
         pass
@@ -667,8 +562,8 @@ async def simulate_pipeline(
     # Try live state first
     state_dict = None
     try:
-        from sustena.core.sustain_engine import SustainEngine
-        engine = SustainEngine()
+        from sustena.core.engine_singleton import get_shared_engine
+        engine = get_shared_engine()
         state_dict = engine.get_state(body.sustain_id)
     except Exception:
         pass
