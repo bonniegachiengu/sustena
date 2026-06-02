@@ -204,7 +204,7 @@ Sprint 8.6  Auth/Users (register/login) ✅ ← 8.2; UNBLOCKS 8.7–8.10
 Sprint 8.7  Lore CMS + Journal API ✅     ← 8.6
 Sprint 8.8  Library + Spore flow ✅       ← 8.2 + 8.6
 Sprint 8.9  Arena products + publishing ✅ ← 8.6 + 8.8
-Sprint 8.10 Profile telemetry + Ctrl      ← 8.6 + 8.2
+Sprint 8.10 Profile telemetry + Ctrl ✅   ← 8.6 + 8.2
 Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 ```
 
