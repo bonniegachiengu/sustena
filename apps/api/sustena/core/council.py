@@ -57,6 +57,58 @@ class CouncillorConfig:
     domain:         list[str] = field(default_factory=list)
     sub_operatives: dict[str, str] = field(default_factory=dict)
 
+    def is_relevant(self, proposal_domains: list[str]) -> bool:
+        """
+        Return True if this councillor should participate in evaluating a proposal.
+
+        Rules:
+          - proposal_domains is empty → proposal is untagged (applies to all) → True
+          - councillor has no declared domain → always False (will ABSTAIN)
+          - otherwise → True iff any councillor domain appears in proposal_domains
+        """
+        if not proposal_domains:
+            return True
+        if not self.domain:
+            return False
+        return bool(set(self.domain) & set(proposal_domains))
+
+
+# ── Operator domain map ────────────────────────────────────────────────────────
+
+OPERATOR_DOMAIN_MAP: dict[str, list[str]] = {
+    # Finance / budget
+    "budget.record_income":              ["finances", "budget", "savings"],
+    "budget.allocate":                   ["finances", "budget"],
+    "budget.spend":                      ["finances", "budget"],
+    "budget.transfer":                   ["finances", "budget"],
+    "budget.summary":                    ["finances", "budget"],
+    "budget.reallocate":                 ["finances", "budget"],
+    # Calendar / time
+    "homestead.calendar.add_event":       ["calendar", "time"],
+    "homestead.calendar.upcoming_events": ["calendar", "time"],
+    "homestead.calendar.remove_event":    ["calendar", "time"],
+    # Tasks / deadlines
+    "homestead.tasks.add":               ["tasks", "deadlines"],
+    "homestead.tasks.complete":          ["tasks"],
+    "homestead.tasks.list":              ["tasks"],
+    "homestead.tasks.carryover":         ["tasks", "deadlines"],
+    # Procurement / assets / inventory
+    "procurement.raise_po":              ["procurement", "assets", "inventory"],
+    "procurement.confirm_delivery":      ["procurement", "logistics", "delivery", "transport"],
+    "mkulima.broadcast_supply_signal":   ["procurement", "assets"],
+    "mkulima.receive_signal":            ["procurement"],
+}
+
+
+def get_proposal_domains(operator_name: str) -> list[str]:
+    """
+    Return the domain tags for an operator name.
+
+    Unknown operators return an empty list — their proposals are treated as
+    untagged (relevant to all councillors).
+    """
+    return list(OPERATOR_DOMAIN_MAP.get(operator_name, []))
+
 
 def load_councillor_configs(operatives_spec: dict) -> dict[str, "CouncillorConfig"]:
     """
@@ -138,6 +190,7 @@ class CouncilSession:
         operator_name: str,
         input_params: dict,
         simulation_results: dict | None = None,
+        domains: list[str] | None = None,
     ) -> str:
         """
         Create a new Council proposal and persist it to state.
@@ -148,12 +201,17 @@ class CouncilSession:
             operator_name     : e.g. "budget.reallocate"
             input_params      : kwargs for the operator
             simulation_results: optional forward-simulation output
+            domains           : domain tags for this proposal. If None, auto-derived
+                                from OPERATOR_DOMAIN_MAP using operator_name. Pass an
+                                explicit list to override (e.g. for cross-domain proposals).
 
         Returns:
             proposal_id (UUID string)
         """
         now        = self._clock()
         expires_at = now + timedelta(hours=PROPOSAL_TTL_HOURS)
+
+        resolved_domains = domains if domains is not None else get_proposal_domains(operator_name)
 
         proposal = {
             "id":                     str(uuid.uuid4()),
@@ -166,12 +224,13 @@ class CouncilSession:
             "created_at":             now.isoformat(),
             "resolved_at":            None,
             "expires_at":             expires_at.isoformat(),
+            "domains":                resolved_domains,
         }
 
         self.state.append("council_proposals", proposal)
         logger.info(
-            "[council] proposal created: id=%s operator=%s proposed_by=%s",
-            proposal["id"], operator_name, proposed_by,
+            "[council] proposal created: id=%s operator=%s proposed_by=%s domains=%s",
+            proposal["id"], operator_name, proposed_by, resolved_domains,
         )
         return proposal["id"]
 
@@ -181,13 +240,22 @@ class CouncilSession:
         self,
         proposal_id: str,
         operatives: list[Any],   # list[BaseOperative]
+        councillor_configs: dict | None = None,  # dict[str, CouncillorConfig] | None
     ) -> dict:
         """
         Ask each operative to deliberate and record their vote.
 
+        Domain relevance check (Sprint 7.2):
+          If councillor_configs is provided and an operative's config declares a domain
+          list that does not overlap the proposal's tagged domains, that operative
+          receives an immediate ABSTAIN with abstain_reason="no_domain_overlap" — its
+          deliberate() method is never called and no sub-operatives are spawned.
+
         Args:
-            proposal_id : Council proposal to vote on.
-            operatives  : Operative instances to poll.
+            proposal_id        : Council proposal to vote on.
+            operatives         : Operative instances to poll.
+            councillor_configs : Optional mapping of operative_id → CouncillorConfig.
+                                 When None, all operatives deliberate (backwards compat).
 
         Returns:
             dict mapping operative_id → OperativeVote dict.
@@ -198,6 +266,8 @@ class CouncilSession:
 
         # Record that collect_votes was invoked for this proposal
         self._votes_collected.add(proposal_id)
+
+        proposal_domains: list[str] = proposal.get("domains", [])
 
         context = {
             "sustain_id":   self.sustain_id,
@@ -216,12 +286,43 @@ class CouncilSession:
         vote_results: dict[str, dict] = {}
 
         for operative in operatives:
+            op_id = getattr(operative, "operative_id", "unknown")
+
+            # ── Domain relevance check ─────────────────────────────────────────
+            if councillor_configs is not None:
+                config = councillor_configs.get(op_id)
+                if config is not None and not config.is_relevant(proposal_domains):
+                    vote_record = {
+                        "id":            str(uuid.uuid4()),
+                        "proposal_id":   proposal_id,
+                        "operative_id":  op_id,
+                        "vote":          "ABSTAIN",
+                        "reasoning":     "Domain not relevant to this proposal.",
+                        "abstain_reason": "no_domain_overlap",
+                        "weight":        0.098,
+                        "timestamp":     self._clock().isoformat(),
+                        "utility":       0.5,
+                    }
+                    self.state.append("council_votes", vote_record)
+                    vote_results[op_id] = {
+                        "vote":          "ABSTAIN",
+                        "reasoning":     "Domain not relevant to this proposal.",
+                        "abstain_reason": "no_domain_overlap",
+                        "utility":       0.5,
+                    }
+                    logger.info(
+                        "[council] operative '%s' ABSTAIN (no domain overlap): proposal=%s domains=%s",
+                        op_id, proposal_id, proposal_domains,
+                    )
+                    continue  # skip deliberate() — zero sub-operatives spawned
+
+            # ── Normal deliberation path ───────────────────────────────────────
             try:
                 vote = await operative.deliberate(context, proposal_dict)
                 vote_record = {
                     "id":           str(uuid.uuid4()),
                     "proposal_id":  proposal_id,
-                    "operative_id": operative.operative_id,
+                    "operative_id": op_id,
                     "vote":         vote.vote.value,
                     "reasoning":    vote.reasoning,
                     "weight":       0.098,   # per schema default
@@ -229,22 +330,22 @@ class CouncilSession:
                     "utility":      vote.utility,
                 }
                 self.state.append("council_votes", vote_record)
-                vote_results[operative.operative_id] = vote.to_dict()
+                vote_results[op_id] = vote.to_dict()
 
                 logger.info(
                     "[council] vote recorded: proposal=%s operative=%s vote=%s",
-                    proposal_id, operative.operative_id, vote.vote.value,
+                    proposal_id, op_id, vote.vote.value,
                 )
             except Exception as exc:
                 logger.error(
                     "[council] operative '%s' deliberation error: %s",
-                    getattr(operative, "operative_id", "unknown"), exc,
+                    op_id, exc,
                 )
                 # Record ABSTAIN on error
                 vote_record = {
                     "id":           str(uuid.uuid4()),
                     "proposal_id":  proposal_id,
-                    "operative_id": getattr(operative, "operative_id", "unknown"),
+                    "operative_id": op_id,
                     "vote":         "ABSTAIN",
                     "reasoning":    f"Deliberation error: {exc}",
                     "weight":       0.098,
@@ -252,7 +353,7 @@ class CouncilSession:
                     "utility":      0.5,
                 }
                 self.state.append("council_votes", vote_record)
-                vote_results[getattr(operative, "operative_id", "unknown")] = {
+                vote_results[op_id] = {
                     "vote": "ABSTAIN",
                     "reasoning": str(exc),
                     "utility": 0.5,
