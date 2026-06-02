@@ -243,11 +243,11 @@ async def test_council_stub_route_reachable():
 
 
 @pytest.mark.asyncio
-async def test_users_stub_route_reachable():
-    """GET /api/v1/users/ must return 200 (stub route)."""
+async def test_users_register_reachable():
+    """POST /api/v1/users/register must return 200 or 422 (not 404)."""
     async with _client() as client:
-        response = await client.get("/api/v1/users/")
-    assert response.status_code == 200
+        response = await client.post("/api/v1/users/register", json={})
+    assert response.status_code != 404
 
 
 # =============================================================

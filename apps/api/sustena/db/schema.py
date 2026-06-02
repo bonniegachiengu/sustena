@@ -30,14 +30,17 @@ logger = logging.getLogger(__name__)
 metadata = MetaData()
 
 # ── users ──────────────────────────────────────────────────────────────────────
-# One row per registered user (identified by phone number for WhatsApp users).
+# One row per registered user.
+# phone_number — WhatsApp users; email/password_hash — web/API users (Sprint 8.6)
 users = Table(
     "users",
     metadata,
-    Column("id", String(36), primary_key=True),               # UUID
-    Column("phone_number", String(20), unique=True, nullable=False),
+    Column("id", String(36), primary_key=True),
+    Column("phone_number", String(20), unique=True, nullable=True),
+    Column("email", String(200), unique=True, nullable=True),
+    Column("password_hash", String(200), nullable=True),
     Column("display_name", String(100), nullable=True),
-    Column("pawa_balance", Integer, default=100, nullable=False),  # Onboarding grant
+    Column("pawa_balance", Integer, default=100, nullable=False),
     Column("created_at", DateTime, default=datetime.utcnow, nullable=False),
     Column("last_active_at", DateTime, nullable=True),
 )
@@ -174,11 +177,46 @@ def get_engine() -> AsyncEngine:
     return _engine
 
 
+def _migrate_users_auth(sync_conn) -> None:
+    """
+    Add email + password_hash to the users table on existing DBs.
+    SQLite cannot ALTER COLUMN, so we rename → recreate → copy → drop.
+    No-op when the columns already exist (fresh DB or already migrated).
+    """
+    try:
+        sync_conn.execute(text("SELECT email FROM users LIMIT 1"))
+        return  # columns already present
+    except Exception:
+        pass
+
+    sync_conn.execute(text("ALTER TABLE users RENAME TO _users_old"))
+    sync_conn.execute(text("""
+        CREATE TABLE users (
+            id            VARCHAR(36) PRIMARY KEY,
+            phone_number  VARCHAR(20)  UNIQUE,
+            email         VARCHAR(200) UNIQUE,
+            password_hash VARCHAR(200),
+            display_name  VARCHAR(100),
+            pawa_balance  INTEGER NOT NULL DEFAULT 100,
+            created_at    DATETIME NOT NULL,
+            last_active_at DATETIME
+        )
+    """))
+    sync_conn.execute(text("""
+        INSERT INTO users (id, phone_number, display_name, pawa_balance, created_at, last_active_at)
+        SELECT id, phone_number, display_name, pawa_balance, created_at, last_active_at
+        FROM _users_old
+    """))
+    sync_conn.execute(text("DROP TABLE _users_old"))
+    logger.info("Migrated users table — added email and password_hash columns.")
+
+
 async def init_db() -> None:
     """Create all tables if they don't exist. Called at startup."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
+        await conn.run_sync(_migrate_users_auth)
     logger.info("Database initialised — all tables ready.")
 
 
