@@ -1,0 +1,13 @@
+{
+  "entry": "check_deadlines",
+  "exit": "check_deadlines",
+  "nodes": {
+    "check_deadlines": {
+      "operator": "homestead.calendar.upcoming_events",
+      "kwargs": {
+        "days": "{{lookahead_days|7}}"
+      }
+    }
+  },
+  "edges": []
+}

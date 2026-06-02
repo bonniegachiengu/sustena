@@ -343,27 +343,52 @@
     "mentor": {
       "class": "MentorOperative",
       "evaluation_graph": "graphs/mentor_evaluation.json",
-      "deliberation_graph": "graphs/mentor_deliberation.json"
+      "deliberation_graph": "graphs/mentor_deliberation.json",
+      "domain": ["finances", "budget", "savings"],
+      "sub_operatives": {
+        "financial_risk_assessor": "graphs/financial_risk_assessment.json",
+        "burn_rate_analyst": "graphs/burn_rate_analysis.json"
+      }
     },
     "protege": {
       "class": "ProtegeOperative",
       "evaluation_graph": "graphs/protege_evaluation.json",
-      "deliberation_graph": "graphs/protege_deliberation.json"
+      "deliberation_graph": "graphs/protege_deliberation.json",
+      "domain": ["tasks", "calendar", "time", "deadlines"],
+      "sub_operatives": {
+        "deadline_analyst": "graphs/deadline_analysis.json",
+        "priority_sorter": "graphs/priority_sorting.json"
+      }
     },
     "attache": {
       "class": "AttacheOperative",
       "evaluation_graph": "graphs/attache_evaluation.json",
-      "deliberation_graph": "graphs/attache_deliberation.json"
+      "deliberation_graph": "graphs/attache_deliberation.json",
+      "domain": ["contacts", "social", "relationships", "trust"],
+      "sub_operatives": {
+        "trust_assessor": "graphs/trust_assessment.json",
+        "relationship_tracker": "graphs/relationship_tracking.json"
+      }
     },
     "navigator": {
       "class": "NavigatorOperative",
       "evaluation_graph": "graphs/navigator_evaluation.json",
-      "deliberation_graph": "graphs/navigator_deliberation.json"
+      "deliberation_graph": "graphs/navigator_deliberation.json",
+      "domain": ["logistics", "routing", "delivery", "transport"],
+      "sub_operatives": {
+        "route_optimizer": "graphs/route_optimization.json",
+        "delivery_tracker": "graphs/delivery_tracking.json"
+      }
     },
     "curator": {
       "class": "CuratorOperative",
       "evaluation_graph": "graphs/curator_evaluation.json",
-      "deliberation_graph": "graphs/curator_deliberation.json"
+      "deliberation_graph": "graphs/curator_deliberation.json",
+      "domain": ["assets", "inventory", "procurement", "investment"],
+      "sub_operatives": {
+        "investment_advisor": "graphs/investment_advisory.json",
+        "asset_valuator": "graphs/asset_valuation.json"
+      }
     }
   },
   "invariants": [

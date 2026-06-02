@@ -1,0 +1,15 @@
+{
+  "entry": "risk_check",
+  "exit": "risk_check",
+  "nodes": {
+    "risk_check": {
+      "operator": "monitor.state_path",
+      "kwargs": {
+        "path": "finances.liquid.balance",
+        "condition": "< {{liquid_floor|1000}}",
+        "alert_event": "event.council.financial_risk_flagged"
+      }
+    }
+  },
+  "edges": []
+}

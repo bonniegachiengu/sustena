@@ -1,0 +1,15 @@
+{
+  "entry": "track_delivery",
+  "exit": "track_delivery",
+  "nodes": {
+    "track_delivery": {
+      "operator": "monitor.state_path",
+      "kwargs": {
+        "path": "logistics.orders",
+        "condition": "!= null",
+        "alert_event": "event.council.delivery_tracked"
+      }
+    }
+  },
+  "edges": []
+}

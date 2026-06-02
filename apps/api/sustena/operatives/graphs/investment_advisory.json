@@ -1,0 +1,14 @@
+{
+  "entry": "score_investment",
+  "exit": "score_investment",
+  "nodes": {
+    "score_investment": {
+      "operator": "simulate.score",
+      "kwargs": {
+        "fork_id": "{{fork_id}}",
+        "goal_metric": "return_on_investment"
+      }
+    }
+  },
+  "edges": []
+}

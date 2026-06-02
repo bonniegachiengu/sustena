@@ -1,0 +1,14 @@
+{
+  "entry": "optimize_route",
+  "exit": "optimize_route",
+  "nodes": {
+    "optimize_route": {
+      "operator": "simulate.score",
+      "kwargs": {
+        "fork_id": "{{fork_id}}",
+        "goal_metric": "time_cost_efficiency"
+      }
+    }
+  },
+  "edges": []
+}

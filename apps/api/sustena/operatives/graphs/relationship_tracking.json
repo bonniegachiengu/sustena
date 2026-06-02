@@ -1,0 +1,15 @@
+{
+  "entry": "track_relationships",
+  "exit": "track_relationships",
+  "nodes": {
+    "track_relationships": {
+      "operator": "monitor.state_path",
+      "kwargs": {
+        "path": "contacts",
+        "condition": "> 0",
+        "alert_event": "event.council.relationships_tracked"
+      }
+    }
+  },
+  "edges": []
+}

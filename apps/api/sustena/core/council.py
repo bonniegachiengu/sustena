@@ -27,10 +27,60 @@ import json
 import logging
 import math
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# ── CouncillorConfig ───────────────────────────────────────────────────────────
+
+
+@dataclass
+class CouncillorConfig:
+    """
+    Configuration for a single councillor (operative) within a sustain.
+
+    Loaded from the 'operatives' section of a sustain JSON spec.
+
+    domain         : domain tags this councillor covers (e.g. ["finances", "budget"]).
+                     Used at runtime to determine relevance to a given proposal.
+                     Empty list → councillor has no declared domain → will always ABSTAIN.
+    sub_operatives : mapping of name → graph file path for sub-operative templates.
+                     Each template is a library graph calibrated and spawned during
+                     sandbox evaluation (Sprint 7.3+).
+                     Empty dict → councillor is relevant but spawns no sub-operatives.
+    """
+
+    operative_id:   str
+    domain:         list[str] = field(default_factory=list)
+    sub_operatives: dict[str, str] = field(default_factory=dict)
+
+
+def load_councillor_configs(operatives_spec: dict) -> dict[str, "CouncillorConfig"]:
+    """
+    Parse the 'operatives' section of a sustain spec into CouncillorConfig instances.
+
+    Each entry may include optional 'domain' and 'sub_operatives' keys alongside
+    'class', 'evaluation_graph', and 'deliberation_graph'. Missing keys get safe
+    empty defaults.
+
+    Args:
+        operatives_spec : dict keyed by operative_id, values are per-operative dicts.
+
+    Returns:
+        dict mapping operative_id → CouncillorConfig.
+    """
+    configs: dict[str, CouncillorConfig] = {}
+    for op_id, spec in operatives_spec.items():
+        configs[op_id] = CouncillorConfig(
+            operative_id=op_id,
+            domain=list(spec.get("domain", [])),
+            sub_operatives=dict(spec.get("sub_operatives", {})),
+        )
+    return configs
+
 
 # ── Proposal status constants ──────────────────────────────────────────────────
 

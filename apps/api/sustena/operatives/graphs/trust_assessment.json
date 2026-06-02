@@ -1,0 +1,15 @@
+{
+  "entry": "assess_trust",
+  "exit": "assess_trust",
+  "nodes": {
+    "assess_trust": {
+      "operator": "monitor.state_path",
+      "kwargs": {
+        "path": "contacts",
+        "condition": "!= null",
+        "alert_event": "event.council.trust_assessed"
+      }
+    }
+  },
+  "edges": []
+}

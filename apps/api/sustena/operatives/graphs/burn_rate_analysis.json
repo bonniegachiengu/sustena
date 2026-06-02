@@ -1,0 +1,11 @@
+{
+  "entry": "summarize",
+  "exit": "summarize",
+  "nodes": {
+    "summarize": {
+      "operator": "budget.summary",
+      "kwargs": {}
+    }
+  },
+  "edges": []
+}

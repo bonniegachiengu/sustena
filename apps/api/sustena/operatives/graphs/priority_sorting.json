@@ -1,0 +1,13 @@
+{
+  "entry": "list_tasks",
+  "exit": "list_tasks",
+  "nodes": {
+    "list_tasks": {
+      "operator": "homestead.tasks.list",
+      "kwargs": {
+        "filter": "active"
+      }
+    }
+  },
+  "edges": []
+}

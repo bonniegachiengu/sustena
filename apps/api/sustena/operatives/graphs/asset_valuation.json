@@ -1,0 +1,15 @@
+{
+  "entry": "value_assets",
+  "exit": "value_assets",
+  "nodes": {
+    "value_assets": {
+      "operator": "monitor.state_path",
+      "kwargs": {
+        "path": "finances.pockets",
+        "condition": "> 0",
+        "alert_event": "event.council.assets_valued"
+      }
+    }
+  },
+  "edges": []
+}
