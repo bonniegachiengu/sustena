@@ -67,7 +67,7 @@ uvicorn sustena.api.main:app --reload --port 8000
 ### Testing
 ```bash
 # From apps/api/
-python -m pytest tests/ -q --tb=short     # 929 tests, all pass
+python -m pytest tests/ -q --tb=short     # 1162 tests, all pass
 
 # Run specific file
 python -m pytest tests/test_uiparser.py -v
@@ -149,10 +149,18 @@ All 7 tasks done and committed:
 - [x] 3.6 `control.*` operators — `control.execute_approved`, `control.rollback`
 - [x] 3.7 `protocol` field required on `OperatorMeta` (3rd arg in `@sustena_operator`); all 44 existing operators back-filled with `protocol="rpc"`
 
-### Sprint 4 — NEXT: Operator UIs
+### Sprint 4 ✅ — Operator UIs
+All 4 tasks done and committed (1162 tests):
+- [x] 4.1 Protocol-aware Operator Console — `GET /devui/registry/operators` includes `protocol`; terminal shows colour-coded badge per execution; streaming panel + event-driven/polling indicators
+- [x] 4.2 Monitor Panel widget grid — `GET /devui/monitor-widgets` calls the three `visualize.*` operators; `PocketRingWidget`, `EventFeedWidget`, `ConstraintHealthWidget` rendered live
+- [x] 4.3 Simulate Panel — `POST /devui/simulate-pipeline` chains `simulate.fork → run_path → score`; editable proposal textarea, goal-metric selector, per-step accordion
+- [x] 4.4 Control Panel — `ProposalCard` calls `control.execute_approved`; `RollbackPanel` calls `control.rollback`; both confirm before executing
+
+### Sprint 5 — NEXT: Operative Networks (LLM-Optional Base Layer)
 See `docs/Sustena_XII_Roadmap_Jun2026.md` for full task list.
-Tasks 4.1–4.4 cover: protocol-aware Operator Console, Monitor Panel widget grid,
-Simulate Panel with `simulate.*` operators, Control Panel proposal execution.
+Tasks 5.1–5.7 cover: `OperativeGraph` base layer, refactor `BaseOperative` to use graphs,
+rewrite Mentor as graph-of-operators, protocol-aware operative runtime, JSON graph specs,
+graph designs for all Council operatives, and `operative.spawn` with `{{placeholder}}` calibration.
 
 ---
 
@@ -178,9 +186,12 @@ ui_schema={
 - `"state.<dot.path>"` → `state.get(path)` (StateAccessor) or plain dict walk
 - `"state.<a> - state.<b>"` → numeric subtraction of two state paths
 
-### New devui endpoints
+### New devui endpoints (Sprints 2 + 4)
 - `GET  /devui/widgets` — list all registered widget types
 - `POST /devui/preview-widget` — body: `{spec_json, mock_state}` → `{widget: ResponseWidget}`
+- `GET  /devui/monitor-widgets?sustain_id=` — calls `visualize.*` operators, returns `{pocket_ring, event_feed, constraint_health}` widgets
+- `POST /devui/simulate-pipeline` — body: `{sustain_id, proposal, goal_metric}` → `{fork_id, steps, score, interpretation}`
+- `GET  /devui/registry/operators` — now includes `protocol` field on every operator entry
 
 ---
 
