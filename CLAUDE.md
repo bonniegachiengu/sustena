@@ -203,7 +203,7 @@ Sprint 8.5  Editor real graph ✅          ← 8.2
 Sprint 8.6  Auth/Users (register/login) ✅ ← 8.2; UNBLOCKS 8.7–8.10
 Sprint 8.7  Lore CMS + Journal API ✅     ← 8.6
 Sprint 8.8  Library + Spore flow ✅       ← 8.2 + 8.6
-Sprint 8.9  Arena products + publishing   ← 8.6 + 8.8
+Sprint 8.9  Arena products + publishing ✅ ← 8.6 + 8.8
 Sprint 8.10 Profile telemetry + Ctrl      ← 8.6 + 8.2
 Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 ```
@@ -280,6 +280,14 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 - ✅ `EditorPanel` — GRAPH/STATE/OP SPEC tab toggle; STATE tab fetches `GET /devui/state`, displays live JSON, applies patches via `edit.state_patch`; OP SPEC tab calls `edit.operator_spec` with field selector and result diff.
 - ✅ Node palette OPERATORS section wired to `GET /devui/sustain/{id}/operators`; clicking an operator opens OP SPEC mode pre-filled.
 - ✅ 1554 tests pass (no new backend tests — purely frontend).
+
+**Sprint 8.9 status (2 Jun 2026):**
+- ✅ `schema.py` — added `arena_products` (name, seller_type, price, unit, emoji, tags) and `arena_orders` (ref, items_json, product_total, licenses_json) tables.
+- ✅ `routes/arena.py` — `seed_demo_products()` inserts 8 Kenyan products (4 Vyyb food + 4 Mkulima farm) at startup if table empty; real `GET /api/v1/arena/products`; real `POST /api/v1/arena/orders` (returns ref + per-package licenses); real `GET /api/v1/arena/orders` (user-scoped, formatted for OrderCard).
+- ✅ `main.py` — `await seed_demo_products()` in lifespan.
+- ✅ `CartDrawer` in `ArenaPage.jsx` — async `handleConfirm` POSTs to real orders endpoint when token present; shows loading state; falls back to local-only when no token.
+- ✅ `LibraryPanel` in `other.jsx` — PUBLISH button opens inline form (name, kind, description, tags); submits to `POST /api/v1/arena/packages`; refreshes library on success.
+- ✅ 6 new tests. **1574 tests total.**
 
 **Sprint 8.8 status (2 Jun 2026):**
 - ✅ `schema.py` — added `arena_packages` table (kind, trust_score, download_count, pawa_cost, is_free, tags, description, version).
