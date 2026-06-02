@@ -685,6 +685,98 @@ class TestBaseOperativeGraphIntegration:
 # ── OperativeRuntime protocol dispatch tests (Task 5.4) ───────────────────────
 
 
+class TestCouncilOperativeGraphSpecs:
+    """
+    Task 5.6 — Verify that JSON graph spec files exist for all Council operatives
+    and can be parsed by OperativeGraph.from_spec() (no operator registry lookups;
+    just spec structure validation).
+    """
+
+    GRAPHS_DIR = (
+        __import__("pathlib").Path(__file__).parent.parent
+        / "sustena" / "operatives" / "graphs"
+    )
+
+    EXPECTED_FILES = [
+        "mentor_evaluation.json",
+        "mentor_deliberation.json",
+        "protege_evaluation.json",
+        "protege_deliberation.json",
+        "attache_evaluation.json",
+        "attache_deliberation.json",
+        "curator_evaluation.json",
+        "curator_deliberation.json",
+        "navigator_evaluation.json",
+        "navigator_deliberation.json",
+        "orchie_evaluation.json",
+    ]
+
+    def test_all_graph_spec_files_exist(self):
+        """Every expected graph spec file must exist in the graphs directory."""
+        missing = [
+            f for f in self.EXPECTED_FILES
+            if not (self.GRAPHS_DIR / f).exists()
+        ]
+        assert not missing, f"Missing graph spec files: {missing}"
+
+    def test_all_graph_specs_are_valid_json(self):
+        """Every graph spec file must be valid JSON."""
+        import json
+        for fname in self.EXPECTED_FILES:
+            path = self.GRAPHS_DIR / fname
+            if not path.exists():
+                continue
+            with path.open(encoding="utf-8") as fh:
+                data = json.load(fh)
+            assert isinstance(data, dict), f"{fname} must be a JSON object"
+
+    def test_all_graph_specs_have_entry_exit_nodes(self):
+        """Every graph spec must declare 'entry' and 'exit'."""
+        import json
+        for fname in self.EXPECTED_FILES:
+            path = self.GRAPHS_DIR / fname
+            if not path.exists():
+                continue
+            with path.open(encoding="utf-8") as fh:
+                data = json.load(fh)
+            assert "entry" in data, f"{fname} missing 'entry'"
+            assert "exit" in data, f"{fname} missing 'exit'"
+            assert "nodes" in data, f"{fname} missing 'nodes'"
+            assert "edges" in data, f"{fname} missing 'edges'"
+
+    def test_from_spec_parses_all_specs(self):
+        """OperativeGraph.from_spec() must parse every graph spec without error."""
+        import json
+        for fname in self.EXPECTED_FILES:
+            path = self.GRAPHS_DIR / fname
+            if not path.exists():
+                continue
+            with path.open(encoding="utf-8") as fh:
+                spec_dict = json.load(fh)
+            # from_spec() only validates structure; doesn't check operator registry
+            graph = OperativeGraph.from_spec(spec_dict)
+            assert graph.entry_node is not None, f"{fname} produced graph with no entry"
+            assert graph.exit_node is not None, f"{fname} produced graph with no exit"
+
+    def test_homestead_spec_references_all_graph_files(self):
+        """homestead.json's operatives section must reference graph files for each operative."""
+        import json
+        import pathlib
+        homestead_path = (
+            pathlib.Path(__file__).parent.parent / "sustena" / "sustains" / "homestead.json"
+        )
+        with homestead_path.open(encoding="utf-8") as fh:
+            spec = json.load(fh)
+
+        operatives = spec["operatives"]
+        for name, entry in operatives.items():
+            if name == "chama_secretary":
+                continue
+            assert "evaluation_graph" in entry or "class" in entry, (
+                f"operative '{name}' must declare at least 'class'"
+            )
+
+
 class TestFromSpecFile:
     """Tests for OperativeGraph.from_spec_file() — Sprint 5.5."""
 

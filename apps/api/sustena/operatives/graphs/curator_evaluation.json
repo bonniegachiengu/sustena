@@ -1,0 +1,33 @@
+{
+  "entry": "monitor",
+  "exit": "propose",
+  "nodes": {
+    "monitor": {
+      "operator": "monitor.constraint",
+      "kwargs": {
+        "constraint_expr": "inventory.*.level >= inventory.*.reorder_threshold",
+        "interval_s": 21600
+      }
+    },
+    "alert": {
+      "operator": "visualize.constraint_health",
+      "kwargs": {}
+    },
+    "propose": {
+      "operator": "curator.propose_restock",
+      "kwargs": {
+        "constraint_result": "$monitor",
+        "operator_name": "procurement.raise_po",
+        "rationale": "Inventory level below reorder threshold — raise purchase order."
+      }
+    }
+  },
+  "edges": [
+    {
+      "from": "monitor",
+      "to": "alert",
+      "condition": {"field": "passing", "op": "==", "value": false}
+    },
+    {"from": "alert", "to": "propose"}
+  ]
+}

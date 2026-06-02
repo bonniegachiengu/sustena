@@ -1,0 +1,29 @@
+{
+  "entry": "upcoming",
+  "exit": "propose",
+  "nodes": {
+    "upcoming": {
+      "operator": "homestead.calendar.upcoming_events",
+      "kwargs": {
+        "days": 3
+      }
+    },
+    "tasks": {
+      "operator": "homestead.tasks.list",
+      "kwargs": {
+        "filter": "overdue_or_due_soon"
+      }
+    },
+    "propose": {
+      "operator": "homestead.tasks.surface_overdue",
+      "kwargs": {
+        "operator_name": "homestead.tasks.carryover",
+        "rationale": "Overdue or urgent tasks require scheduling action."
+      }
+    }
+  },
+  "edges": [
+    {"from": "upcoming", "to": "tasks"},
+    {"from": "tasks", "to": "propose"}
+  ]
+}

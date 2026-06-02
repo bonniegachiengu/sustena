@@ -1,0 +1,24 @@
+{
+  "entry": "assess",
+  "exit": "vote",
+  "nodes": {
+    "assess": {
+      "operator": "attache.assess_social_impact",
+      "kwargs": {
+        "proposal_dict": "$trigger_event"
+      }
+    },
+    "vote": {
+      "operator": "attache.vote_on_proposal",
+      "kwargs": {
+        "impact": "$assess",
+        "proposal_dict": "$trigger_event",
+        "operator_name": "deliberation_result",
+        "rationale": "Social capital impact assessed."
+      }
+    }
+  },
+  "edges": [
+    {"from": "assess", "to": "vote"}
+  ]
+}

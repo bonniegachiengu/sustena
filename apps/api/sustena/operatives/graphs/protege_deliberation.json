@@ -1,0 +1,36 @@
+{
+  "entry": "fork",
+  "exit": "vote",
+  "nodes": {
+    "fork": {
+      "operator": "simulate.fork",
+      "kwargs": {}
+    },
+    "run": {
+      "operator": "simulate.run_path",
+      "kwargs": {
+        "fork_id": "$fork.fork_id",
+        "operator_sequence": "$trigger_event.simulation_sequence"
+      }
+    },
+    "score": {
+      "operator": "simulate.score",
+      "kwargs": {
+        "fork_id": "$fork.fork_id",
+        "goal_metric": "minimize_budget_deviation"
+      }
+    },
+    "vote": {
+      "operator": "mentor.deliberate_budget",
+      "kwargs": {
+        "proposal_dict": "$trigger_event",
+        "liquid_floor": 0.10
+      }
+    }
+  },
+  "edges": [
+    {"from": "fork", "to": "run"},
+    {"from": "run",  "to": "score"},
+    {"from": "score","to": "vote"}
+  ]
+}

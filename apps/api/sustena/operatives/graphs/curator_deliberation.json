@@ -1,0 +1,38 @@
+{
+  "entry": "fork",
+  "exit": "vote",
+  "nodes": {
+    "fork": {
+      "operator": "simulate.fork",
+      "kwargs": {}
+    },
+    "run": {
+      "operator": "simulate.run_path",
+      "kwargs": {
+        "fork_id": "$fork.fork_id",
+        "operator_sequence": "$trigger_event.simulation_sequence"
+      }
+    },
+    "score": {
+      "operator": "simulate.score",
+      "kwargs": {
+        "fork_id": "$fork.fork_id",
+        "goal_metric": "maximize_liquid_balance"
+      }
+    },
+    "vote": {
+      "operator": "curator.vote_on_procurement",
+      "kwargs": {
+        "score_data": "$score",
+        "proposal_dict": "$trigger_event",
+        "operator_name": "deliberation_result",
+        "rationale": "Procurement value-per-KES assessment complete."
+      }
+    }
+  },
+  "edges": [
+    {"from": "fork",  "to": "run"},
+    {"from": "run",   "to": "score"},
+    {"from": "score", "to": "vote"}
+  ]
+}

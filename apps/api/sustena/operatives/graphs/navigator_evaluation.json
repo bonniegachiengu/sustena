@@ -1,0 +1,45 @@
+{
+  "entry": "status",
+  "exit": "propose",
+  "nodes": {
+    "status": {
+      "operator": "navigator.monitor_order_status",
+      "kwargs": {
+        "logistics_event": "$trigger_event"
+      }
+    },
+    "route": {
+      "operator": "api.get",
+      "kwargs": {
+        "url": "$trigger_event.routing_api_url",
+        "headers": {}
+      }
+    },
+    "simulate": {
+      "operator": "simulate.fork",
+      "kwargs": {}
+    },
+    "path": {
+      "operator": "simulate.run_path",
+      "kwargs": {
+        "fork_id": "$simulate.fork_id",
+        "operator_sequence": "$trigger_event.route_sequence"
+      }
+    },
+    "propose": {
+      "operator": "navigator.propose_route_action",
+      "kwargs": {
+        "route_data": "$route",
+        "simulation": "$path",
+        "operator_name": "navigator.update_route",
+        "rationale": "Optimal route computed from logistics data."
+      }
+    }
+  },
+  "edges": [
+    {"from": "status",   "to": "route"},
+    {"from": "route",    "to": "simulate"},
+    {"from": "simulate", "to": "path"},
+    {"from": "path",     "to": "propose"}
+  ]
+}

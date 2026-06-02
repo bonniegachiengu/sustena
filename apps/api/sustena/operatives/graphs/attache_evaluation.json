@@ -1,0 +1,35 @@
+{
+  "entry": "profile",
+  "exit": "propose",
+  "nodes": {
+    "profile": {
+      "operator": "attache.profile_lookup",
+      "kwargs": {
+        "contact_event": "$trigger_event"
+      }
+    },
+    "trust": {
+      "operator": "attache.trust_score_update",
+      "kwargs": {
+        "contact_id": "$profile.contact_id",
+        "interaction": "$trigger_event"
+      }
+    },
+    "propose": {
+      "operator": "attache.propose_relationship_action",
+      "kwargs": {
+        "trust_data": "$trust",
+        "operator_name": "attache.create_proposal",
+        "rationale": "Trust threshold crossed — relationship action warranted."
+      }
+    }
+  },
+  "edges": [
+    {"from": "profile", "to": "trust"},
+    {
+      "from": "trust",
+      "to": "propose",
+      "condition": {"field": "trust_changed", "op": "==", "value": true}
+    }
+  ]
+}

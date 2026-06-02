@@ -1,0 +1,24 @@
+{
+  "entry": "intent",
+  "exit": "route",
+  "nodes": {
+    "intent": {
+      "operator": "orchie.parse_intent",
+      "kwargs": {
+        "user_message": "$trigger_event.message",
+        "sustain_id": "$trigger_event.sustain_id"
+      }
+    },
+    "route": {
+      "operator": "orchie.route_intent",
+      "kwargs": {
+        "intent": "$intent",
+        "operator_name": "sustena.orchie_action",
+        "rationale": "User intent routed to appropriate operator or operative."
+      }
+    }
+  },
+  "edges": [
+    {"from": "intent", "to": "route"}
+  ]
+}

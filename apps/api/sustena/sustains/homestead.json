@@ -299,16 +299,24 @@
       "deliberation_graph": "graphs/mentor_deliberation.json"
     },
     "protege": {
-      "class": "ProtegeOperative"
+      "class": "ProtegeOperative",
+      "evaluation_graph": "graphs/protege_evaluation.json",
+      "deliberation_graph": "graphs/protege_deliberation.json"
     },
     "attache": {
-      "class": "AttacheOperative"
+      "class": "AttacheOperative",
+      "evaluation_graph": "graphs/attache_evaluation.json",
+      "deliberation_graph": "graphs/attache_deliberation.json"
     },
     "navigator": {
-      "class": "NavigatorOperative"
+      "class": "NavigatorOperative",
+      "evaluation_graph": "graphs/navigator_evaluation.json",
+      "deliberation_graph": "graphs/navigator_deliberation.json"
     },
     "curator": {
-      "class": "CuratorOperative"
+      "class": "CuratorOperative",
+      "evaluation_graph": "graphs/curator_evaluation.json",
+      "deliberation_graph": "graphs/curator_deliberation.json"
     }
   },
   "invariants": [
