@@ -179,8 +179,16 @@ All 7 tasks done and committed (1245 tests):
 
 ### Sprint 6 — NEXT: Today List + Morning Brief
 See `docs/Sustena_XII_Roadmap_Jun2026.md` for full task list.
-Tasks 6.1–6.4 cover: `homestead.tasks.*` operators, `orchie.morning_brief` operator,
-Orchie auto-sends morning brief on session start, and a new Today panel in the web UI.
+Tasks 6.1–6.4:
+- [ ] 6.1 `homestead.tasks.*` operators — add, complete, list, carryover. State at `tasks.items`. Update homestead.json.
+- [ ] 6.2 `orchie.morning_brief` operator — aggregates calendar, tasks, proposals, finances into a `morning_brief_card` ResponseWidget + `brief_text`.
+- [ ] 6.3 Orchie session init — on web app mount, auto-POST `orchie.morning_brief` and render result as first Orchie chat message.
+- [ ] 6.4 Orchie Panel — full-page view opened by expanding the Orchie chat bubble. Layout:
+      - Top-left **TODAY** card (replaces "MOST ASKED"): renders `morning_brief_card` — tasks due today, calendar events, approved strategies.
+      - Bottom-left **OPEN EDITS**: recent operator executions awaiting council review.
+      - Middle **PINNED MONITORING**: the three `visualize.*` widgets (pocket ring, constraint health, event feed).
+      - Middle-bottom **RECENT ORCHIE REPLIES**: last 3 Orchie chat messages.
+      - Right sidebar: TASK/SUBTASK active graph tree, DELEGATION/COUNCIL network (Orchie at centre), CURRENT TASKS checklist, DELIBERATION council vote bars (Mentor/Curator/Navigator/Protégé), LISTEN + Ask Orchie input.
 
 ---
 
