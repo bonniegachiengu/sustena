@@ -177,6 +177,13 @@ All 7 tasks done and committed (1245 tests — 1269 after Sprint 6.1):
 - [x] 5.6 Graph specs for all Council operatives — 11 JSON files in `operatives/graphs/` covering Mentor, Protégé, Attaché, Curator, Navigator, Orchie (evaluation + deliberation each).
 - [x] 5.7 `operative.spawn` operator — loads template, resolves `{{placeholder}}` from `calibration_data` + live state, returns `instantiated_spec`. `CalibrationError` propagates as `OperatorResult.fail`.
 
+### Sprint 7 🔄 — Council Enrichment
+- [x] 7.1 `CouncillorConfig` dataclass + `load_councillor_configs()` in `core/council.py`. `homestead.json` operatives extended with `domain` + `sub_operatives` (2 per councillor). 10 sub-operative graph JSON stubs created. 39 new tests. (1336 total)
+- [ ] 7.2 Domain relevance check — auto-ABSTAIN when no domain overlap
+- [ ] 7.3 Sandbox simulation per councillor — independent fork per councillor
+- [ ] 7.4 DelegatedVote — sub-operative vote aggregation at councillor level
+- [ ] 7.5 Enriched CouncilSession.collect_votes() — full sandbox + delegation flow
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:
