@@ -454,55 +454,104 @@ class CouncilSession:
             if fork_id:
                 enriched_proposal["fork_id"] = fork_id
 
-            # ── Normal deliberation path ───────────────────────────────────────
-            try:
-                vote = await operative.deliberate(context, enriched_proposal)
+            # ── DelegatedVote aggregation (7.5) ───────────────────────────────
+            delegated = (
+                _parse_sandbox_to_delegated_votes(sandbox_results)
+                if sandbox_results
+                else []
+            )
+            delegated_votes_record = (
+                [
+                    {
+                        "position":   d.position.value,
+                        "confidence": d.confidence,
+                        "reasoning":  d.reasoning,
+                    }
+                    for d in delegated
+                ]
+                if delegated
+                else None
+            )
+
+            if delegated:
+                # Sub-operatives produced votes — aggregate and skip deliberate()
+                vote = aggregate_delegated_votes(delegated)
                 vote_record = {
-                    "id":           str(uuid.uuid4()),
-                    "proposal_id":  proposal_id,
-                    "operative_id": op_id,
-                    "vote":         vote.vote.value,
-                    "reasoning":    vote.reasoning,
-                    "weight":       0.098,
-                    "timestamp":    self._clock().isoformat(),
-                    "utility":      vote.utility,
-                    "fork_id":      fork_id,
+                    "id":              str(uuid.uuid4()),
+                    "proposal_id":     proposal_id,
+                    "operative_id":    op_id,
+                    "vote":            vote.vote.value,
+                    "reasoning":       vote.reasoning,
+                    "weight":          0.098,
+                    "timestamp":       self._clock().isoformat(),
+                    "utility":         vote.utility,
+                    "fork_id":         fork_id,
                     "sandbox_results": sandbox_results or None,
+                    "delegated_votes": delegated_votes_record,
                 }
                 self.state.append("council_votes", vote_record)
                 vote_result = vote.to_dict()
                 vote_result["fork_id"] = fork_id
+                vote_result["delegated_votes"] = delegated_votes_record
                 if sandbox_results:
                     vote_result["sandbox_results"] = sandbox_results
                 vote_results[op_id] = vote_result
-
                 logger.info(
-                    "[council] vote recorded: proposal=%s operative=%s vote=%s fork=%s",
-                    proposal_id, op_id, vote.vote.value, fork_id,
+                    "[council] vote recorded (delegated): proposal=%s operative=%s "
+                    "vote=%s fork=%s delegated=%d",
+                    proposal_id, op_id, vote.vote.value, fork_id, len(delegated),
                 )
-            except Exception as exc:
-                logger.error(
-                    "[council] operative '%s' deliberation error: %s", op_id, exc,
-                )
-                vote_record = {
-                    "id":           str(uuid.uuid4()),
-                    "proposal_id":  proposal_id,
-                    "operative_id": op_id,
-                    "vote":         "ABSTAIN",
-                    "reasoning":    f"Deliberation error: {exc}",
-                    "weight":       0.098,
-                    "timestamp":    self._clock().isoformat(),
-                    "utility":      0.5,
-                    "fork_id":      fork_id,
-                    "sandbox_results": None,
-                }
-                self.state.append("council_votes", vote_record)
-                vote_results[op_id] = {
-                    "vote":     "ABSTAIN",
-                    "reasoning": str(exc),
-                    "utility":  0.5,
-                    "fork_id":  fork_id,
-                }
+            else:
+                # No delegated votes — fall through to operative.deliberate()
+                try:
+                    vote = await operative.deliberate(context, enriched_proposal)
+                    vote_record = {
+                        "id":              str(uuid.uuid4()),
+                        "proposal_id":     proposal_id,
+                        "operative_id":    op_id,
+                        "vote":            vote.vote.value,
+                        "reasoning":       vote.reasoning,
+                        "weight":          0.098,
+                        "timestamp":       self._clock().isoformat(),
+                        "utility":         vote.utility,
+                        "fork_id":         fork_id,
+                        "sandbox_results": sandbox_results or None,
+                        "delegated_votes": None,
+                    }
+                    self.state.append("council_votes", vote_record)
+                    vote_result = vote.to_dict()
+                    vote_result["fork_id"] = fork_id
+                    if sandbox_results:
+                        vote_result["sandbox_results"] = sandbox_results
+                    vote_results[op_id] = vote_result
+                    logger.info(
+                        "[council] vote recorded: proposal=%s operative=%s vote=%s fork=%s",
+                        proposal_id, op_id, vote.vote.value, fork_id,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "[council] operative '%s' deliberation error: %s", op_id, exc,
+                    )
+                    vote_record = {
+                        "id":              str(uuid.uuid4()),
+                        "proposal_id":     proposal_id,
+                        "operative_id":    op_id,
+                        "vote":            "ABSTAIN",
+                        "reasoning":       f"Deliberation error: {exc}",
+                        "weight":          0.098,
+                        "timestamp":       self._clock().isoformat(),
+                        "utility":         0.5,
+                        "fork_id":         fork_id,
+                        "sandbox_results": None,
+                        "delegated_votes": None,
+                    }
+                    self.state.append("council_votes", vote_record)
+                    vote_results[op_id] = {
+                        "vote":      "ABSTAIN",
+                        "reasoning": str(exc),
+                        "utility":   0.5,
+                        "fork_id":   fork_id,
+                    }
 
         return vote_results
 

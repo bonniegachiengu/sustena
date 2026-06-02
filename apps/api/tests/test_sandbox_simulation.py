@@ -299,8 +299,8 @@ class TestCollectVotesSandbox:
         assert "sandbox_results" in results["mentor"]
 
     @pytest.mark.asyncio
-    async def test_enriched_proposal_passed_to_deliberate(self):
-        """deliberate() receives sandbox_results and fork_id in the proposal dict."""
+    async def test_deliberate_not_called_when_sub_ops_ran(self):
+        """When sub-operatives produce delegated votes, deliberate() is skipped."""
         state   = _make_state()
         council = _make_council(state)
         pid = council.create_proposal(
@@ -309,13 +309,14 @@ class TestCollectVotesSandbox:
         )
         mentor = _make_operative("mentor", vote="YES")
 
-        await council.collect_votes(pid, [mentor], councillor_configs=_configs())
+        results = await council.collect_votes(pid, [mentor], councillor_configs=_configs())
 
-        # Inspect what was passed to deliberate()
-        call_args = mentor.deliberate.call_args
-        _, proposal_arg = call_args[0]
-        assert "sandbox_results" in proposal_arg
-        assert "fork_id"         in proposal_arg
+        # Delegated path taken — deliberate() never called
+        mentor.deliberate.assert_not_called()
+        # Vote is still recorded in results
+        assert "vote" in results["mentor"]
+        # delegated_votes present in return value
+        assert "delegated_votes" in results["mentor"]
 
     @pytest.mark.asyncio
     async def test_two_relevant_councillors_get_different_forks(self):
@@ -444,7 +445,8 @@ class TestCollectVotesSandbox:
             pid, [mentor, attache, protege], councillor_configs=_configs()
         )
 
-        mentor.deliberate.assert_called_once()
+        # mentor has sub_operatives → delegated path → deliberate() NOT called
+        mentor.deliberate.assert_not_called()
         attache.deliberate.assert_not_called()
         protege.deliberate.assert_not_called()
 
@@ -454,3 +456,192 @@ class TestCollectVotesSandbox:
 
         # Only mentor created a fork
         assert len(_FORK_REGISTRY) == 1
+
+
+# ── Sprint 7.5 — delegated vote wiring in collect_votes ──────────────────────
+
+
+class TestCollectVotesDelegation:
+
+    @pytest.fixture(autouse=True)
+    def wipe_forks(self):
+        clear_fork_registry()
+        yield
+        clear_fork_registry()
+
+    @pytest.mark.asyncio
+    async def test_delegated_votes_on_vote_record_when_sub_ops_run(self):
+        """Vote record in state has delegated_votes list when sub-ops ran."""
+        state   = _make_state()
+        council = _make_council(state)
+        pid = council.create_proposal(
+            sustain_id="s", proposed_by="orchie",
+            operator_name="budget.allocate", input_params={},
+        )
+        mentor = _make_operative("mentor", vote="YES")
+
+        await council.collect_votes(pid, [mentor], councillor_configs=_configs())
+
+        votes = state.get("council_votes")
+        assert len(votes) == 1
+        assert votes[0]["delegated_votes"] is not None
+        assert isinstance(votes[0]["delegated_votes"], list)
+        assert len(votes[0]["delegated_votes"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_delegated_votes_none_when_no_sub_ops(self):
+        """Vote record has delegated_votes=None when no sub-operatives ran."""
+        state   = _make_state()
+        council = _make_council(state)
+        pid = council.create_proposal(
+            sustain_id="s", proposed_by="orchie",
+            operator_name="budget.allocate", input_params={},
+        )
+        mentor = _make_operative("mentor", vote="YES")
+        configs = {"mentor": CouncillorConfig("mentor", ["finances", "budget"], {})}
+
+        await council.collect_votes(pid, [mentor], councillor_configs=configs)
+
+        votes = state.get("council_votes")
+        assert votes[0]["delegated_votes"] is None
+
+    @pytest.mark.asyncio
+    async def test_delegated_votes_each_entry_has_required_fields(self):
+        """Each delegated_vote entry has position, confidence, reasoning."""
+        state   = _make_state()
+        council = _make_council(state)
+        pid = council.create_proposal(
+            sustain_id="s", proposed_by="orchie",
+            operator_name="budget.allocate", input_params={},
+        )
+        mentor = _make_operative("mentor")
+
+        await council.collect_votes(pid, [mentor], councillor_configs=_configs())
+
+        votes = state.get("council_votes")
+        for dv in votes[0]["delegated_votes"]:
+            assert "position"   in dv
+            assert "confidence" in dv
+            assert "reasoning"  in dv
+            assert dv["position"] in ("YES", "NO", "ABSTAIN")
+
+    @pytest.mark.asyncio
+    async def test_deliberate_still_called_after_fork_failure(self):
+        """Fork failure → sandbox_results={} → delegated=[] → deliberate() runs."""
+        state   = _make_state()
+        council = _make_council(state)
+        pid = council.create_proposal(
+            sustain_id="s", proposed_by="orchie",
+            operator_name="budget.allocate", input_params={},
+        )
+        mentor = _make_operative("mentor", vote="YES")
+
+        async def _failing_sandbox(config):
+            return None, {}
+
+        council._create_sandbox = _failing_sandbox
+
+        results = await council.collect_votes(
+            pid, [mentor], councillor_configs=_configs()
+        )
+
+        mentor.deliberate.assert_called_once()
+        assert results["mentor"]["vote"] == "YES"
+
+    @pytest.mark.asyncio
+    async def test_deliberate_called_when_no_sub_operatives(self):
+        """Config with empty sub_operatives → no sandbox → deliberate() runs."""
+        state   = _make_state()
+        council = _make_council(state)
+        pid = council.create_proposal(
+            sustain_id="s", proposed_by="orchie",
+            operator_name="budget.allocate", input_params={},
+        )
+        mentor = _make_operative("mentor", vote="NO")
+        configs = {"mentor": CouncillorConfig("mentor", ["finances", "budget"], {})}
+
+        results = await council.collect_votes(pid, [mentor], councillor_configs=configs)
+
+        mentor.deliberate.assert_called_once()
+        assert results["mentor"]["vote"] == "NO"
+
+    @pytest.mark.asyncio
+    async def test_sub_ops_with_yes_vote_produce_yes_outcome(self):
+        """Sub-op returning vote=YES in simulation_results → councillor votes YES."""
+        state   = _make_state()
+        council = _make_council(state)
+        pid = council.create_proposal(
+            sustain_id="s", proposed_by="orchie",
+            operator_name="budget.allocate", input_params={},
+        )
+        mentor = _make_operative("mentor")
+
+        # Patch _create_sandbox to return a YES sub-op result
+        async def _yes_sandbox(config):
+            return "fork-yes", {
+                "assessor": {
+                    "status": "ok",
+                    "operator_name": "budget.summary",
+                    "rationale": "all good",
+                    "simulation_results": {
+                        "vote": "YES",
+                        "confidence": 0.9,
+                        "reasoning": "budget is healthy",
+                    },
+                }
+            }
+
+        council._create_sandbox = _yes_sandbox
+
+        results = await council.collect_votes(
+            pid, [mentor], councillor_configs=_configs()
+        )
+
+        mentor.deliberate.assert_not_called()
+        assert results["mentor"]["vote"] == "YES"
+        assert results["mentor"]["fork_id"] == "fork-yes"
+
+    @pytest.mark.asyncio
+    async def test_sub_ops_all_error_produce_abstain_via_delegation(self):
+        """All sub-op errors → all ABSTAIN delegated → aggregate returns ABSTAIN."""
+        state   = _make_state()
+        council = _make_council(state)
+        pid = council.create_proposal(
+            sustain_id="s", proposed_by="orchie",
+            operator_name="budget.allocate", input_params={},
+        )
+        mentor = _make_operative("mentor")
+
+        async def _error_sandbox(config):
+            return "fork-err", {
+                "assessor": {"status": "error", "reason": "timeout"},
+            }
+
+        council._create_sandbox = _error_sandbox
+
+        results = await council.collect_votes(
+            pid, [mentor], councillor_configs=_configs()
+        )
+
+        # delegated list is non-empty (one ABSTAIN entry) → delegation path taken
+        mentor.deliberate.assert_not_called()
+        assert results["mentor"]["vote"] == "ABSTAIN"
+        assert results["mentor"]["delegated_votes"] is not None
+
+    @pytest.mark.asyncio
+    async def test_deliberate_fallback_no_councillor_configs(self):
+        """Without councillor_configs, no sandbox, deliberate() always runs."""
+        state   = _make_state()
+        council = _make_council(state)
+        pid = council.create_proposal(
+            sustain_id="s", proposed_by="orchie",
+            operator_name="budget.allocate", input_params={},
+        )
+        mentor = _make_operative("mentor", vote="YES")
+
+        results = await council.collect_votes(pid, [mentor])  # no configs
+
+        mentor.deliberate.assert_called_once()
+        votes = state.get("council_votes")
+        assert votes[0]["delegated_votes"] is None
+        assert results["mentor"]["vote"] == "YES"
