@@ -1,7 +1,7 @@
 # Sustena XII — Claude Code Context
 
 > Read this before touching any code. It tells you where we are, how things are built,
-> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 6.3).
+> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 6 complete).
 
 ---
 
@@ -177,13 +177,13 @@ All 7 tasks done and committed (1245 tests — 1269 after Sprint 6.1):
 - [x] 5.6 Graph specs for all Council operatives — 11 JSON files in `operatives/graphs/` covering Mentor, Protégé, Attaché, Curator, Navigator, Orchie (evaluation + deliberation each).
 - [x] 5.7 `operative.spawn` operator — loads template, resolves `{{placeholder}}` from `calibration_data` + live state, returns `instantiated_spec`. `CalibrationError` propagates as `OperatorResult.fail`.
 
-### Sprint 6 — IN PROGRESS: Today List + Morning Brief
-See `docs/Sustena_XII_Roadmap_Jun2026.md` for full task list.
-Tasks 6.1–6.4 (1297 tests):
+### Sprint 6 ✅ — Today List + Morning Brief
+All 4 tasks done and committed (1297 tests):
+Tasks 6.1–6.4:
 - [x] 6.1 `homestead.tasks.*` operators — add, complete, list, carryover. State at `tasks.items`. homestead.json updated.
 - [x] 6.2 `orchie.morning_brief` operator — aggregates today's tasks, calendar events, passed proposals, liquid balance into `morning_brief_card` ResponseWidget + `brief_text`. `morning_brief_card` registered in WidgetTypeRegistry. 22 new tests.
 - [x] 6.3 Orchie session init — `useStreamedConversation` in `chat.jsx` fires `orchie.morning_brief` via `/devui/console/execute` on mount (when script is empty). Renders `brief_text` as first Orchie message; falls back to empty-state line on error or null.
-- [ ] 6.4 Orchie Panel — full-page view opened by expanding the Orchie chat bubble. Layout:
+- [x] 6.4 Orchie Panel — full-page view at `/orchie-panel?sustain=`. Layout:
       - Top-left **TODAY** card (replaces "MOST ASKED"): renders `morning_brief_card` — tasks due today, calendar events, approved strategies.
       - Bottom-left **OPEN EDITS**: recent operator executions awaiting council review.
       - Middle **PINNED MONITORING**: the three `visualize.*` widgets (pocket ring, constraint health, event feed).
