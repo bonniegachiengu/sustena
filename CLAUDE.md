@@ -201,7 +201,7 @@ Sprint 8.3  Monitor real widgets           ← 8.2
 Sprint 8.4  Simulator DAG ✅              ← 8.2
 Sprint 8.5  Editor real graph             ← 8.2
 Sprint 8.6  Auth/Users (register/login) ✅ ← 8.2; UNBLOCKS 8.7–8.10
-Sprint 8.7  Lore CMS + Journal API        ← 8.6
+Sprint 8.7  Lore CMS + Journal API ✅     ← 8.6
 Sprint 8.8  Library + Spore flow          ← 8.2 + 8.6
 Sprint 8.9  Arena products + publishing   ← 8.6 + 8.8
 Sprint 8.10 Profile telemetry + Ctrl      ← 8.6 + 8.2
@@ -256,6 +256,12 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 - ✅ 33 new tests in `test_users.py` using `AsyncClient` + explicit `init_db()` per function. 1497 tests total.
 - ✅ `test_api.py` stub test updated to reflect real register endpoint.
 - ✅ CI fix: `test_users.py` `client` fixture creates its own `sqlite+aiosqlite:///:memory:` engine and injects it into `_schema._engine` directly, bypassing `DATABASE_URL`. CI sets `DATABASE_URL=sqlite+aiosqlite:///./test.db`; `conftest.py` `setdefault` is a no-op there, so tests shared a file-based DB and accumulated duplicate users across functions. Fix ensures each test gets a clean isolated DB.
+
+**Sprint 8.7 status (2 Jun 2026):**
+- ✅ `schema.py` — added `lore_entries` (public editorial, draft/published, VISION/TECHNICAL/REFLECTION/UPDATE) and `journal_entries` (private user notes, DECISION/NOTE/REFLECTION/UPDATE, links to sustain_id + operator_log_id).
+- ✅ `routes/lore.py` — `GET /api/v1/lore/entries` (public), `POST /entries` (auth), `PUT /entries/{id}` (auth, own only), `POST /entries/{id}/publish` (auth, own, draft→published, 409 on double-publish).
+- ✅ `routes/journal.py` — `GET/POST/PUT/DELETE /api/v1/journal/entries` (all auth-required, user-scoped, 403 on cross-user access).
+- ✅ `main.py` — both routers mounted. 57 new tests (test_lore.py + test_journal.py). **1554 tests total.**
 
 **Controller panel UI fixes (2 Jun 2026, post-8.2):**
 - ✅ Universal Controls instrument frames were clipped at the bottom — added `flexShrink:0` to the Card and removed `minHeight:0` from `Instrument` (`other.jsx`).
