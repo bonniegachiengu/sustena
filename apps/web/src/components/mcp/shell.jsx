@@ -154,10 +154,7 @@ function App() {
           leftOpen={simLeft} rightOpen={simRight}
           onToggleLeft={() => setSimLeft(v => !v)}
           onToggleRight={() => setSimRight(v => !v)} />}
-        {panel === 'editor'     && <EditorPanel sustain={sustain}
-          leftOpen={editLeft} rightOpen={editRight}
-          onToggleLeft={() => setEditLeft(v => !v)}
-          onToggleRight={() => setEditRight(v => !v)} />}
+        {panel === 'editor'     && <EditorPanel sustain={sustain} />}
         {panel === 'controller' && <ControllerPanel tick={tick} sustain={sustain} openModal={(p) => setModal({ kind: 'proposal', data: p })} />}
         {panel === 'library'    && <LibraryPanel openModal={(it, kind) => setModal({ kind: 'library', data: { item: it, kind } })} />}
         {panel === 'seed'       && <SeedPanel />}

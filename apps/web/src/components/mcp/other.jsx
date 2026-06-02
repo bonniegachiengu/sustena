@@ -5,32 +5,114 @@ import { api } from '../../lib/api.js';
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
 
 /* ───────────────────────────────────────────────────────────
-   EDITOR PANEL — node-based DAG editor
+   EDITOR PANEL — Sustena primitives editor
+   Sections: SUSTAIN · OPERATORS · OPERATIVES · CONSTRAINTS
    ─────────────────────────────────────────────────────────── */
-const EDITOR_NODES = [
-  { id: 'st-input',     type: 'state',      label: 'finances.cash',          x: 110, y: 80  },
-  { id: 'st-pockets',   type: 'state',      label: 'finances.pockets',       x: 110, y: 200 },
-  { id: 'st-burn',      type: 'state',      label: 'finances.burn_rate',     x: 110, y: 320 },
-  { id: 'op-parse',     type: 'operator',   label: 'mpesa.parse',            x: 290, y: 80  },
-  { id: 'op-alloc',     type: 'operator',   label: 'budget.allocate',        x: 290, y: 200 },
-  { id: 'op-compute',   type: 'operator',   label: 'budget.compute_burn',    x: 290, y: 320 },
-  { id: 'cst-sum',      type: 'constraint', label: 'sum_constraint',         x: 470, y: 200 },
-  { id: 'cst-bal',      type: 'constraint', label: 'balance_constraint',     x: 470, y: 320 },
-  { id: 'ag-mentor',    type: 'operative',  label: 'MENTOR',                 x: 640, y: 200 },
-  { id: 'ev-alloc',     type: 'event',      label: 'BUDGET_ALLOCATED',       x: 800, y: 120 },
-  { id: 'ev-alert',     type: 'event',      label: 'BURN_RATE_ALERT',        x: 800, y: 320 },
-];
-const EDITOR_EDGES = [
-  ['st-input','op-parse'], ['st-pockets','op-alloc'], ['st-burn','op-compute'],
-  ['op-parse','op-alloc'], ['op-alloc','cst-sum'], ['op-compute','cst-bal'],
-  ['cst-sum','ag-mentor'], ['cst-bal','ag-mentor'],
-  ['ag-mentor','ev-alloc'], ['ag-mentor','ev-alert'],
-];
 
-function EditorPanel({ sustain, leftOpen = true, rightOpen = true, onToggleLeft, onToggleRight }) {
-  const [selectedId, setSelectedId] = dUseState('op-alloc');
-  const [mode, setMode] = dUseState('graph');
-  const selectedNode = EDITOR_NODES.find(n => n.id === selectedId);
+function EditorPanel({ sustain }) {
+  const [section, setSection] = dUseState('sustain');
+  const [liveState, setLiveState] = dUseState(null);
+  const [stateLoading, setStateLoading] = dUseState(false);
+  const [operators, setOperators] = dUseState([]);
+  const [graphData, setGraphData] = dUseState({ nodes: [], edges: [] });
+  const [constraints, setConstraints] = dUseState([]);
+
+  const sustainId = sustain?.id;
+
+  const loadAll = dUseRef(async (sid) => {
+    if (!sid) return;
+    setStateLoading(true);
+    api.get(`/devui/state?sustain_id=${encodeURIComponent(sid)}`)
+      .then(d => { setLiveState(d?.data?.state || {}); setConstraints(d?.data?.constraints || []); })
+      .catch(() => { setLiveState({}); setConstraints([]); })
+      .finally(() => setStateLoading(false));
+    api.get(`/devui/sustain/${encodeURIComponent(sid)}/operators`)
+      .then(d => setOperators(d?.data?.operators || []))
+      .catch(() => {});
+    api.get(`/devui/sustain/${encodeURIComponent(sid)}/graph`)
+      .then(d => setGraphData({ nodes: d?.data?.nodes || [], edges: d?.data?.edges || [] }))
+      .catch(() => {});
+  });
+
+  dUseEffect(() => { loadAll.current(sustainId); }, [sustainId]);
+
+  const refreshState = async () => {
+    if (!sustainId) return;
+    try {
+      const d = await api.get(`/devui/state?sustain_id=${encodeURIComponent(sustainId)}`);
+      setLiveState(d?.data?.state || {});
+      setConstraints(d?.data?.constraints || []);
+    } catch {}
+  };
+
+  const SECTIONS = [
+    { id: 'sustain',     label: 'SUSTAIN',     icon: '▭',  sub: 'state · patches' },
+    { id: 'operators',   label: 'OPERATORS',   icon: '◖◗', sub: 'spec · cost · params' },
+    { id: 'operatives',  label: 'OPERATIVES',  icon: '⬢',  sub: 'network · delegation' },
+    { id: 'constraints', label: 'CONSTRAINTS', icon: '◆',  sub: 'rules · pass / fail' },
+  ];
+
+  return (
+    <div className="panel-enter" style={{ display: 'grid', gridTemplateColumns: '196px 1fr', height: '100%' }}>
+
+      {/* Left nav rail */}
+      <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ padding: '18px 14px 14px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <span className="label-10" style={{ color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>EDITOR</span>
+          <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', lineHeight: 1.3 }}>
+            {sustain?.label || '—'}
+          </div>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', marginTop: 3, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {sustainId}
+          </span>
+        </div>
+
+        <nav style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '8px 6px', flex: 1 }}>
+          {SECTIONS.map(s => {
+            const active = section === s.id;
+            return (
+              <button key={s.id} onClick={() => setSection(s.id)} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '9px 10px', borderRadius: 'var(--radius-sm)',
+                background: active ? 'var(--amber-glow)' : 'transparent',
+                border: `1px solid ${active ? 'var(--amber-border)' : 'transparent'}`,
+                transition: 'all var(--t-fast)', textAlign: 'left', cursor: 'pointer',
+              }}
+              onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--bg-raised)'; }}
+              onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: active ? 'var(--amber)' : 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 }}>{s.icon}</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.06em', color: active ? 'var(--amber)' : 'var(--text-secondary)' }}>{s.label}</span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>{s.sub}</span>
+                </div>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div style={{ padding: '10px 10px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+          <button onClick={() => loadAll.current(sustainId)} style={{
+            width: '100%', padding: '6px 0', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.08em',
+            color: 'var(--text-muted)', background: 'transparent', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)', cursor: 'pointer', transition: 'all var(--t-fast)',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--amber-border)'; e.currentTarget.style.color = 'var(--amber)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+          >↻ REFRESH</button>
+        </div>
+      </div>
+
+      {/* Main area */}
+      <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        {section === 'sustain'     && <SustainEditorSection sustain={sustain} liveState={liveState} stateLoading={stateLoading} onRefresh={refreshState} />}
+        {section === 'operators'   && <OperatorsEditorSection sustain={sustain} operators={operators} />}
+        {section === 'operatives'  && <OperativesEditorSection graphData={graphData} />}
+        {section === 'constraints' && <ConstraintsEditorSection constraints={constraints} />}
+      </div>
+    </div>
+  );
+}
 
   const [liveState, setLiveState] = dUseState(null);
   const [stateLoading, setStateLoading] = dUseState(false);
@@ -258,7 +340,510 @@ function EditorPanel({ sustain, leftOpen = true, rightOpen = true, onToggleLeft,
   );
 }
 
-function StateEditorTab({ sustain, liveState, stateLoading, patchText, onPatchChange, patchResult, patchError, patchApplying, onApplyPatch, onRefresh }) {
+/* ── SUSTAIN section — state tree + patch editor ──────────────────────────── */
+function SustainEditorSection({ sustain, liveState, stateLoading, onRefresh }) {
+  const [patchPath, setPatchPath] = dUseState('');
+  const [patchValue, setPatchValue] = dUseState('');
+  const [patchOp, setPatchOp] = dUseState('replace');
+  const [applying, setApplying] = dUseState(false);
+  const [result, setResult] = dUseState(null);
+  const [error, setError] = dUseState(null);
+
+  const onSelectPath = (path, currentVal) => {
+    setPatchPath(path);
+    setResult(null); setError(null);
+    if (currentVal !== undefined && currentVal !== null) {
+      setPatchValue(typeof currentVal === 'object' ? JSON.stringify(currentVal, null, 2) : String(currentVal));
+    }
+  };
+
+  const applyPatch = async () => {
+    if (!patchPath.trim()) return;
+    let value;
+    if (patchOp !== 'remove') {
+      try { value = JSON.parse(patchValue); } catch { value = patchValue; }
+    }
+    const patch = patchOp === 'remove'
+      ? [{ op: 'remove', path: patchPath.trim() }]
+      : [{ op: patchOp, path: patchPath.trim(), value }];
+
+    setApplying(true); setError(null); setResult(null);
+    try {
+      const res = await api.post('/devui/console/execute', {
+        sustain_id: sustain?.id || '',
+        operator_id: 'edit.state_patch',
+        params: { patch },
+      });
+      const data = res?.data?.result?.data || {};
+      if (data.error_count > 0 && !data.applied_count) {
+        setError(data.errors?.[0] || 'Patch failed');
+      } else {
+        setResult(data);
+        await onRefresh();
+        window.flash?.(`State patched · ${data.applied_count ?? 0} ops`, 'ok');
+      }
+    } catch (err) {
+      setError(err.message || 'API error');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const inputBase = { background: 'var(--bg-base)', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)', outline: 'none', width: '100%', boxSizing: 'border-box' };
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', height: '100%', minHeight: 0 }}>
+      {/* State tree */}
+      <div style={{ display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)', overflow: 'hidden' }}>
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="label-10">STATE TREE</span>
+          <span className="meta-10" style={{ color: 'var(--text-dim)' }}>click any value to select path</span>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px' }}>
+          {stateLoading
+            ? <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)' }}>loading…</span>
+            : liveState && Object.keys(liveState).length > 0
+              ? <StateTreeNode data={liveState} path="" selectedPath={patchPath} onSelect={onSelectPath} depth={0} />
+              : <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>no state recorded yet · seed via SEED panel</span>
+          }
+        </div>
+      </div>
+
+      {/* Patch form */}
+      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <span className="label-10">PATCH STATE · edit.state_patch</span>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <span className="label-10" style={{ display: 'block', marginBottom: 5 }}>OPERATION</span>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {['replace', 'add', 'remove'].map(op => (
+                <button key={op} onClick={() => setPatchOp(op)} style={{
+                  padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 9, cursor: 'pointer',
+                  color: patchOp === op ? 'var(--amber)' : 'var(--text-muted)',
+                  background: patchOp === op ? 'var(--amber-glow)' : 'transparent',
+                  border: `1px solid ${patchOp === op ? 'var(--amber-border)' : 'var(--border)'}`,
+                  borderRadius: 3, transition: 'all var(--t-fast)',
+                }}>{op}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <span className="label-10" style={{ display: 'block', marginBottom: 5 }}>PATH</span>
+            <input value={patchPath} onChange={e => setPatchPath(e.target.value)} placeholder="e.g. finances.liquid.balance" style={inputBase} />
+          </div>
+          {patchOp !== 'remove' && (
+            <div>
+              <span className="label-10" style={{ display: 'block', marginBottom: 5 }}>VALUE</span>
+              <textarea value={patchValue} onChange={e => setPatchValue(e.target.value)} rows={4} placeholder={'5000\n"string"\n{"key":"val"}'} style={{ ...inputBase, resize: 'vertical', lineHeight: 1.5 }} />
+            </div>
+          )}
+          {error && <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--danger)' }}>{error}</span>}
+          {result && (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--teal)' }}>
+              ✓ {result.applied_count} applied{result.error_count > 0 ? ` · ${result.error_count} errors` : ''}
+            </span>
+          )}
+          <button onClick={applyPatch} disabled={!patchPath.trim() || applying} style={{
+            padding: '8px 0', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em',
+            background: (!patchPath.trim() || applying) ? 'var(--bg-overlay)' : 'var(--amber)',
+            color: (!patchPath.trim() || applying) ? 'var(--text-dim)' : 'var(--bg-base)',
+            border: 'none', borderRadius: 'var(--radius-sm)',
+            cursor: (!patchPath.trim() || applying) ? 'not-allowed' : 'pointer', transition: 'all var(--t-fast)',
+          }}>{applying ? '⟳ APPLYING…' : 'APPLY PATCH'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StateTreeNode({ data, path, selectedPath, onSelect, depth }) {
+  const [expanded, setExpanded] = dUseState(depth < 2);
+  if (data === null || data === undefined) {
+    return <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>null</span>;
+  }
+  if (typeof data !== 'object') {
+    const isSelected = path === selectedPath;
+    return (
+      <button onClick={() => onSelect(path, data)} style={{
+        fontFamily: 'var(--mono)', fontSize: 10,
+        color: isSelected ? 'var(--amber)' : typeof data === 'number' ? 'var(--node-state)' : 'var(--text-secondary)',
+        background: isSelected ? 'var(--amber-glow)' : 'transparent',
+        border: `1px solid ${isSelected ? 'var(--amber-border)' : 'transparent'}`,
+        borderRadius: 2, padding: '1px 5px', cursor: 'pointer', transition: 'all var(--t-fast)',
+      }}>{typeof data === 'string' ? `"${data}"` : String(data)}</button>
+    );
+  }
+  const entries = Object.entries(data);
+  if (entries.length === 0) return <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>{Array.isArray(data) ? '[]' : '{}'}</span>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {entries.map(([key, val]) => {
+        const childPath = path ? `${path}.${key}` : key;
+        const isObj = typeof val === 'object' && val !== null;
+        const isSelected = childPath === selectedPath;
+        return (
+          <div key={key} style={{ display: 'flex', flexDirection: 'column', paddingLeft: depth > 0 ? 14 : 0, marginBottom: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+              {isObj
+                ? <button onClick={() => setExpanded(e => !e)} style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '1px 2px', minWidth: 10, lineHeight: 1 }}>{expanded ? '▾' : '▸'}</button>
+                : <span style={{ minWidth: 14 }} />
+              }
+              <button onClick={() => onSelect(childPath, val)} style={{
+                fontFamily: 'var(--mono)', fontSize: 10, color: isSelected ? 'var(--amber)' : 'var(--node-operator)',
+                background: isSelected ? 'var(--amber-glow)' : 'transparent',
+                border: `1px solid ${isSelected ? 'var(--amber-border)' : 'transparent'}`,
+                borderRadius: 2, padding: '1px 4px', cursor: 'pointer', transition: 'all var(--t-fast)',
+              }}>{key}</button>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--border-light)' }}>:</span>
+              {isObj
+                ? <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>{Array.isArray(val) ? `[${val.length}]` : `{${Object.keys(val).length}}`}</span>
+                : <StateTreeNode data={val} path={childPath} selectedPath={selectedPath} onSelect={onSelect} depth={depth + 1} />
+              }
+            </div>
+            {isObj && expanded && (
+              <div>
+                <StateTreeNode data={val} path={childPath} selectedPath={selectedPath} onSelect={onSelect} depth={depth + 1} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── OPERATORS section — list + spec editor ───────────────────────────────── */
+function OperatorsEditorSection({ sustain, operators }) {
+  const [selectedOp, setSelectedOp] = dUseState(null);
+  const [editDesc, setEditDesc] = dUseState('');
+  const [editPawa, setEditPawa] = dUseState('');
+  const [saving, setSaving] = dUseState(false);
+  const [saveResult, setSaveResult] = dUseState(null);
+
+  dUseEffect(() => {
+    if (selectedOp) {
+      setEditDesc(selectedOp.description || '');
+      setEditPawa(String(selectedOp.pawa_cost ?? 0));
+      setSaveResult(null);
+    }
+  }, [selectedOp?.name]);
+
+  const saveField = async (field, value) => {
+    if (!selectedOp) return;
+    setSaving(true); setSaveResult(null);
+    try {
+      await api.post('/devui/console/execute', {
+        sustain_id: sustain?.id || '',
+        operator_id: 'edit.operator_spec',
+        params: { operator_name: selectedOp.name, field, value },
+      });
+      setSaveResult({ field, ok: true });
+      window.flash?.(`${selectedOp.name} · ${field} saved`, 'ok');
+    } catch (err) {
+      setSaveResult({ field, ok: false, msg: err.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const PROTOCOL_COLOR = { rpc: 'var(--teal)', event_driven: 'var(--node-event)', polling: 'var(--text-muted)', streaming: 'var(--amber)' };
+  const inputBase = { background: 'var(--bg-base)', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)', outline: 'none', width: '100%', boxSizing: 'border-box' };
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', height: '100%', minHeight: 0 }}>
+      {/* Operator list */}
+      <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <span className="label-10">OPERATORS · {operators.length}</span>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          {operators.length === 0
+            ? <div style={{ padding: '16px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>no operators · sustain is clear</div>
+            : operators.map(op => {
+              const active = selectedOp?.name === op.name;
+              const pc = PROTOCOL_COLOR[op.protocol] || 'var(--text-muted)';
+              return (
+                <button key={op.name} onClick={() => setSelectedOp(op)} style={{
+                  width: '100%', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 3,
+                  padding: '10px 16px', borderBottom: '1px solid var(--border)',
+                  background: active ? 'var(--amber-glow)' : 'transparent',
+                  cursor: 'pointer', transition: 'background var(--t-fast)',
+                }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--bg-raised)'; }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500, color: active ? 'var(--amber)' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{op.name}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: pc, flexShrink: 0, letterSpacing: '0.06em' }}>{(op.protocol || 'rpc').toUpperCase()}</span>
+                  </div>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.description || '—'}</span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)' }}>{op.pawa_cost ?? 0} pwa</span>
+                </button>
+              );
+            })
+          }
+        </div>
+      </div>
+
+      {/* Operator editor */}
+      {!selectedOp
+        ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>select an operator to edit</span>
+          </div>
+        : <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>{selectedOp.name}</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: PROTOCOL_COLOR[selectedOp.protocol] || 'var(--text-muted)', letterSpacing: '0.06em' }}>{(selectedOp.protocol || 'rpc').toUpperCase()}</span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--amber)' }}>{selectedOp.pawa_cost ?? 0} pwa</span>
+              </div>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 520 }}>
+
+              {/* Description */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span className="label-10">DESCRIPTION</span>
+                  <button onClick={() => saveField('description', editDesc)} disabled={saving || editDesc === (selectedOp.description || '')} style={{
+                    padding: '3px 10px', fontFamily: 'var(--mono)', fontSize: 9, cursor: 'pointer',
+                    color: (saving || editDesc === (selectedOp.description || '')) ? 'var(--text-dim)' : 'var(--teal)',
+                    background: 'transparent',
+                    border: `1px solid ${(saving || editDesc === (selectedOp.description || '')) ? 'var(--border)' : 'var(--teal-border)'}`,
+                    borderRadius: 3, transition: 'all var(--t-fast)',
+                  }}>SAVE</button>
+                </div>
+                <textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={3} style={{ ...inputBase, resize: 'vertical', lineHeight: 1.5, fontFamily: 'var(--ui)', fontSize: 12 }} />
+              </div>
+
+              {/* Pawa cost */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span className="label-10">PAWA COST</span>
+                  <button onClick={() => saveField('pawa_cost', parseInt(editPawa, 10) || 0)} disabled={saving || editPawa === String(selectedOp.pawa_cost ?? 0)} style={{
+                    padding: '3px 10px', fontFamily: 'var(--mono)', fontSize: 9, cursor: 'pointer',
+                    color: (saving || editPawa === String(selectedOp.pawa_cost ?? 0)) ? 'var(--text-dim)' : 'var(--teal)',
+                    background: 'transparent',
+                    border: `1px solid ${(saving || editPawa === String(selectedOp.pawa_cost ?? 0)) ? 'var(--border)' : 'var(--teal-border)'}`,
+                    borderRadius: 3, transition: 'all var(--t-fast)',
+                  }}>SAVE</button>
+                </div>
+                <input type="number" value={editPawa} onChange={e => setEditPawa(e.target.value)} min={0} style={inputBase} />
+              </div>
+
+              {/* Params — read-only */}
+              {selectedOp.params && selectedOp.params.length > 0 && (
+                <div>
+                  <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>PARAMS</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {selectedOp.params.map((p, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--node-operator)' }}>{p.name ?? p}</span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>{p.type ?? 'any'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {saveResult && (
+                <div style={{ padding: '8px 12px', borderRadius: 'var(--radius-sm)', background: saveResult.ok ? 'rgba(42,184,160,0.08)' : 'rgba(224,80,80,0.08)', border: `1px solid ${saveResult.ok ? 'var(--teal-border)' : 'rgba(224,80,80,0.3)'}`, fontFamily: 'var(--mono)', fontSize: 10, color: saveResult.ok ? 'var(--teal)' : 'var(--danger)' }}>
+                  {saveResult.ok ? `✓ ${saveResult.field} saved` : `✗ ${saveResult.msg}`}
+                </div>
+              )}
+            </div>
+          </div>
+      }
+    </div>
+  );
+}
+
+/* ── OPERATIVES section — network tree + detail ────────────────────────────── */
+function OperativesEditorSection({ graphData }) {
+  const [selected, setSelected] = dUseState(null);
+  const { nodes, edges } = graphData;
+
+  const orchie = nodes.find(n => n.type === 'orchie');
+  const operatives = nodes.filter(n => n.type === 'operative');
+  const subOps = nodes.filter(n => n.type === 'sub_operative');
+  const getSubOps = (parentId) => subOps.filter(s => s.parent === parentId);
+
+  const delegatesTo = selected ? edges.filter(e => e.from === selected.id) : [];
+  const delegatesFrom = selected ? edges.filter(e => e.to === selected.id) : [];
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', height: '100%', minHeight: 0 }}>
+      {/* Network tree */}
+      <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <span className="label-10">NETWORK · {nodes.length} NODES</span>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: '10px 8px' }}>
+          {nodes.length === 0
+            ? <div style={{ padding: '8px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>no operatives reporting · all thresholds nominal</div>
+            : <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                {orchie && <OpNetworkNode node={orchie} selected={selected?.id === orchie.id} onSelect={setSelected} />}
+                {operatives.map(op => (
+                  <div key={op.id}>
+                    <div style={{ paddingLeft: 14 }}>
+                      <OpNetworkNode node={op} selected={selected?.id === op.id} onSelect={setSelected} />
+                    </div>
+                    {getSubOps(op.id).map(sub => (
+                      <div key={sub.id} style={{ paddingLeft: 28 }}>
+                        <OpNetworkNode node={sub} selected={selected?.id === sub.id} onSelect={setSelected} isSub />
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+          }
+        </div>
+      </div>
+
+      {/* Detail */}
+      {!selected
+        ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>select an operative to inspect</span>
+          </div>
+        : <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>{selected.label}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-muted)', padding: '2px 8px', border: '1px solid var(--border)', borderRadius: 10 }}>{selected.type.replace('_', ' ')}</span>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 520 }}>
+              <div>
+                <span className="label-10" style={{ display: 'block', marginBottom: 5 }}>ROLE</span>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--text-secondary)' }}>{selected.role}</span>
+              </div>
+              {selected.domain && selected.domain.length > 0 && (
+                <div>
+                  <span className="label-10" style={{ display: 'block', marginBottom: 6 }}>DOMAINS</span>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {selected.domain.map(d => (
+                      <span key={d} style={{ padding: '3px 10px', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--node-operative)', border: '1px solid rgba(42,184,160,0.3)', borderRadius: 10 }}>{d}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {delegatesFrom.length > 0 && (
+                <div>
+                  <span className="label-10" style={{ display: 'block', marginBottom: 6 }}>RECEIVES FROM</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {delegatesFrom.map((e, i) => <EdgeRow key={i} label={e.from} kind={e.type} direction="←" />)}
+                  </div>
+                </div>
+              )}
+              {delegatesTo.length > 0 && (
+                <div>
+                  <span className="label-10" style={{ display: 'block', marginBottom: 6 }}>DELEGATES TO</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {delegatesTo.map((e, i) => <EdgeRow key={i} label={e.to} kind={e.type} direction="→" />)}
+                  </div>
+                </div>
+              )}
+              <div style={{ padding: '10px 12px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                  Operative structure (domain routing, sub-operative graphs, evaluation/deliberation specs) is defined in the sustain JSON. Edit the spec to restructure the network — the graph here reflects live config.
+                </span>
+              </div>
+            </div>
+          </div>
+      }
+    </div>
+  );
+}
+
+function OpNetworkNode({ node, selected, onSelect, isSub }) {
+  const typeColor = { orchie: 'var(--amber)', operative: 'var(--node-operative)', sub_operative: 'var(--text-secondary)' }[node.type] || 'var(--text-muted)';
+  const icon = { orchie: '◉', operative: '⬢', sub_operative: '⬡' }[node.type] || '·';
+  return (
+    <button onClick={() => onSelect(node)} style={{
+      width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8,
+      padding: isSub ? '5px 8px' : '7px 10px',
+      borderRadius: 'var(--radius-sm)',
+      background: selected ? `${typeColor}18` : 'transparent',
+      border: `1px solid ${selected ? `${typeColor}40` : 'transparent'}`,
+      cursor: 'pointer', transition: 'all var(--t-fast)', marginBottom: 1,
+    }}
+    onMouseEnter={e => { if (!selected) e.currentTarget.style.background = 'var(--bg-raised)'; }}
+    onMouseLeave={e => { if (!selected) e.currentTarget.style.background = 'transparent'; }}
+    >
+      <span style={{ fontFamily: 'var(--mono)', fontSize: isSub ? 9 : 12, color: typeColor, flexShrink: 0 }}>{icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: isSub ? 9 : 10, fontWeight: 500, color: selected ? typeColor : 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.label}</div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.role}</div>
+      </div>
+    </button>
+  );
+}
+
+function EdgeRow({ label, kind, direction }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>{direction}</span>
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)', flex: 1 }}>{label}</span>
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)', letterSpacing: '0.06em' }}>{kind}</span>
+    </div>
+  );
+}
+
+/* ── CONSTRAINTS section ─────────────────────────────────────────────────────── */
+function ConstraintsEditorSection({ constraints }) {
+  const passing = constraints.filter(c => c.passed !== false);
+  const failing = constraints.filter(c => c.passed === false);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span className="label-10">CONSTRAINTS · {constraints.length}</span>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--teal)' }}>● {passing.length} pass</span>
+          {failing.length > 0 && <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--danger)' }}>● {failing.length} fail</span>}
+        </div>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {constraints.length === 0
+          ? <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>no constraints · all within bounds</span>
+          : constraints.map((c, i) => {
+              const passed = c.passed !== false;
+              const statusColor = passed ? 'var(--teal)' : 'var(--danger)';
+              return (
+                <div key={i} style={{ background: 'var(--bg-base)', border: `1px solid ${passed ? 'var(--border)' : 'rgba(224,80,80,0.3)'}`, borderRadius: 'var(--radius-sm)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500, color: 'var(--text-primary)' }}>{c.name || c.id || `constraint_${i}`}</span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: statusColor, letterSpacing: '0.08em' }}>{passed ? '● PASS' : '● FAIL'}</span>
+                  </div>
+                  {c.expr && (
+                    <code style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)', background: 'var(--bg-surface)', padding: '4px 8px', borderRadius: 3, display: 'block', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{c.expr}</code>
+                  )}
+                  {c.message && (
+                    <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: passed ? 'var(--text-muted)' : 'var(--danger)', lineHeight: 1.5 }}>{c.message}</span>
+                  )}
+                </div>
+              );
+            })
+        }
+        {constraints.length > 0 && (
+          <div style={{ padding: '10px 12px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', marginTop: 4 }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+              Constraint expressions are defined in the sustain JSON spec. To modify them, edit the spec and restart the engine. Use SUSTAIN → PATCH STATE to modify the state values that constraint expressions evaluate against.
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── legacy stubs (kept so window.assign doesn't break; editor replaced above) ── */
+function StateEditorTab() { return null; }
+function OpSpecEditorTab() { return null; }
+function PaletteItem() { return null; }
+function EditorCanvas() { return null; }
+function NodeInspector() { return null; }
+/* ── removed old body stubs (replaced by section components above) ─── */
+function _unused_removed({
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: '100%', minHeight: 0 }}>
       {/* Left — live state JSON */}
@@ -337,7 +922,7 @@ function StateEditorTab({ sustain, liveState, stateLoading, patchText, onPatchCh
   );
 }
 
-function OpSpecEditorTab({ opName, onOpNameChange, opField, onOpFieldChange, opValue, onOpValueChange, opResult, opApplying, onApply, realOps }) {
+function _unused_OpSpecEditorTab({ opName, onOpNameChange, opField, onOpFieldChange, opValue, onOpValueChange, opResult, opApplying, onApply, realOps }) {
   const EDITABLE_FIELDS = ['description', 'pawa_cost', 'license_tier', 'author', 'ui_schema'];
   return (
     <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, overflow: 'auto', height: '100%', boxSizing: 'border-box' }}>
@@ -427,7 +1012,7 @@ function OpSpecEditorTab({ opName, onOpNameChange, opField, onOpFieldChange, opV
   );
 }
 
-function PaletteItem({ type, label, shape }) {
+function _unused_PaletteItem({ type, label, shape }) {
   const color = {
     state: 'var(--node-state)', operator: 'var(--node-operator)',
     constraint: 'var(--node-constraint)', event: 'var(--node-event)',
@@ -448,7 +1033,7 @@ function PaletteItem({ type, label, shape }) {
   );
 }
 
-function EditorCanvas({ selectedId, onSelect }) {
+function _unused_EditorCanvas({ selectedId, onSelect }) {
   return (
     <div style={{
       position: 'relative', width: '100%', height: '100%',
@@ -490,7 +1075,7 @@ function EditorCanvas({ selectedId, onSelect }) {
   );
 }
 
-function NodeInspector({ node }) {
+function _unused_NodeInspector({ node }) {
   const fields = {
     state:      [['type', 'number'], ['scope', 'sustain'], ['snapshot', 'enabled']],
     operator:   [['signature', '(State, Inputs) → Δ'], ['cost', '0.02 pwa'], ['constraints', '2 attached']],
@@ -2817,5 +3402,4 @@ Object.assign(window, {
   LibraryMark,
   Knob, Slider, Stepper, VerticalScale, Segmented, BigToggle, RockerSwitch, LedGrid,
   OperativeLibCard, OperatorLibRow, SporeLibCard, WidgetLibCard, WidgetPreview, Stat,
-  StateEditorTab, OpSpecEditorTab,
 });
