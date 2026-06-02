@@ -179,7 +179,7 @@ All 7 tasks done and committed (1245 tests — 1269 after Sprint 6.1):
 
 ### Sprint 7 🔄 — Council Enrichment
 - [x] 7.1 `CouncillorConfig` dataclass + `load_councillor_configs()` in `core/council.py`. `homestead.json` operatives extended with `domain` + `sub_operatives` (2 per councillor). 10 sub-operative graph JSON stubs created. 39 new tests. (1336 total)
-- [ ] 7.2 Domain relevance check — auto-ABSTAIN when no domain overlap
+- [x] 7.2 Domain relevance check — `CouncillorConfig.is_relevant()`, `OPERATOR_DOMAIN_MAP`, `get_proposal_domains()`. `create_proposal()` auto-tags with domains. `collect_votes()` accepts optional `councillor_configs` — irrelevant councillors get immediate ABSTAIN with `abstain_reason: "no_domain_overlap"`, `deliberate()` never called. 34 new tests. (1370 total)
 - [ ] 7.3 Sandbox simulation per councillor — independent fork per councillor
 - [ ] 7.4 DelegatedVote — sub-operative vote aggregation at councillor level
 - [ ] 7.5 Enriched CouncilSession.collect_votes() — full sandbox + delegation flow
