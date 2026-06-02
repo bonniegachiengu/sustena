@@ -308,6 +308,38 @@ docs: description
 - Core coverage target: >90%.
 - `test_operator_registry.py` has `ALL_KNOWN_OPERATORS` — add new operators there when registering.
 
+### Frontend data honesty — PERMANENT rule for all UI work
+Every UI component renders real data from the API or shows a designed empty state.
+**Never invent, hardcode, or leave placeholder mock data in any component.**
+
+When building or touching any UI panel, widget, or section:
+1. Wire it to the real API call. If the endpoint doesn't exist yet, note it and leave the
+   section blank — do not fill it with made-up numbers or fake names.
+2. If the API returns an empty array, null, or zero — render an **empty state** in
+   Sustena's design language (see below). Do not hide the section.
+3. If you encounter existing hardcoded/mock data anywhere in the frontend while working
+   on a task, remove it in the same commit and replace with the empty-state pattern.
+
+**Sustena empty-state design language**
+The UI is a terminal-adjacent monitoring surface — not a consumer app. Empty states
+should feel like a system at rest, not a friendly onboarding screen.
+
+Use short, lowercase, operative-voiced lines. Examples by context:
+```
+Tasks          — "no active tasks · sustain is clear"
+Council        — "council is quiet · no proposals in motion"
+Operatives     — "no operatives reporting · all thresholds nominal"
+Deliberation   — "no vote in progress"
+Events         — "no events recorded yet"
+Morning brief  — "nothing scheduled · sustain state nominal"
+Monitoring     — "no constraints breached · all within bounds"
+Proposals      — "no edits pending review"
+Recent replies — "orchie hasn't spoken yet"
+```
+Style: dim text (text-gray-500 or equivalent), no icons unless a single subtle
+dot/ring indicator fits. No illustrations. No "Get started" CTAs. One line maximum.
+The component frame should still be visible so the layout doesn't collapse.
+
 ### No WhatsApp work
 WhatsApp stubs exist in the codebase and stay. No new WhatsApp development until
 explicitly reactivated. Do not touch `whatsapp_*.py` files or the `/webhook` routes.
