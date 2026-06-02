@@ -124,6 +124,10 @@ MENTOR_OPERATORS = [
     "mentor.deliberate_budget",
 ]
 
+OPERATIVE_OPERATORS = [
+    "operative.spawn",
+]
+
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + BIASHARA_OPERATORS + VYYB_OPERATORS  # Epic 1.5.2
@@ -135,6 +139,7 @@ ALL_KNOWN_OPERATORS = (
     + EDIT_OPERATORS                       # Sprint 3.5
     + CONTROL_OPERATORS                    # Sprint 3.6
     + MENTOR_OPERATORS                     # Sprint 5.3
+    + OPERATIVE_OPERATORS                  # Sprint 5.7
 )
 
 
