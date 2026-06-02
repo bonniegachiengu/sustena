@@ -1,7 +1,7 @@
 # Sustena XII — Claude Code Context
 
 > Read this before touching any code. It tells you where we are, how things are built,
-> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 6 complete).
+> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 7.3 complete).
 
 ---
 
@@ -181,8 +181,8 @@ All 7 tasks done and committed (1245 tests — 1269 after Sprint 6.1):
 - [x] 7.1 `CouncillorConfig` dataclass + `load_councillor_configs()` in `core/council.py`. `homestead.json` operatives extended with `domain` + `sub_operatives` (2 per councillor). 10 sub-operative graph JSON stubs created. 39 new tests. (1336 total)
 - [x] 7.2 Domain relevance check — `CouncillorConfig.is_relevant()`, `OPERATOR_DOMAIN_MAP`, `get_proposal_domains()`. `create_proposal()` auto-tags with domains. `collect_votes()` accepts optional `councillor_configs` — irrelevant councillors get immediate ABSTAIN with `abstain_reason: "no_domain_overlap"`, `deliberate()` never called. 34 new tests. (1370 total)
 - [x] 7.3 Sandbox simulation per councillor — `CouncilSession._create_sandbox()` calls `simulate.fork()` once per relevant councillor (unique fork_id per councillor, none shared). Sub-operative graphs run against the fork's isolated state. `get_fork_state()` added to `simulate_ops.py`. `fork_id` + `sandbox_results` recorded on vote records and passed to `deliberate()`. Graceful degradation on fork failure. 19 new tests. (1389 total)
-- [ ] 7.4 DelegatedVote — sub-operative vote aggregation at councillor level
-- [ ] 7.5 Enriched CouncilSession.collect_votes() — full sandbox + delegation flow
+- [ ] 7.4 `DelegatedVote` dataclass — sub-operative vote aggregation at councillor level. Each sub-operative result in `sandbox_results` is parsed into a `DelegatedVote(position: YES|NO|ABSTAIN, confidence: float, reasoning: str)`. Councillor aggregates them (weighted by confidence) to form its final `OperativeVote`. The aggregation logic lives in `core/council.py` (`aggregate_delegated_votes()`).
+- [ ] 7.5 Enriched `CouncilSession.collect_votes()` — wire the full flow end-to-end: relevance check → sandbox fork → sub-operative execution → `DelegatedVote` aggregation → councillor's final `OperativeVote`. The existing `deliberate()` interface on `BaseOperative` is still honoured.
 
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
