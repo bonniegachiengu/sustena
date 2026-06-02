@@ -299,6 +299,15 @@ function NodeInspector({ node }) {
   );
 }
 
+/* ── Helper: call console execute for control operators ─────────────────── */
+async function callControlOperator(sustainId, operatorId, params) {
+  return api.post('/devui/console/execute', {
+    sustain_id: sustainId,
+    operator_id: operatorId,
+    params,
+  });
+}
+
 /* ───────────────────────────────────────────────────────────
    CONTROLLER PANEL — proposal queue + terminal
    ─────────────────────────────────────────────────────────── */
@@ -321,9 +330,17 @@ function ControllerPanel({ tick, sustain, openModal }) {
           <span className="meta-10">{PROPOSALS.length} AWAITING EXECUTION</span>
         </div>
         {PROPOSALS.length === 0
-          ? <div style={{ padding: '16px 0', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)', textAlign: 'center' }}>No data — seed via SEED panel</div>
+          ? <div style={{ padding: '16px 0', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)', textAlign: 'center' }}>No proposals awaiting execution — run operators or seed via SEED panel</div>
           : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-              {PROPOSALS.map((p, i) => <ProposalCard key={p.id} p={p} delay={i * 80} onClick={() => openModal(p)} />)}
+              {PROPOSALS.map((p, i) => (
+                <ProposalCard
+                  key={p.id}
+                  p={p}
+                  delay={i * 80}
+                  sustainId={sustain?.id || 'homestead.bonnie'}
+                  onClick={() => openModal(p)}
+                />
+              ))}
             </div>
         }
       </div>
@@ -452,8 +469,8 @@ function ControllerPanel({ tick, sustain, openModal }) {
           <Card title="IOT · CONNECTED DEVICES" sub="5 ONLINE" padded scroll>
             <IotList />
           </Card>
-          <Card title="ROLLBACK" sub="EVENT REPLAY" padded>
-            <RollbackPanel />
+          <Card title="ROLLBACK" sub="control.rollback" padded>
+            <RollbackPanel sustain={sustain} />
           </Card>
         </div>
       </div>
@@ -944,9 +961,42 @@ function LedGrid({ count = 6, active }) {
   );
 }
 
-function ProposalCard({ p, delay, onClick }) {
+function ProposalCard({ p, delay, sustainId, onClick }) {
+  const [executing, setExecuting] = dUseState(false);
   const autonomyColor = p.autonomy === 'HIGH' ? 'var(--amber)' : p.autonomy === 'LOW' ? 'var(--teal)' : 'var(--text-secondary)';
   const ctaTone = p.cta === 'AUTO-EXECUTE' ? 'teal' : 'amber';
+
+  const doExecute = async () => {
+    setExecuting(true);
+    try {
+      await callControlOperator(sustainId, 'control.execute_approved', { proposal_id: p.id });
+      window.flash?.(`${p.id} executed via control.execute_approved`, 'ok');
+    } catch (err) {
+      window.flash?.(`Execute failed: ${err.message}`, 'danger');
+    } finally {
+      setExecuting(false);
+    }
+  };
+
+  const handleExecute = (e) => {
+    e.stopPropagation();
+    if (p.autonomy === 'HIGH') {
+      window.openPinPad?.({
+        title: `EXECUTE · ${p.id}`,
+        body: `${p.title}. This will call control.execute_approved.`,
+        onConfirm: doExecute,
+      });
+    } else {
+      window.confirmAction?.({
+        title: `Execute ${p.id}?`,
+        body: `Runs control.execute_approved. ${p.sim?.projection || ''}`,
+        ctaLabel: p.cta || 'EXECUTE',
+        tone: 'amber',
+        onConfirm: doExecute,
+      });
+    }
+  };
+
   return (
     <div className="fade-up lift" style={{
       background: 'var(--bg-surface)',
@@ -967,46 +1017,38 @@ function ProposalCard({ p, delay, onClick }) {
         <Badge tone={ctaTone}>{p.autonomy}</Badge>
       </div>
       <span style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.55 }}>{p.summary}</span>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-        <SmallMetric label="SCORE" value={p.sim.outcomeScore.toFixed(2)} tone={p.sim.outcomeScore > 0.8 ? 'teal' : 'amber'} />
-        <SmallMetric label="CSTR PASS" value={`${(p.sim.constraintPassRate * 100).toFixed(0)}%`} />
-        <SmallMetric label="PAWA" value={p.cost} />
-      </div>
+      {p.sim && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+          <SmallMetric label="SCORE" value={p.sim.outcomeScore?.toFixed(2) ?? '—'} tone={p.sim.outcomeScore > 0.8 ? 'teal' : 'amber'} />
+          <SmallMetric label="CSTR PASS" value={p.sim.constraintPassRate != null ? `${(p.sim.constraintPassRate * 100).toFixed(0)}%` : '—'} />
+          <SmallMetric label="PAWA" value={p.cost ?? '—'} />
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+        <button
+          onClick={handleExecute}
+          disabled={executing}
+          style={{
+            flex: 1, padding: '6px 10px',
+            fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em',
+            background: executing ? 'var(--bg-overlay)' : 'var(--amber)',
+            color: executing ? 'var(--text-dim)' : 'var(--bg-base)',
+            border: `1px solid ${executing ? 'var(--border)' : 'var(--amber)'}`,
+            borderRadius: 'var(--radius-sm)',
+            cursor: executing ? 'not-allowed' : 'pointer',
+            transition: 'all var(--t-fast)',
+          }}
+        >
+          {executing ? '⟳' : (p.cta || 'EXECUTE')}
+        </button>
         <button onClick={e => {
           e.stopPropagation();
-          const exec = () => window.flash(`${p.id} executed · ${p.sim.projection}`, 'ok');
-          if (p.autonomy === 'HIGH') {
-            window.openPinPad({
-              title: `${p.cta} · ${p.id}`,
-              body: `${p.title}.`,
-              onConfirm: exec,
-            });
-          } else if (p.autonomy === 'AUTO') {
-            exec();
-          } else {
-            window.confirmAction({
-              title: `${p.cta} ${p.id}?`,
-              body: `${p.sim.projection}.`,
-              ctaLabel: p.cta,
-              tone: 'amber',
-              onConfirm: exec,
-            });
-          }
-        }} style={{
-          flex: 1, padding: '6px 10px',
-          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em',
-          background: 'var(--amber)', color: 'var(--bg-base)',
-          border: '1px solid var(--amber)', borderRadius: 'var(--radius-sm)',
-        }}>{p.cta}</button>
-        <button onClick={e => {
-          e.stopPropagation();
-          window.confirmAction({
+          window.confirmAction?.({
             title: `Reject ${p.id}?`,
             body: `Returns to draft. Authors notified.`,
             ctaLabel: 'REJECT',
             tone: 'danger',
-            onConfirm: () => window.flash(`${p.id} rejected`, 'danger'),
+            onConfirm: () => window.flash?.(`${p.id} rejected`, 'danger'),
           });
         }} style={{
           padding: '6px 10px',
@@ -1494,31 +1536,75 @@ function IotList() {
   );
 }
 
-function RollbackPanel() {
+function RollbackPanel({ sustain }) {
+  const [version, setVersion] = dUseState('');
+  const [rolling, setRolling] = dUseState(false);
+  const [lastResult, setLastResult] = dUseState(null);
+
+  const doRollback = async () => {
+    setRolling(true);
+    const sustainId = sustain?.id || 'homestead.bonnie';
+    const params = version.trim()
+      ? { sustain_id: sustainId, to_version: parseInt(version, 10) }
+      : { sustain_id: sustainId };
+    try {
+      const res = await callControlOperator(sustainId, 'control.rollback', params);
+      const data = res?.data?.result?.data || {};
+      setLastResult(data);
+      window.flash?.(
+        `Rolled back to v${data.restored_version ?? '?'} · ${data.snapshot_timestamp?.slice(0, 19) ?? ''}`,
+        'amber',
+      );
+    } catch (err) {
+      window.flash?.(`Rollback failed: ${err.message}`, 'danger');
+    } finally {
+      setRolling(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-        Replay event log to a prior state. The real world cannot be undone, but state can be reconciled.
+      <span style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+        Restore state to a prior snapshot. Snapshots are created automatically by{' '}
+        <span style={{ color: 'var(--amber)', fontFamily: 'var(--mono)', fontSize: 10 }}>control.execute_approved</span>.
       </span>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span className="label-10">TARGET</span>
-        <input readOnly value="ev_8429112 · 14:28:44 UTC" style={{
-          width: '100%',
-          background: 'var(--bg-base)', border: '1px solid var(--border-mid)',
-          borderRadius: 'var(--radius-sm)', padding: '7px 10px',
-          fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)',
-          outline: 'none',
-        }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span className="label-10">SNAPSHOT VERSION (leave blank for latest)</span>
+        <input
+          value={version}
+          onChange={e => setVersion(e.target.value)}
+          placeholder="e.g. 3  (omit = most recent)"
+          style={{
+            width: '100%',
+            background: 'var(--bg-base)', border: '1px solid var(--border-mid)',
+            borderRadius: 'var(--radius-sm)', padding: '7px 10px',
+            fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)',
+            outline: 'none',
+          }}
+        />
       </div>
+      {lastResult && (
+        <div style={{
+          background: 'var(--bg-base)', border: '1px solid var(--amber-border)',
+          borderRadius: 'var(--radius-sm)', padding: '6px 10px',
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--amber)',
+        }}>
+          Restored v{lastResult.restored_version} · {lastResult.snapshot_timestamp?.slice(0, 19) ?? '—'}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-        <PBtn variant="ghost" onClick={() => window.flash('Diff preview computed · 12 fields changed', 'info')}>PREVIEW DIFF</PBtn>
-        <PBtn onClick={() => window.confirmAction({
-          title: 'Rollback to ev_8429112?',
-          body: 'Replays event log to 14:28:44 UTC. Real-world side-effects already executed cannot be undone — only sustain state is corrected.',
-          ctaLabel: 'ROLLBACK',
-          tone: 'danger',
-          onConfirm: () => window.flash('State rolled back · 8 events replayed', 'amber'),
-        })}>ROLLBACK</PBtn>
+        <PBtn
+          onClick={() => window.confirmAction?.({
+            title: `Rollback ${sustain?.id || 'sustain'}?`,
+            body: `Restores state to snapshot ${version.trim() || 'latest'}. Only in-process snapshots are available.`,
+            ctaLabel: 'ROLLBACK',
+            tone: 'danger',
+            onConfirm: doRollback,
+          })}
+          disabled={rolling}
+        >
+          {rolling ? '⟳' : 'ROLLBACK'}
+        </PBtn>
       </div>
     </div>
   );
