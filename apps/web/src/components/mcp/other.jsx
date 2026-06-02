@@ -347,6 +347,7 @@ function ControllerPanel({ tick, sustain, openModal }) {
 
       {/* Universal controls bar */}
       <Card title="UNIVERSAL CONTROLS" sub="[CTL-0148] · EXECUTION AUTHORITY · SCADA" padded
+        style={{ flexShrink: 0 }}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Badge tone={emergency ? 'danger' : execMode === 'LIVE' ? 'amber' : 'ok'} dot>{emergency ? 'EMERGENCY HOLD' : execMode}</Badge>
@@ -492,7 +493,6 @@ function Instrument({ id, label, children }) {
       borderRadius: 2,
       padding: '20px 10px 10px',
       display: 'flex', flexDirection: 'column',
-      minHeight: 0,
     }}>
       {/* Top-left ID label, sci-fi style */}
       <span style={{
