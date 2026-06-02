@@ -660,7 +660,24 @@ function FTick({ label, value }) {
 
 /* ─── Proposal modal ──────────────────────────────────────── */
 function ProposalModal({ p, onClose }) {
-  const total = p.council.for + p.council.against + p.council.abstain;
+  const votes  = p.council || { for: 0, against: 0, abstain: 0, total: 0, breakdown: [] };
+  const total  = votes.for + votes.against + votes.abstain;
+  const hasSim = p.sim != null;
+
+  const doExecute = async () => {
+    try {
+      await api.post('/devui/console/execute', {
+        sustain_id: p.sustain,
+        operator_id: 'control.execute_approved',
+        params: { proposal_id: p.id },
+      });
+      onClose();
+      window.flash?.(`${p.id} executed · committed to ${p.sustain}`, 'ok');
+    } catch (err) {
+      window.flash?.(`Execute failed: ${err.message}`, 'danger');
+    }
+  };
+
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div className="modal-card" onClick={e => e.stopPropagation()}>
@@ -681,60 +698,110 @@ function ProposalModal({ p, onClose }) {
         </header>
         <div style={{ padding: '20px 20px 4px', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{p.summary}</p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-            <ModalMetric label="OUTCOME SCORE" value={p.sim.outcomeScore.toFixed(2)} sub={`rank 1 of ${p.sim.runs}`} tone="teal" />
-            <ModalMetric label="CSTR PASS" value={`${(p.sim.constraintPassRate * 100).toFixed(0)}%`} sub="100 simulations" />
-            <ModalMetric label="PAWA COST" value={p.cost} sub="per execution" />
-            <ModalMetric label="AUTONOMY" value={p.autonomy} sub="thresholds" tone="amber" />
-          </div>
+
+          {/* Sim metrics — only when simulation data present */}
+          {hasSim ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+              <ModalMetric label="OUTCOME SCORE" value={p.sim.outcomeScore.toFixed(2)} sub={`rank 1 of ${p.sim.runs}`} tone="teal" />
+              <ModalMetric label="CSTR PASS" value={`${(p.sim.constraintPassRate * 100).toFixed(0)}%`} sub="100 simulations" />
+              <ModalMetric label="PAWA COST" value={p.cost} sub="per execution" />
+              <ModalMetric label="AUTONOMY" value={p.autonomy} sub="thresholds" tone="amber" />
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+              <ModalMetric label="PAWA COST" value={p.cost} sub="per execution" />
+              <ModalMetric label="AUTONOMY" value={p.autonomy} sub="thresholds" tone="amber" />
+            </div>
+          )}
+
+          {/* Council tally */}
           <div>
             <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>COUNCIL TALLY · {total} VOTES</span>
-            <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'var(--bg-base)' }}>
-              <div style={{ width: `${(p.council.for / total) * 100}%`, background: 'var(--teal)' }} />
-              <div style={{ width: `${(p.council.against / total) * 100}%`, background: 'var(--danger)' }} />
-              <div style={{ width: `${(p.council.abstain / total) * 100}%`, background: 'var(--text-muted)' }} />
-            </div>
-            <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
-              <span className="meta-10" style={{ color: 'var(--teal)' }}>FOR {p.council.for}</span>
-              <span className="meta-10" style={{ color: 'var(--danger)' }}>AGAINST {p.council.against}</span>
-              <span className="meta-10" style={{ color: 'var(--text-muted)' }}>ABSTAIN {p.council.abstain}</span>
-            </div>
+            {total > 0 ? (
+              <>
+                <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'var(--bg-base)' }}>
+                  <div style={{ width: `${(votes.for / total) * 100}%`, background: 'var(--teal)' }} />
+                  <div style={{ width: `${(votes.against / total) * 100}%`, background: 'var(--danger)' }} />
+                  <div style={{ width: `${(votes.abstain / total) * 100}%`, background: 'var(--border)' }} />
+                </div>
+                <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
+                  <span className="meta-10" style={{ color: 'var(--teal)' }}>FOR {votes.for}</span>
+                  <span className="meta-10" style={{ color: 'var(--danger)' }}>AGAINST {votes.against}</span>
+                  <span className="meta-10" style={{ color: 'var(--text-muted)' }}>ABSTAIN {votes.abstain}</span>
+                </div>
+              </>
+            ) : (
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>no vote in progress</span>
+            )}
           </div>
-          <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 14 }}>
-            <span className="label-10" style={{ color: 'var(--amber)' }}>SIMULATION PROJECTION</span>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text-primary)', marginTop: 4 }}>
-              {p.sim.projection}
+
+          {/* Per-councillor breakdown */}
+          {votes.breakdown?.length > 0 && (
+            <div>
+              <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>COUNCILLOR BREAKDOWN</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {votes.breakdown.map(v => (
+                  <div key={v.operative_id} style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                    padding: '7px 10px', background: 'var(--bg-base)',
+                    border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                  }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)', flex: 1 }}>{v.operative_id}</span>
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500,
+                      color: v.vote === 'YES' ? 'var(--teal)' : v.vote === 'NO' ? 'var(--danger)' : 'var(--text-muted)',
+                      flexShrink: 0,
+                    }}>{v.vote}</span>
+                    {v.reasoning && (
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', maxWidth: 240, lineHeight: 1.5 }}>
+                        {v.reasoning}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Simulation projection */}
+          {hasSim && (
+            <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 14 }}>
+              <span className="label-10" style={{ color: 'var(--amber)' }}>SIMULATION PROJECTION</span>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text-primary)', marginTop: 4 }}>
+                {p.sim.projection}
+              </div>
+            </div>
+          )}
         </div>
         <footer style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <PBtn variant="ghost" onClick={onClose}>CANCEL</PBtn>
           <PBtn variant="ghost" onClick={() => {
-            window.confirmAction({
+            window.confirmAction?.({
               title: `Reject ${p.id}?`,
               body: `This rolls back the council vote and returns the proposal to draft. Authors will be notified.`,
               ctaLabel: 'REJECT',
               tone: 'danger',
-              onConfirm: () => { onClose(); window.flash(`${p.id} rejected · authors notified`, 'danger'); },
+              onConfirm: () => { onClose(); window.flash?.(`${p.id} rejected · authors notified`, 'danger'); },
             });
           }}>REJECT</PBtn>
           <PBtn onClick={() => {
+            const projection = p.sim?.projection || `Execute ${p.title}`;
             if (p.autonomy === 'HIGH') {
-              window.openPinPad({
-                title: `${p.cta} · ${p.id}`,
-                body: `${p.title}. ${p.sim.projection}.`,
-                onConfirm: () => { onClose(); window.flash(`${p.id} executed · committed to ${p.sustain}`, 'ok'); },
+              window.openPinPad?.({
+                title: `${p.cta || 'EXECUTE'} · ${p.id}`,
+                body: `${p.title}.`,
+                onConfirm: doExecute,
               });
             } else {
-              window.confirmAction({
-                title: `${p.cta} ${p.id}?`,
-                body: `${p.sim.projection}. Pawa cost ${p.cost}. Constraint pass ${(p.sim.constraintPassRate*100).toFixed(0)}%.`,
-                ctaLabel: p.cta,
+              window.confirmAction?.({
+                title: `${p.cta || 'EXECUTE'} ${p.id}?`,
+                body: `${projection}. Pawa cost ${p.cost}.`,
+                ctaLabel: p.cta || 'EXECUTE',
                 tone: 'amber',
-                onConfirm: () => { onClose(); window.flash(`${p.id} executed · ${p.sim.projection}`, 'ok'); },
+                onConfirm: doExecute,
               });
             }
-          }}>{p.cta}</PBtn>
+          }}>{p.cta || 'EXECUTE'}</PBtn>
         </footer>
       </div>
     </div>

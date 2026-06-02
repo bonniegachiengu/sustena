@@ -931,8 +931,32 @@ async function callControlOperator(sustainId, operatorId, params) {
 /* ───────────────────────────────────────────────────────────
    CONTROLLER PANEL — proposal queue + terminal
    ─────────────────────────────────────────────────────────── */
+
+function _transformProposal(raw, fallbackSustainId) {
+  const sim = raw.simulation || {};
+  const votes = raw.votes || { for: 0, against: 0, abstain: 0, total: 0, breakdown: [] };
+  const score = typeof sim.outcome_score === 'number' ? sim.outcome_score : null;
+  return {
+    id:       raw.id,
+    sustain:  raw.sustain_id || fallbackSustainId,
+    title:    raw.operator_name,
+    summary:  `Proposed by ${raw.proposed_by}`,
+    autonomy: score != null ? (score > 0.8 ? 'HIGH' : score > 0.5 ? 'MED' : 'LOW') : 'MED',
+    cta:      'EXECUTE',
+    cost:     sim.pawa_cost ?? '—',
+    sim:      score != null ? {
+      outcomeScore:       score,
+      constraintPassRate: sim.constraint_pass_rate ?? 1,
+      projection:         sim.projection || `Execute ${raw.operator_name}`,
+      runs:               sim.runs ?? 1,
+    } : null,
+    council:  votes,
+  };
+}
+
 function ControllerPanel({ tick, sustain, openModal }) {
   // Universal control state
+  const [proposals, setProposals] = dUseState([]);
   const [autonomy, setAutonomy] = dUseState(0);       // 0-100, threshold for auto-execute
   const [pawaCeiling, setPawaCeiling] = dUseState(8500);
   const [timelock, setTimelock] = dUseState(0);       // hours
@@ -941,23 +965,42 @@ function ControllerPanel({ tick, sustain, openModal }) {
   const [opsEnabled, setOpsEnabled] = dUseState({ mentor: true, protege: true, curator: true, navigator: false });
   const [emergency, setEmergency] = dUseState(false);
 
+  const sustainId = sustain?.id;
+
+  const fetchProposals = async (sid) => {
+    if (!sid) return;
+    try {
+      const d = await api.get(`/api/v1/council/${encodeURIComponent(sid)}/proposals?status=PASSED`);
+      const raw = d?.data?.proposals || [];
+      setProposals(raw.map(r => _transformProposal(r, sid)));
+    } catch {}
+  };
+
+  dUseEffect(() => { fetchProposals(sustainId); }, [sustainId]);
+
+  dUseEffect(() => {
+    if (!sustainId) return;
+    const id = setInterval(() => fetchProposals(sustainId), 15000);
+    return () => clearInterval(id);
+  }, [sustainId]);
+
   return (
     <div className="panel-enter" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 14, padding: '24px 28px', overflowY: 'auto' }}>
       {/* Proposal queue */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
           <span className="label-11">PROPOSAL QUEUE · PASSED COUNCIL</span>
-          <span className="meta-10">{PROPOSALS.length} AWAITING EXECUTION</span>
+          <span className="meta-10">{proposals.length} AWAITING EXECUTION</span>
         </div>
-        {PROPOSALS.length === 0
-          ? <div style={{ padding: '16px 0', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)', textAlign: 'center' }}>No proposals awaiting execution — run operators or seed via SEED panel</div>
+        {proposals.length === 0
+          ? <div style={{ padding: '16px 0', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)', textAlign: 'center' }}>council is quiet · no proposals in motion</div>
           : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-              {PROPOSALS.map((p, i) => (
+              {proposals.map((p, i) => (
                 <ProposalCard
                   key={p.id}
                   p={p}
                   delay={i * 80}
-                  sustainId={sustain?.id || 'homestead.bonnie'}
+                  sustainId={sustainId || 'homestead.bonnie'}
                   onClick={() => openModal(p)}
                 />
               ))}
@@ -1583,6 +1626,7 @@ function LedGrid({ count = 6, active }) {
 
 function ProposalCard({ p, delay, sustainId, onClick }) {
   const [executing, setExecuting] = dUseState(false);
+  const [expanded, setExpanded] = dUseState(false);
   const autonomyColor = p.autonomy === 'HIGH' ? 'var(--amber)' : p.autonomy === 'LOW' ? 'var(--teal)' : 'var(--text-secondary)';
   const ctaTone = p.cta === 'AUTO-EXECUTE' ? 'teal' : 'amber';
 
@@ -1644,6 +1688,53 @@ function ProposalCard({ p, delay, sustainId, onClick }) {
           <SmallMetric label="PAWA" value={p.cost ?? '—'} />
         </div>
       )}
+      {/* Per-councillor vote bars */}
+      {(() => {
+        const { for: f = 0, against: a = 0, abstain: ab = 0, total: t = 0, breakdown = [] } = p.council || {};
+        if (t === 0) return null;
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <span className="meta-10" style={{ color: 'var(--teal)' }}>FOR {f}</span>
+                <span className="meta-10" style={{ color: 'var(--danger)' }}>AGAINST {a}</span>
+                <span className="meta-10" style={{ color: 'var(--text-muted)' }}>ABSTAIN {ab}</span>
+              </div>
+              {breakdown.length > 0 && (
+                <button onClick={e => { e.stopPropagation(); setExpanded(v => !v); }} style={{
+                  fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)',
+                  background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+                }}>{expanded ? '▲' : '▼'}</button>
+              )}
+            </div>
+            <div style={{ display: 'flex', height: 3, borderRadius: 2, overflow: 'hidden', background: 'var(--bg-base)' }}>
+              <div style={{ width: `${(f / t) * 100}%`, background: 'var(--teal)' }} />
+              <div style={{ width: `${(a / t) * 100}%`, background: 'var(--danger)' }} />
+              <div style={{ width: `${(ab / t) * 100}%`, background: 'var(--border)' }} />
+            </div>
+            {expanded && breakdown.map(v => (
+              <div key={v.operative_id} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8,
+                padding: '5px 8px', background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)',
+              }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)', flex: 1 }}>
+                  {v.operative_id}
+                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: v.vote === 'YES' ? 'var(--teal)' : v.vote === 'NO' ? 'var(--danger)' : 'var(--text-muted)' }}>
+                    {v.vote}
+                  </span>
+                  {v.reasoning && (
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-muted)', maxWidth: 140, textAlign: 'right', lineHeight: 1.4 }}>
+                      {v.reasoning.length > 60 ? v.reasoning.slice(0, 60) + '…' : v.reasoning}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
       <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
         <button
           onClick={handleExecute}
