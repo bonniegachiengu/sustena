@@ -177,7 +177,7 @@ function SignInPanel({ open, onClose, onSuccess, defaultMode = 'login' }) {
       try { data = await res.json(); } catch { data = {}; }
       if (!res.ok) {
         if (res.status >= 500) {
-          setError('Cannot reach server · run: uvicorn sustena.api.main:app --reload --port 8000');
+          setError('Cannot reach server · run: uvicorn sustena.api.main:app --reload --port 9000');
         } else {
           setError(_detail(data.detail, mode === 'login' ? 'Invalid email or password' : 'Registration failed'));
         }

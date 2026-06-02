@@ -3,7 +3,7 @@
  *
  * Thin API client for the Sustena devui + orchie endpoints.
  *
- * In dev:  requests go through Vite's proxy (vite.config.ts) → localhost:8000.
+ * In dev:  requests go through Vite's proxy (vite.config.ts) → localhost:9000.
  *          No absolute base URL needed — all paths are relative.
  * In prod: set VITE_API_BASE to the deployed backend URL (e.g. https://api.sustena.io).
  *          Leave unset (or set to '') to use the same origin as the frontend.

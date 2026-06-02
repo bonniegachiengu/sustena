@@ -71,7 +71,7 @@ sustena/
 ```bash
 # From apps/api/
 pip install -r requirements.txt
-uvicorn sustena.api.main:app --reload --port 8000
+uvicorn sustena.api.main:app --reload --port 9000
 ```
 
 ### Testing
@@ -112,7 +112,7 @@ npm run build    # production build
 
 Needs `apps/web/.env` with:
 ```
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=http://localhost:9000
 VITE_ADMIN_TOKEN=dev-admin-token
 ```
 
@@ -547,14 +547,14 @@ npm run dev                             # start dev server
 npm run build                           # production build
 
 # Useful API calls (dev)
-curl -H "Authorization: Bearer dev-admin-token" http://localhost:8000/devui/sustains
-curl -H "Authorization: Bearer dev-admin-token" http://localhost:8000/devui/widgets
+curl -H "Authorization: Bearer dev-admin-token" http://localhost:9000/devui/sustains
+curl -H "Authorization: Bearer dev-admin-token" http://localhost:9000/devui/widgets
 curl -H "Authorization: Bearer dev-admin-token" \
-  "http://localhost:8000/devui/state?sustain_id=<id>"
-curl -X POST http://localhost:8000/orchie/message \
+  "http://localhost:9000/devui/state?sustain_id=<id>"
+curl -X POST http://localhost:9000/orchie/message \
   -H "Content-Type: application/json" \
   -d '{"sustain_id":"<id>","message":"habari"}'
-curl -X POST http://localhost:8000/devui/preview-widget \
+curl -X POST http://localhost:9000/devui/preview-widget \
   -H "Authorization: Bearer dev-admin-token" \
   -H "Content-Type: application/json" \
   -d '{"spec_json":{"widget_type":"budget_allocation_card","fields":[{"label":"Pocket","source":"inputs.pocket_name"}],"ctas":[]},"mock_state":{"inputs":{"pocket_name":"food"}}}'
