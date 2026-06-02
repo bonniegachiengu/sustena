@@ -305,12 +305,62 @@ def _migrate_users_auth(sync_conn) -> None:
     logger.info("Migrated users table — added email and password_hash columns.")
 
 
+def _migrate_sustains_schema(sync_conn) -> None:
+    """
+    Add template_id to the sustains table on existing DBs and relax the
+    seed-only columns to nullable. SQLite cannot ALTER COLUMN, so we
+    rename → recreate → copy → drop.
+
+    No-op when template_id already exists (fresh DB or already migrated).
+
+    Root cause this repairs: DBs created before template_id was added have a
+    sustains table without it. metadata.create_all uses CREATE TABLE IF NOT
+    EXISTS, so it never adds the column, and SustainEngine.list_all() (which
+    SELECTs s.template_id) and instantiate() then fail with
+    "no such column: s.template_id" — leaving the platform with zero sustains.
+    """
+    # Detect with PRAGMA (never raises) — a failing SELECT inside this shared
+    # transaction would invalidate the connection and silently abort the
+    # recreate below.
+    old_cols = [row[1] for row in sync_conn.execute(text("PRAGMA table_info(sustains)"))]
+    if not old_cols or "template_id" in old_cols:
+        return  # no sustains table yet (create_all handles it), or already migrated
+
+    # Columns the old table actually has — copy only their intersection.
+    new_cols = [
+        "id", "user_id", "template_id", "created_at",
+        "sustain_type", "name", "template_version", "is_active",
+    ]
+    carry = [c for c in new_cols if c in old_cols]  # template_id won't be in old_cols
+    cols_csv = ", ".join(carry)
+
+    sync_conn.execute(text("ALTER TABLE sustains RENAME TO _sustains_old"))
+    sync_conn.execute(text("""
+        CREATE TABLE sustains (
+            id               VARCHAR(36) PRIMARY KEY,
+            user_id          VARCHAR(36) NOT NULL,
+            template_id      VARCHAR(100),
+            created_at       DATETIME NOT NULL,
+            sustain_type     VARCHAR(50),
+            name             VARCHAR(100),
+            template_version VARCHAR(20),
+            is_active        BOOLEAN
+        )
+    """))
+    sync_conn.execute(text(
+        f"INSERT INTO sustains ({cols_csv}) SELECT {cols_csv} FROM _sustains_old"
+    ))
+    sync_conn.execute(text("DROP TABLE _sustains_old"))
+    logger.info("Migrated sustains table — added template_id, relaxed seed columns.")
+
+
 async def init_db() -> None:
     """Create all tables if they don't exist. Called at startup."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
         await conn.run_sync(_migrate_users_auth)
+        await conn.run_sync(_migrate_sustains_schema)
     logger.info("Database initialised — all tables ready.")
 
 
