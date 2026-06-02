@@ -202,7 +202,7 @@ Sprint 8.4  Simulator DAG ✅              ← 8.2
 Sprint 8.5  Editor real graph ✅          ← 8.2
 Sprint 8.6  Auth/Users (register/login) ✅ ← 8.2; UNBLOCKS 8.7–8.10
 Sprint 8.7  Lore CMS + Journal API ✅     ← 8.6
-Sprint 8.8  Library + Spore flow          ← 8.2 + 8.6  ⚠️ do next
+Sprint 8.8  Library + Spore flow ✅       ← 8.2 + 8.6
 Sprint 8.9  Arena products + publishing   ← 8.6 + 8.8
 Sprint 8.10 Profile telemetry + Ctrl      ← 8.6 + 8.2
 Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
@@ -276,11 +276,24 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 - ✅ Universal Controls instrument frames were clipped at the bottom — added `flexShrink:0` to the Card and removed `minHeight:0` from `Instrument` (`other.jsx`).
 - ✅ [E-HLD] EXEC MODE column too narrow (130px) — LIVE button overflowed the instrument frame; widened to 165px.
 
+**Sprint 8.5 status (2 Jun 2026):**
+- ✅ `EditorPanel` — GRAPH/STATE/OP SPEC tab toggle; STATE tab fetches `GET /devui/state`, displays live JSON, applies patches via `edit.state_patch`; OP SPEC tab calls `edit.operator_spec` with field selector and result diff.
+- ✅ Node palette OPERATORS section wired to `GET /devui/sustain/{id}/operators`; clicking an operator opens OP SPEC mode pre-filled.
+- ✅ 1554 tests pass (no new backend tests — purely frontend).
+
+**Sprint 8.8 status (2 Jun 2026):**
+- ✅ `schema.py` — added `arena_packages` table (kind, trust_score, download_count, pawa_cost, is_free, tags, description, version).
+- ✅ `routes/arena.py` — `GET /api/v1/arena/packages` (public, ?kind= filter), `POST /api/v1/arena/packages` (auth), `GET /api/v1/arena/packages/{id}` (public), `/products` + `/orders` stubs.
+- ✅ `devui.py` — `GET /devui/library` groups arena_packages by kind for LibraryPanel.
+- ✅ `LibraryPanel` wired to `GET /devui/library`; tab counts show real API data; empty state "mycelium is quiet · no packages yet".
+- ✅ `ProfilePage.jsx` — `SignInPanel` now supports SIGN IN / REGISTER mode toggle with display name field; REGISTER + SIGN IN buttons in header and unauthenticated body.
+- ✅ 14 new tests in `test_arena.py`. **1568 tests total.**
+
 **New routes added in Sprints 8–11:**
 - `POST /api/v1/users/register`, `POST /api/v1/users/login`, `GET /api/v1/users/me`, `GET /api/v1/users/me/stats`, `GET /api/v1/users/me/activity`
 - `GET|POST|PUT /api/v1/lore/entries`, `POST /api/v1/lore/entries/{id}/publish`
 - `GET|POST|PUT|DELETE /api/v1/journal/entries`
-- `GET|POST /api/v1/arena/packages`, `GET /api/v1/arena/products`, `POST /api/v1/arena/orders`
+- `GET /api/v1/arena/packages`, `POST /api/v1/arena/packages`, `GET /api/v1/arena/packages/{id}`, `GET /api/v1/arena/products`, `POST|GET /api/v1/arena/orders`
 - `GET /devui/library`, `GET /devui/sustain/{id}/graph`, `GET /devui/sustain/{id}/operators`
 - `GET|POST /api/v1/council/{sustain_id}/proposals`
 
