@@ -209,7 +209,7 @@ function App() {
         <TweakSlider label="Tick rate" value={t.tickRate} min={250} max={3000} step={250} unit="ms"
           onChange={(v) => setTweak('tickRate', v)} />
         <TweakSection label="Orchie" />
-        <TweakButton label="Open full Orchie (mobile)" onClick={() => window.open('/pages/orchie-panel.html', '_blank')} />
+        <TweakButton label="Open Orchie panel" onClick={() => window.location.href = `/orchie-panel?sustain=${encodeURIComponent(t.sustain || 'homestead.bonnie')}`} />
         <TweakSection label="Atmosphere" />
         <TweakToggle label="Background grain" value={t.showGrain}
           onChange={(v) => setTweak('showGrain', v)} />
@@ -417,6 +417,7 @@ function LeftNav({ panels, active, onSelect, collapsed, onToggle, pageLinks, paw
 
 /* ─── Orchie FAB + Drawer ─────────────────────────────────── */
 function OrchieFAB({ open, onToggle, sustainId = 'homestead.bonnie' }) {
+  const navigate = useNavigate();
   const { messages, thinking, onMessageDone, send, restart } = useStreamedConversation(ORCHIE_DEMO, true, 1400, sustainId);
   const [input, setInput] = dUseState('');
   const [unread, setUnread] = dUseState(0);
@@ -484,7 +485,7 @@ function OrchieFAB({ open, onToggle, sustainId = 'homestead.bonnie' }) {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <FabBtn onClick={restart} title="Restart"><Icon name="replay" size={11} /></FabBtn>
-              <FabBtn onClick={() => window.open('/pages/orchie-panel.html', '_blank')} title="Open mobile"><Icon name="expand" size={11} /></FabBtn>
+              <FabBtn onClick={() => navigate(`/orchie-panel?sustain=${encodeURIComponent(sustainId)}`)} title="Open Orchie panel"><Icon name="expand" size={11} /></FabBtn>
               <FabBtn onClick={onToggle} title="Close"><Icon name="x" size={11} /></FabBtn>
             </div>
           </header>

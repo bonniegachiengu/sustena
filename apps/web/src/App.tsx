@@ -44,6 +44,7 @@ import LorePage from './pages/LorePage'
 import JournalPage from './pages/JournalPage'
 import ArenaPage from './pages/ArenaPage'
 import DocsPage from './pages/DocsPage'
+import OrchePanel from './pages/OrchePanel'
 
 function RootApp() {
   return (
@@ -51,6 +52,8 @@ function RootApp() {
       <Routes>
         <Route path="/" element={<ShellApp />} />
         <Route path="/profile" element={<ProfilePage />} />
+        {/* Orchie Panel — full-page view */}
+        <Route path="/orchie-panel" element={<OrchePanel />} />
         {/* Arena — standalone with its own full header */}
         <Route path="/arena" element={<ArenaPage />} />
         {/* Lore section — shared top nav via LoreLayout */}

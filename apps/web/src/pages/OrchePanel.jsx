@@ -1,1132 +1,749 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { api } from '../lib/api.js';
 
-/* ── Unified React hooks ─────────────────────────────────── */
-    /* d-aliases: used by mcp-data */
-    const dUseState = useState, dUseEffect = useEffect, dUseMemo = useMemo,
-          dUseRef = useRef, dUseCallback = useCallback;
-    /* o-aliases: used by streaming conversation components */
-    const oUseState = useState, oUseEffect = useEffect, oUseRef = useRef, oUseMemo = useMemo;
+/* ── Orchie Panel ─────────────────────────────────────────────────────────────
+   Full-page panel opened from the Orchie FAB expand button.
 
+   Data sources (all real — no hardcoded values):
+     POST /devui/console/execute { operator: 'orchie.morning_brief' } → TODAY card
+     GET  /devui/monitor-widgets?sustain_id=...                        → PINNED MONITORING
+     GET  /devui/state?sustain_id=...                                  → proposals + tasks
+     POST /orchie/message                                               → chat replies
+     POST /devui/console/execute { operator: 'homestead.tasks.complete' } → task checkbox
 
-/* ═══ core.jsx (SustenaMark + Icon) ═══ */
+   Empty states follow the Sustena design language from CLAUDE.md.
+*/
 
-/* Sustena — core primitives: logo, icons, frames, badges, hero readouts */
+/* ── Tiny primitives ─────────────────────────────────────────────────────────── */
 
+function Dot({ color = 'var(--amber)', pulse }) {
+  return (
+    <span className={pulse ? 'pulse' : undefined} style={{
+      width: 5, height: 5, borderRadius: '50%',
+      background: color, flexShrink: 0, display: 'inline-block',
+    }} />
+  );
+}
 
+function SLabel({ children, style }) {
+  return (
+    <span style={{
+      fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em',
+      color: 'var(--text-dim)', textTransform: 'uppercase', ...style,
+    }}>{children}</span>
+  );
+}
 
-/* ───────────────────────────────────────────────────────────
-   LOGO — network node (center disc + 3 branching arcs)
-   ─────────────────────────────────────────────────────────── */
-function SustenaMark({ size = 18, primary = 'var(--amber)', secondary = 'var(--text-primary)', mono = false }) {
-  const a = mono ? secondary : primary;
-  const c = secondary;
+function Empty({ text }) {
+  return (
+    <span style={{
+      fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)',
+      letterSpacing: '0.04em',
+    }}>{text}</span>
+  );
+}
+
+function SustenaMark({ size = 18 }) {
   const endX = 78 * Math.cos((28 * Math.PI) / 180);
   const endY = 78 * Math.sin((28 * Math.PI) / 180);
-  const branchPath = `M 0 0 Q 52 0 ${endX} ${endY}`;
+  const bp = `M 0 0 Q 52 0 ${endX} ${endY}`;
   return (
     <svg width={size} height={size} viewBox="-100 -100 200 200" style={{ display: 'block' }}>
       {[-90, 30, 150].map(r => (
         <g key={r} transform={`rotate(${r})`}>
-          <path d={branchPath} stroke={c} strokeWidth="14" fill="none" strokeLinecap="round" />
-          <circle cx={endX} cy={endY} r="11" fill={c} />
+          <path d={bp} stroke="var(--text-primary)" strokeWidth="14" fill="none" strokeLinecap="round" />
+          <circle cx={endX} cy={endY} r="11" fill="var(--text-primary)" />
         </g>
       ))}
-      <circle cx="0" cy="0" r="22" fill={a} />
+      <circle cx="0" cy="0" r="22" fill="var(--amber)" />
     </svg>
   );
 }
 
-function SustenaLogo({ size = 16, gap = 8 }) {
+/* ── Section frame ───────────────────────────────────────────────────────────── */
+function Section({ label, children, flex, minH, scrollable }) {
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap }}>
-      <SustenaMark size={size} />
-      <span style={{
-        fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 500,
-        letterSpacing: '0.08em', textTransform: 'uppercase',
-        color: 'var(--text-primary)', lineHeight: 1,
-      }}>
-        <span style={{ color: 'var(--amber)' }}>S</span>USTENA
-      </span>
-    </div>
-  );
-}
-
-/* ───────────────────────────────────────────────────────────
-   ICONS — line set
-   ─────────────────────────────────────────────────────────── */
-function Icon({ name, size = 14 }) {
-  const s = { width: size, height: size, fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' };
-  switch (name) {
-    case 'pulse':    return <svg {...s} viewBox="0 0 16 16"><path d="M1 8h3l2-5 3 10 2-5h4" /></svg>;
-    case 'ledger':   return <svg {...s} viewBox="0 0 16 16"><rect x="3" y="2" width="10" height="12" /><path d="M5 5h6M5 8h6M5 11h4" /></svg>;
-    case 'council':  return <svg {...s} viewBox="0 0 16 16"><circle cx="5" cy="5.5" r="1.6" /><circle cx="11" cy="5.5" r="1.6" /><path d="M2 13c0-2 1.4-3.5 3-3.5s3 1.5 3 3.5" /><path d="M8 13c0-2 1.4-3.5 3-3.5s3 1.5 3 3.5" /></svg>;
-    case 'leaf':     return <svg {...s} viewBox="0 0 16 16"><path d="M3 13c0-6 4-10 10-10 0 6-4 10-10 10z" /><path d="M3 13c2-2 4-4 7-6" /></svg>;
-    case 'agent':    return <svg {...s} viewBox="0 0 16 16"><rect x="3" y="4" width="10" height="9" rx="1.5" /><circle cx="6.5" cy="8.5" r="0.8" fill="currentColor" stroke="none" /><circle cx="9.5" cy="8.5" r="0.8" fill="currentColor" stroke="none" /><path d="M8 4V2M6 2h4" /></svg>;
-    case 'vault':    return <svg {...s} viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" /><circle cx="8" cy="8" r="2.5" /><path d="M8 5.5v0.5M8 10v0.5M5.5 8h0.5M10 8h0.5" /></svg>;
-    case 'settings': return <svg {...s} viewBox="0 0 16 16"><circle cx="8" cy="8" r="2" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3 3l1.5 1.5M11.5 11.5L13 13M3 13l1.5-1.5M11.5 4.5L13 3" /></svg>;
-    case 'send':     return <svg {...s} viewBox="0 0 16 16"><path d="M14 2L2 7l5 2 2 5z" /></svg>;
-    case 'arrow-up':   return <svg {...s} viewBox="0 0 16 16"><path d="M8 13V3M4 7l4-4 4 4" /></svg>;
-    case 'arrow-down': return <svg {...s} viewBox="0 0 16 16"><path d="M8 3v10M4 9l4 4 4-4" /></svg>;
-    case 'chevron':  return <svg {...s} viewBox="0 0 16 16"><path d="M6 4l4 4-4 4" /></svg>;
-    case 'check':    return <svg {...s} viewBox="0 0 16 16"><path d="M3 8.5L6.5 12 13 4.5" /></svg>;
-    case 'x':        return <svg {...s} viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" /></svg>;
-    case 'plus':     return <svg {...s} viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg>;
-    case 'expand':   return <svg {...s} viewBox="0 0 16 16"><path d="M3 6V3h3M13 6V3h-3M3 10v3h3M13 10v3h-3" /></svg>;
-    case 'replay':   return <svg {...s} viewBox="0 0 16 16"><path d="M3 8a5 5 0 1 0 5-5" /><path d="M3 3v3h3" /></svg>;
-    case 'crosshair': return <svg {...s} viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" /><path d="M8 1v3M8 12v3M1 8h3M12 8h3" /></svg>;
-    case 'warning':  return <svg {...s} viewBox="0 0 16 16"><path d="M8 2l6.5 11h-13z" /><path d="M8 6v3.5M8 11.5v0.5" /></svg>;
-    case 'dot':      return <svg {...s} viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.5" fill="currentColor" stroke="none" /></svg>;
-    default: return null;
-  }
-}
-
-/* ───────────────────────────────────────────────────────────
-   BADGE — status pill
-   ─────────────────────────────────────────────────────────── */
-function Badge({ tone = 'muted', dot, children }) {
-  return (
-    <span className={`badge badge-${tone}`}>
-      {dot && <span className="badge-dot" />}
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 8,
+      flex: flex ? 1 : undefined, minHeight: minH,
+      overflowY: scrollable ? 'auto' : undefined,
+    }}>
+      <SLabel>{label}</SLabel>
       {children}
-    </span>
-  );
-}
-
-/* Primary action button */
-function PBtn({ children, onClick, variant = 'primary' }) {
-  const [hover, setHover] = useState(false);
-  const primary = variant === 'primary';
-  return (
-    <button onClick={onClick}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{
-        padding: '6px 14px',
-        fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500,
-        letterSpacing: '0.08em', textTransform: 'uppercase',
-        color: primary ? 'var(--bg-base)' : (hover ? 'var(--text-primary)' : 'var(--text-secondary)'),
-        background: primary ? (hover ? '#f5b030' : 'var(--amber)') : (hover ? 'var(--bg-raised)' : 'transparent'),
-        border: '1px solid ' + (primary ? 'var(--amber)' : 'var(--border-mid)'),
-        borderRadius: 'var(--radius-sm)',
-        transition: 'all var(--t-fast)',
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-      }}
-    >{children}</button>
-  );
-}
-
-/* ═══ Orchie panel code from mcp-data.jsx ═══ */
-
-/* ─── Typewriter hook ──────────────────────────────────────── */
-function useTypewriter(text, speed = 30, onDone) {
-  const [shown, setShown] = oUseState('');
-  const doneRef = oUseRef(false);
-  oUseEffect(() => {
-    setShown(''); doneRef.current = false;
-    if (!text) return;
-    let i = 0;
-    const interval = setInterval(() => {
-      i += Math.max(1, Math.floor(speed / 12));
-      if (i >= text.length) {
-        setShown(text); clearInterval(interval);
-        if (!doneRef.current) { doneRef.current = true; onDone?.(); }
-      } else { setShown(text.slice(0, i)); }
-    }, 16);
-    return () => clearInterval(interval);
-  }, [text, speed]);
-  return shown;
-}
-
-/* ─── Scripted demo ─────────────────────────────────────────── */
-const ORCHIE_DEMO = [
-  { role: 'assistant', text: 'Habari, Bonnie. Mid-day briefing — three things landed since you last checked.' },
-  { role: 'assistant', text: 'Your cash position right now:',
-    widget: { type: 'metric', data: { label: 'CASH · CONSOLIDATED', value: '184,250', unit: 'KSH', delta: { positive: false, value: '−4.2%', label: '7d' }, sub: 'runway ~ 42 days at current burn' } } },
-  { role: 'assistant', text: "Here's how it's split across pockets — Food and Transport are eating most of it:",
-    widget: { type: 'pie', data: { slices: [
-      { label: 'Food', value: 38, color: '#E8A020' }, { label: 'Transport', value: 22, color: '#2ab8a0' },
-      { label: 'Utilities', value: 16, color: '#5090e0' }, { label: 'Health', value: 11, color: '#9a7fb8' },
-      { label: 'Savings', value: 8, color: '#4caf80' }, { label: 'Other', value: 5, color: '#565250' },
-    ], total: 'KSH 184,250' } } },
-  { role: 'assistant', text: 'Burn rate is approaching the watchdog ceiling (KSH 4,500/day):',
-    widget: { type: 'line', data: { series: [3120,3280,3410,3520,3680,3840,3920,4010,4080,4140,4180,4214], labels: ['D12','','','D15','','','D18','','','D21','','NOW'], threshold: 4500, unit: 'KSH/day' } } },
-  { role: 'assistant', text: "Pantry is at zero on matumbo — Mama Mboga in Githurai has it at KSH 280/kg, 12-min ETA. Approve?",
-    widget: { type: 'mpesa', data: { recipient: 'MAMA MBOGA · GITHURAI', amount: 'KSH 1,120', memo: 'matumbo 4 kg · restock', till: '5826141', sustain: 'homestead.bonnie' } } },
-  { role: 'assistant', text: 'Quick note — pantry oil is low too.',
-    widget: { type: 'alert', data: { tone: 'amber', title: 'Pantry threshold breach', body: 'Cooking oil at 0.4 L · reorder threshold 0.5 L. Curator can batch this with the matumbo restock.', actions: ['Batch', 'Dismiss'] } } },
-  { role: 'assistant', text: "And one Council motion needs your eye before quorum closes:",
-    widget: { type: 'proposal', data: { id: 'SUS-0148', title: 'Advance Q3 disbursement to Carbon-R&D by 14 days', for: 7, against: 2, abstain: 1, quorum: 10, eta: '4h 22m', score: 0.84 } } },
-];
-
-function pickReply(text) {
-  const t = text.toLowerCase();
-  if (t.includes('budget') || t.includes('pocket'))
-    return { role: 'assistant', text: "Here's the pocket breakdown, with overspend flagged in amber:", widget: { type: 'pie', data: ORCHIE_DEMO[2].widget.data } };
-  if (t.includes('burn') || t.includes('rate'))
-    return { role: 'assistant', text: "Burn rate over the last 12 days — trending up toward ceiling:", widget: { type: 'line', data: ORCHIE_DEMO[3].widget.data } };
-  if (t.includes('reall') || t.includes('move'))
-    return { role: 'assistant', text: "Simulated. Moving KSH 400k from Treasury Ops → Carbon-R&D keeps you 6.1% above council floor and unblocks two grants by 9 days. Draft as SUS-0149?",
-      widget: { type: 'proposal', data: { ...ORCHIE_DEMO[6].widget.data, id: 'SUS-0149 (DRAFT)', title: 'Reallocate −KSH 400k Ops → Carbon-R&D', for: 0, against: 0, abstain: 0, eta: 'NOT QUEUED' } } };
-  if (t.includes('cash') || t.includes('position'))
-    return { role: 'assistant', text: 'Right now:', widget: { type: 'metric', data: ORCHIE_DEMO[1].widget.data } };
-  if (t.includes('pantry') || t.includes('matumbo') || t.includes('sukuma'))
-    return { role: 'assistant', text: "Pantry at 40% — lowest items: matumbo (zero), cooking oil (0.4L), ugali flour (1 pack). Curator has a batch restock ready if you approve.", widget: { type: 'alert', data: ORCHIE_DEMO[5].widget.data } };
-  return { role: 'assistant', text: "Pulling that — I'll need a moment to simulate the dependency chain. Should I surface the impact on Q3 cap, or just the headline number?" };
-}
-
-/* Streamed conversation hook */
-function useStreamedConversation(script, autoStart = true, baseDelay = 1200) {
-  const [shown, setShown] = oUseState([]);
-  const [thinking, setThinking] = oUseState(false);
-  const idxRef = oUseRef(0);
-
-  const playNext = () => {
-    if (idxRef.current >= script.length) return;
-    setThinking(true);
-    const msg = script[idxRef.current];
-    const thinkTime = 400 + Math.random() * 600;
-    setTimeout(() => { setThinking(false); setShown(s => [...s, msg]); idxRef.current += 1; }, thinkTime);
-  };
-
-  oUseEffect(() => {
-    if (!autoStart) return;
-    if (shown.length === 0 && idxRef.current === 0) {
-      const t0 = setTimeout(() => playNext(), 600);
-      return () => clearTimeout(t0);
-    }
-  }, []);
-
-  const onMessageDone = () => { setTimeout(() => playNext(), baseDelay); };
-
-  const send = (text) => {
-    setShown(s => [...s, { role: 'user', text }]);
-    setThinking(true);
-    setTimeout(() => { setThinking(false); setShown(s => [...s, pickReply(text)]); }, 900 + Math.random() * 800);
-  };
-
-  const restart = () => { setShown([]); idxRef.current = 0; setThinking(false); setTimeout(() => playNext(), 400); };
-
-  return { messages: shown, thinking, onMessageDone, send, restart };
-}
-
-/* ─── Widget renderers ──────────────────────────────────────── */
-function MetricWidget({ data, size }) {
-  return (
-    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: size === 'sm' ? '10px 12px' : '14px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span className="label-10">{data.label}</span>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: size === 'sm' ? 26 : 36, fontWeight: 500, letterSpacing: '-0.01em', color: 'var(--text-primary)' }}>{data.value}</span>
-        {data.unit && <span className="meta-10">{data.unit}</span>}
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        {data.delta && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 3, color: data.delta.positive ? 'var(--teal)' : 'var(--danger)' }}>
-            <span style={{ fontSize: 10 }}>{data.delta.positive ? '▲' : '▼'}</span>
-            <span className="val-12" style={{ color: 'inherit', fontSize: 11 }}>{data.delta.value}</span>
-            <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{data.delta.label}</span>
-          </div>
-        )}
-        {data.sub && <span className="meta-10" style={{ color: 'var(--text-muted)', fontSize: 9 }}>{data.sub}</span>}
-      </div>
     </div>
   );
 }
 
-function PieWidget({ data, size }) {
-  const total = data.slices.reduce((s, x) => s + x.value, 0);
-  const dim = size === 'sm' ? 88 : 110; const r = dim / 2 - 6; const cx = dim / 2, cy = dim / 2; const inner = r * 0.55;
-  let acc = 0;
-  const arcs = data.slices.map(s => { const start = (acc / total) * 2 * Math.PI; acc += s.value; const end = (acc / total) * 2 * Math.PI; return { ...s, start, end }; });
-  const pathArc = (a) => {
-    const x1=cx+r*Math.cos(a.start-Math.PI/2),y1=cy+r*Math.sin(a.start-Math.PI/2),x2=cx+r*Math.cos(a.end-Math.PI/2),y2=cy+r*Math.sin(a.end-Math.PI/2);
-    const xi2=cx+inner*Math.cos(a.end-Math.PI/2),yi2=cy+inner*Math.sin(a.end-Math.PI/2),xi1=cx+inner*Math.cos(a.start-Math.PI/2),yi1=cy+inner*Math.sin(a.start-Math.PI/2);
-    const large=a.end-a.start>Math.PI?1:0;
-    return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${xi2} ${yi2} A ${inner} ${inner} 0 ${large} 0 ${xi1} ${yi1} Z`;
-  };
-  return (
-    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: size === 'sm' ? '10px 12px' : '14px 16px', display: 'flex', gap: 14, alignItems: 'center' }}>
-      <div style={{ position: 'relative', flexShrink: 0 }}>
-        <svg width={dim} height={dim}>
-          {arcs.map((a, i) => <path key={i} d={pathArc(a)} fill={a.color} style={{ opacity: 0, animation: `fadeUp 0.4s ease-out ${0.15+i*0.08}s forwards`, transformOrigin: `${cx}px ${cy}px` }} />)}
-        </svg>
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-          <span className="label-10" style={{ fontSize: 8 }}>TOTAL</span>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: size === 'sm' ? 10 : 11, fontWeight: 500, color: 'var(--text-primary)' }}>{data.total}</span>
-        </div>
-      </div>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-        {data.slices.map((s, i) => (
-          <div key={i} className="fade-up" style={{ display: 'grid', gridTemplateColumns: '8px 1fr auto', gap: 8, alignItems: 'center', animationDelay: `${0.25+i*0.06}s` }}>
-            <span style={{ width: 7, height: 7, background: s.color, borderRadius: 1 }} />
-            <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
-            <span className="val-12" style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{s.value}%</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function LineWidget({ data, size }) {
-  const W = size === 'sm' ? 260 : 320; const H = size === 'sm' ? 72 : 90;
-  const series = data.series;
-  const min = Math.min(...series, data.threshold || Infinity) * 0.9;
-  const max = Math.max(...series, data.threshold || -Infinity) * 1.05;
-  const range = max - min || 1;
-  const pts = series.map((v, i) => [(i / (series.length - 1)) * (W - 24) + 12, H - ((v - min) / range) * H + 8]);
-  const linePath = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ');
-  const [lx, ly] = pts[pts.length - 1];
-  const thrY = data.threshold ? (H - ((data.threshold - min) / range) * H + 8) : null;
-  return (
-    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: size === 'sm' ? '10px 12px' : '14px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span className="label-10">BURN RATE · LAST 12 DAYS</span>
-        <span className="val-12" style={{ fontSize: 11, color: 'var(--amber)' }}>{series[series.length-1].toLocaleString()} {data.unit}</span>
-      </div>
-      <svg width={W} height={H + 18} style={{ overflow: 'visible' }}>
-        {thrY != null && <><line x1="0" y1={thrY} x2={W} y2={thrY} stroke="var(--danger)" strokeDasharray="2 3" strokeWidth="1" opacity="0.6" /><text x={W-4} y={thrY-4} textAnchor="end" fontFamily="DM Mono" fontSize="9" fill="var(--danger)">CEILING {data.threshold}</text></>}
-        <path d={`${linePath} L ${lx} ${H+8} L 12 ${H+8} Z`} fill="var(--amber-glow)" style={{ opacity:0, animation:'fadeUp 0.5s ease-out 0.4s forwards' }} />
-        <path d={linePath} fill="none" stroke="var(--amber)" strokeWidth="1.4" className="draw-line" style={{ '--dash-len': W * 3, animationDuration: '1s' }} />
-        <circle cx={lx} cy={ly} r="3" fill="var(--amber)" style={{ opacity:0, animation:'fadeUp 0.3s ease-out 1.1s forwards' }} />
-        {data.labels?.map((l, i) => { if (!l) return null; const x=(i/(series.length-1))*(W-24)+12; return <text key={i} x={x} y={H+18} textAnchor="middle" fontFamily="DM Mono" fontSize="9" fill="var(--text-muted)">{l}</text>; })}
-      </svg>
-    </div>
-  );
-}
-
-function MpesaWidget({ data, size }) {
-  return (
-    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--amber-border)', borderRadius: 'var(--radius-md)', padding: size === 'sm' ? '12px 14px' : '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, position: 'relative', overflow: 'hidden' }}>
-      <span style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'var(--amber)' }} />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span className="label-10" style={{ color: 'var(--amber)' }}>M-PESA · STK PUSH</span>
-        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>TILL · {data.till}</span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-secondary)' }}>To</span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-primary)' }}>{data.recipient}</span>
-      </div>
-      <span style={{ fontFamily: 'var(--mono)', fontSize: 24, fontWeight: 500, color: 'var(--text-primary)' }}>{data.amount}</span>
-      <span className="meta-10" style={{ color: 'var(--text-muted)' }}>memo · {data.memo}</span>
-      <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-        <button onClick={() => window.flash?.(`Sent ${data.amount} to ${data.recipient}`, 'ok')} style={{ flex: 1, padding: '8px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', background: 'var(--amber)', color: 'var(--bg-base)', border: '1px solid var(--amber)', borderRadius: 'var(--radius-sm)' }}>APPROVE · PIN</button>
-        <button onClick={() => window.flash?.('Deferred · re-prompt in 30 min', 'info')} style={{ padding: '8px 12px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)' }}>DEFER</button>
-      </div>
-    </div>
-  );
-}
-
-function AlertWidget({ data, size }) {
-  const c = data.tone === 'amber' ? 'var(--amber)' : data.tone === 'danger' ? 'var(--danger)' : 'var(--teal)';
-  return (
-    <div style={{ background: 'var(--bg-surface)', border: `1px solid ${c}`, borderLeftWidth: 3, borderRadius: 'var(--radius-md)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Icon name="warning" size={12} />
-        <span className="label-10" style={{ color: c }}>{data.title.toUpperCase()}</span>
-      </div>
-      <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{data.body}</span>
-      {data.actions && (
-        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-          {data.actions.map((a, i) => (
-            <button key={a} onClick={() => window.flash?.(`${a} · ${data.title.toLowerCase()}`, i === 0 ? 'ok' : 'info')} style={{ padding: '5px 10px', fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', color: i === 0 ? c : 'var(--text-muted)', border: `1px solid ${i === 0 ? c : 'var(--border-mid)'}`, borderRadius: 'var(--radius-sm)', background: 'transparent' }}>{a.toUpperCase()}</button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProposalWidget({ data, size }) {
-  const total = data.for + data.against + data.abstain;
-  const forPct = (data.for / total) * 100 || 0;
-  const againstPct = (data.against / total) * 100 || 0;
-  return (
-    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--amber-border)', borderRadius: 'var(--radius-md)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{data.id} · COUNCIL</span>
-          <span style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', lineHeight: 1.35 }}>{data.title}</span>
-        </div>
-        <Badge tone="amber" dot>VOTING</Badge>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span className="meta-10" style={{ fontSize: 9 }}>QUORUM</span>
-          <span className="val-12" style={{ fontSize: 10, color: total >= data.quorum ? 'var(--teal)' : 'var(--amber)' }}>{total}/{data.quorum}</span>
-        </div>
-        <div style={{ display: 'flex', height: 4, borderRadius: 2, overflow: 'hidden', background: 'var(--bg-base)' }}>
-          <div style={{ width: `${forPct}%`, background: 'var(--teal)' }} />
-          <div style={{ width: `${againstPct}%`, background: 'var(--danger)' }} />
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <span className="meta-10" style={{ fontSize: 9, color: 'var(--teal)' }}>YES {data.for}</span>
-          <span className="meta-10" style={{ fontSize: 9, color: 'var(--danger)' }}>NO {data.against}</span>
-          <span className="meta-10" style={{ fontSize: 9, color: 'var(--text-muted)' }}>ABSTAIN {data.abstain}</span>
-        </div>
-      </div>
-      {data.eta && data.eta !== 'NOT QUEUED' && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-          <span className="meta-10">CLOSES IN {data.eta}</span>
-          <PBtn onClick={() => window.flash?.(`Vote cast · YES on ${data.id}`, 'ok')}>VOTE</PBtn>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function OrchieWidget({ widget, size = 'sm' }) {
-  if (!widget) return null;
-  switch (widget.type) {
-    case 'metric':   return <MetricWidget data={widget.data} size={size} />;
-    case 'pie':      return <PieWidget data={widget.data} size={size} />;
-    case 'line':     return <LineWidget data={widget.data} size={size} />;
-    case 'mpesa':    return <MpesaWidget data={widget.data} size={size} />;
-    case 'alert':    return <AlertWidget data={widget.data} size={size} />;
-    case 'proposal': return <ProposalWidget data={widget.data} size={size} />;
-    default: return null;
-  }
-}
-
-/* ─── Animated message bubble ───────────────────────────────── */
-function OrchieBubble({ m, size = 'sm', onDone }) {
-  const [widgetReady, setWidgetReady] = oUseState(false);
-  const text = useTypewriter(m.text || '', 30, () => setTimeout(() => { setWidgetReady(true); onDone?.(); }, 80));
-  const isUser = m.role === 'user';
-  const compact = size === 'sm';
-  if (isUser) {
+/* ── TODAY card ──────────────────────────────────────────────────────────────── */
+function TodayCard({ brief, sustainId, onTaskComplete }) {
+  if (!brief) {
     return (
-      <div className="fade-up" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-        <div className="bubble-user" style={{ maxWidth: compact ? '85%' : '78%', fontSize: compact ? 12 : 14, fontFamily: 'var(--ui)', color: 'var(--text-primary)', lineHeight: 1.5 }}>{m.text}</div>
+      <div style={cardStyle}>
+        <Empty text="nothing scheduled · sustain state nominal" />
       </div>
     );
   }
-  return (
-    <div className="fade-up" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-      {!compact && (
-        <div style={{ width: 28, height: 28, flexShrink: 0, borderRadius: '50%', background: 'var(--bg-surface)', border: '1px solid var(--amber-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 12px var(--amber-glow)' }}>
-          <SustenaMark size={18} />
-        </div>
-      )}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div className="bubble" style={{ fontFamily: 'var(--ui)', fontSize: compact ? 12 : 14, color: 'var(--text-primary)', lineHeight: 1.55 }}>
-          {compact && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-              <SustenaMark size={12} /><span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--amber)', letterSpacing: '0.08em' }}>ORCHIE</span>
-            </div>
-          )}
-          {text}
-          {text.length < (m.text?.length || 0) && <span className="t-cursor" style={{ width: 5, height: 11 }} />}
-        </div>
-        {m.widget && widgetReady && <div className="fade-up"><OrchieWidget widget={m.widget} size={size} /></div>}
-      </div>
-    </div>
-  );
-}
-
-function OrchieThinking({ size = 'sm' }) {
-  return (
-    <div className="fade-up" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-      {size === 'md' && (
-        <div style={{ width: 28, height: 28, flexShrink: 0, borderRadius: '50%', background: 'var(--bg-surface)', border: '1px solid var(--amber-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <SustenaMark size={18} />
-        </div>
-      )}
-      <div className="bubble" style={{ display: 'flex', gap: 4, padding: '10px 14px' }}>
-        {[0,1,2].map(i => <span key={i} className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--text-muted)', animationDelay: `${i*0.18}s` }} />)}
-      </div>
-    </div>
-  );
-}
-
-const ORCHIE_INTENTS = [
-  { text: 'Complete Vyyb Phase 1 setup',     confidence: 87, source: 'from task list',  id: 'i1' },
-  { text: 'Review morning briefing',          confidence: 92, source: 'from calendar',  id: 'i2' },
-  { text: 'Schedule delivery dispatch',       confidence: 74, source: 'from chat',      id: 'i3' },
-  { text: 'File Sustena XII entity docs',     confidence: 61, source: 'from task list', id: 'i4' },
-];
-
-/*
-  OrchieExpansionPanel — mobile full-page overlay.
-  Voice + chat CTAs at top, intent cards / customisations / activity viz below.
-*/
-function OrchieExpansionPanel({ open, onClose, tick = 0 }) {
-  const [intents, setIntents] = dUseState(ORCHIE_INTENTS);
-  const [prefResponseLen, setPrefResponseLen] = dUseState('balanced');
-  const [prefProactive, setPrefProactive] = dUseState(true);
-  const [prefNotifs, setPrefNotifs] = dUseState('important');
-  const [isRecording, setIsRecording] = dUseState(false);
-  const [chatInput, setChatInput] = dUseState('');
-  const [isListening, setIsListening] = dUseState(false);
-
-  const dismissIntent = (id) => setIntents(prev => prev.filter(i => i.id !== id));
-
-  const handleVoice = () => {
-    setIsRecording(r => {
-      if (!r) window.flash?.('Listening… speak now', 'info');
-      else     window.flash?.('Voice captured — Orchie is processing', 'ok');
-      return !r;
-    });
-  };
-
-  const handleChat = (e) => {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
-    window.flash?.(`Orchie: processing "${chatInput.slice(0, 40)}…"`, 'info');
-    setChatInput('');
-  };
+  const { tasks_due_today = [], events_today = [], passed_strategies = [], liquid_balance = 0 } = brief;
+  const noData = !tasks_due_today.length && !events_today.length && !passed_strategies.length;
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'var(--bg-base)', display: 'flex', flexDirection: 'column', opacity: open ? 1 : 0, pointerEvents: open ? 'all' : 'none', transition: 'opacity 0.22s ease' }}>
-
-      {/* ── Top bar ── */}
-      <div style={{ padding: '10px 16px', flexShrink: 0, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-surface)' }}>
-        <button onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-secondary)', padding: '3px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', transition: 'all var(--t-fast)', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.07em' }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--amber-border)'; e.currentTarget.style.color = 'var(--amber)'; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
-        >
-          <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 1.5L2.5 4.5L6 7.5" /></svg>
-          BACK
-        </button>
-        <div style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
-        <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--bg-base)', border: '1px solid var(--amber-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 6px var(--amber-glow)', flexShrink: 0 }}>
-          <SustenaMark size={13} />
-        </div>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '0.08em' }}>ORCHIE</span>
-        <span style={{ flex: 1 }} />
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-          {['DELEGATING', 'RECEIVING', 'ANSWERING', 'VOTING'][tick % 4]}
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', background: '#2ab8a015', border: '1px solid #2ab8a040', borderRadius: 'var(--radius-sm)' }}>
-          <span className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--teal)', flexShrink: 0 }} />
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--teal)', letterSpacing: '0.08em' }}>ACTIVE</span>
+    <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Liquid balance */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>LIQUID</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 16, fontWeight: 500, color: 'var(--amber)' }}>
+          KES {liquid_balance.toLocaleString()}
         </span>
       </div>
 
-      {/* ── Primary CTAs: Voice + Chat + Listen ── */}
-      <div style={{ padding: '24px 24px 18px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, flexShrink: 0, background: 'linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-base) 100%)' }}>
-        {/* Voice mic */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-          <button onClick={handleVoice} style={{
-            width: 72, height: 72, borderRadius: '50%',
-            background: isRecording ? 'radial-gradient(circle at 50% 50%, #e0505022 0%, transparent 70%)' : 'radial-gradient(circle at 50% 50%, var(--amber-glow) 0%, transparent 70%)',
-            border: isRecording ? '2px solid var(--danger)' : '2px solid var(--amber-border)',
-            boxShadow: isRecording ? '0 0 0 6px #e0505018, 0 0 0 14px #e0505008' : '0 0 0 4px var(--amber-glow), 0 4px 18px rgba(0,0,0,0.4)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', transition: 'all 0.25s ease',
-            animation: isRecording ? 'orchMicPulse 1.1s ease-in-out infinite' : 'none',
-          }}>
-            <style>{`@keyframes orchMicPulse { 0%,100% { box-shadow: 0 0 0 4px #e0505025, 0 0 0 10px #e0505010; } 50% { box-shadow: 0 0 0 10px #e0505035, 0 0 0 20px #e0505015; } }`}</style>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={isRecording ? 'var(--danger)' : 'var(--amber)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="2" width="6" height="12" rx="3" />
-              <path d="M5 10a7 7 0 0 0 14 0" />
-              <line x1="12" y1="17" x2="12" y2="21" />
-              <line x1="9" y1="21" x2="15" y2="21" />
-            </svg>
-          </button>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: isRecording ? 'var(--danger)' : 'var(--amber)' }}>
-            {isRecording ? '● LISTENING…' : 'SPEAK TO ORCHIE'}
-          </span>
-        </div>
+      {noData && <Empty text="nothing scheduled · sustain state nominal" />}
 
-        {/* Chat input */}
-        <form onSubmit={handleChat} style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 480 }}>
-          <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Ask Orchie anything…"
-            style={{ flex: 1, padding: '9px 13px', fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-primary)', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', outline: 'none', transition: 'border-color var(--t-fast)' }}
-            onFocus={e => e.target.style.borderColor = 'var(--amber-border)'}
-            onBlur={e => e.target.style.borderColor = 'var(--border)'}
-          />
-          <button type="submit" style={{ padding: '9px 16px', flexShrink: 0, background: chatInput.trim() ? 'var(--amber)' : 'var(--bg-overlay)', border: `1px solid ${chatInput.trim() ? 'var(--amber)' : 'var(--border)'}`, borderRadius: 'var(--radius-md)', color: chatInput.trim() ? 'var(--bg-base)' : 'var(--text-dim)', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.07em', transition: 'all var(--t-fast)', cursor: 'pointer' }}>SEND</button>
-        </form>
-
-        {/* Listen toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', maxWidth: 480 }}>
-          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-          <button onClick={() => setIsListening(l => !l)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 14px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em', color: isListening ? 'var(--teal)' : 'var(--text-muted)', background: isListening ? 'var(--teal-glow)' : 'transparent', border: `1px solid ${isListening ? 'var(--teal-border)' : 'var(--border)'}`, borderRadius: 'var(--radius-sm)', transition: 'all var(--t-fast)', cursor: 'pointer' }}>
-            <span className={isListening ? 'pulse' : ''} style={{ width: 5, height: 5, borderRadius: '50%', background: isListening ? 'var(--teal)' : 'var(--text-dim)', flexShrink: 0 }} />
-            {isListening ? 'LISTENING' : 'LISTEN'}
-          </button>
-          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-        </div>
-      </div>
-
-      {/* ── Scrollable body: intents + customisations + activity ── */}
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 0 }}>
-
-        {/* Intent cards */}
-        <div style={{ padding: '14px 14px 10px', borderBottom: '1px solid var(--border)' }}>
-          <span className="label-10" style={{ display: 'block', marginBottom: 10 }}>ORCHIE KNOWS YOU WANT</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {intents.map(intent => (
-              <div key={intent.id} className="fade-up" style={{ padding: '10px 12px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', position: 'relative' }}>
-                <button onClick={() => dismissIntent(intent.id)} style={{ position: 'absolute', top: 8, right: 8, color: 'var(--text-dim)', padding: 2, transition: 'color var(--t-fast)' }}
-                  onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'} onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
-                ><Icon name="x" size={10} /></button>
-                <p style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.4, marginBottom: 8, paddingRight: 16 }}>{intent.text}</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ flex: 1, height: 3, background: 'var(--bg-raised)', borderRadius: 2, overflow: 'hidden' }}>
-                    <div style={{ width: `${intent.confidence}%`, height: '100%', background: intent.confidence > 80 ? 'var(--teal)' : intent.confidence > 60 ? 'var(--amber)' : 'var(--text-muted)', borderRadius: 2, transition: 'width 0.6s ease' }} />
-                  </div>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)', minWidth: 30 }}>{intent.confidence}%</span>
-                </div>
-                <span className="meta-10" style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 4, display: 'block' }}>{intent.source}</span>
-              </div>
-            ))}
-            {intents.length === 0 && <div style={{ textAlign: 'center', padding: '16px 0' }}><span className="meta-11" style={{ color: 'var(--text-dim)' }}>All intents reviewed</span></div>}
-          </div>
-        </div>
-
-        {/* Customisations */}
-        <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
-          <span className="label-10" style={{ display: 'block', marginBottom: 10 }}>CUSTOMISATIONS</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <span className="meta-10" style={{ color: 'var(--text-muted)' }}>Response length</span>
-              <div style={{ display: 'flex', gap: 3 }}>
-                {['brief', 'balanced', 'detailed'].map(v => (
-                  <button key={v} onClick={() => setPrefResponseLen(v)} style={{ flex: 1, padding: '4px 0', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase', color: prefResponseLen === v ? 'var(--amber)' : 'var(--text-muted)', background: prefResponseLen === v ? 'var(--amber-glow)' : 'transparent', border: `1px solid ${prefResponseLen === v ? 'var(--amber-border)' : 'var(--border)'}`, borderRadius: 'var(--radius-sm)', transition: 'all var(--t-fast)' }}>{v}</button>
-                ))}
-              </div>
-            </div>
-            <OrchieToggle label="Proactive suggestions" value={prefProactive} onChange={setPrefProactive} />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <span className="meta-10" style={{ color: 'var(--text-muted)' }}>Notification level</span>
-              <div style={{ display: 'flex', gap: 3 }}>
-                {['all', 'important', 'silent'].map(v => (
-                  <button key={v} onClick={() => setPrefNotifs(v)} style={{ flex: 1, padding: '4px 0', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase', color: prefNotifs === v ? 'var(--amber)' : 'var(--text-muted)', background: prefNotifs === v ? 'var(--amber-glow)' : 'transparent', border: `1px solid ${prefNotifs === v ? 'var(--amber-border)' : 'var(--border)'}`, borderRadius: 'var(--radius-sm)', transition: 'all var(--t-fast)' }}>{v}</button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Activity visualisation */}
-        <div style={{ padding: '12px 14px', flex: 1 }}>
-          <span className="label-10" style={{ display: 'block', marginBottom: 10 }}>ACTIVITY · AMBIENT</span>
-          <OrchieActivityViz tick={tick} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function OrchieToggle({ label, value, onChange }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-      <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-secondary)' }}>{label}</span>
-      <button onClick={() => onChange(!value)} style={{
-        width: 32, height: 18, borderRadius: 9, flexShrink: 0,
-        background: value ? 'var(--amber)' : 'var(--bg-overlay)',
-        border: `1px solid ${value ? 'var(--amber)' : 'var(--border-mid)'}`,
-        position: 'relative', transition: 'all var(--t-mid)', cursor: 'pointer',
-      }}>
-        <span style={{
-          position: 'absolute', top: 2,
-          left: value ? 'calc(100% - 16px)' : 2,
-          width: 12, height: 12, borderRadius: 6,
-          background: value ? 'var(--bg-base)' : 'var(--text-dim)',
-          transition: 'left var(--t-mid)',
-        }} />
-      </button>
-    </div>
-  );
-}
-
-/* Ambient activity SVG animation — 4 states cycling via CSS */
-function OrchieActivityViz({ tick }) {
-  // States: delegating, receiving, querying, voting
-  const state = tick % 4;
-  const nodes = [
-    { label: 'ORCHIE',   x: 90, y: 80, isCenter: true },
-    { label: 'budget.op', x: 30, y: 40  },
-    { label: 'pantry.op', x: 155, y: 40 },
-    { label: 'COUNCIL',   x: 90, y: 140 },
-    { label: 'INBOX',     x: 30, y: 130 },
-  ];
-
-  // Animated dot positions — different per state
-  const dotPath = {
-    0: [{ from: 0, to: 1 }, { from: 0, to: 2 }], // delegating
-    1: [{ from: 1, to: 0 }, { from: 2, to: 0 }], // receiving feedback
-    2: [{ from: 4, to: 0 }],                       // answering query
-    3: [{ from: 0, to: 3 }, { from: 3, to: 0 }],  // council voting
-  }[state] || [];
-
-  const stateLabels = ['DELEGATING', 'RECEIVING', 'ANSWERING', 'VOTING'];
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* State label */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--amber)', flexShrink: 0 }} />
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--amber)', letterSpacing: '0.08em' }}>{stateLabels[state]}</span>
-      </div>
-
-      {/* SVG ambient graph */}
-      <svg width="100%" height="180" viewBox="0 0 190 180" style={{ overflow: 'visible' }}>
-        <style>{`
-          @keyframes orchDot {
-            0%   { transform: translate(0px, 0px); opacity: 0; }
-            10%  { opacity: 1; }
-            90%  { opacity: 1; }
-            100% { transform: translate(var(--dx), var(--dy)); opacity: 0; }
-          }
-          @keyframes orchPulse {
-            0%, 100% { r: 9; opacity: 0.7; }
-            50%       { r: 13; opacity: 1; }
-          }
-        `}</style>
-
-        {/* Edges */}
-        {[
-          [0,1],[0,2],[0,3],[0,4]
-        ].map(([a,b], i) => (
-          <line key={i}
-            x1={nodes[a].x} y1={nodes[a].y}
-            x2={nodes[b].x} y2={nodes[b].y}
-            stroke="var(--border-mid)" strokeWidth="0.8" opacity="0.4"
-          />
-        ))}
-
-        {/* Nodes */}
-        {nodes.map((n, i) => (
-          <g key={i}>
-            {n.isCenter ? (
-              <>
-                <circle cx={n.x} cy={n.y} r="14"
-                  fill="var(--amber-glow)" stroke="var(--amber-border)" strokeWidth="1"
-                  style={{ animation: 'orchPulse 2s ease-in-out infinite' }}
-                />
-                <g transform={`translate(${n.x-7}, ${n.y-7})`}>
-                  <SustenaMark size={14} primary="var(--amber)" secondary="var(--text-dim)" />
-                </g>
-              </>
-            ) : (
-              <>
-                <circle cx={n.x} cy={n.y} r="7"
-                  fill="var(--bg-raised)" stroke="var(--border-mid)" strokeWidth="1"
-                />
-                <circle cx={n.x} cy={n.y} r="3"
-                  fill="var(--text-dim)"
-                />
-              </>
-            )}
-            <text x={n.x} y={n.y + (n.isCenter ? 24 : 18)}
-              textAnchor="middle"
-              fontFamily="DM Mono" fontSize="8"
-              fill="var(--text-muted)"
-            >{n.label}</text>
-          </g>
-        ))}
-
-        {/* Animated flow dots */}
-        {dotPath.map((dp, i) => {
-          const from = nodes[dp.from];
-          const to = nodes[dp.to];
-          const dx = to.x - from.x;
-          const dy = to.y - from.y;
-          return (
-            <circle key={`dot-${i}`}
-              cx={from.x} cy={from.y} r="3"
-              fill="var(--amber)"
-              style={{
-                '--dx': `${dx}px`, '--dy': `${dy}px`,
-                animation: `orchDot 1.8s ease-in-out ${i * 0.4}s infinite`,
-                transformOrigin: `${from.x}px ${from.y}px`,
-              }}
-            />
-          );
-        })}
-
-        {/* Center pulse ring on query/vote */}
-        {(state === 2 || state === 3) && (
-          <circle cx={nodes[0].x} cy={nodes[0].y} r="20"
-            fill="none" stroke="var(--amber)" strokeWidth="0.8" opacity="0.4"
-            style={{ animation: 'orchPulse 1.4s ease-in-out infinite' }}
-          />
-        )}
-      </svg>
-
-      {/* Mini to-do checklist (ambient) */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-        <span className="label-10" style={{ fontSize: 9 }}>CURRENT TASKS</span>
-        {[
-          { done: true,              label: 'Morning briefing compiled' },
-          { done: true,              label: 'Council vote SUS-0148 tracked' },
-          { done: false, active: true, label: 'Fetching pantry state' },
-          { done: false, active: false, label: 'Awaiting M-Pesa confirm' },
-        ].map((t, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{
-              fontFamily: 'var(--mono)', fontSize: 10,
-              color: t.done ? 'var(--ok)' : t.active ? 'var(--amber)' : 'var(--text-dim)',
-            }}>
-              {t.done ? '✓' : t.active ? '⟳' : '○'}
-            </span>
-            <span style={{
-              fontFamily: 'var(--ui)', fontSize: 11,
-              color: t.done ? 'var(--text-muted)' : t.active ? 'var(--text-primary)' : 'var(--text-dim)',
-              textDecoration: t.done ? 'line-through' : 'none',
-            }}>
-              {t.label}
-            </span>
-            {t.active && (
-              <span className="pulse" style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--amber)', marginLeft: 2 }} />
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-
-/* ── Desktop summary data ─────────────────────────────────── */
-const DKTP_MOST_ASKED = [
-  { q: "What's my burn rate?",           count: 14, r: 'KES 4,214 / day · up 8% from yesterday' },
-  { q: 'Should I restock sukuma wiki?',  count: 8,  r: 'Pantry 40% · ~3-day runway at current rate' },
-  { q: 'Any pending chama payouts?',     count: 6,  r: 'Wanjiku · KES 6,000 due this Friday' },
-];
-const DKTP_PINNED = [
-  { label: 'Pantry Level',    value: '40%',    tone: 'warn', sub: 'restock within 72h' },
-  { label: 'Budget Consumed', value: '72%',    tone: 'warn', sub: 'KES 8,420 / 11,700' },
-  { label: 'SUS-0148',        value: 'VOTING', tone: 'info', sub: '3/5 quorum · 18h left' },
-];
-const DKTP_OPEN_EDITS = [
-  { name: 'budget.allocate', diff: 'v2.1 → v2.2-fork', status: 'COUNCIL REVIEW', tone: 'amber' },
-  { name: 'Mentor policy',   diff: 'v1.4 → v1.5-fork', status: 'SANDBOXED',      tone: 'info'  },
-];
-const DKTP_RECENT = [
-  { q: 'Burn rate check', time: '08:14', snippet: 'Burn rate KES 4,214/day, up 8% from yesterday. Food pocket is the primary driver at KES 2,100.' },
-  { q: 'Pantry status',   time: '07:52', snippet: 'Pantry at 40% · needs restock in ~3 days. Sukuma wiki lowest at 1 bunch remaining.' },
-  { q: 'SUS-0148 update', time: '07:31', snippet: 'Council quorum reached. Mentor ✓, Curator ✓, Navigator pending. Vote closes in 18h.' },
-];
-const DKTP_COUNCIL = [
-  { name: 'MENTOR',    domain: 96, stake: 34, vote: 'YES', weight: 0.34 },
-  { name: 'CURATOR',   domain: 78, stake: 28, vote: 'YES', weight: 0.28 },
-  { name: 'NAVIGATOR', domain: 55, stake: 22, vote: null,  weight: 0.22 },
-  { name: 'PROTÉGÉ',   domain: 40, stake: 16, vote: 'NO',  weight: 0.16 },
-];
-const DKTP_TASKS = [
-  { label: 'Morning briefing', active: true, subs: [
-    { label: 'Fetch calendar events', done: true  },
-    { label: 'Read messages',         done: true  },
-    { label: 'Scan pantry state',     active: true },
-    { label: 'Compile suggestions',   pending: true },
-  ]},
-  { label: 'Budget reallocation review', pending: true, subs: [
-    { label: 'Validate constraints', pending: true },
-    { label: 'Draft proposal',       pending: true },
-  ]},
-  { label: 'Council SUS-0148', pending: true, subs: [
-    { label: 'Monitor quorum', pending: true },
-  ]},
-];
-
-/* ── OrchieDesktopPanel ───────────────────────────────────── */
-function OrchieDesktopPanel({ onClose, tick }) {
-  const [isListening, setIsListening] = dUseState(false);
-  const [chatInput, setChatInput] = dUseState('');
-
-  const handleChat = (e) => {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
-    setChatInput('');
-  };
-
-  const toneCol = { warn: 'var(--warn)', info: 'var(--info)', ok: 'var(--ok)', amber: 'var(--amber)' };
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'var(--bg-base)', display: 'flex', flexDirection: 'column' }}>
-
-      {/* TOP BAR */}
-      <div style={{ padding: '10px 16px', flexShrink: 0, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-surface)' }}>
-        <button onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-secondary)', padding: '3px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'transparent', transition: 'all var(--t-fast)', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.07em' }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--amber-border)'; e.currentTarget.style.color = 'var(--amber)'; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
-        >
-          <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M6 1.5L2.5 4.5L6 7.5"/></svg>
-          BACK
-        </button>
-        <div style={{ width: 1, height: 16, background: 'var(--border)' }} />
-        <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--bg-base)', border: '1px solid var(--amber-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 6px var(--amber-glow)', flexShrink: 0 }}>
-          <SustenaMark size={13} />
-        </div>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '0.08em' }}>ORCHIE</span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.06em' }}>DESKTOP</span>
-        <span style={{ flex: 1 }} />
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-          {['DELEGATING','RECEIVING','ANSWERING','VOTING'][tick % 4]}
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', background: '#2ab8a015', border: '1px solid #2ab8a040', borderRadius: 'var(--radius-sm)' }}>
-          <span className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--teal)', flexShrink: 0 }} />
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--teal)', letterSpacing: '0.08em' }}>ACTIVE</span>
-        </span>
-      </div>
-
-      {/* BODY: 2/3 | 1/3 */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '2fr 1fr', minHeight: 0, overflow: 'hidden' }}>
-
-        {/* ── LEFT PANEL ── */}
-        <div style={{ borderRight: '1px solid var(--border)', overflowY: 'auto', padding: '20px 24px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-
-            {/* MOST ASKED */}
-            <div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 10 }}>MOST ASKED</div>
-              {DKTP_MOST_ASKED.map((item, i) => (
-                <div key={i} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderLeft: '2px solid var(--amber)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', marginBottom: 6 }}>
-                  <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4, lineHeight: 1.35 }}>{item.q}</div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.4 }}>{item.r}</div>
-                  <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)', marginTop: 4 }}>{item.count}× this week</div>
-                </div>
-              ))}
-            </div>
-
-            {/* PINNED MONITORING */}
-            <div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 10 }}>PINNED MONITORING</div>
-              {DKTP_PINNED.map((item, i) => {
-                const c = toneCol[item.tone] || 'var(--text-secondary)';
-                return (
-                  <div key={i} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderLeft: `2px solid ${c}`, borderRadius: 'var(--radius-sm)', padding: '8px 10px', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', marginBottom: 2 }}>{item.label}</div>
-                      <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)' }}>{item.sub}</div>
-                    </div>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, color: c }}>{item.value}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* OPEN EDITS / DEVS */}
-            <div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 10 }}>OPEN EDITS · DEVS</div>
-              {DKTP_OPEN_EDITS.map((item, i) => {
-                const c = toneCol[item.tone] || 'var(--text-secondary)';
-                return (
-                  <div key={i} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', marginBottom: 6 }}>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)', marginBottom: 3 }}>{item.name}</div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', marginBottom: 6 }}>{item.diff}</div>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: c, background: `${c}18`, border: `1px solid ${c}40`, borderRadius: 3, padding: '1px 6px' }}>{item.status}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* RECENT ORCHIE REPLIES */}
-            <div>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 10 }}>RECENT ORCHIE REPLIES</div>
-              {DKTP_RECENT.map((item, i) => (
-                <div key={i} style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)', borderLeft: '2px solid var(--teal)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', marginBottom: 6 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--teal)' }}>{item.q}</span>
-                    <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)' }}>{item.time}</span>
-                  </div>
-                  <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>{item.snippet}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* ── RIGHT PANEL ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-
-          {/* Task · Subtask tree */}
-          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0, overflowY: 'auto', maxHeight: '32%' }}>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 10 }}>TASK · SUBTASK</div>
-            {DKTP_TASKS.map((task, ti) => (
-              <div key={ti} style={{ marginBottom: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: task.active ? 'var(--amber)' : 'var(--text-dim)' }}>{task.active ? '⟳' : '○'}</span>
-                  <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: task.active ? 'var(--text-primary)' : 'var(--text-muted)' }}>{task.label}</span>
-                  {task.active && <span className="pulse" style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--amber)', marginLeft: 2 }} />}
-                </div>
-                <div style={{ paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  {task.subs.map((sub, si) => (
-                    <div key={si} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: sub.done ? 'var(--ok)' : sub.active ? 'var(--amber)' : 'var(--text-dim)' }}>{sub.done ? '✓' : sub.active ? '⟳' : '○'}</span>
-                      <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: sub.done ? 'var(--text-dim)' : sub.active ? 'var(--text-secondary)' : 'var(--text-muted)', textDecoration: sub.done ? 'line-through' : 'none' }}>{sub.label}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Delegation viz + Council weights */}
-          <div style={{ flex: 1, padding: '14px 16px', borderBottom: '1px solid var(--border)', overflowY: 'auto', minHeight: 0 }}>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 8 }}>DELEGATION · COUNCIL</div>
-            <OrchieActivityViz tick={tick} />
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 6 }}>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 8 }}>DELIBERATION · SUS-0148</div>
-              {DKTP_COUNCIL.map((c, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7 }}>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: c.vote === 'YES' ? 'var(--ok)' : c.vote === 'NO' ? 'var(--danger)' : 'var(--text-dim)', width: 10, textAlign: 'center', flexShrink: 0 }}>
-                    {c.vote === 'YES' ? '✓' : c.vote === 'NO' ? '✗' : '○'}
-                  </span>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', minWidth: 58, flexShrink: 0 }}>{c.name}</span>
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <div style={{ display: 'flex', gap: 8, fontFamily: 'var(--mono)', fontSize: 7, color: 'var(--text-dim)' }}>
-                      <span>domain {c.domain}%</span><span>stake {c.stake}%</span>
-                    </div>
-                    <div style={{ height: 2, background: 'var(--bg-overlay)', borderRadius: 1, overflow: 'hidden' }}>
-                      <div style={{ width: `${c.weight * 100}%`, height: '100%', background: c.vote === 'YES' ? 'var(--ok)' : c.vote === 'NO' ? 'var(--danger)' : 'var(--border-mid)', borderRadius: 1 }} />
-                    </div>
-                  </div>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-muted)', minWidth: 24, textAlign: 'right', flexShrink: 0 }}>{(c.weight * 100).toFixed(0)}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Chat + Listen input */}
-          <div style={{ padding: '12px 14px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button onClick={() => setIsListening(l => !l)} style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%',
-              padding: '8px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em',
-              color: isListening ? 'var(--teal)' : 'var(--text-muted)',
-              background: isListening ? 'var(--teal-glow)' : 'var(--bg-raised)',
-              border: `1px solid ${isListening ? 'var(--teal-border)' : 'var(--border)'}`,
-              borderRadius: 'var(--radius-sm)', transition: 'all var(--t-fast)', cursor: 'pointer',
-            }}>
-              <span className={isListening ? 'pulse' : ''} style={{ width: 5, height: 5, borderRadius: '50%', background: isListening ? 'var(--teal)' : 'var(--text-dim)', flexShrink: 0 }} />
-              {isListening ? '● ORCHIE IS LISTENING' : 'LISTEN'}
-            </button>
-            <form onSubmit={handleChat} style={{ display: 'flex', gap: 6 }}>
-              <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Ask Orchie…"
-                style={{ flex: 1, padding: '7px 10px', fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-primary)', background: 'var(--bg-base)', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)', outline: 'none', transition: 'border-color var(--t-fast)' }}
-                onFocus={e => e.target.style.borderColor = 'var(--amber-border)'}
-                onBlur={e => e.target.style.borderColor = 'var(--border-mid)'}
+      {/* Tasks due today */}
+      {tasks_due_today.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <SLabel>TASKS DUE TODAY</SLabel>
+          {tasks_due_today.map(t => (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                onClick={() => onTaskComplete(t.id)}
+                style={{
+                  width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                  border: '1px solid var(--border-mid)', background: 'transparent',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+                title="Mark complete"
               />
-              <button type="submit" style={{ padding: '7px 14px', flexShrink: 0, background: chatInput.trim() ? 'var(--amber)' : 'var(--bg-overlay)', border: `1px solid ${chatInput.trim() ? 'var(--amber)' : 'var(--border)'}`, borderRadius: 'var(--radius-sm)', color: chatInput.trim() ? 'var(--bg-base)' : 'var(--text-dim)', fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.07em', transition: 'all var(--t-fast)', cursor: 'pointer' }}>SEND</button>
-            </form>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── OrchieModeDialog ─────────────────────────────────────── */
-function OrchieModeDialog({ onSelect }) {
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
-      <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-lg)', padding: 36, maxWidth: 420, width: '100%', display: 'flex', flexDirection: 'column', gap: 24, animation: 'modalSlideIn 0.28s cubic-bezier(0.22,0.61,0.36,1)' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--bg-base)', border: '1px solid var(--amber-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 16px var(--amber-glow)' }}>
-            <SustenaMark size={26} />
-          </div>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-primary)' }}>ORCHIE</span>
-          <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.5 }}>Select a view mode to open the Orchie panel.</span>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          {[
-            { mode: 'mobile',  icon: '📱', label: 'MOBILE',  sub: 'Voice + chat. Compact layout for phone screens.' },
-            { mode: 'desktop', icon: '🖥',  label: 'DESKTOP', sub: 'Summary dashboard with delegation and council viz.' },
-          ].map(opt => (
-            <button key={opt.mode} onClick={() => onSelect(opt.mode)} style={{
-              padding: '20px 14px', background: 'var(--bg-base)',
-              border: `1px solid var(--border-mid)`, borderRadius: 'var(--radius-md)',
-              cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
-              transition: 'all var(--t-fast)',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = opt.mode === 'desktop' ? 'var(--teal-border)' : 'var(--amber-border)'; e.currentTarget.style.background = opt.mode === 'desktop' ? 'var(--teal-glow)' : 'var(--amber-glow)'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-mid)'; e.currentTarget.style.background = 'var(--bg-base)'; }}
-            >
-              <span style={{ fontSize: 28 }}>{opt.icon}</span>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-primary)' }}>{opt.label}</span>
-              <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.45 }}>{opt.sub}</span>
-            </button>
+              <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-primary)', flex: 1 }}>
+                {t.title}
+              </span>
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 8,
+                color: t.priority === 'high' ? 'var(--danger)' : t.priority === 'low' ? 'var(--text-dim)' : 'var(--text-muted)',
+                textTransform: 'uppercase',
+              }}>{t.priority}</span>
+            </div>
           ))}
         </div>
+      )}
 
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)', textAlign: 'center', letterSpacing: '0.08em' }}>
-          DEMO ONLY — PRODUCTION USES MYCELIUM DESKTOP NATIVELY
+      {/* Calendar events today */}
+      {events_today.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <SLabel>CALENDAR TODAY</SLabel>
+          {events_today.map(ev => (
+            <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Dot color="var(--teal)" />
+              <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-secondary)' }}>
+                {ev.title}
+              </span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                {ev.date?.slice(11, 16) || ''}
+              </span>
+            </div>
+          ))}
         </div>
-      </div>
+      )}
+
+      {/* Passed strategies */}
+      {passed_strategies.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <SLabel>PASSED STRATEGIES</SLabel>
+          {passed_strategies.slice(0, 3).map(p => (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Dot color="var(--ok)" />
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)' }}>
+                {p.operator_name}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-/* ── Toast ──────────────────────────────────────────────────── */
-function ToastStack({ toasts }) {
-  const toneStyle = {
-    ok:   { borderColor: 'rgba(76,175,128,0.5)', dotColor: 'var(--ok)' },
-    warn: { borderColor: 'var(--amber-border)',  dotColor: 'var(--amber)' },
-    info: { borderColor: 'rgba(80,144,224,0.4)', dotColor: 'var(--info)' },
-    danger:{ borderColor: 'rgba(224,80,80,0.4)',  dotColor: 'var(--danger)' },
-  };
+/* ── Open Edits ──────────────────────────────────────────────────────────────── */
+function OpenEditsCard({ proposals }) {
+  const edits = proposals.filter(p => ['IN_VOTING', 'SANDBOXED', 'PASSED'].includes(p.status));
+  if (!edits.length) {
+    return <div style={cardStyle}><Empty text="no edits pending review" /></div>;
+  }
+  const badgeColor = { IN_VOTING: 'var(--amber)', PASSED: 'var(--ok)', SANDBOXED: 'var(--info)' };
   return (
-    <div className="toast-stack">
-      {toasts.map(t => {
-        const s = toneStyle[t.tone] || toneStyle.info;
+    <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {edits.map(p => (
+        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {p.operator_name || p.id?.slice(0, 12) + '…'}
+          </span>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 7,
+            color: badgeColor[p.status] || 'var(--text-muted)',
+            background: `${badgeColor[p.status] || 'var(--text-muted)'}18`,
+            border: `1px solid ${badgeColor[p.status] || 'var(--text-muted)'}40`,
+            borderRadius: 3, padding: '1px 5px', flexShrink: 0,
+          }}>{p.status}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Pocket ring summary ─────────────────────────────────────────────────────── */
+function PocketRingCard({ widget }) {
+  if (!widget?.data?.pockets?.length) {
+    return <div style={cardStyle}><Empty text="no constraints breached · all within bounds" /></div>;
+  }
+  const { liquid = 0, total_allocated = 0, total_spent = 0, pockets = [] } = widget.data;
+  return (
+    <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-muted)' }}>
+          KES {liquid.toLocaleString()} liquid
+        </span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>
+          {pockets.length} pocket{pockets.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+      {pockets.slice(0, 4).map(p => {
+        const pct = p.pct_spent || 0;
+        const barColor = pct >= 100 ? 'var(--danger)' : pct >= 80 ? 'var(--amber)' : 'var(--teal)';
         return (
-          <div key={t.id} className="toast" style={{ borderColor: s.borderColor }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.dotColor, flexShrink: 0 }} />
-            {t.text}
+          <div key={p.name} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontFamily: 'var(--ui)', fontSize: 10, color: 'var(--text-secondary)' }}>{p.name}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: barColor }}>{pct}%</span>
+            </div>
+            <div style={{ height: 2, background: 'var(--bg-overlay)', borderRadius: 1, overflow: 'hidden' }}>
+              <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', background: barColor, borderRadius: 1 }} />
+            </div>
           </div>
         );
       })}
+      {widget.summary && (
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)', marginTop: 2 }}>
+          {widget.summary}
+        </span>
+      )}
     </div>
   );
 }
 
-/* ── Confirm modal ──────────────────────────────────────────── */
-function ConfirmModal({ data, onClose }) {
-  const teal = data?.tone === 'teal';
-  const c = teal ? 'var(--teal)' : 'var(--amber)';
-  const cBorder = teal ? 'var(--teal-border)' : 'var(--amber-border)';
-  const cGlow   = teal ? 'var(--teal-glow)'   : 'var(--amber-glow)';
+/* ── Constraint health summary ───────────────────────────────────────────────── */
+function ConstraintHealthCard({ widget }) {
+  if (!widget?.data?.constraints?.length) {
+    return <div style={cardStyle}><Empty text="no constraints breached · all within bounds" /></div>;
+  }
+  const { constraints = [], passing = 0, total = 0 } = widget.data;
   return (
-    <div className="modal-scrim" onClick={onClose}>
-      <div className="modal-card" style={{ maxWidth: 380 }} onClick={e => e.stopPropagation()}>
-        <div style={{ padding: '24px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '0.06em' }}>{data?.title}</span>
-          {data?.body && <span style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>{data.body}</span>}
-          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button onClick={() => { data?.onConfirm?.(); onClose(); }} style={{ flex: 1, padding: '9px 0', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: teal ? 'white' : 'var(--bg-base)', background: c, border: `1px solid ${cBorder}`, borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>{data?.ctaLabel || 'CONFIRM'}</button>
-            <button onClick={onClose} style={{ padding: '9px 18px', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.08em', color: 'var(--text-muted)', background: 'transparent', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>CANCEL</button>
+    <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: passing === total ? 'var(--ok)' : 'var(--amber)' }}>
+          {passing}/{total} passing
+        </span>
+      </div>
+      {constraints.slice(0, 5).map((c, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: c.passing ? 'var(--ok)' : 'var(--danger)', flexShrink: 0 }}>
+            {c.passing ? '✓' : '✗'}
+          </span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {c.constraint}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Event feed summary ──────────────────────────────────────────────────────── */
+function EventFeedCard({ widget }) {
+  const events = widget?.data?.events || [];
+  if (!events.length) {
+    return <div style={cardStyle}><Empty text="no events recorded yet" /></div>;
+  }
+  return (
+    <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {events.slice(0, 5).map((ev, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <Dot color="var(--text-dim)" />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {ev.event_name}
+          </span>
+          {ev.timestamp && (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)', flexShrink: 0 }}>
+              {ev.timestamp.slice(11, 16)}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Delegation / Council SVG ────────────────────────────────────────────────── */
+function DelegationCouncil({ proposals, tick }) {
+  const hasActive = proposals.some(p => p.status === 'IN_VOTING');
+  const state = tick % 4;
+  const stateLabel = ['DELEGATING', 'RECEIVING', 'ANSWERING', 'VOTING'][state];
+
+  const nodes = [
+    { label: 'ORCHIE',    x: 90, y: 75,  isCenter: true },
+    { label: 'MENTOR',    x: 30, y: 38  },
+    { label: 'CURATOR',   x: 152, y: 38 },
+    { label: 'NAVIGATOR', x: 152, y: 118 },
+    { label: 'PROTÉGÉ',   x: 30, y: 118 },
+  ];
+
+  if (!hasActive) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <Empty text="council is quiet · no proposals in motion" />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Dot color="var(--amber)" pulse />
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--amber)', letterSpacing: '0.08em' }}>{stateLabel}</span>
+      </div>
+      <svg width="100%" height="150" viewBox="0 0 182 150" style={{ overflow: 'visible' }}>
+        {nodes.slice(1).map((n, i) => (
+          <line key={i}
+            x1={nodes[0].x} y1={nodes[0].y}
+            x2={n.x} y2={n.y}
+            stroke="var(--border-mid)" strokeWidth="0.7" opacity="0.5"
+          />
+        ))}
+        {nodes.map((n, i) => (
+          <g key={i}>
+            {n.isCenter ? (
+              <circle cx={n.x} cy={n.y} r="13"
+                fill="var(--amber-glow)" stroke="var(--amber-border)" strokeWidth="1"
+              />
+            ) : (
+              <circle cx={n.x} cy={n.y} r="7"
+                fill="var(--bg-raised)" stroke="var(--border-mid)" strokeWidth="1"
+              />
+            )}
+            <text x={n.x} y={n.y + (n.isCenter ? 23 : 17)}
+              textAnchor="middle" fontFamily="DM Mono" fontSize="7" fill="var(--text-muted)"
+            >{n.label}</text>
+          </g>
+        ))}
+        <g transform={`translate(${nodes[0].x - 7}, ${nodes[0].y - 7})`}>
+          <SustenaMark size={14} />
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+/* ── Deliberation vote bars ──────────────────────────────────────────────────── */
+function DeliberationCard({ proposals }) {
+  const active = proposals.find(p => p.status === 'IN_VOTING');
+  if (!active) {
+    return <Empty text="no vote in progress" />;
+  }
+
+  const OPERATIVES = ['MENTOR', 'CURATOR', 'NAVIGATOR', 'PROTÉGÉ'];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {active.operator_name || active.id?.slice(0, 16)}
+      </span>
+      {OPERATIVES.map(name => (
+        <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)', width: 10, flexShrink: 0 }}>○</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-muted)', minWidth: 54, flexShrink: 0 }}>{name}</span>
+          <div style={{ flex: 1, height: 2, background: 'var(--bg-overlay)', borderRadius: 1 }}>
+            <div style={{ width: '0%', height: '100%', background: 'var(--border-mid)', borderRadius: 1 }} />
           </div>
         </div>
+      ))}
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)' }}>awaiting operative votes</span>
+    </div>
+  );
+}
+
+/* ── Current tasks checklist ─────────────────────────────────────────────────── */
+function CurrentTasksList({ tasks, sustainId, onComplete }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const due = tasks.filter(t => t.status !== 'completed' && t.due_date === today);
+
+  if (!due.length) {
+    return <Empty text="no active tasks · sustain is clear" />;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {due.slice(0, 6).map(t => (
+        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            onClick={() => onComplete(t.id)}
+            style={{
+              width: 13, height: 13, borderRadius: 2, flexShrink: 0,
+              border: '1px solid var(--border-mid)', background: 'transparent', cursor: 'pointer',
+            }}
+            title="Complete"
+          />
+          <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {t.title}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Chat bubble ─────────────────────────────────────────────────────────────── */
+function Bubble({ m }) {
+  const isUser = m.role === 'user';
+  return (
+    <div className="fade-up" style={{
+      display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 6,
+    }}>
+      <div style={{
+        maxWidth: '86%',
+        padding: '7px 10px',
+        borderRadius: isUser ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
+        background: isUser ? 'var(--amber-glow)' : 'var(--bg-raised)',
+        border: `1px solid ${isUser ? 'var(--amber-border)' : 'var(--border)'}`,
+        fontFamily: 'var(--ui)', fontSize: 12,
+        color: 'var(--text-primary)', lineHeight: 1.5,
+      }}>
+        {m.text}
       </div>
     </div>
   );
 }
 
-/* ── Orchie Panel standalone mount ── */
-function OrchiePanelApp() {
-  const [mode, setMode] = dUseState('dialog');
-  const [tick, setTick] = React.useState(0);
-  const [toasts, setToasts] = dUseState([]);
-  const [modal, setModal] = dUseState(null);
+/* ── Shared card style ───────────────────────────────────────────────────────── */
+const cardStyle = {
+  background: 'var(--bg-raised)', border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-md)', padding: '10px 12px',
+};
 
-  React.useEffect(() => {
+/* ── Divider ─────────────────────────────────────────────────────────────────── */
+function Divider() {
+  return <div style={{ height: 1, background: 'var(--border)', flexShrink: 0 }} />;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ORCHIE PANEL — main component
+═══════════════════════════════════════════════════════════════════════════════ */
+export default function OrchePanel() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const sustainId = searchParams.get('sustain') || 'homestead.bonnie';
+
+  const [tick, setTick] = useState(0);
+  const [brief, setBrief] = useState(null);
+  const [monitorWidgets, setMonitorWidgets] = useState(null);
+  const [proposals, setProposals] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [thinking, setThinking] = useState(false);
+  const [input, setInput] = useState('');
+  const [listening, setListening] = useState(false);
+  const scrollRef = useRef(null);
+
+  // Tick
+  useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 2000);
     return () => clearInterval(id);
   }, []);
 
-  // Wire globals
-  dUseEffect(() => {
-    window.flash = (text, tone = 'ok') => {
-      const id = Math.random().toString(36).slice(2);
-      setToasts(ts => [...ts, { id, text, tone }]);
-      setTimeout(() => setToasts(ts => ts.filter(t => t.id !== id)), 3600);
-    };
-    window.confirmAction = (opts) => setModal({ kind: 'confirm', data: opts });
-  }, []);
+  // Auto-scroll chat
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 99999, behavior: 'smooth' });
+  }, [messages.length, thinking]);
+
+  // Fetch everything on mount
+  useEffect(() => {
+    fetchBrief();
+    fetchMonitor();
+    fetchState();
+  }, [sustainId]);
+
+  async function fetchBrief() {
+    try {
+      const resp = await api.post('/devui/console/execute', {
+        sustain_id: sustainId,
+        operator: 'orchie.morning_brief',
+        params: {},
+      });
+      const result = resp?.data?.result?.data;
+      if (result) {
+        setBrief(result.widget?.data || null);
+        if (result.brief_text) {
+          setMessages([{ role: 'assistant', text: result.brief_text }]);
+        }
+      }
+    } catch {
+      setBrief(null);
+    }
+  }
+
+  async function fetchMonitor() {
+    try {
+      const resp = await api.get(`/devui/monitor-widgets?sustain_id=${encodeURIComponent(sustainId)}`);
+      setMonitorWidgets(resp?.data?.widgets || null);
+    } catch {
+      setMonitorWidgets(null);
+    }
+  }
+
+  async function fetchState() {
+    try {
+      const resp = await api.get(`/devui/state?sustain_id=${encodeURIComponent(sustainId)}`);
+      const state = resp?.data?.state || {};
+      setProposals(state.council_proposals || []);
+      setTasks(state.tasks?.items || []);
+    } catch {
+      setProposals([]);
+      setTasks([]);
+    }
+  }
+
+  async function completeTask(taskId) {
+    try {
+      await api.post('/devui/console/execute', {
+        sustain_id: sustainId,
+        operator: 'homestead.tasks.complete',
+        params: { task_id: taskId },
+      });
+      // Remove from local state optimistically
+      setTasks(ts => ts.map(t => t.id === taskId ? { ...t, status: 'completed' } : t));
+    } catch {
+      window.flash?.('could not complete task · api error', 'danger');
+    }
+  }
+
+  async function sendMessage() {
+    const text = input.trim();
+    if (!text) return;
+    setInput('');
+    setMessages(ms => [...ms, { role: 'user', text }]);
+    setThinking(true);
+    try {
+      const data = await api.post('/orchie/message', { sustain_id: sustainId, message: text });
+      setMessages(ms => [...ms, { role: 'assistant', text: data.reply || 'no response' }]);
+    } catch {
+      setMessages(ms => [...ms, { role: 'assistant', text: 'orchie is offline — start the api server and try again.' }]);
+    } finally {
+      setThinking(false);
+    }
+  }
+
+  const recentReplies = messages.filter(m => m.role === 'assistant').slice(-3);
+  const stateLabel = ['DELEGATING', 'RECEIVING', 'ANSWERING', 'VOTING'][tick % 4];
 
   return (
-    <>
-      {mode === 'dialog'  && <OrchieModeDialog onSelect={setMode} />}
-      {mode === 'desktop' && <OrchieDesktopPanel onClose={() => setMode('dialog')} tick={tick} />}
-      {mode === 'mobile'  && <OrchieExpansionPanel open={true} onClose={() => setMode('dialog')} tick={tick} />}
-      <ToastStack toasts={toasts} />
-      {modal?.kind === 'confirm' && <ConfirmModal data={modal.data} onClose={() => setModal(null)} />}
-    </>
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 900,
+      background: 'var(--bg-base)',
+      display: 'flex', flexDirection: 'column',
+      fontFamily: 'var(--ui)',
+    }}>
+      {/* ── TOP BAR ────────────────────────────────────────────────────────── */}
+      <div style={{
+        padding: '10px 20px', flexShrink: 0,
+        borderBottom: '1px solid var(--border)',
+        background: 'var(--bg-surface)',
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}>
+        <button
+          onClick={() => navigate(-1)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            color: 'var(--text-secondary)', padding: '3px 8px',
+            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+            background: 'transparent', fontFamily: 'var(--mono)', fontSize: 9,
+            letterSpacing: '0.07em', cursor: 'pointer', transition: 'all var(--t-fast)',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--amber-border)'; e.currentTarget.style.color = 'var(--amber)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+        >
+          <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M6 1.5L2.5 4.5L6 7.5" /></svg>
+          BACK
+        </button>
+
+        <div style={{ width: 1, height: 16, background: 'var(--border)', flexShrink: 0 }} />
+
+        <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'var(--bg-base)', border: '1px solid var(--amber-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 8px var(--amber-glow)', flexShrink: 0 }}>
+          <SustenaMark size={14} />
+        </div>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--text-primary)' }}>ORCHIE</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.06em' }}>{sustainId}</span>
+
+        <div style={{ flex: 1 }} />
+
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>{stateLabel}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', background: '#2ab8a015', border: '1px solid #2ab8a040', borderRadius: 'var(--radius-sm)' }}>
+          <Dot color="var(--teal)" pulse />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--teal)', letterSpacing: '0.08em' }}>ACTIVE</span>
+        </div>
+      </div>
+
+      {/* ── BODY ───────────────────────────────────────────────────────────── */}
+      <div style={{
+        flex: 1, minHeight: 0,
+        display: 'grid',
+        gridTemplateColumns: '28% 42% 30%',
+        overflow: 'hidden',
+      }}>
+
+        {/* ── LEFT COLUMN ────────────────────────────────────────────────── */}
+        <div style={{
+          borderRight: '1px solid var(--border)',
+          overflowY: 'auto', padding: '18px 16px',
+          display: 'flex', flexDirection: 'column', gap: 20,
+        }}>
+          <Section label="TODAY">
+            <TodayCard brief={brief} sustainId={sustainId} onTaskComplete={completeTask} />
+          </Section>
+
+          <Divider />
+
+          <Section label="OPEN EDITS" flex scrollable>
+            <OpenEditsCard proposals={proposals} />
+          </Section>
+        </div>
+
+        {/* ── MIDDLE COLUMN ──────────────────────────────────────────────── */}
+        <div style={{
+          borderRight: '1px solid var(--border)',
+          overflowY: 'auto', padding: '18px 16px',
+          display: 'flex', flexDirection: 'column', gap: 20,
+        }}>
+          <Section label="PINNED MONITORING">
+            <PocketRingCard widget={monitorWidgets?.pocket_ring} />
+            <ConstraintHealthCard widget={monitorWidgets?.constraint_health} />
+            <EventFeedCard widget={monitorWidgets?.event_feed} />
+          </Section>
+
+          <Divider />
+
+          <Section label="RECENT ORCHIE REPLIES">
+            {!recentReplies.length
+              ? <Empty text="orchie hasn't spoken yet" />
+              : recentReplies.map((m, i) => (
+                <div key={i} style={{ ...cardStyle, borderLeft: '2px solid var(--teal)' }}>
+                  <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                    {m.text}
+                  </span>
+                </div>
+              ))
+            }
+          </Section>
+        </div>
+
+        {/* ── RIGHT SIDEBAR ──────────────────────────────────────────────── */}
+        <div style={{
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}>
+          {/* Scrollable top sections */}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px 14px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <Section label="TASK / SUBTASK">
+              <Empty text="no operatives reporting · all thresholds nominal" />
+            </Section>
+
+            <Divider />
+
+            <Section label="DELEGATION / COUNCIL">
+              <DelegationCouncil proposals={proposals} tick={tick} />
+            </Section>
+
+            <Divider />
+
+            <Section label="CURRENT TASKS">
+              <CurrentTasksList tasks={tasks} sustainId={sustainId} onComplete={completeTask} />
+            </Section>
+
+            <Divider />
+
+            <Section label="DELIBERATION">
+              <DeliberationCard proposals={proposals} />
+            </Section>
+          </div>
+
+          {/* Pinned chat input */}
+          <div style={{
+            borderTop: '1px solid var(--border)', padding: '10px 14px',
+            display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0,
+            background: 'var(--bg-surface)',
+          }}>
+            {/* Chat history (compact) */}
+            {messages.length > 0 && (
+              <div ref={scrollRef} className="no-scrollbar" style={{
+                maxHeight: 160, overflowY: 'auto',
+                display: 'flex', flexDirection: 'column',
+                paddingBottom: 4,
+              }}>
+                {messages.map((m, i) => <Bubble key={i} m={m} />)}
+                {thinking && (
+                  <div className="fade-up" style={{ display: 'flex', gap: 4, padding: '6px 8px' }}>
+                    {[0, 1, 2].map(i => (
+                      <span key={i} className="pulse" style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--text-muted)', animationDelay: `${i * 0.18}s` }} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* LISTEN toggle */}
+            <button
+              onClick={() => setListening(l => !l)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                padding: '6px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.1em',
+                color: listening ? 'var(--teal)' : 'var(--text-muted)',
+                background: listening ? 'var(--teal-glow)' : 'var(--bg-raised)',
+                border: `1px solid ${listening ? 'var(--teal-border)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius-sm)', cursor: 'pointer', transition: 'all var(--t-fast)',
+              }}
+            >
+              <Dot color={listening ? 'var(--teal)' : 'var(--text-dim)'} pulse={listening} />
+              {listening ? 'ORCHIE IS LISTENING' : 'LISTEN'}
+            </button>
+
+            {/* Input */}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') sendMessage(); }}
+                placeholder="Ask Orchie…"
+                style={{
+                  flex: 1, padding: '7px 10px',
+                  fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-primary)',
+                  background: 'var(--bg-base)', border: '1px solid var(--border-mid)',
+                  borderRadius: 'var(--radius-sm)', outline: 'none',
+                  transition: 'border-color var(--t-fast)',
+                }}
+                onFocus={e => e.target.style.borderColor = 'var(--amber-border)'}
+                onBlur={e => e.target.style.borderColor = 'var(--border-mid)'}
+              />
+              <button
+                onClick={sendMessage}
+                style={{
+                  padding: '7px 12px', flexShrink: 0,
+                  background: input.trim() ? 'var(--amber)' : 'var(--bg-overlay)',
+                  border: `1px solid ${input.trim() ? 'var(--amber)' : 'var(--border)'}`,
+                  borderRadius: 'var(--radius-sm)',
+                  color: input.trim() ? 'var(--bg-base)' : 'var(--text-dim)',
+                  fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.07em',
+                  cursor: 'pointer', transition: 'all var(--t-fast)',
+                }}
+              >SEND</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
-
-
-export default OrchiePanelApp;
