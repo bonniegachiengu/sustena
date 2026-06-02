@@ -358,7 +358,7 @@ function ControllerPanel({ tick, sustain, openModal }) {
         {/* Top row: 5 instrument frames */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '170px 1fr 200px 1fr 130px',
+          gridTemplateColumns: '170px 1fr 200px 1fr 165px',
           gap: 18, alignItems: 'stretch',
         }}>
           {/* Knob — autonomy threshold */}
