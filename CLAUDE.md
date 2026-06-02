@@ -199,10 +199,10 @@ Sprint 8.1  GitHub cleanup + scroll        — no deps
 Sprint 8.2  Engine singleton               — UNBLOCKS all panels
 Sprint 8.3  Monitor real widgets           ← 8.2
 Sprint 8.4  Simulator DAG ✅              ← 8.2
-Sprint 8.5  Editor real graph             ← 8.2
+Sprint 8.5  Editor real graph             ← 8.2  ⚠️ SKIPPED — do next
 Sprint 8.6  Auth/Users (register/login) ✅ ← 8.2; UNBLOCKS 8.7–8.10
 Sprint 8.7  Lore CMS + Journal API ✅     ← 8.6
-Sprint 8.8  Library + Spore flow          ← 8.2 + 8.6
+Sprint 8.8  Library + Spore flow          ← 8.2 + 8.6  ⚠️ do next
 Sprint 8.9  Arena products + publishing   ← 8.6 + 8.8
 Sprint 8.10 Profile telemetry + Ctrl      ← 8.6 + 8.2
 Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
@@ -262,6 +262,15 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 - ✅ `routes/lore.py` — `GET /api/v1/lore/entries` (public), `POST /entries` (auth), `PUT /entries/{id}` (auth, own only), `POST /entries/{id}/publish` (auth, own, draft→published, 409 on double-publish).
 - ✅ `routes/journal.py` — `GET/POST/PUT/DELETE /api/v1/journal/entries` (all auth-required, user-scoped, 403 on cross-user access).
 - ✅ `main.py` — both routers mounted. 57 new tests (test_lore.py + test_journal.py). **1554 tests total.**
+
+**Sprint 8.7 UI wiring (2 Jun 2026, same session as 8.7):**
+- ✅ `LorePage.jsx` — `GET /api/v1/lore/entries` on mount; `SignInPanel` (JWT → localStorage `sustena_token`); `ComposePanel` (POST + publish in one flow); `textToBlocks` converts textarea to `[{type,text}]` blocks; `+ WRITE` / `sign in to write` footer; SIGN OUT.
+- ✅ `JournalPage.jsx` — `GET /api/v1/journal/entries` on mount (auth required); `ComposePanel` wired to `POST /api/v1/journal/entries`; shared JWT pattern; entry list refreshes after save; proper empty states.
+- ✅ `ProfilePage.jsx` — fetches `/me` + `/me/stats` + `/me/activity`; stat pills and contribution timeline from live API; `SignInPanel` + SIGN OUT in settings; "sign in to view your profile" when unauthenticated.
+- ✅ `ArenaPage.jsx` — converted 7 empty module-level constants to `useState`; `useEffect` scaffolds for `GET /api/v1/arena/packages`, `/products`, `/orders` (silent-fail until Sprint 8.9); TABS counts and filtered pool use live state; "Waiting for API" strings replaced with Sustena empty states.
+- ✅ `data.jsx` — "Waiting for API" in `OrchieActivityViz` CURRENT TASKS → "no active tasks · sustain is clear".
+- ✅ `monitor.jsx` — "use MOCK data" comment cleaned up.
+- ✅ `CLAUDE.md` — added "UI + backend must always be fully wired" permanent principle.
 
 **Controller panel UI fixes (2 Jun 2026, post-8.2):**
 - ✅ Universal Controls instrument frames were clipped at the bottom — added `flexShrink:0` to the Card and removed `minHeight:0` from `Instrument` (`other.jsx`).
