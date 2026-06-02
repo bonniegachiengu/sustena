@@ -89,6 +89,18 @@ class SimulateRequest(BaseModel):
     )
 
 
+class SimulatePipelineRequest(BaseModel):
+    sustain_id: str
+    proposal: list[dict] = Field(
+        default_factory=list,
+        description="Sequence of {operator, params} steps to run through simulate.fork → run_path → score",
+    )
+    goal_metric: str = Field(
+        default="minimize_budget_deviation",
+        description="Goal metric for simulate.score. Options: minimize_budget_deviation | maximize_savings_rate | maximize_liquid_balance",
+    )
+
+
 class PreviewWidgetRequest(BaseModel):
     spec_json: dict = Field(description="A ui_schema dict or operator spec containing ui_schema")
     mock_state: dict = Field(
@@ -472,27 +484,27 @@ async def get_operator_registry(_: str = Depends(verify_admin)) -> dict:
         return ok({
             "operators": {
                 name: {
-                    "description": meta.description,
-                    "pawa_cost":   meta.pawa_cost,
+                    "description":  meta.description,
+                    "pawa_cost":    meta.pawa_cost,
                     "license_tier": meta.license_tier,
-                    "author":      meta.author,
-                    "constraints": meta.constraints,
+                    "author":       meta.author,
+                    "constraints":  meta.constraints,
                     "side_effects": meta.side_effects,
-                    "ui_schema":   meta.ui_schema,
+                    "ui_schema":    meta.ui_schema,
+                    "protocol":     meta.protocol,
                 }
                 for name, meta in OPERATOR_REGISTRY.items()
             }
         })
     except Exception as exc:
         logger.warning("OPERATOR_REGISTRY unavailable: %s", exc)
-    # TODO: wire real
     return ok({
         "operators": {
-            "budget.allocate":    {"description": "Allocate to pocket",         "pawa_cost": 0,    "license_tier": "free"},
-            "budget.record_income": {"description": "Record income receipt",    "pawa_cost": 0,    "license_tier": "free"},
-            "mpesa.parse":        {"description": "Parse M-PESA message",       "pawa_cost": 0,    "license_tier": "free"},
-            "pantry.consume":     {"description": "Log pantry consumption",     "pawa_cost": 0,    "license_tier": "free"},
-            "chama.contribute":   {"description": "Record chama contribution",  "pawa_cost": 0,    "license_tier": "free"},
+            "budget.allocate":      {"description": "Allocate to pocket",        "pawa_cost": 0, "license_tier": "free", "protocol": "rpc"},
+            "budget.record_income": {"description": "Record income receipt",     "pawa_cost": 0, "license_tier": "free", "protocol": "rpc"},
+            "mpesa.parse":          {"description": "Parse M-PESA message",      "pawa_cost": 0, "license_tier": "free", "protocol": "rpc"},
+            "pantry.consume":       {"description": "Log pantry consumption",    "pawa_cost": 0, "license_tier": "free", "protocol": "rpc"},
+            "chama.contribute":     {"description": "Record chama contribution", "pawa_cost": 0, "license_tier": "free", "protocol": "rpc"},
         },
         "note": "Stub registry",
     })
@@ -556,7 +568,165 @@ async def list_widgets(_: str = Depends(verify_admin)) -> dict:
     return ok({"widgets": widget_registry.list_all()})
 
 
-# ── 7. POST /devui/preview-widget ────────────────────────────────────────────
+# ── 7. GET /devui/monitor-widgets ────────────────────────────────────────────
+
+_MONITOR_STUB_STATE = {
+    "finances": {
+        "liquid": {"balance": 24730},
+        "pockets": {
+            "food":      {"allocated": 8420,  "spent": 3200, "target": 10000},
+            "transport": {"allocated": 4100,  "spent": 2800, "target": 5000},
+            "savings":   {"allocated": 22000, "spent": 0,    "target": 25000},
+            "rent":      {"allocated": 15000, "spent": 15000,"target": 15000},
+        },
+    },
+    "system": {
+        "constraints": [
+            "finances.pockets.food.allocated > 0",
+            "finances.pockets.savings.allocated > 0",
+        ],
+    },
+}
+
+
+@router.get("/monitor-widgets", summary="Rendered visualize.* widgets for the Monitor Panel")
+async def get_monitor_widgets(
+    sustain_id: str = Query(default="homestead.bonnie"),
+    _: str = Depends(verify_admin),
+) -> dict:
+    """
+    Calls visualize.pocket_ring, visualize.event_feed, and
+    visualize.constraint_health against the current sustain state and returns
+    their ResponseWidget outputs.  Falls back to stub state when the engine
+    is not initialised.
+    """
+    from sustena.core.events import EventBus
+    from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext
+    from sustena.core.pawa import PawaLedger
+    from sustena.core.state import StateAccessor
+
+    # Try live state first
+    state_dict = None
+    try:
+        from sustena.core.sustain_engine import SustainEngine
+        engine = SustainEngine()
+        state_dict = engine.get_state(sustain_id)
+    except Exception:
+        pass
+
+    if not state_dict:
+        state_dict = _MONITOR_STUB_STATE
+
+    ctx = OperatorContext(
+        state=StateAccessor(state_dict),
+        events=EventBus(sustain_id=sustain_id),
+        pawa=PawaLedger(),
+        sustain_id=sustain_id,
+        user_id="devui",
+    )
+
+    widgets: dict[str, Any] = {}
+
+    for op_name, widget_key in [
+        ("visualize.pocket_ring",       "pocket_ring"),
+        ("visualize.event_feed",        "event_feed"),
+        ("visualize.constraint_health", "constraint_health"),
+    ]:
+        try:
+            result = await OPERATOR_REGISTRY[op_name].fn(ctx, sustain_id=sustain_id)
+            widgets[widget_key] = result.data
+        except Exception as exc:
+            logger.warning("monitor-widgets: %s failed: %s", op_name, exc)
+            widgets[widget_key] = {"widget_type": op_name.split(".")[-1], "data": {}, "summary": str(exc)}
+
+    return ok({"sustain_id": sustain_id, "widgets": widgets})
+
+
+# ── 8. POST /devui/simulate-pipeline ─────────────────────────────────────────
+
+
+@router.post("/simulate-pipeline", summary="Simulate via simulate.fork → run_path → score pipeline")
+async def simulate_pipeline(
+    body: SimulatePipelineRequest,
+    _: str = Depends(verify_admin),
+) -> dict:
+    """
+    Chains the three simulate.* operators in sequence:
+      1. simulate.fork     — snapshot live state into an in-memory fork
+      2. simulate.run_path — execute proposal steps against the fork
+      3. simulate.score    — score the fork's final state against goal_metric
+
+    Returns fork_id, per-step results, and the final score.
+    Falls back to stub state when the engine is not initialised.
+    """
+    from sustena.core.events import EventBus
+    from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext
+    from sustena.core.pawa import PawaLedger
+    from sustena.core.state import StateAccessor
+
+    # Try live state first
+    state_dict = None
+    try:
+        from sustena.core.sustain_engine import SustainEngine
+        engine = SustainEngine()
+        state_dict = engine.get_state(body.sustain_id)
+    except Exception:
+        pass
+
+    if not state_dict:
+        state_dict = _MONITOR_STUB_STATE
+
+    ctx = OperatorContext(
+        state=StateAccessor(state_dict),
+        events=EventBus(sustain_id=body.sustain_id),
+        pawa=PawaLedger(),
+        sustain_id=body.sustain_id,
+        user_id="devui",
+    )
+
+    # Step 1: fork
+    fork_result = await OPERATOR_REGISTRY["simulate.fork"].fn(ctx, sustain_id=body.sustain_id)
+    if not fork_result.succeeded:
+        return ok({
+            "sustain_id": body.sustain_id,
+            "error": fork_result.reason,
+            "steps": [],
+            "score": None,
+        })
+    fork_id: str = fork_result.data["fork_id"]
+
+    # Step 2: run_path
+    path_result = await OPERATOR_REGISTRY["simulate.run_path"].fn(
+        ctx,
+        fork_id=fork_id,
+        operator_sequence=body.proposal,
+    )
+
+    steps = path_result.data.get("steps", []) if path_result.succeeded else []
+
+    # Step 3: score
+    score_result = await OPERATOR_REGISTRY["simulate.score"].fn(
+        ctx,
+        fork_id=fork_id,
+        goal_metric=body.goal_metric,
+    )
+
+    score_data = score_result.data if score_result.succeeded else {}
+
+    return ok({
+        "sustain_id": body.sustain_id,
+        "fork_id": fork_id,
+        "goal_metric": body.goal_metric,
+        "steps": steps,
+        "steps_run": len(steps),
+        "steps_succeeded": sum(1 for s in steps if s.get("status") == "ok"),
+        "score": score_data.get("score"),
+        "interpretation": score_data.get("interpretation"),
+        "final_state": path_result.data.get("final_state", {}) if path_result.succeeded else {},
+    })
+
+
+# ── 10. POST /devui/preview-widget ───────────────────────────────────────────
 
 @router.post("/preview-widget", summary="Render a widget from a spec JSON (dev console preview)")
 async def preview_widget(

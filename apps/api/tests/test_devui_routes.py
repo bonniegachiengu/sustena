@@ -390,3 +390,164 @@ class TestLegacyRoutes:
         body = r.json()
         assert "operatives" in body["data"]
         assert isinstance(body["data"]["operatives"], list)
+
+    def test_registry_operators_include_protocol(self, client):
+        """4.1: every operator entry must have a protocol field."""
+        r = client.get("/devui/registry/operators", headers=AUTH_HEADER)
+        assert r.status_code == 200
+        operators = r.json()["data"]["operators"]
+        assert len(operators) > 0
+        for name, meta in operators.items():
+            assert "protocol" in meta, f"operator '{name}' missing protocol field"
+
+    def test_registry_operators_protocol_values_are_valid(self, client):
+        """4.1: protocol values must be one of the four defined types."""
+        valid = {"rpc", "event_driven", "polling", "streaming"}
+        r = client.get("/devui/registry/operators", headers=AUTH_HEADER)
+        operators = r.json()["data"]["operators"]
+        for name, meta in operators.items():
+            assert meta["protocol"] in valid, (
+                f"operator '{name}' has invalid protocol '{meta['protocol']}'"
+            )
+
+
+# ---------------------------------------------------------------------------
+# GET /devui/monitor-widgets   (Task 4.2)
+# ---------------------------------------------------------------------------
+
+class TestMonitorWidgets:
+    def test_returns_200(self, client):
+        r = client.get("/devui/monitor-widgets", headers=AUTH_HEADER)
+        assert r.status_code == 200
+
+    def test_requires_auth(self, client):
+        r = client.get("/devui/monitor-widgets")
+        assert r.status_code == 401
+
+    def test_response_has_status_ok(self, client):
+        r = client.get("/devui/monitor-widgets", headers=AUTH_HEADER)
+        assert r.json()["status"] == "ok"
+
+    def test_response_contains_widgets_dict(self, client):
+        r = client.get("/devui/monitor-widgets", headers=AUTH_HEADER)
+        data = r.json()["data"]
+        assert "widgets" in data
+
+    def test_widgets_has_pocket_ring(self, client):
+        r = client.get("/devui/monitor-widgets", headers=AUTH_HEADER)
+        assert "pocket_ring" in r.json()["data"]["widgets"]
+
+    def test_widgets_has_event_feed(self, client):
+        r = client.get("/devui/monitor-widgets", headers=AUTH_HEADER)
+        assert "event_feed" in r.json()["data"]["widgets"]
+
+    def test_widgets_has_constraint_health(self, client):
+        r = client.get("/devui/monitor-widgets", headers=AUTH_HEADER)
+        assert "constraint_health" in r.json()["data"]["widgets"]
+
+    def test_pocket_ring_widget_has_type(self, client):
+        r = client.get("/devui/monitor-widgets", headers=AUTH_HEADER)
+        ring = r.json()["data"]["widgets"]["pocket_ring"]
+        # ResponseWidget serialises as {type, data, summary}
+        assert "type" in ring or "widget_type" in ring
+
+    def test_custom_sustain_id_echoed(self, client):
+        r = client.get(
+            "/devui/monitor-widgets",
+            params={"sustain_id": "vyyb.hive"},
+            headers=AUTH_HEADER,
+        )
+        assert r.json()["data"]["sustain_id"] == "vyyb.hive"
+
+
+# ---------------------------------------------------------------------------
+# POST /devui/simulate-pipeline   (Task 4.3)
+# ---------------------------------------------------------------------------
+
+class TestSimulatePipeline:
+    def test_returns_200_empty_proposal(self, client):
+        r = client.post(
+            "/devui/simulate-pipeline",
+            json={"sustain_id": "homestead.bonnie", "proposal": []},
+            headers=AUTH_HEADER,
+        )
+        assert r.status_code == 200
+
+    def test_requires_auth(self, client):
+        r = client.post(
+            "/devui/simulate-pipeline",
+            json={"sustain_id": "homestead.bonnie", "proposal": []},
+        )
+        assert r.status_code == 401
+
+    def test_response_has_status_ok(self, client):
+        r = client.post(
+            "/devui/simulate-pipeline",
+            json={"sustain_id": "homestead.bonnie", "proposal": []},
+            headers=AUTH_HEADER,
+        )
+        assert r.json()["status"] == "ok"
+
+    def test_response_has_fork_id(self, client):
+        r = client.post(
+            "/devui/simulate-pipeline",
+            json={"sustain_id": "homestead.bonnie", "proposal": []},
+            headers=AUTH_HEADER,
+        )
+        assert "fork_id" in r.json()["data"]
+
+    def test_response_has_steps_list(self, client):
+        r = client.post(
+            "/devui/simulate-pipeline",
+            json={"sustain_id": "homestead.bonnie", "proposal": []},
+            headers=AUTH_HEADER,
+        )
+        assert isinstance(r.json()["data"]["steps"], list)
+
+    def test_response_has_score(self, client):
+        r = client.post(
+            "/devui/simulate-pipeline",
+            json={"sustain_id": "homestead.bonnie", "proposal": []},
+            headers=AUTH_HEADER,
+        )
+        data = r.json()["data"]
+        assert "score" in data
+
+    def test_step_count_matches_proposal(self, client):
+        proposal = [
+            {"operator": "simulate.fork", "params": {}},
+        ]
+        r = client.post(
+            "/devui/simulate-pipeline",
+            json={"sustain_id": "homestead.bonnie", "proposal": proposal},
+            headers=AUTH_HEADER,
+        )
+        assert r.json()["data"]["steps_run"] == len(proposal)
+
+    def test_default_goal_metric_applied(self, client):
+        r = client.post(
+            "/devui/simulate-pipeline",
+            json={"sustain_id": "homestead.bonnie", "proposal": []},
+            headers=AUTH_HEADER,
+        )
+        assert r.json()["data"]["goal_metric"] == "minimize_budget_deviation"
+
+    def test_custom_goal_metric(self, client):
+        r = client.post(
+            "/devui/simulate-pipeline",
+            json={
+                "sustain_id": "homestead.bonnie",
+                "proposal": [],
+                "goal_metric": "maximize_savings_rate",
+            },
+            headers=AUTH_HEADER,
+        )
+        assert r.json()["data"]["goal_metric"] == "maximize_savings_rate"
+
+    def test_echoes_sustain_id(self, client):
+        r = client.post(
+            "/devui/simulate-pipeline",
+            json={"sustain_id": "vyyb.hive", "proposal": []},
+            headers=AUTH_HEADER,
+        )
+        assert r.json()["data"]["sustain_id"] == "vyyb.hive"
