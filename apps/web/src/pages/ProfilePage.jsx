@@ -148,25 +148,47 @@ function SignInPanel({ open, onClose, onSuccess, defaultMode = 'login' }) {
 
   const inputStyle = { fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--text-primary)', background: 'var(--bg-raised)', border: '1px solid var(--border-mid)', borderRadius: 4, padding: '10px 14px', outline: 'none', width: '100%', caretColor: 'var(--amber)' };
 
+  // Extract a readable string from a FastAPI error detail (may be string or array)
+  const _detail = (d, fallback) => {
+    if (!d) return fallback;
+    if (typeof d === 'string') return d;
+    if (Array.isArray(d)) return d[0]?.msg ?? fallback;
+    return fallback;
+  };
+
   const handleSubmit = async () => {
     if (!email.trim() || !password) return;
+    if (mode === 'register') {
+      if (!displayName.trim()) { setError('Display name required'); return; }
+      if (password.length < 8) { setError('Password must be at least 8 characters'); return; }
+    }
     setLoading(true); setError('');
     try {
-      if (mode === 'login') {
-        const res = await fetch(`${API_BASE}/api/v1/users/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim(), password }) });
-        const data = await res.json();
-        if (!res.ok) { setError(data.detail ?? 'Login failed'); return; }
-        localStorage.setItem('sustena_token', data.data.token);
-        onSuccess(data.data.token);
-      } else {
-        if (!displayName.trim()) { setError('Display name required'); setLoading(false); return; }
-        const res = await fetch(`${API_BASE}/api/v1/users/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim(), password, display_name: displayName.trim() }) });
-        const data = await res.json();
-        if (!res.ok) { setError(data.detail ?? 'Registration failed'); return; }
-        localStorage.setItem('sustena_token', data.data.token);
-        onSuccess(data.data.token);
+      const url  = mode === 'login' ? '/api/v1/users/login' : '/api/v1/users/register';
+      const body = mode === 'login'
+        ? { email: email.trim(), password }
+        : { email: email.trim(), password, display_name: displayName.trim() };
+      const res  = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      let data;
+      try { data = await res.json(); } catch { data = {}; }
+      if (!res.ok) {
+        setError(_detail(data.detail, mode === 'login' ? 'Login failed' : 'Registration failed'));
+        return;
       }
-    } catch { setError('Connection error'); } finally { setLoading(false); }
+      const token = data?.data?.token;
+      if (!token) { setError('Server error · no token returned'); return; }
+      localStorage.setItem('sustena_token', token);
+      onSuccess(token);
+    } catch (err) {
+      console.error('[SignInPanel] fetch failed:', err);
+      setError('Cannot reach server · make sure the backend is running');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const switchMode = (m) => { setMode(m); setError(''); };
