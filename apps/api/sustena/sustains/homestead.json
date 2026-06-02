@@ -183,6 +183,29 @@
         "events"
       ]
     },
+    "tasks": {
+      "type": "object",
+      "description": "Household task list managed by homestead.tasks.* operators.",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id":          {"type": "string", "description": "UUID"},
+              "title":       {"type": "string"},
+              "due_date":    {"type": "string", "format": "date"},
+              "assigned_to": {"type": "string", "description": "Member name or empty string"},
+              "priority":    {"type": "string", "enum": ["low", "normal", "high"]},
+              "status":      {"type": "string", "enum": ["active", "carryover", "completed"]},
+              "created_at":  {"type": "string", "format": "date-time"}
+            },
+            "required": ["id", "title", "due_date", "assigned_to", "priority", "status", "created_at"]
+          }
+        }
+      },
+      "required": ["items"]
+    },
     "alerts": {
       "type": "array",
       "description": "System and operative-generated alerts for household members.",
@@ -290,6 +313,30 @@
         "event_id"
       ],
       "pawa_cost": 0
+    },
+    {
+      "name": "homestead.tasks.add",
+      "description": "Add a new task to the household task list.",
+      "params": ["title", "due_date", "assigned_to", "priority"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "homestead.tasks.complete",
+      "description": "Mark a task as completed by its ID.",
+      "params": ["task_id"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "homestead.tasks.list",
+      "description": "List tasks filtered by status window.",
+      "params": ["filter"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "homestead.tasks.carryover",
+      "description": "Mark all overdue active tasks as carryover. Runs on a polling schedule.",
+      "params": [],
+      "pawa_cost": 0
     }
   ],
   "operatives": {
@@ -357,6 +404,9 @@
     },
     "calendar": {
       "events": []
+    },
+    "tasks": {
+      "items": []
     },
     "alerts": []
   },

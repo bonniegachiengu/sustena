@@ -128,6 +128,13 @@ OPERATIVE_OPERATORS = [
     "operative.spawn",
 ]
 
+TASKS_OPERATORS = [
+    "homestead.tasks.add",
+    "homestead.tasks.complete",
+    "homestead.tasks.list",
+    "homestead.tasks.carryover",
+]
+
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + BIASHARA_OPERATORS + VYYB_OPERATORS  # Epic 1.5.2
@@ -140,6 +147,7 @@ ALL_KNOWN_OPERATORS = (
     + CONTROL_OPERATORS                    # Sprint 3.6
     + MENTOR_OPERATORS                     # Sprint 5.3
     + OPERATIVE_OPERATORS                  # Sprint 5.7
+    + TASKS_OPERATORS                      # Sprint 6.1
 )
 
 
