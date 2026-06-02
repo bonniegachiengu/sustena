@@ -1,7 +1,7 @@
 # Sustena XII — Claude Code Context
 
 > Read this before touching any code. It tells you where we are, how things are built,
-> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 6.1).
+> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 6.2).
 
 ---
 
@@ -179,9 +179,9 @@ All 7 tasks done and committed (1245 tests — 1269 after Sprint 6.1):
 
 ### Sprint 6 — IN PROGRESS: Today List + Morning Brief
 See `docs/Sustena_XII_Roadmap_Jun2026.md` for full task list.
-Tasks 6.1–6.4 (1269 tests):
+Tasks 6.1–6.4 (1297 tests):
 - [x] 6.1 `homestead.tasks.*` operators — add, complete, list, carryover. State at `tasks.items`. homestead.json updated.
-- [ ] 6.2 `orchie.morning_brief` operator — aggregates calendar, tasks, proposals, finances into a `morning_brief_card` ResponseWidget + `brief_text`.
+- [x] 6.2 `orchie.morning_brief` operator — aggregates today's tasks, calendar events, passed proposals, liquid balance into `morning_brief_card` ResponseWidget + `brief_text`. `morning_brief_card` registered in WidgetTypeRegistry. 22 new tests.
 - [ ] 6.3 Orchie session init — on web app mount, auto-POST `orchie.morning_brief` and render result as first Orchie chat message.
 - [ ] 6.4 Orchie Panel — full-page view opened by expanding the Orchie chat bubble. Layout:
       - Top-left **TODAY** card (replaces "MOST ASKED"): renders `morning_brief_card` — tasks due today, calendar events, approved strategies.
