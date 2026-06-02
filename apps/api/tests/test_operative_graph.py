@@ -533,3 +533,145 @@ class TestPlaceholderResolution:
         )
         assert graph.nodes["a"].kwargs["input_params"]["amount"] == 500.0
         assert graph.nodes["a"].kwargs["input_params"]["pocket"] == "food"
+
+
+# ── BaseOperative graph integration tests (Task 5.2) ─────────────────────────
+
+
+class TestBaseOperativeGraphIntegration:
+    """
+    Verify that BaseOperative's default evaluate() / deliberate() dispatch to
+    evaluation_graph / deliberation_graph when those are set.
+    """
+
+    def _make_eval_graph(self, test_operators) -> OperativeGraph:
+        """3-node evaluation graph that returns a budget.reallocate proposal."""
+        return OperativeGraph(
+            nodes={
+                "a": OperativeNode("a", "test.step_a"),
+                "b": OperativeNode("b", "test.step_b"),
+                "c": OperativeNode("c", "test.step_c", kwargs={
+                    "operator_name": "budget.reallocate",
+                    "input_params": {"pocket_name": "food", "amount": 500.0},
+                    "rationale": "Graph-based evaluation.",
+                }),
+            },
+            edges=[OperativeEdge("a", "b"), OperativeEdge("b", "c")],
+            entry_node="a",
+            exit_node="c",
+        )
+
+    def _make_delib_graph(self, test_operators) -> OperativeGraph:
+        """Deliberation graph whose exit node returns vote data."""
+        from sustena.core.operator import OperatorMeta
+
+        async def vote_yes(ctx: OperatorContext) -> OperatorResult:
+            return OperatorResult.ok({
+                "vote": "YES",
+                "utility": 0.85,
+                "reasoning": "Graph says YES.",
+                "operator_name": "deliberation_result",
+                "rationale": "Graph says YES.",
+            })
+
+        OPERATOR_REGISTRY["test.vote_yes"] = OperatorMeta(
+            name="test.vote_yes",
+            description="Test vote YES",
+            fn=vote_yes,
+            protocol="rpc",
+        )
+
+        return OperativeGraph(
+            nodes={"vote": OperativeNode("vote", "test.vote_yes")},
+            edges=[],
+            entry_node="vote",
+            exit_node="vote",
+        )
+
+    @pytest.fixture(autouse=True)
+    def cleanup_test_vote_op(self):
+        yield
+        OPERATOR_REGISTRY.pop("test.vote_yes", None)
+
+    @pytest.mark.asyncio
+    async def test_evaluate_uses_evaluation_graph(self, test_operators):
+        """evaluate() should run evaluation_graph when set — no LLM call."""
+        from sustena.core.state import StateAccessor
+        from sustena.operatives.base import BaseOperative, VoteChoice
+
+        class GraphOperative(BaseOperative):
+            operative_id = "graph_test"
+
+            def should_evaluate(self, state):
+                return True
+
+        state = StateAccessor({"finances": {"liquid": {"balance": 50000.0}}})
+        op = GraphOperative(config={}, state_accessor=state, claude_client=None,
+                            sustain_id="test", user_id="test-user")
+        op.evaluation_graph = self._make_eval_graph(test_operators)
+
+        proposal = await op.evaluate(trigger_event={"event": "test"})
+
+        assert isinstance(proposal, OperativeProposal)
+        assert proposal.operator_name == "budget.reallocate"
+        assert proposal.rationale == "Graph-based evaluation."
+
+    @pytest.mark.asyncio
+    async def test_deliberate_uses_deliberation_graph(self, test_operators):
+        """deliberate() should run deliberation_graph when set and extract OperativeVote."""
+        from sustena.core.state import StateAccessor
+        from sustena.operatives.base import BaseOperative, OperativeVote, VoteChoice
+
+        class GraphOperative(BaseOperative):
+            operative_id = "graph_test"
+
+            def should_evaluate(self, state):
+                return True
+
+        state = StateAccessor({"finances": {"liquid": {"balance": 50000.0}}})
+        op = GraphOperative(config={}, state_accessor=state, claude_client=None,
+                            sustain_id="test", user_id="test-user")
+        op.deliberation_graph = self._make_delib_graph(test_operators)
+
+        vote = await op.deliberate(context={}, proposal={"operator_name": "budget.reallocate"})
+
+        assert isinstance(vote, OperativeVote)
+        assert vote.vote == VoteChoice.YES
+        assert vote.utility == pytest.approx(0.85)
+        assert vote.reasoning == "Graph says YES."
+
+    @pytest.mark.asyncio
+    async def test_evaluate_raises_without_graph_or_override(self):
+        """evaluate() raises NotImplementedError when no graph and no override."""
+        from sustena.core.state import StateAccessor
+        from sustena.operatives.base import BaseOperative
+
+        class MinimalOperative(BaseOperative):
+            operative_id = "minimal"
+
+            def should_evaluate(self, state):
+                return True
+
+        state = StateAccessor({})
+        op = MinimalOperative(config={}, state_accessor=state, claude_client=None)
+
+        with pytest.raises(NotImplementedError, match="evaluation_graph"):
+            await op.evaluate({})
+
+    @pytest.mark.asyncio
+    async def test_deliberate_raises_without_graph_or_override(self):
+        """deliberate() raises NotImplementedError when no graph and no override."""
+        from sustena.core.state import StateAccessor
+        from sustena.operatives.base import BaseOperative
+
+        class MinimalOperative(BaseOperative):
+            operative_id = "minimal"
+
+            def should_evaluate(self, state):
+                return True
+
+        state = StateAccessor({})
+        op = MinimalOperative(config={}, state_accessor=state, claude_client=None)
+
+        with pytest.raises(NotImplementedError, match="deliberation_graph"):
+            await op.deliberate({}, {})

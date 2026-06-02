@@ -9,9 +9,14 @@ they create proposals that go through the CouncilSession for ratification.
 
 Design principles:
   - should_evaluate() is ALWAYS cheap: threshold check only, zero LLM calls.
-  - evaluate() is called only when should_evaluate() returns True.
-  - deliberate() votes on a proposal using LLM reasoning.
+  - evaluate() runs evaluation_graph if set; subclasses may override instead.
+  - deliberate() runs deliberation_graph if set; subclasses may override instead.
   - _call_claude() wraps the Anthropic client with retry + cost logging.
+
+Graph-based operatives (Sprint 5+):
+  Set self.evaluation_graph and/or self.deliberation_graph (OperativeGraph instances)
+  to replace LLM-dependent evaluate/deliberate with deterministic operator graphs.
+  LLM is still available as an explicit llm.* node in the graph spec.
 
 Model convention:
   HAIKU  = claude-haiku-4-5-20251001 (fast, cheap — default for operatives)
@@ -24,11 +29,15 @@ import logging
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sustena.config import settings
 from sustena.core.state import StateAccessor
+
+if TYPE_CHECKING:
+    from sustena.core.operative_graph import OperativeGraph
 
 logger = logging.getLogger(__name__)
 
@@ -101,12 +110,22 @@ class BaseOperative(ABC):
 
     Subclasses must implement:
       - should_evaluate(state) → bool (fast threshold check, NO LLM)
+
+    Subclasses may either override or provide graphs for:
       - evaluate(trigger_event) → OperativeProposal | None
       - deliberate(context, proposal) → OperativeVote
+
+    Graph-based path (Sprint 5):
+      Set evaluation_graph / deliberation_graph in __init__ and the base class
+      methods dispatch to them automatically. No LLM required.
+
+    LLM-based path (legacy / optional node):
+      Override evaluate() / deliberate() directly, or include llm.* nodes in graphs.
 
     Subclasses inherit:
       - _call_claude(...) → str (LLM call with retry + cost logging)
       - _build_state_context(paths) → str (readable state context for prompts)
+      - _build_operator_context() → OperatorContext (for graph execution)
     """
 
     #: Subclasses set this to identify themselves in logs and council_votes.
@@ -117,18 +136,28 @@ class BaseOperative(ABC):
         config: dict,
         state_accessor: StateAccessor,
         claude_client: Any,
+        sustain_id: str = "unknown",
+        user_id: str = "system",
     ) -> None:
         """
         Args:
-            config: Operative-specific config (thresholds, prompts, etc.)
+            config:         Operative-specific config (thresholds, prompts, etc.)
             state_accessor: StateAccessor bound to the sustain being watched.
-            claude_client:  Anthropic client (real or mock). Must expose
-                            .messages.create(**kwargs) coroutine.
+            claude_client:  Anthropic client (real or mock). Exposes .messages.create().
+            sustain_id:     Sustain this operative belongs to (used in OperatorContext).
+            user_id:        User context for OperatorContext (default: "system").
         """
-        self.config         = config
-        self.state          = state_accessor
-        self.claude_client  = claude_client
-        self._log_entries: list[dict] = []   # in-memory operators_log sink
+        self.config        = config
+        self.state         = state_accessor
+        self.claude_client = claude_client
+        self.sustain_id    = sustain_id
+        self.user_id       = user_id
+        self._log_entries: list[dict] = []
+
+        # Graph-based evaluate / deliberate (Sprint 5).
+        # Set these in subclass __init__ to replace LLM-dependent methods.
+        self.evaluation_graph:    "OperativeGraph | None" = None
+        self.deliberation_graph:  "OperativeGraph | None" = None
 
     # ── Abstract interface ─────────────────────────────────────────────────────
 
@@ -138,23 +167,28 @@ class BaseOperative(ABC):
         Cheap threshold check — MUST NOT call the LLM.
 
         Return True only when a measurable threshold in `state` is breached
-        (e.g., a pocket is <20% of allocation). The operative runner calls this
-        on every relevant event; calling the LLM here would be prohibitively
-        expensive and slow.
+        (e.g., a pocket is <20% of allocation). Called on every relevant event.
         """
         ...
 
-    @abstractmethod
+    # ── Graph-backed evaluate / deliberate ────────────────────────────────────
+
     async def evaluate(self, trigger_event: dict) -> "OperativeProposal | None":
         """
         Analyse the trigger event and optionally propose an operator call.
 
-        Called only when should_evaluate() returns True. May use _call_claude()
-        for reasoning. Returns None if no action is warranted.
+        Default: runs self.evaluation_graph if set.
+        Subclasses may override for custom (including LLM-based) logic.
+        Returns None if no action is warranted.
         """
-        ...
+        if self.evaluation_graph is not None:
+            ctx = self._build_operator_context()
+            return await self.evaluation_graph.run(ctx, trigger_event)
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must either override evaluate() "
+            "or set self.evaluation_graph"
+        )
 
-    @abstractmethod
     async def deliberate(
         self,
         context: dict,
@@ -163,14 +197,47 @@ class BaseOperative(ABC):
         """
         Vote on a Council proposal.
 
-        Args:
-            context: Snapshot of relevant state sections.
-            proposal: The OperativeProposal (or council_proposals row) as dict.
-
-        Returns:
-            OperativeVote with YES/NO/ABSTAIN + reasoning.
+        Default: runs self.deliberation_graph if set; extracts vote/utility from
+        the exit node's result data.
+        Subclasses may override for custom (including LLM-based) logic.
         """
-        ...
+        if self.deliberation_graph is not None:
+            ctx = self._build_operator_context()
+            graph_proposal = await self.deliberation_graph.run(ctx, proposal)
+            exit_data = graph_proposal.simulation_results.get(
+                self.deliberation_graph.exit_node, {}
+            )
+            vote_str = str(exit_data.get("vote", "ABSTAIN")).upper()
+            try:
+                vote = VoteChoice(vote_str)
+            except ValueError:
+                vote = VoteChoice.ABSTAIN
+            reasoning = exit_data.get("reasoning", graph_proposal.rationale)
+            utility = float(exit_data.get("utility", 0.5))
+            utility = max(0.0, min(1.0, utility))
+            return OperativeVote(vote=vote, reasoning=reasoning, utility=utility)
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must either override deliberate() "
+            "or set self.deliberation_graph"
+        )
+
+    # ── OperatorContext builder ───────────────────────────────────────────────
+
+    def _build_operator_context(self):
+        """Build a minimal OperatorContext for graph execution (no DB, no Firestore)."""
+        from sustena.core.events import EventBus
+        from sustena.core.operator import OperatorContext
+        from sustena.core.pawa import PawaLedger
+
+        return OperatorContext(
+            state=self.state,
+            events=EventBus(sustain_id=self.sustain_id),
+            pawa=PawaLedger(),
+            sustain_id=self.sustain_id,
+            user_id=self.user_id,
+            operative_id=self.operative_id,
+            timestamp=datetime.utcnow(),
+        )
 
     # ── LLM wrapper ───────────────────────────────────────────────────────────
 
