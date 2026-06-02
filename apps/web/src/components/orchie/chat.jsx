@@ -454,10 +454,36 @@ function useStreamedConversation(script, autoStart = true, baseDelay = 1200, sus
   // Auto-start sequence
   oUseEffect(() => {
     if (!autoStart) return;
-    if (shown.length === 0 && idxRef.current === 0) {
+    if (shown.length > 0 || idxRef.current > 0) return;
+
+    if (script.length > 0) {
+      // Scripted demo sequence (used when ORCHIE_DEMO is non-empty)
       const t0 = setTimeout(() => playNext(), 600);
       return () => clearTimeout(t0);
     }
+
+    // Empty script → fetch morning brief from API on session init
+    let cancelled = false;
+    const t0 = setTimeout(async () => {
+      if (cancelled) return;
+      setThinking(true);
+      try {
+        const resp = await api.post('/devui/console/execute', {
+          sustain_id: sustainId,
+          operator: 'orchie.morning_brief',
+          params: {},
+        });
+        if (cancelled) return;
+        const brief = resp?.data?.result?.data?.brief_text;
+        setThinking(false);
+        setShown([{ role: 'assistant', text: brief || 'nothing scheduled · sustain state nominal' }]);
+      } catch {
+        if (cancelled) return;
+        setThinking(false);
+        setShown([{ role: 'assistant', text: 'nothing scheduled · sustain state nominal' }]);
+      }
+    }, 600);
+    return () => { cancelled = true; clearTimeout(t0); };
   }, []);
 
   const onMessageDone = () => {
