@@ -1,7 +1,7 @@
 # Sustena XII — Claude Code Context
 
 > Read this before touching any code. It tells you where we are, how things are built,
-> and how Bonnie works. Everything here is current as of 2 June 2026.
+> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 5).
 
 ---
 
@@ -40,15 +40,25 @@ lore/           Public knowledge surface (journal, docs)
 ### Key directories
 ```
 sustena/
-  core/           7 primitives + UIParser:
+  core/           7 primitives + UIParser + operative graph layer:
                     state.py, constraints.py, events.py, pawa.py,
                     operator.py, sustain_engine.py, council.py,
-                    uiparser.py, widget_registry.py          ← added Sprint 2
+                    uiparser.py, widget_registry.py,         ← added Sprint 2
+                    operative_graph.py,                      ← added Sprint 5
+                    operative_runtime.py                     ← added Sprint 5
   operators/      budget.py, chama.py, procurement.py, vyyb.py,
                   biashara.py, calendar.py,
-                  ui_render.py                              ← added Sprint 2
+                  ui_render.py,                             ← added Sprint 2
+                  api_ops.py, monitor.py, visualize.py,     ← added Sprint 3
+                  simulate_ops.py, edit_ops.py, control_ops.py,
+                  mentor_ops.py,                            ← added Sprint 5
+                  operative_ops.py                          ← added Sprint 5
   operatives/     base.py, mentor.py, protege.py, attache.py, navigator.py,
                   curator.py, chama_secretary.py
+  operatives/graphs/   JSON graph specs for all Council operatives ← Sprint 5
+                    mentor_evaluation.json, mentor_deliberation.json,
+                    protege_*.json, attache_*.json, curator_*.json,
+                    navigator_*.json, orchie_evaluation.json
   sustains/       homestead.json, vyyb.json, chama.json, biashara.json, colosso.json
   api/
     main.py       FastAPI app, lifespan (init_db + Claude client mode log), CORS
@@ -67,7 +77,7 @@ uvicorn sustena.api.main:app --reload --port 8000
 ### Testing
 ```bash
 # From apps/api/
-python -m pytest tests/ -q --tb=short     # 1162 tests, all pass
+python -m pytest tests/ -q --tb=short     # 1245 tests, all pass
 
 # Run specific file
 python -m pytest tests/test_uiparser.py -v
@@ -106,8 +116,9 @@ VITE_API_BASE_URL=http://localhost:8000
 VITE_ADMIN_TOKEN=dev-admin-token
 ```
 
-**Current state:** Sprint 1 + Sprint 2 complete. All panels wired to real API.
-Controller panel has CONSOLE / UI PREVIEW tab toggle.
+**Current state:** Sprints 1–4 complete. All panels wired to real API.
+Controller panel has CONSOLE / UI PREVIEW tab toggle. Monitor/Simulate/Control panels
+all use real Sprint 3 operators.
 
 ---
 
@@ -156,11 +167,20 @@ All 4 tasks done and committed (1162 tests):
 - [x] 4.3 Simulate Panel — `POST /devui/simulate-pipeline` chains `simulate.fork → run_path → score`; editable proposal textarea, goal-metric selector, per-step accordion
 - [x] 4.4 Control Panel — `ProposalCard` calls `control.execute_approved`; `RollbackPanel` calls `control.rollback`; both confirm before executing
 
-### Sprint 5 — NEXT: Operative Networks (LLM-Optional Base Layer)
+### Sprint 5 ✅ — Operative Networks (LLM-Optional Base Layer)
+All 7 tasks done and committed (1245 tests):
+- [x] 5.1 `OperativeGraph` base layer — `CalibrationError`, `Condition`, `OperativeNode`, `OperativeEdge`, `OperativeGraph` in `core/operative_graph.py`. `from_spec()` with `{{placeholder}}` resolution and inline defaults. `$dot.path` dynamic kwargs for runtime value injection.
+- [x] 5.2 `BaseOperative` uses `OperativeGraph` — optional `evaluation_graph`/`deliberation_graph` attributes. Default `evaluate()`/`deliberate()` dispatch to graphs. `_build_operator_context()` helper added.
+- [x] 5.3 Mentor rewritten as graph-of-operators — `mentor.evaluate_budget` + `mentor.deliberate_budget` operators replace all `_call_claude()` calls. Zero Anthropic API calls.
+- [x] 5.4 Protocol-aware operative runtime — `OperativeRuntime` in `core/operative_runtime.py`. `event_driven` → EventBus subscriber; `polling` → `start_polling()` loop; `rpc` → `run_once()`.
+- [x] 5.5 Graph spec in JSON — `OperativeGraph.from_spec_file(path)`. Mentor graph files in `operatives/graphs/`. `homestead.json` operatives upgraded to dict with `class` + graph path keys. `GRAPHS_DIR` constant.
+- [x] 5.6 Graph specs for all Council operatives — 11 JSON files in `operatives/graphs/` covering Mentor, Protégé, Attaché, Curator, Navigator, Orchie (evaluation + deliberation each).
+- [x] 5.7 `operative.spawn` operator — loads template, resolves `{{placeholder}}` from `calibration_data` + live state, returns `instantiated_spec`. `CalibrationError` propagates as `OperatorResult.fail`.
+
+### Sprint 6 — NEXT: Today List + Morning Brief
 See `docs/Sustena_XII_Roadmap_Jun2026.md` for full task list.
-Tasks 5.1–5.7 cover: `OperativeGraph` base layer, refactor `BaseOperative` to use graphs,
-rewrite Mentor as graph-of-operators, protocol-aware operative runtime, JSON graph specs,
-graph designs for all Council operatives, and `operative.spawn` with `{{placeholder}}` calibration.
+Tasks 6.1–6.4 cover: `homestead.tasks.*` operators, `orchie.morning_brief` operator,
+Orchie auto-sends morning brief on session start, and a new Today panel in the web UI.
 
 ---
 
@@ -192,6 +212,60 @@ ui_schema={
 - `GET  /devui/monitor-widgets?sustain_id=` — calls `visualize.*` operators, returns `{pocket_ring, event_feed, constraint_health}` widgets
 - `POST /devui/simulate-pipeline` — body: `{sustain_id, proposal, goal_metric}` → `{fork_id, steps, score, interpretation}`
 - `GET  /devui/registry/operators` — now includes `protocol` field on every operator entry
+
+---
+
+## Operative graph — key facts (Sprint 5)
+
+### New operators added in Sprint 5
+```
+mentor.evaluate_budget   — scans pockets, returns proposal dict; no LLM
+mentor.deliberate_budget — rule-based budget vote (YES/NO/ABSTAIN); no LLM
+operative.spawn          — loads graph template, resolves {{placeholders}}, returns instantiated_spec
+```
+
+### OperativeGraph spec format
+```python
+{
+  "entry": "node_id",
+  "exit":  "node_id",
+  "nodes": {
+    "node_id": {
+      "operator": "operator.name",
+      "kwargs": {
+        "static_param": "value",
+        "calibrated_param": "{{user.income}}",        # resolved at from_spec() time
+        "dynamic_param": "$prior_node.field"          # resolved at run() time
+      }
+    }
+  },
+  "edges": [
+    {"from": "a", "to": "b"},
+    {"from": "b", "to": "c", "condition": {"field": "score", "op": ">", "value": 0.7}}
+  ]
+}
+```
+
+### Graph file locations
+```
+sustena/operatives/graphs/
+  mentor_evaluation.json       deliberation.json
+  protege_*.json               attache_*.json
+  curator_*.json               navigator_*.json
+  orchie_evaluation.json       (Orchie does not deliberate)
+```
+
+### operative.spawn flow
+```
+operative.spawn(template_id, calibration_data)
+  → load graph from operatives/graphs/{template_id}.json
+  → merge ctx.state snapshot into calibration_data under "state" key
+  → OperativeGraph.from_spec(spec, calibration_data) — resolves {{tokens}}
+  → return OperatorResult.ok({"instantiated_spec": resolved_spec, ...})
+  → caller does: OperativeGraph.from_spec(result["instantiated_spec"]).run(ctx, trigger)
+```
+
+### New devui endpoints (Sprint 5 — none; purely backend/operator layer)
 
 ---
 
@@ -229,19 +303,31 @@ all operative calls locally.
 
 ## Architecture decisions
 
-### Operative graphs (Sprint 5 target)
-Operatives will be rewritten as directed graphs of operator calls — no LLM required
-at the base layer. The graph is defined in JSON. `operative.spawn(template_id, calibration_data)`
-calibrates a library template with user context. See Sprint 5 in the roadmap.
+### Operative graphs (Sprint 5 — done)
+Operatives are directed graphs of operator calls — no LLM required at the base layer.
+`OperativeGraph` (core/operative_graph.py) runs the graph. `OperativeRuntime`
+(core/operative_runtime.py) dispatches by protocol (event_driven/polling/rpc).
+`operative.spawn(template_id, calibration_data)` calibrates a library template with
+user context, resolving `{{placeholder}}` tokens. `CalibrationError` is raised on
+unresolved required placeholders. Graph JSON files live in `operatives/graphs/`.
+Circular import between `operative_graph.py` and `operatives/base.py` is broken with
+a `TYPE_CHECKING` guard and a lazy import inside `_build_proposal`.
+
+### Operative graph kwargs — two resolution passes
+1. **`from_spec()` time**: `{{placeholder}}` tokens are resolved from `calibration_data`.
+2. **`run()` time**: `$dot.path` string kwargs are resolved from `accumulated` node results
+   (e.g. `"$trigger_event"` injects the trigger event dict; `"$fork.fork_id"` injects
+   the fork ID from a prior node).
+Never use `eval()` for either resolution.
 
 ### devui endpoints
 `/devui/*` endpoints exist and have stub fallbacks. They try to call `SustainEngine`
 methods first, fall back to hardcoded stub data if the engine isn't initialised.
 After seeding, the real data flows. All stubs have `# TODO: wire real` comments.
 
-### Protocol types (Sprint 3 target)
-Every operator will declare `protocol`: `rpc | event_driven | polling | streaming`.
-Not implemented yet — add to `OperatorMeta` in Sprint 3.7.
+### Protocol types (Sprint 3 — done)
+Every operator declares `protocol`: `rpc | event_driven | polling | streaming` on
+`OperatorMeta`. `OperativeRuntime` uses the entry node's protocol to decide dispatch.
 
 ### UIParser (Sprint 2 — done)
 `uiparser.py` owns `UISchema`, `UISchemaField`, `ResponseWidget`, `UISchemaParser`.
@@ -257,7 +343,7 @@ before UIParser was built.
 ```bash
 # Backend
 cd apps/api
-python -m pytest tests/ -q              # run all tests (929)
+python -m pytest tests/ -q              # run all tests (1245)
 uvicorn sustena.api.main:app --reload   # start server
 
 # Frontend
@@ -288,5 +374,9 @@ curl -X POST http://localhost:8000/devui/preview-widget \
 - Do not add `rootdir` to `pyproject.toml [tool.pytest.ini_options]` — it's not a valid key.
 - Do not write to `sustena.db` from tests — conftest.py uses `:memory:`.
 - Do not start Epics 1.12 (Monte Carlo), 1.13 (Mkulima), or 1.14 (Daraja) yet.
-  Sequence is: Sprint 3 operators+protocols → Sprint 4 operator UIs → Sprint 5 operative graphs.
+  Sequence is: Sprint 5 operative graphs → Sprint 6 today list → Sprint 7 council enrichment.
 - Do not add a new operator without adding it to `ALL_KNOWN_OPERATORS` in `test_operator_registry.py`.
+- Do not import `OperativeProposal` at the top level of `operative_graph.py` — it creates
+  a circular import. Use the lazy import inside `_build_proposal()` that is already there.
+- Do not use `eval()` anywhere in UIParser, OperativeGraph, or placeholder resolution.
+  Phase 1 is strictly pattern-matching and dict-walking only.
