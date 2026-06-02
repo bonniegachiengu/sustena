@@ -1,7 +1,7 @@
 # Sustena XII — Claude Code Context
 
 > Read this before touching any code. It tells you where we are, how things are built,
-> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 7.3 complete).
+> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 8.2 + controller UI fixes).
 
 ---
 
@@ -231,6 +231,10 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 - ✅ `main.py` lifespan — seeds one homestead sustain on startup if DB is empty.
 - ✅ `conftest.py` — resets engine singleton between test modules.
 - ✅ 18 new tests in `test_engine_singleton.py`. 1446 tests pass.
+
+**Controller panel UI fixes (2 Jun 2026, post-8.2):**
+- ✅ Universal Controls instrument frames were clipped at the bottom — added `flexShrink:0` to the Card and removed `minHeight:0` from `Instrument` (`other.jsx`).
+- ✅ [E-HLD] EXEC MODE column too narrow (130px) — LIVE button overflowed the instrument frame; widened to 165px.
 
 **New routes added in Sprints 8–11:**
 - `POST /api/v1/users/register`, `POST /api/v1/users/login`, `GET /api/v1/users/me`, `GET /api/v1/users/me/stats`, `GET /api/v1/users/me/activity`
