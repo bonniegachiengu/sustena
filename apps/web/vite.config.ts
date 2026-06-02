@@ -6,9 +6,11 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/api': 'http://localhost:9000',
-      '/devui': 'http://localhost:9000',
-      '/webhook': 'http://localhost:9000',
+      '/api':     { target: 'http://localhost:8000', changeOrigin: true, ws: false },
+      '/devui':   { target: 'http://localhost:8000', changeOrigin: true, ws: true  },
+      '/orchie':  { target: 'http://localhost:8000', changeOrigin: true, ws: false },
+      '/webhook': { target: 'http://localhost:8000', changeOrigin: true, ws: false },
+      '/seed':    { target: 'http://localhost:8000', changeOrigin: true, ws: false },
     }
   },
   build: {

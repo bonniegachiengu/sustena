@@ -2272,7 +2272,7 @@ function LibraryPanel({ openModal }) {
     if (!token) { window.flash?.('Sign in to publish packages', 'amber'); return; }
     setPublishing(true);
     try {
-      const base = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
+      const base = import.meta.env.VITE_API_BASE ?? '';
       const res = await fetch(`${base}/api/v1/arena/packages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },

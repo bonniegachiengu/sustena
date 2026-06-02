@@ -2,11 +2,14 @@
  * apps/web/src/lib/api.js
  *
  * Thin API client for the Sustena devui + orchie endpoints.
- *   VITE_API_BASE    — defaults to http://localhost:8000
- *   VITE_ADMIN_TOKEN — defaults to 'dev-token'
+ *
+ * In dev:  requests go through Vite's proxy (vite.config.ts) → localhost:8000.
+ *          No absolute base URL needed — all paths are relative.
+ * In prod: set VITE_API_BASE to the deployed backend URL (e.g. https://api.sustena.io).
+ *          Leave unset (or set to '') to use the same origin as the frontend.
  */
 
-const BASE  = import.meta.env.VITE_API_BASE   ?? 'http://localhost:9000';
+const BASE  = import.meta.env.VITE_API_BASE  ?? '';
 const TOKEN = import.meta.env.VITE_ADMIN_TOKEN ?? 'dev-admin-token';
 
 const headers = () => ({
@@ -32,14 +35,13 @@ async function post(path, body) {
 
 /**
  * Open a WebSocket to /devui/state-stream.
- * @param {string} sustainId
- * @param {(data: object) => void} onMessage
- * @param {() => void} onClose
- * @returns {WebSocket}
+ * In dev Vite proxies /devui with ws:true so a relative path works.
  */
 function ws(sustainId, onMessage, onClose) {
-  const wsBase = BASE.replace(/^http/, 'ws');
-  const url = `${wsBase}/devui/state-stream?sustain_id=${encodeURIComponent(sustainId)}&token=${encodeURIComponent(TOKEN)}`;
+  const base = BASE
+    ? BASE.replace(/^http/, 'ws')
+    : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+  const url = `${base}/devui/state-stream?sustain_id=${encodeURIComponent(sustainId)}&token=${encodeURIComponent(TOKEN)}`;
   const socket = new WebSocket(url);
 
   socket.onmessage = (event) => {
