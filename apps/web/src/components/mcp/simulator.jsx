@@ -315,111 +315,204 @@ function SimulatorCanvas({
   );
 }
 
-/* State Diff right panel — wired to POST /devui/simulate */
+/* ── StateDiff — uses simulate.fork → run_path → score pipeline ─────────── */
+
+const DEFAULT_PROPOSAL = [
+  { operator: 'budget.allocate', params: { pocket_name: 'food', amount: 5000 } },
+];
 
 function StateDiff({ tick, sustain, selectedBranch }) {
   const [result, setResult] = dUseState(null);
   const [loading, setLoading] = dUseState(false);
   const [ran, setRan] = dUseState(false);
+  const [openStep, setOpenStep] = dUseState(null);
+  const [goalMetric, setGoalMetric] = dUseState('minimize_budget_deviation');
+  const [proposalText, setProposalText] = dUseState(JSON.stringify(DEFAULT_PROPOSAL, null, 2));
+  const [proposalError, setProposalError] = dUseState(null);
 
-  const runSim = () => {
+  const runPipeline = () => {
+    let proposal;
+    try {
+      proposal = JSON.parse(proposalText);
+      setProposalError(null);
+    } catch {
+      setProposalError('Invalid JSON');
+      return;
+    }
     setLoading(true);
-    api.post('/devui/simulate', {
+    api.post('/devui/simulate-pipeline', {
       sustain_id: sustain?.id || 'homestead.bonnie',
-      proposal: [{ operator: 'budget.allocate', params: { pocket_name: 'food', amount: 5000 } }],
+      proposal,
+      goal_metric: goalMetric,
     })
-      .then(d => { setResult(d); setLoading(false); setRan(true); })
+      .then(d => {
+        setResult(d?.data || null);
+        setLoading(false);
+        setRan(true);
+        setOpenStep(null);
+      })
       .catch(() => { setLoading(false); setRan(true); });
   };
 
-  // Derive display values from API result only
-  const score = result?.steps?.slice(-1)[0]?.score ?? result?.outcome_score ?? null;
-  const cstrs = result?.constraint_satisfaction
-    ? Object.entries(result.constraint_satisfaction).map(([name, pass]) => ({ name, status: pass ? 'PASS' : 'FAIL' }))
-    : [];
-  const diffs = result?.steps?.flatMap(s =>
-    Object.entries(s.delta || {}).map(([field, val]) => ({
-      field,
-      op: typeof val === 'number' ? (val >= 0 ? `+${val}` : `${val}`) : String(val),
-      tone: typeof val === 'number' && val < 0 ? 'amber' : typeof val === 'number' && val > 0 ? 'ok' : 'muted',
-    }))
-  ) || [];
-  const pawaCost = result?.pawa_cost ?? null;
+  const score = result?.score ?? null;
+  const interpretation = result?.interpretation ?? null;
+  const steps = result?.steps ?? [];
+  const stepsRun = result?.steps_run ?? 0;
+  const stepsOk = result?.steps_succeeded ?? 0;
+  const scoreColor = score === null ? 'var(--text-dim)'
+    : score >= 0.8 ? 'var(--teal)'
+    : score >= 0.5 ? 'var(--amber)'
+    : 'var(--danger)';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Run simulation button */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+      {/* Goal metric selector */}
       <div>
-        <button
-          onClick={runSim}
-          disabled={loading}
+        <span className="label-10" style={{ display: 'block', marginBottom: 4 }}>GOAL METRIC</span>
+        <select
+          value={goalMetric}
+          onChange={e => setGoalMetric(e.target.value)}
           style={{
-            width: '100%', padding: '8px 0',
-            fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.07em',
-            color: loading ? 'var(--text-dim)' : 'var(--bg-base)',
-            background: loading ? 'var(--bg-overlay)' : 'var(--amber)',
-            border: `1px solid ${loading ? 'var(--border)' : 'var(--amber)'}`,
-            borderRadius: 'var(--radius-sm)',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            transition: 'all var(--t-fast)',
+            width: '100%', background: 'var(--bg-base)', border: '1px solid var(--border-mid)',
+            borderRadius: 'var(--radius-sm)', padding: '6px 8px',
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)', outline: 'none',
           }}
         >
-          {loading ? '⟳ SIMULATING…' : ran ? '↺ RE-SIMULATE' : '▶ RUN SIMULATION'}
-        </button>
+          <option value="minimize_budget_deviation">minimize_budget_deviation</option>
+          <option value="maximize_savings_rate">maximize_savings_rate</option>
+          <option value="maximize_liquid_balance">maximize_liquid_balance</option>
+        </select>
       </div>
 
+      {/* Proposal editor */}
       <div>
-        <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>
-          OUTCOME · BRANCH {selectedBranch || 'A.2'}
+        <span className="label-10" style={{ display: 'block', marginBottom: 4 }}>PROPOSAL · OPERATOR SEQUENCE</span>
+        <textarea
+          value={proposalText}
+          onChange={e => { setProposalText(e.target.value); setProposalError(null); }}
+          spellCheck={false}
+          rows={5}
+          style={{
+            width: '100%', boxSizing: 'border-box', resize: 'vertical',
+            background: 'var(--bg-base)', border: `1px solid ${proposalError ? 'var(--danger)' : 'var(--border-mid)'}`,
+            borderRadius: 'var(--radius-sm)', padding: '6px 8px',
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)', outline: 'none',
+          }}
+        />
+        {proposalError && <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--danger)' }}>{proposalError}</span>}
+      </div>
+
+      {/* Run button */}
+      <button
+        onClick={runPipeline}
+        disabled={loading}
+        style={{
+          width: '100%', padding: '8px 0',
+          fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.07em',
+          color: loading ? 'var(--text-dim)' : 'var(--bg-base)',
+          background: loading ? 'var(--bg-overlay)' : 'var(--amber)',
+          border: `1px solid ${loading ? 'var(--border)' : 'var(--amber)'}`,
+          borderRadius: 'var(--radius-sm)',
+          cursor: loading ? 'not-allowed' : 'pointer',
+          transition: 'all var(--t-fast)',
+        }}
+      >
+        {loading ? '⟳ SIMULATING…' : ran ? '↺ RE-SIMULATE' : '▶ RUN PIPELINE'}
+      </button>
+
+      {/* Score output */}
+      <div>
+        <span className="label-10" style={{ display: 'block', marginBottom: 6 }}>
+          SCORE · BRANCH {selectedBranch || 'A.2'}
         </span>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 36, fontWeight: 500, color: score !== null ? 'var(--teal)' : 'var(--text-dim)' }}>
-            {score !== null ? (typeof score === 'number' ? score.toFixed(2) : score) : '—'}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 36, fontWeight: 500, color: scoreColor, lineHeight: 1 }}>
+            {score !== null ? score.toFixed(2) : '—'}
           </span>
-          {score !== null && <span className="meta-10">/ 1.00 score</span>}
+          {score !== null && <span className="meta-10">/ 1.00</span>}
+          {interpretation && (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: scoreColor, letterSpacing: '0.08em' }}>
+              {interpretation.toUpperCase()}
+            </span>
+          )}
         </div>
-        {result && <span className="meta-10" style={{ color: 'var(--teal)', fontSize: 9 }}>● LIVE RESULT</span>}
-        {!result && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>Run simulation to see results</span>}
+        {result && (
+          <span className="meta-10" style={{ color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+            {stepsOk}/{stepsRun} steps succeeded · fork {result?.fork_id?.slice(0, 8) ?? '—'}
+          </span>
+        )}
+        {!result && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>Run pipeline to see results</span>}
       </div>
 
-      <div>
-        <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>STATE Δ</span>
-        {diffs.length === 0
-          ? <span className="meta-10" style={{ color: 'var(--text-dim)' }}>No data — seed via SEED panel</span>
-          : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {diffs.map((d, i) => (
-                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.field}</span>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: d.tone === 'ok' ? 'var(--teal)' : d.tone === 'amber' ? 'var(--amber)' : 'var(--text-muted)' }}>
-                    {d.op}
-                  </span>
+      {/* Step accordion */}
+      {steps.length > 0 && (
+        <div>
+          <span className="label-10" style={{ display: 'block', marginBottom: 6 }}>
+            STEP DIFF · {stepsRun} STEP{stepsRun !== 1 ? 'S' : ''}
+          </span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {steps.map((step, i) => {
+              const isOpen = openStep === i;
+              const ok = step.status === 'ok';
+              const delta = step.state_after ? Object.entries(step.state_after).filter(([k]) => k !== '_stub') : [];
+              return (
+                <div key={i} style={{
+                  border: `1px solid ${ok ? 'var(--border)' : 'var(--danger)'}`,
+                  borderRadius: 'var(--radius-sm)',
+                  overflow: 'hidden',
+                }}>
+                  {/* Header row */}
+                  <button onClick={() => setOpenStep(isOpen ? null : i)} style={{
+                    width: '100%', textAlign: 'left',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '7px 10px',
+                    background: isOpen ? 'var(--bg-raised)' : 'transparent',
+                    transition: 'background var(--t-fast)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: ok ? 'var(--teal)' : 'var(--danger)', fontSize: 11 }}>{ok ? '✓' : '✗'}</span>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)' }}>{step.operator}</span>
+                    </div>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>{isOpen ? '▲' : '▼'}</span>
+                  </button>
+                  {/* Accordion body */}
+                  {isOpen && (
+                    <div style={{ padding: '8px 10px', background: 'var(--bg-base)', borderTop: '1px solid var(--border)' }}>
+                      {step.reason && (
+                        <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--danger)', marginBottom: 6 }}>
+                          {step.reason}
+                        </div>
+                      )}
+                      {Object.keys(step.params || {}).length > 0 && (
+                        <div style={{ marginBottom: 6 }}>
+                          <span className="meta-10" style={{ color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>PARAMS</span>
+                          {Object.entries(step.params).map(([k, v]) => (
+                            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>{k}</span>
+                              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)' }}>{String(v)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {(step.data && Object.keys(step.data).length > 0) && (
+                        <div>
+                          <span className="meta-10" style={{ color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>RESULT DATA</span>
+                          <pre style={{
+                            fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)',
+                            background: 'var(--bg-surface)', borderRadius: 2, padding: '4px 6px',
+                            overflow: 'auto', maxHeight: 80, margin: 0,
+                          }}>{JSON.stringify(step.data, null, 2)}</pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-        }
-      </div>
-
-      <div>
-        <span className="label-10" style={{ display: 'block', marginBottom: 8 }}>CONSTRAINTS</span>
-        {cstrs.length === 0
-          ? <span className="meta-10" style={{ color: 'var(--text-dim)' }}>No data — seed via SEED panel</span>
-          : <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {cstrs.map((c, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)' }}>{c.name}</span>
-                  <Badge tone={c.status === 'PASS' ? 'ok' : 'danger'}>{c.status}</Badge>
-                </div>
-              ))}
-            </div>
-        }
-      </div>
-
-      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span className="label-10">PAWA COST</span>
-          <span className="val-12" style={{ color: 'var(--amber)' }}>{pawaCost !== null ? `${pawaCost} pwa` : <span style={{ color: 'var(--text-dim)' }}>—</span>}</span>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
