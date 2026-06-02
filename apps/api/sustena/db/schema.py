@@ -142,6 +142,39 @@ council_proposals = Table(
     Column("expires_at", DateTime, nullable=True),             # 48h default from created_at
 )
 
+# ── lore_entries ───────────────────────────────────────────────────────────────
+# Public editorial content — blog-style posts with a draft → published lifecycle.
+# Read is public; write requires authentication.
+# kind: VISION | TECHNICAL | REFLECTION | UPDATE
+lore_entries = Table(
+    "lore_entries",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("title", String(200), nullable=False),
+    Column("body_json", Text, nullable=False),           # JSON content blocks
+    Column("kind", String(50), nullable=False),
+    Column("status", String(20), default="draft", nullable=False),  # draft | published
+    Column("author_id", String(36), nullable=False),     # FK → users.id
+    Column("created_at", DateTime, default=datetime.utcnow, nullable=False),
+    Column("published_at", DateTime, nullable=True),
+)
+
+# ── journal_entries ────────────────────────────────────────────────────────────
+# Private user journal — personal notes linked to sustains and operator actions.
+# Always authenticated; never public.
+# kind: DECISION | NOTE | REFLECTION | UPDATE
+journal_entries = Table(
+    "journal_entries",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("user_id", String(36), nullable=False),       # FK → users.id
+    Column("sustain_id", String(36), nullable=True),     # FK → sustains.id (optional)
+    Column("operator_log_id", String(36), nullable=True),  # FK → operators_log.id (optional)
+    Column("kind", String(20), nullable=False),
+    Column("body", Text, nullable=False),
+    Column("created_at", DateTime, default=datetime.utcnow, nullable=False),
+)
+
 # ── council_votes ──────────────────────────────────────────────────────────────
 # Individual votes per proposal per operative/user.
 council_votes = Table(
