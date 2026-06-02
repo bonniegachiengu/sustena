@@ -44,16 +44,23 @@ users = Table(
 
 # ── sustains ───────────────────────────────────────────────────────────────────
 # One row per sustain instance (a described system owned by a user).
+#
+# Two writers share this table:
+#   SustainEngine (sqlite3)   — inserts id, user_id, template_id, created_at
+#   seed.py (SQLAlchemy)      — inserts id, user_id, sustain_type, name,
+#                               template_version, created_at, is_active
+# Columns used by only one writer are nullable so the other's INSERT doesn't fail.
 sustains = Table(
     "sustains",
     metadata,
     Column("id", String(36), primary_key=True),               # UUID
     Column("user_id", String(36), nullable=False),             # FK → users.id
-    Column("sustain_type", String(50), nullable=False),        # homestead | vyyb | chama | mkulima
-    Column("name", String(100), nullable=False),
-    Column("template_version", String(20), default="1.0", nullable=False),
+    Column("template_id", String(100), nullable=True),         # used by SustainEngine
     Column("created_at", DateTime, default=datetime.utcnow, nullable=False),
-    Column("is_active", Boolean, default=True, nullable=False),
+    Column("sustain_type", String(50), nullable=True),         # used by seed.py
+    Column("name", String(100), nullable=True),
+    Column("template_version", String(20), nullable=True),
+    Column("is_active", Boolean, nullable=True),
 )
 
 # ── sustain_states ─────────────────────────────────────────────────────────────
