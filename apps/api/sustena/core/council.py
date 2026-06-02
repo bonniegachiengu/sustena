@@ -29,9 +29,13 @@ import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Graph files live at sustena/operatives/graphs/ — council.py is in sustena/core/
+_OPERATIVES_DIR: Path = Path(__file__).parent.parent / "operatives"
 
 
 # ── CouncillorConfig ───────────────────────────────────────────────────────────
@@ -251,6 +255,13 @@ class CouncilSession:
           receives an immediate ABSTAIN with abstain_reason="no_domain_overlap" — its
           deliberate() method is never called and no sub-operatives are spawned.
 
+        Sandbox simulation (Sprint 7.3):
+          Each relevant councillor (domain overlap ≥ 1) that declares sub_operatives
+          gets its own isolated simulate.fork() — a deep-copy of current state. Its
+          sub-operative graphs run against that fork. No two councillors share a fork.
+          The fork_id and sandbox_results are recorded on the vote record and passed
+          to deliberate() in the enriched proposal dict.
+
         Args:
             proposal_id        : Council proposal to vote on.
             operatives         : Operative instances to poll.
@@ -258,7 +269,7 @@ class CouncilSession:
                                  When None, all operatives deliberate (backwards compat).
 
         Returns:
-            dict mapping operative_id → OperativeVote dict.
+            dict mapping operative_id → OperativeVote dict (includes fork_id when set).
         """
         proposal = self._get_proposal(proposal_id)
         if proposal is None:
@@ -270,8 +281,8 @@ class CouncilSession:
         proposal_domains: list[str] = proposal.get("domains", [])
 
         context = {
-            "sustain_id":   self.sustain_id,
-            "proposal_id":  proposal_id,
+            "sustain_id":    self.sustain_id,
+            "proposal_id":   proposal_id,
             "operator_name": proposal.get("operator_name"),
         }
 
@@ -288,60 +299,83 @@ class CouncilSession:
         for operative in operatives:
             op_id = getattr(operative, "operative_id", "unknown")
 
-            # ── Domain relevance check ─────────────────────────────────────────
-            if councillor_configs is not None:
-                config = councillor_configs.get(op_id)
-                if config is not None and not config.is_relevant(proposal_domains):
-                    vote_record = {
-                        "id":            str(uuid.uuid4()),
-                        "proposal_id":   proposal_id,
-                        "operative_id":  op_id,
-                        "vote":          "ABSTAIN",
-                        "reasoning":     "Domain not relevant to this proposal.",
-                        "abstain_reason": "no_domain_overlap",
-                        "weight":        0.098,
-                        "timestamp":     self._clock().isoformat(),
-                        "utility":       0.5,
-                    }
-                    self.state.append("council_votes", vote_record)
-                    vote_results[op_id] = {
-                        "vote":          "ABSTAIN",
-                        "reasoning":     "Domain not relevant to this proposal.",
-                        "abstain_reason": "no_domain_overlap",
-                        "utility":       0.5,
-                    }
-                    logger.info(
-                        "[council] operative '%s' ABSTAIN (no domain overlap): proposal=%s domains=%s",
-                        op_id, proposal_id, proposal_domains,
-                    )
-                    continue  # skip deliberate() — zero sub-operatives spawned
+            # Resolve CouncillorConfig for this operative (None if configs not provided)
+            config: "CouncillorConfig | None" = (
+                councillor_configs.get(op_id) if councillor_configs is not None else None
+            )
+
+            # ── Domain relevance check (7.2) ───────────────────────────────────
+            if config is not None and not config.is_relevant(proposal_domains):
+                vote_record = {
+                    "id":             str(uuid.uuid4()),
+                    "proposal_id":    proposal_id,
+                    "operative_id":   op_id,
+                    "vote":           "ABSTAIN",
+                    "reasoning":      "Domain not relevant to this proposal.",
+                    "abstain_reason": "no_domain_overlap",
+                    "weight":         0.098,
+                    "timestamp":      self._clock().isoformat(),
+                    "utility":        0.5,
+                    "fork_id":        None,
+                }
+                self.state.append("council_votes", vote_record)
+                vote_results[op_id] = {
+                    "vote":           "ABSTAIN",
+                    "reasoning":      "Domain not relevant to this proposal.",
+                    "abstain_reason": "no_domain_overlap",
+                    "utility":        0.5,
+                    "fork_id":        None,
+                }
+                logger.info(
+                    "[council] operative '%s' ABSTAIN (no domain overlap): "
+                    "proposal=%s domains=%s",
+                    op_id, proposal_id, proposal_domains,
+                )
+                continue  # skip deliberate() — zero sub-operatives spawned
+
+            # ── Per-councillor sandbox fork (7.3) ──────────────────────────────
+            fork_id: str | None = None
+            sandbox_results: dict = {}
+            if config is not None and config.sub_operatives:
+                fork_id, sandbox_results = await self._create_sandbox(config)
+
+            # Enrich the proposal dict passed to deliberate() with sandbox output
+            enriched_proposal: dict = dict(proposal_dict)
+            if sandbox_results:
+                enriched_proposal["sandbox_results"] = sandbox_results
+            if fork_id:
+                enriched_proposal["fork_id"] = fork_id
 
             # ── Normal deliberation path ───────────────────────────────────────
             try:
-                vote = await operative.deliberate(context, proposal_dict)
+                vote = await operative.deliberate(context, enriched_proposal)
                 vote_record = {
                     "id":           str(uuid.uuid4()),
                     "proposal_id":  proposal_id,
                     "operative_id": op_id,
                     "vote":         vote.vote.value,
                     "reasoning":    vote.reasoning,
-                    "weight":       0.098,   # per schema default
+                    "weight":       0.098,
                     "timestamp":    self._clock().isoformat(),
                     "utility":      vote.utility,
+                    "fork_id":      fork_id,
+                    "sandbox_results": sandbox_results or None,
                 }
                 self.state.append("council_votes", vote_record)
-                vote_results[op_id] = vote.to_dict()
+                vote_result = vote.to_dict()
+                vote_result["fork_id"] = fork_id
+                if sandbox_results:
+                    vote_result["sandbox_results"] = sandbox_results
+                vote_results[op_id] = vote_result
 
                 logger.info(
-                    "[council] vote recorded: proposal=%s operative=%s vote=%s",
-                    proposal_id, op_id, vote.vote.value,
+                    "[council] vote recorded: proposal=%s operative=%s vote=%s fork=%s",
+                    proposal_id, op_id, vote.vote.value, fork_id,
                 )
             except Exception as exc:
                 logger.error(
-                    "[council] operative '%s' deliberation error: %s",
-                    op_id, exc,
+                    "[council] operative '%s' deliberation error: %s", op_id, exc,
                 )
-                # Record ABSTAIN on error
                 vote_record = {
                     "id":           str(uuid.uuid4()),
                     "proposal_id":  proposal_id,
@@ -351,15 +385,129 @@ class CouncilSession:
                     "weight":       0.098,
                     "timestamp":    self._clock().isoformat(),
                     "utility":      0.5,
+                    "fork_id":      fork_id,
+                    "sandbox_results": None,
                 }
                 self.state.append("council_votes", vote_record)
                 vote_results[op_id] = {
-                    "vote": "ABSTAIN",
+                    "vote":     "ABSTAIN",
                     "reasoning": str(exc),
-                    "utility": 0.5,
+                    "utility":  0.5,
+                    "fork_id":  fork_id,
                 }
 
         return vote_results
+
+    # ── Sandbox helpers (Sprint 7.3) ──────────────────────────────────────────
+
+    def _build_ctx(self) -> Any:
+        """Build a minimal OperatorContext from this session's state for operator calls."""
+        from sustena.core.events import EventBus
+        from sustena.core.operator import OperatorContext
+        from sustena.core.pawa import PawaLedger
+        return OperatorContext(
+            state=self.state,
+            events=EventBus(sustain_id=self.sustain_id),
+            pawa=PawaLedger(),
+            sustain_id=self.sustain_id,
+            user_id="council",
+            operative_id="council_session",
+            timestamp=datetime.now(timezone.utc),
+        )
+
+    async def _create_sandbox(
+        self,
+        config: "CouncillorConfig",
+    ) -> "tuple[str | None, dict]":
+        """
+        Fork the current state and run all of config's sub-operatives against it.
+
+        Each councillor calling this method gets its own fork_id — forks are never
+        shared between councillors. Sub-operatives run against the fork's isolated
+        state via a dedicated OperatorContext.
+
+        Returns:
+            (fork_id, sandbox_results) where sandbox_results maps
+            sub_op_name → result dict. fork_id is None if forking failed.
+        """
+        from sustena.core.events import EventBus
+        from sustena.core.operative_graph import CalibrationError, OperativeGraph
+        from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext
+        from sustena.core.pawa import PawaLedger
+        from sustena.core.state import StateAccessor
+        from sustena.operators.simulate_ops import get_fork_state
+
+        # Step 1: Fork the live state (snapshot → stored in _FORK_REGISTRY)
+        try:
+            fork_result = await OPERATOR_REGISTRY["simulate.fork"].fn(self._build_ctx())
+        except Exception as exc:
+            logger.warning("[council] simulate.fork failed for '%s': %s",
+                           config.operative_id, exc)
+            return None, {}
+
+        if not fork_result.succeeded:
+            logger.warning("[council] simulate.fork returned fail for '%s': %s",
+                           config.operative_id, fork_result.reason)
+            return None, {}
+
+        fork_id: str = fork_result.data["fork_id"]
+        fork_state_dict = get_fork_state(fork_id)  # deep copy of the forked state
+
+        # Step 2: Run each sub-operative graph against the fork
+        sandbox_results: dict = {}
+        for sub_op_name, graph_rel_path in config.sub_operatives.items():
+            full_path = _OPERATIVES_DIR / graph_rel_path
+            try:
+                sub_state = (
+                    StateAccessor(fork_state_dict)
+                    if fork_state_dict is not None
+                    else self.state
+                )
+                sub_ctx = OperatorContext(
+                    state=sub_state,
+                    events=EventBus(
+                        sustain_id=f"sandbox:{config.operative_id}:{self.sustain_id}"
+                    ),
+                    pawa=PawaLedger(),
+                    sustain_id=self.sustain_id,
+                    user_id="council",
+                    operative_id=f"sub_op:{sub_op_name}",
+                    timestamp=datetime.now(timezone.utc),
+                )
+                graph = OperativeGraph.from_spec_file(
+                    full_path,
+                    calibration_data={"fork_id": fork_id},
+                )
+                result = await graph.run(
+                    sub_ctx, {"fork_id": fork_id, "sub_op": sub_op_name}
+                )
+                sandbox_results[sub_op_name] = {
+                    "status":             "ok",
+                    "operator_name":      result.operator_name,
+                    "rationale":          result.rationale,
+                    "simulation_results": result.simulation_results,
+                }
+            except CalibrationError as exc:
+                logger.warning("[council] sub-op '%s' calibration error: %s",
+                               sub_op_name, exc)
+                sandbox_results[sub_op_name] = {
+                    "status": "calibration_error", "reason": str(exc)
+                }
+            except FileNotFoundError as exc:
+                logger.warning("[council] sub-op '%s' graph not found: %s",
+                               sub_op_name, exc)
+                sandbox_results[sub_op_name] = {
+                    "status": "not_found", "reason": str(exc)
+                }
+            except Exception as exc:
+                logger.warning("[council] sub-op '%s' error: %s", sub_op_name, exc)
+                sandbox_results[sub_op_name] = {"status": "error", "reason": str(exc)}
+
+        logger.info(
+            "[council] sandbox: operative=%s fork=%s sub_ops=%s",
+            config.operative_id, fork_id, list(sandbox_results),
+        )
+        return fork_id, sandbox_results
 
     # ── resolve ───────────────────────────────────────────────────────────────
 

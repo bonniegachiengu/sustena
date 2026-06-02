@@ -37,6 +37,19 @@ def clear_fork_registry() -> None:
     _FORK_REGISTRY.clear()
 
 
+def get_fork_state(fork_id: str) -> dict | None:
+    """
+    Return a deep copy of the forked state dict, or None if the fork is unknown.
+
+    Used by CouncilSession._create_sandbox() to give each sub-operative its own
+    isolated view of the fork without exposing _FORK_REGISTRY directly.
+    """
+    fork = _FORK_REGISTRY.get(fork_id)
+    if fork is None:
+        return None
+    return copy.deepcopy(fork["state"])
+
+
 # ── simulate.fork ──────────────────────────────────────────────────────────────
 
 @sustena_operator(
