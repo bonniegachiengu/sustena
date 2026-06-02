@@ -163,27 +163,134 @@ async def test_list_packages_kind_filter_after_create(auth_client):
     assert all(p["kind"] == "operative" for p in pkgs)
 
 
-# ── products + orders stubs ────────────────────────────────────────────────────
+# ── products (Sprint 8.9) ─────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_list_products_stub(client):
+async def test_list_products_empty(client):
     r = await client.get("/api/v1/arena/products")
     assert r.status_code == 200
-    assert r.json()["data"]["products"] == []
+    assert isinstance(r.json()["data"]["products"], list)
 
+
+@pytest.mark.asyncio
+async def test_list_products_after_seed(client):
+    from sustena.api.routes.arena import seed_demo_products
+    await seed_demo_products()
+    r = await client.get("/api/v1/arena/products")
+    assert r.status_code == 200
+    products = r.json()["data"]["products"]
+    assert len(products) == 8
+    vyyb    = [p for p in products if p["source"] == "vyyb"]
+    mkulima = [p for p in products if p["source"] == "mkulima"]
+    assert len(vyyb) == 4
+    assert len(mkulima) == 4
+    for p in products:
+        assert "name" in p and "price" in p and "unit" in p and "seller" in p
+
+
+@pytest.mark.asyncio
+async def test_product_fields(client):
+    from sustena.api.routes.arena import seed_demo_products
+    await seed_demo_products()
+    r = await client.get("/api/v1/arena/products")
+    p = r.json()["data"]["products"][0]
+    for field in ["id", "name", "seller_type", "seller", "price", "unit", "emoji", "tags", "source"]:
+        assert field in p, f"missing field: {field}"
+
+
+# ── orders (Sprint 8.9) ───────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_create_order_unauthenticated(client):
-    r = await client.post("/api/v1/arena/orders")
+    r = await client.post("/api/v1/arena/orders", json={"items": []})
     assert r.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_list_orders_authenticated(auth_client):
+async def test_list_orders_empty(auth_client):
     client, token = auth_client
     r = await client.get("/api/v1/arena/orders", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     assert r.json()["data"]["orders"] == []
+
+
+@pytest.mark.asyncio
+async def test_place_and_retrieve_order(auth_client):
+    client, token = auth_client
+    headers = {"Authorization": f"Bearer {token}"}
+
+    r = await client.post("/api/v1/arena/orders", json={
+        "items": [
+            {"name": "Pilau Kando", "kind": "product", "qty": 2, "price": 280, "unit": "per portion", "emoji": "🍛"},
+            {"name": "Sukuma Wiki", "kind": "product", "qty": 1, "price": 35, "unit": "500g", "emoji": "🥬"},
+        ],
+        "sustain_id": "homestead.bonnie",
+        "delivery_addr": "Westlands, Nairobi",
+        "pay_method": "till",
+    }, headers=headers)
+    assert r.status_code == 201
+    data = r.json()["data"]
+    assert data["ref"].startswith("SXI-")
+    assert data["product_status"] == "PLACED"
+    assert data["package_status"] is None
+    assert data["licenses"] == []
+
+    history = await client.get("/api/v1/arena/orders", headers=headers)
+    assert history.status_code == 200
+    orders = history.json()["data"]["orders"]
+    assert len(orders) == 1
+    assert orders[0]["ref"] == data["ref"]
+    assert orders[0]["productTotal"] == 595  # 280*2 + 35
+    assert orders[0]["deliveryAddr"] == "Westlands, Nairobi"
+
+
+@pytest.mark.asyncio
+async def test_order_with_packages_generates_license(auth_client):
+    client, token = auth_client
+    r = await client.post("/api/v1/arena/orders", json={
+        "items": [
+            {"name": "Budget Monitor", "kind": "operative", "qty": 1, "pawa": 50},
+        ],
+        "sustain_id": "homestead.bonnie",
+    }, headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 201
+    data = r.json()["data"]
+    assert data["package_status"] == "PLACED"
+    assert data["product_status"] is None
+    assert len(data["licenses"]) == 1
+    assert data["licenses"][0]["name"] == "Budget Monitor"
+    assert data["licenses"][0]["key"].startswith("LIC-")
+
+
+@pytest.mark.asyncio
+async def test_free_package_no_license(auth_client):
+    client, token = auth_client
+    r = await client.post("/api/v1/arena/orders", json={
+        "items": [
+            {"name": "Free Tool", "kind": "operator", "qty": 1, "pawa": "FREE"},
+        ],
+    }, headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 201
+    assert r.json()["data"]["licenses"] == []
+
+
+@pytest.mark.asyncio
+async def test_orders_are_user_scoped(auth_client):
+    """Two users should not see each other's orders."""
+    client, tok_a = auth_client
+
+    reg_b = await client.post("/api/v1/users/register", json={
+        "email": "user_b_scoped@test.com", "password": "testpassword123", "display_name": "B",
+    })
+    assert reg_b.status_code == 200, reg_b.text
+    tok_b = reg_b.json()["data"]["token"]
+
+    await client.post("/api/v1/arena/orders", json={
+        "items": [{"name": "Chai Bora", "kind": "product", "qty": 1, "price": 80}],
+    }, headers={"Authorization": f"Bearer {tok_a}"})
+
+    orders_b = await client.get("/api/v1/arena/orders", headers={"Authorization": f"Bearer {tok_b}"})
+    assert orders_b.json()["data"]["orders"] == []
 
 
 # ── devui library endpoint ────────────────────────────────────────────────────

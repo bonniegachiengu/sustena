@@ -302,7 +302,7 @@ function CartRow({ item, onRemove, onQty }) {
 }
 
 /* ── Cart drawer ──────────────────────────────────────────────── */
-function CartDrawer({ open, onClose, cart, onUpdateQty, onRemove, onClear, onOrderPlaced }) {
+function CartDrawer({ open, onClose, cart, onUpdateQty, onRemove, onClear, onOrderPlaced, token }) {
   const [step, setStep] = useState('cart');
   const [sustain, setSustain] = useState('Sustena XII');
   const [deliveryAddr, setDeliveryAddr] = useState('');
@@ -315,45 +315,93 @@ function CartDrawer({ open, onClose, cart, onUpdateQty, onRemove, onClear, onOrd
   const [cardCvv, setCardCvv] = useState('');
   const [orderRef, setOrderRef] = useState('');
   const [licenses, setLicenses] = useState([]);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState('');
 
   useEffect(() => {
     if (!open) { const t = setTimeout(() => setStep('cart'), 350); return () => clearTimeout(t); }
   }, [open]);
 
-  const products  = cart.filter(c => c.kind === 'product');
-  const packages  = cart.filter(c => c.kind !== 'product');
-  const productTotal  = products.reduce((s, c) => s + c.price * c.qty, 0);
-  const paidPackages  = packages.filter(c => c.pawa !== 'FREE');
-  const freePackages  = packages.filter(c => c.pawa === 'FREE');
-  const paidPwaTotal  = paidPackages.reduce((s, c) => s + Number(c.pawa), 0);
-  const needsPay      = productTotal > 0 || paidPwaTotal > 0;
+  const products     = cart.filter(c => c.kind === 'product');
+  const packages     = cart.filter(c => c.kind !== 'product');
+  const productTotal = products.reduce((s, c) => s + c.price * c.qty, 0);
+  const paidPackages = packages.filter(c => c.pawa !== 'FREE');
+  const freePackages = packages.filter(c => c.pawa === 'FREE');
+  const paidPwaTotal = paidPackages.reduce((s, c) => s + Number(c.pawa), 0);
+  const needsPay     = productTotal > 0 || paidPwaTotal > 0;
 
   const STEPS = ['CART', 'SETUP', 'PAYMENT'];
   const stepIdx = { cart: 0, setup: 1, payment: 2, done: 3 }[step] ?? 0;
 
-  function handleConfirm() {
+  const handleConfirm = async () => {
+    setConfirming(true);
+    setConfirmError('');
+    const now = new Date();
+
+    if (token) {
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/arena/orders`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({
+            items: cart.map(c => ({
+              itemId: c.itemId, name: c.name, kind: c.kind,
+              qty: c.qty, price: c.price || null, unit: c.unit || null,
+              emoji: c.emoji || null, pawa: c.pawa || null,
+            })),
+            sustain_id: sustain,
+            delivery_addr: deliveryAddr || null,
+            pay_method: payMethod,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setConfirmError(data.detail ?? 'Order failed'); setConfirming(false); return; }
+        const d = data.data;
+        setOrderRef(d.ref);
+        setLicenses(d.licenses || []);
+        if (onOrderPlaced) {
+          onOrderPlaced({
+            ref: d.ref,
+            date: now.toISOString().slice(0, 10),
+            time: now.toTimeString().slice(0, 5),
+            items: [...cart],
+            sustain,
+            productTotal, paidPwaTotal,
+            productStatus: d.product_status,
+            packageStatus: d.package_status,
+            deliveryAddr, payMethod,
+            licenses: d.licenses || [],
+          });
+        }
+        setStep('done');
+        onClear();
+        setConfirming(false);
+        return;
+      } catch {
+        setConfirmError('Connection error — order not saved');
+        setConfirming(false);
+        return;
+      }
+    }
+
+    // Fallback: local-only (no token)
     const ref = 'SXI-' + Math.random().toString(36).slice(2, 8).toUpperCase();
     const lic = paidPackages.map(c => ({ name: c.name, key: 'LIC-' + Math.random().toString(36).slice(2, 10).toUpperCase() }));
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const timeStr = now.toTimeString().slice(0, 5);
     setOrderRef(ref);
     setLicenses(lic);
     if (onOrderPlaced) {
       onOrderPlaced({
-        ref, date: dateStr, time: timeStr,
-        items: [...cart],
-        sustain,
-        productTotal, paidPwaTotal,
+        ref, date: now.toISOString().slice(0, 10), time: now.toTimeString().slice(0, 5),
+        items: [...cart], sustain, productTotal, paidPwaTotal,
         productStatus: products.length > 0 ? 'PLACED' : null,
         packageStatus: packages.length > 0 ? 'PLACED' : null,
-        deliveryAddr, payMethod,
-        licenses: lic,
+        deliveryAddr, payMethod, licenses: lic,
       });
     }
     setStep('done');
     onClear();
-  }
+    setConfirming(false);
+  };
 
   const PAY_METHODS = [
     { id: 'till',   label: 'M-PESA TILL',   sub: 'STK push' },
@@ -556,11 +604,16 @@ function CartDrawer({ open, onClose, cart, onUpdateQty, onRemove, onClear, onOrd
             </div>
           )}
           {step === 'payment' && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setStep('setup')} style={{ padding: '12px 16px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-raised)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>← BACK</button>
-              <button onClick={handleConfirm} style={{ flex: 1, padding: '12px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: '#000', background: needsPay ? 'var(--ok)' : 'var(--teal)', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
-                {productTotal > 0 ? `PAY KES ${productTotal.toLocaleString()} →` : paidPwaTotal > 0 ? `SPEND ${paidPwaTotal} PWA →` : 'INSTALL FREE →'}
-              </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {confirmError && (
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--danger)', padding: '6px 0' }}>{confirmError}</div>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setStep('setup')} disabled={confirming} style={{ padding: '12px 16px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-raised)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>← BACK</button>
+                <button onClick={handleConfirm} disabled={confirming} style={{ flex: 1, padding: '12px', fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: '#000', background: confirming ? 'var(--text-muted)' : needsPay ? 'var(--ok)' : 'var(--teal)', border: 'none', borderRadius: 'var(--radius-sm)', cursor: confirming ? 'not-allowed' : 'pointer', transition: 'all var(--t-fast)' }}>
+                  {confirming ? 'PLACING ORDER…' : productTotal > 0 ? `PAY KES ${productTotal.toLocaleString()} →` : paidPwaTotal > 0 ? `SPEND ${paidPwaTotal} PWA →` : 'INSTALL FREE →'}
+                </button>
+              </div>
             </div>
           )}
           {step === 'done' && (
@@ -577,6 +630,7 @@ function ArenaPage() {
   const navigate = useNavigate();
   const [tab, setTab] = useState('operatives');
   const [search, setSearch] = useState('');
+  const [token] = useState(() => localStorage.getItem('sustena_token'));
   const [productFilter, setProductFilter] = useState('all');
   const [cart, setCart] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
@@ -812,7 +866,7 @@ function ArenaPage() {
         )}
       </div>
 
-      <CartDrawer open={cartOpen} onClose={() => setCartOpen(false)} cart={cart} onUpdateQty={updateQty} onRemove={removeFromCart} onClear={clearCart} onOrderPlaced={addOrder} />
+      <CartDrawer open={cartOpen} onClose={() => setCartOpen(false)} cart={cart} onUpdateQty={updateQty} onRemove={removeFromCart} onClear={clearCart} onOrderPlaced={addOrder} token={token} />
     </div>
   );
 }

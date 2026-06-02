@@ -197,6 +197,45 @@ arena_packages = Table(
     Column("created_at", DateTime, default=datetime.utcnow, nullable=False),
 )
 
+# ── arena_products ─────────────────────────────────────────────────────────────
+# Real-world products listed by Vyyb food businesses and Mkulima farms.
+# seller_type: vyyb | mkulima
+arena_products = Table(
+    "arena_products",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("name", String(200), nullable=False),
+    Column("seller_type", String(20), nullable=False),
+    Column("seller_name", String(100), nullable=False),
+    Column("price", Integer, nullable=False),              # price in KES (whole number)
+    Column("unit", String(50), nullable=False),            # e.g. "per portion", "500g"
+    Column("description", Text, nullable=True),
+    Column("tags", Text, nullable=True),                   # JSON array
+    Column("emoji", String(10), nullable=True),
+    Column("is_available", Boolean, default=True, nullable=False),
+    Column("created_at", DateTime, default=datetime.utcnow, nullable=False),
+)
+
+# ── arena_orders ────────────────────────────────────────────────────────────────
+# Orders placed through the Arena checkout flow.
+arena_orders = Table(
+    "arena_orders",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("ref", String(20), nullable=False, unique=True),  # e.g. SXI-ABC123
+    Column("user_id", String(36), nullable=True),            # FK → users.id
+    Column("items_json", Text, nullable=False),               # JSON array of cart items
+    Column("product_total", Integer, default=0, nullable=False),
+    Column("pawa_total", Integer, default=0, nullable=False),
+    Column("sustain_id", String(100), nullable=True),
+    Column("delivery_addr", String(500), nullable=True),
+    Column("pay_method", String(50), nullable=True),
+    Column("product_status", String(20), nullable=True),     # PLACED|PROCESSING|DELIVERING|DELIVERED
+    Column("package_status", String(20), nullable=True),     # PLACED|INSTALLING|SANDBOXED|LIVE
+    Column("licenses_json", Text, nullable=True),             # JSON array [{name, key}]
+    Column("created_at", DateTime, default=datetime.utcnow, nullable=False),
+)
+
 # ── council_votes ──────────────────────────────────────────────────────────────
 # Individual votes per proposal per operative/user.
 council_votes = Table(

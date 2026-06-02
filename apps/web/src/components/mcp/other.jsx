@@ -2241,7 +2241,15 @@ function LibraryPanel({ openModal }) {
   const [author, setAuthor] = dUseState('all');
   const [libraryData, setLibraryData] = dUseState({ operatives: [], operators: [], spores: [], widgets: [] });
 
-  dUseEffect(() => {
+  // Publish form state
+  const [publishOpen, setPublishOpen] = dUseState(false);
+  const [pubName,     setPubName]     = dUseState('');
+  const [pubKind,     setPubKind]     = dUseState('operative');
+  const [pubDesc,     setPubDesc]     = dUseState('');
+  const [pubTags,     setPubTags]     = dUseState('');
+  const [publishing,  setPublishing]  = dUseState(false);
+
+  const fetchLibrary = () => {
     api.get('/devui/library')
       .then(d => {
         const data = d?.data;
@@ -2254,7 +2262,38 @@ function LibraryPanel({ openModal }) {
         });
       })
       .catch(() => {});
-  }, []);
+  };
+
+  dUseEffect(() => { fetchLibrary(); }, []);
+
+  const doPublish = async () => {
+    if (!pubName.trim()) { window.flash?.('Package name required', 'amber'); return; }
+    const token = localStorage.getItem('sustena_token');
+    if (!token) { window.flash?.('Sign in to publish packages', 'amber'); return; }
+    setPublishing(true);
+    try {
+      const base = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
+      const res = await fetch(`${base}/api/v1/arena/packages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          name: pubName.trim(),
+          kind: pubKind,
+          description: pubDesc.trim() || null,
+          tags: pubTags.split(',').map(t => t.trim()).filter(Boolean),
+        }),
+      });
+      if (!res.ok) { const d = await res.json(); window.flash?.(d.detail ?? 'Publish failed', 'danger'); return; }
+      window.flash?.(`${pubName} published to Mycelium`, 'ok');
+      setPublishOpen(false);
+      setPubName(''); setPubDesc(''); setPubTags('');
+      fetchLibrary();
+    } catch (err) {
+      window.flash?.(`Publish failed: ${err.message}`, 'danger');
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   const items = libraryData[tab] || [];
 
@@ -2293,14 +2332,51 @@ function LibraryPanel({ openModal }) {
             <span style={{ color: meta.accent }}>{filtered.length}</span> <span style={{ color: 'var(--text-secondary)' }}>{tab} · {meta.sub.toLowerCase()}</span>
           </h2>
         </div>
-        <PBtn onClick={() => window.confirmAction({
-          title: 'Publish to Mycelium?',
-          body: 'Creates a new package, signs it with your operator key, and lists it for the network. Royalty share: 70 / 20 / 5 / 5.',
-          ctaLabel: 'PUBLISH',
-          tone: 'amber',
-          onConfirm: () => window.flash('Published · entry pending validator review', 'info'),
-        })}><Icon name="plus" size={11} /> PUBLISH</PBtn>
+        <PBtn onClick={() => setPublishOpen(p => !p)}><Icon name="plus" size={11} /> PUBLISH</PBtn>
       </div>
+
+      {/* Inline publish form */}
+      {publishOpen && (
+        <div style={{
+          background: 'var(--bg-base)', border: '1px solid var(--amber-border)',
+          borderRadius: 'var(--radius-md)', padding: '16px 18px',
+          display: 'flex', flexDirection: 'column', gap: 10,
+          animation: 'modalSlideIn 0.2s cubic-bezier(0.22,0.61,0.36,1)',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="label-10" style={{ color: 'var(--amber)' }}>PUBLISH PACKAGE</span>
+            <button onClick={() => setPublishOpen(false)} style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 8 }}>
+            <input value={pubName} onChange={e => setPubName(e.target.value)} placeholder="Package name" style={{
+              background: 'var(--bg-surface)', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
+              padding: '7px 10px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)', outline: 'none',
+            }} />
+            <select value={pubKind} onChange={e => setPubKind(e.target.value)} style={{
+              background: 'var(--bg-surface)', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
+              padding: '7px 10px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)', outline: 'none',
+            }}>
+              {['operative', 'operator', 'spore', 'widget'].map(k => (
+                <option key={k} value={k}>{k}</option>
+              ))}
+            </select>
+          </div>
+          <input value={pubDesc} onChange={e => setPubDesc(e.target.value)} placeholder="Description (optional)" style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
+            padding: '7px 10px', fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-primary)', outline: 'none',
+          }} />
+          <input value={pubTags} onChange={e => setPubTags(e.target.value)} placeholder="Tags: finance, budget, household" style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
+            padding: '7px 10px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)', outline: 'none',
+          }} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+            <PBtn variant="ghost" onClick={() => setPublishOpen(false)}>CANCEL</PBtn>
+            <PBtn onClick={doPublish} disabled={!pubName.trim() || publishing}>
+              {publishing ? '⟳ PUBLISHING…' : 'PUBLISH TO MYCELIUM'}
+            </PBtn>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
