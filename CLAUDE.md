@@ -255,6 +255,7 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 - ✅ `users.py` full rewrite — PBKDF2-SHA256 password hashing via stdlib `hashlib` (avoids passlib/bcrypt 5.x incompatibility); HS256 JWT with 30-day expiry via `python-jose`; `register`, `login`, `/me`, `/me/stats`, `/me/activity`.
 - ✅ 33 new tests in `test_users.py` using `AsyncClient` + explicit `init_db()` per function. 1497 tests total.
 - ✅ `test_api.py` stub test updated to reflect real register endpoint.
+- ✅ CI fix: `test_users.py` `client` fixture creates its own `sqlite+aiosqlite:///:memory:` engine and injects it into `_schema._engine` directly, bypassing `DATABASE_URL`. CI sets `DATABASE_URL=sqlite+aiosqlite:///./test.db`; `conftest.py` `setdefault` is a no-op there, so tests shared a file-based DB and accumulated duplicate users across functions. Fix ensures each test gets a clean isolated DB.
 
 **Controller panel UI fixes (2 Jun 2026, post-8.2):**
 - ✅ Universal Controls instrument frames were clipped at the bottom — added `flexShrink:0` to the Card and removed `minHeight:0` from `Instrument` (`other.jsx`).
