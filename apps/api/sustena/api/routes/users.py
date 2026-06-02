@@ -27,6 +27,10 @@ from sqlalchemy import func, select
 
 from sustena.config import settings
 from sustena.db.schema import get_engine
+from sustena.db.schema import arena_orders as orders_table
+from sustena.db.schema import arena_packages as packages_table
+from sustena.db.schema import council_proposals as proposals_table
+from sustena.db.schema import lore_entries as lore_table
 from sustena.db.schema import operators_log as ops_log_table
 from sustena.db.schema import sustains as sustains_table
 from sustena.db.schema import users as users_table
@@ -225,33 +229,116 @@ async def get_me_stats(current_user: dict = Depends(get_current_user)) -> dict:
     user_id = current_user["id"]
     db_engine = get_engine()
     async with db_engine.connect() as conn:
+        user_sustain_ids = select(sustains_table.c.id).where(
+            sustains_table.c.user_id == user_id
+        )
+
         sustain_count = (
             await conn.execute(
-                select(func.count())
-                .select_from(sustains_table)
+                select(func.count()).select_from(sustains_table)
                 .where(sustains_table.c.user_id == user_id)
             )
         ).scalar() or 0
 
-        user_sustain_ids = select(sustains_table.c.id).where(
-            sustains_table.c.user_id == user_id
-        )
         op_count = (
             await conn.execute(
-                select(func.count())
-                .select_from(ops_log_table)
+                select(func.count()).select_from(ops_log_table)
                 .where(ops_log_table.c.sustain_id.in_(user_sustain_ids))
+            )
+        ).scalar() or 0
+
+        proposals_passed = (
+            await conn.execute(
+                select(func.count()).select_from(proposals_table)
+                .where(
+                    proposals_table.c.sustain_id.in_(user_sustain_ids),
+                    proposals_table.c.status == "PASSED",
+                )
+            )
+        ).scalar() or 0
+
+        proposals_in_voting = (
+            await conn.execute(
+                select(func.count()).select_from(proposals_table)
+                .where(
+                    proposals_table.c.sustain_id.in_(user_sustain_ids),
+                    proposals_table.c.status == "IN_VOTING",
+                )
+            )
+        ).scalar() or 0
+
+        orders_placed = (
+            await conn.execute(
+                select(func.count()).select_from(orders_table)
+                .where(orders_table.c.user_id == user_id)
+            )
+        ).scalar() or 0
+
+        lore_published = (
+            await conn.execute(
+                select(func.count()).select_from(lore_table)
+                .where(
+                    lore_table.c.author_id == user_id,
+                    lore_table.c.status == "published",
+                )
+            )
+        ).scalar() or 0
+
+        packages_published = (
+            await conn.execute(
+                select(func.count()).select_from(packages_table)
+                .where(packages_table.c.author_id == user_id)
             )
         ).scalar() or 0
 
     return _ok(
         {
-            "user_id": user_id,
-            "sustain_count": sustain_count,
-            "pawa_balance": current_user.get("pawa_balance", 0),
+            "user_id":             user_id,
+            "pawa_balance":        current_user.get("pawa_balance", 0),
+            "sustain_count":       sustain_count,
             "operator_executions": op_count,
+            "proposals_passed":    proposals_passed,
+            "proposals_in_voting": proposals_in_voting,
+            "orders_placed":       orders_placed,
+            "lore_published":      lore_published,
+            "packages_published":  packages_published,
         }
     )
+
+
+# ── GET /me/council ───────────────────────────────────────────────────────────
+
+@router.get("/me/council", summary="Recent council proposals for the current user's sustains")
+async def get_me_council(current_user: dict = Depends(get_current_user)) -> dict:
+    user_id = current_user["id"]
+    db_engine = get_engine()
+    async with db_engine.connect() as conn:
+        user_sustain_ids = select(sustains_table.c.id).where(
+            sustains_table.c.user_id == user_id
+        )
+        rows = (
+            await conn.execute(
+                select(proposals_table)
+                .where(proposals_table.c.sustain_id.in_(user_sustain_ids))
+                .order_by(proposals_table.c.created_at.desc())
+                .limit(20)
+            )
+        ).fetchall()
+
+    proposals = [
+        {
+            "id":            r.id,
+            "sustain_id":    r.sustain_id,
+            "operator_name": r.operator_name,
+            "proposed_by":   r.proposed_by,
+            "status":        r.status,
+            "created_at":    _serialize_dt(r.created_at),
+            "resolved_at":   _serialize_dt(r.resolved_at),
+        }
+        for r in rows
+    ]
+
+    return _ok({"proposals": proposals, "count": len(proposals)})
 
 
 # ── GET /me/activity ──────────────────────────────────────────────────────────

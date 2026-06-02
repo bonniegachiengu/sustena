@@ -78,12 +78,12 @@ function AchievementBadge({ label, icon }) {
   );
 }
 
-function ProfileAvatar() {
+function ProfileAvatar({ initial = '?' }) {
   return (
     <div style={{ width: '100%', height: '100%', background: 'var(--bg-raised)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', inset: 16, border: '0.5px solid var(--border-mid)', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', inset: 30, border: '0.5px solid var(--border)', pointerEvents: 'none' }} />
-      <span style={{ fontFamily: 'var(--ui)', fontSize: 72, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '-0.02em', position: 'relative', zIndex: 1, lineHeight: 1 }}>B</span>
+      <span style={{ fontFamily: 'var(--ui)', fontSize: 72, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '-0.02em', position: 'relative', zIndex: 1, lineHeight: 1 }}>{initial}</span>
     </div>
   );
 }
@@ -216,6 +216,7 @@ function ProfilePage() {
   const [profile, setProfile] = useState(null);
   const [stats, setStats] = useState(null);
   const [activity, setActivity] = useState([]);
+  const [proposals, setProposals] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -223,13 +224,15 @@ function ProfilePage() {
     setLoading(true);
     const h = { 'Authorization': `Bearer ${token}` };
     Promise.all([
-      fetch(`${API_BASE}/api/v1/users/me`, { headers: h }).then(r => r.ok ? r.json() : null),
-      fetch(`${API_BASE}/api/v1/users/me/stats`, { headers: h }).then(r => r.ok ? r.json() : null),
+      fetch(`${API_BASE}/api/v1/users/me`,          { headers: h }).then(r => r.ok ? r.json() : null),
+      fetch(`${API_BASE}/api/v1/users/me/stats`,    { headers: h }).then(r => r.ok ? r.json() : null),
       fetch(`${API_BASE}/api/v1/users/me/activity`, { headers: h }).then(r => r.ok ? r.json() : null),
-    ]).then(([me, st, act]) => {
-      if (me?.data) setProfile(me.data);
-      if (st?.data) setStats(st.data);
-      if (act?.data) setActivity(act.data.activity ?? []);
+      fetch(`${API_BASE}/api/v1/users/me/council`,  { headers: h }).then(r => r.ok ? r.json() : null),
+    ]).then(([me, st, act, council]) => {
+      if (me?.data)     setProfile(me.data);
+      if (st?.data)     setStats(st.data);
+      if (act?.data)    setActivity(act.data.activity ?? []);
+      if (council?.data) setProposals(council.data.proposals ?? []);
     }).catch(() => {}).finally(() => setLoading(false));
   }, [token]);
 
@@ -240,22 +243,33 @@ function ProfilePage() {
     setSettingsOpen(false);
   };
 
-  const displayName = profile?.display_name ?? 'Bonnie Gachiengu';
-  const email = profile?.email ?? '—';
-  const handle = email !== '—' ? email.split('@')[0] : 'my.bg';
-  const pawaBalance = profile?.pawa_balance ?? stats?.pawa_balance ?? 0;
+  const displayName  = profile?.display_name || (profile?.email ? profile.email.split('@')[0] : '—');
+  const email        = profile?.email ?? '—';
+  const handle       = email !== '—' ? email.split('@')[0] : '—';
+  const pawaBalance  = profile?.pawa_balance ?? stats?.pawa_balance ?? 0;
+  const avatarLetter = displayName?.[0]?.toUpperCase() ?? '?';
 
   const statPills = [
-    { value: stats ? stats.sustain_count : '—', label: 'Sustains\nActive'       },
-    { value: stats ? stats.operator_executions : '—', label: 'Operators\nRun'   },
-    { value: pawaBalance, label: 'Pawa\nBalance'                                 },
+    { value: stats ? stats.sustain_count       : '—', label: 'Sustains\nActive'    },
+    { value: stats ? stats.operator_executions : '—', label: 'Operators\nRun'      },
+    { value: pawaBalance,                             label: 'Pawa\nBalance'        },
+    { value: stats ? stats.proposals_passed    : '—', label: 'Proposals\nPassed'   },
   ];
 
+  // Badges earned from real stats
+  const earnedBadges = [
+    profile                              && { label: 'FOUNDER',           icon: '◈' },
+    stats?.operator_executions > 10      && { label: 'SYSTEMS ARCHITECT', icon: '⬡' },
+    stats?.packages_published  > 0       && { label: 'MYCELIUM BUILDER',  icon: '⊕' },
+    stats?.proposals_passed    > 0       && { label: 'COUNCIL CHAIR',     icon: '◇' },
+    stats?.lore_published      > 0       && { label: 'WRITER',            icon: '✦' },
+  ].filter(Boolean);
+
   const contributions = activity.map(a => ({
-    date: (a.timestamp ?? '').slice(0, 10),
-    type: 'build',
-    label: a.operator_name,
-    sustain: a.sustain_id ?? 'sustena XII',
+    date:    (a.timestamp ?? '').slice(0, 10),
+    type:    a.status === 'ok' ? 'build' : 'decision',
+    label:   a.operator_name,
+    sustain: a.sustain_id ?? '',
   }));
 
   const monoVars = {
@@ -335,11 +349,11 @@ function ProfilePage() {
           <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.08em' }}>loading</span>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gridTemplateRows: '260px 1fr', overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gridTemplateRows: '260px 1fr auto', overflow: 'hidden' }}>
 
           {/* TL: Avatar */}
           <div style={{ borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', overflow: 'hidden' }}>
-            <ProfileAvatar />
+            <ProfileAvatar initial={avatarLetter} />
           </div>
 
           {/* TR: Identity */}
@@ -349,9 +363,11 @@ function ProfilePage() {
               <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-dim)', fontWeight: 400 }}>{handle}</span>
             </div>
             <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-muted)' }}>{email}</span>
-            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-              {ACHIEVEMENT_BADGES.map(b => <AchievementBadge key={b.label} {...b} />)}
-            </div>
+            {earnedBadges.length > 0 && (
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                {earnedBadges.map(b => <AchievementBadge key={b.label} {...b} />)}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 0, marginTop: 6 }}>
               {statPills.map((s, i) => (
                 <div key={i} style={{ paddingRight: i < statPills.length - 1 ? 24 : 0, marginRight: i < statPills.length - 1 ? 24 : 0, borderRight: i < statPills.length - 1 ? '1px solid var(--border)' : 'none' }}>
@@ -381,8 +397,38 @@ function ProfilePage() {
               <span style={{ fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 500, letterSpacing: '0.12em', color: 'var(--text-dim)', textTransform: 'uppercase' }}>HISTORY</span>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)' }}>{contributions.length} entries</span>
             </div>
-            <ContributionTimeline contributions={contributions} />
+            {contributions.length === 0
+              ? <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>no activity recorded yet</span>
+              : <ContributionTimeline contributions={contributions} />
+            }
           </div>
+
+          {/* CTRL: Council proposals — spans both columns */}
+          {!isPublic && (
+            <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)', padding: '20px 36px 28px' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16 }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 500, letterSpacing: '0.12em', color: 'var(--text-dim)', textTransform: 'uppercase' }}>CTRL · COUNCIL</span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)' }}>{proposals.length} proposals</span>
+              </div>
+              {proposals.length === 0 ? (
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>no vote in progress</span>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  {proposals.map((p, i) => {
+                    const statusColor = { PASSED: 'var(--ok)', FAILED: 'var(--danger)', IN_VOTING: 'var(--text-secondary)', DEFERRED: 'var(--text-muted)' }[p.status] || 'var(--text-dim)';
+                    return (
+                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '7px 0', borderBottom: i < proposals.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: statusColor, minWidth: 72, letterSpacing: '0.06em' }}>{p.status}</span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.operator_name}</span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>{p.sustain_id}</span>
+                        <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>{(p.created_at ?? '').slice(0, 10)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

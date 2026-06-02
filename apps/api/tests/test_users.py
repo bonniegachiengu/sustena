@@ -209,9 +209,22 @@ class TestMeStats:
         token = await _token(client)
         r = await client.get("/api/v1/users/me/stats", headers={"Authorization": f"Bearer {token}"})
         data = r.json()["data"]
-        assert "sustain_count" in data
-        assert "pawa_balance" in data
-        assert "operator_executions" in data
+        for field in [
+            "sustain_count", "pawa_balance", "operator_executions",
+            "proposals_passed", "proposals_in_voting",
+            "orders_placed", "lore_published", "packages_published",
+        ]:
+            assert field in data, f"missing field: {field}"
+
+    async def test_new_user_governance_stats_are_zero(self, client):
+        token = await _token(client)
+        r = await client.get("/api/v1/users/me/stats", headers={"Authorization": f"Bearer {token}"})
+        data = r.json()["data"]
+        assert data["proposals_passed"] == 0
+        assert data["proposals_in_voting"] == 0
+        assert data["orders_placed"] == 0
+        assert data["lore_published"] == 0
+        assert data["packages_published"] == 0
 
     async def test_pawa_balance_is_100(self, client):
         token = await _token(client)
@@ -268,3 +281,31 @@ class TestMeActivity:
         token = await _token(client)
         r = await client.get("/api/v1/users/me/activity", headers={"Authorization": f"Bearer {token}"})
         assert r.json()["status"] == "ok"
+
+
+# ── GET /me/council ───────────────────────────────────────────────────────────
+
+class TestMeCouncil:
+    async def test_returns_200(self, client):
+        token = await _token(client)
+        r = await client.get("/api/v1/users/me/council", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+
+    async def test_has_proposals_list(self, client):
+        token = await _token(client)
+        r = await client.get("/api/v1/users/me/council", headers={"Authorization": f"Bearer {token}"})
+        data = r.json()["data"]
+        assert "proposals" in data
+        assert isinstance(data["proposals"], list)
+        assert "count" in data
+
+    async def test_new_user_has_no_proposals(self, client):
+        token = await _token(client)
+        r = await client.get("/api/v1/users/me/council", headers={"Authorization": f"Bearer {token}"})
+        data = r.json()["data"]
+        assert data["count"] == 0
+        assert data["proposals"] == []
+
+    async def test_no_auth_returns_401(self, client):
+        r = await client.get("/api/v1/users/me/council")
+        assert r.status_code == 401
