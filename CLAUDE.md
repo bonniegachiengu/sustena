@@ -408,13 +408,28 @@ docs: description
 - Core coverage target: >90%.
 - `test_operator_registry.py` has `ALL_KNOWN_OPERATORS` — add new operators there when registering.
 
+### UI + backend must always be fully wired — PERMANENT rule
+**The goal at every stage is zero hanging surfaces.** When a backend endpoint is built,
+the UI that uses it must be wired in the same sprint or immediately after. When a UI
+task is started, every data source it touches must either call a real API or show a
+designed empty state — never a stub, "Waiting for API" string, or hardcoded constant.
+
+If Bonnie asks about any UI surface: assume she also wants every related surface wired
+in the same session. Do not stop at the one thing asked. Check siblings and complete the
+job. If in doubt about scope, ask — but always default to wiring everything that can be
+wired with the APIs that exist, not just the one explicitly mentioned.
+
+**"Waiting for API" is never acceptable in committed code.** If the API doesn't exist yet,
+the section must show a designed empty state and have a `useEffect` scaffold ready for
+when the API lands.
+
 ### Frontend data honesty — PERMANENT rule for all UI work
 Every UI component renders real data from the API or shows a designed empty state.
 **Never invent, hardcode, or leave placeholder mock data in any component.**
 
 When building or touching any UI panel, widget, or section:
-1. Wire it to the real API call. If the endpoint doesn't exist yet, note it and leave the
-   section blank — do not fill it with made-up numbers or fake names.
+1. Wire it to the real API call. If the endpoint doesn't exist yet, leave a `useEffect`
+   scaffold and show the designed empty state — do not fill with made-up data.
 2. If the API returns an empty array, null, or zero — render an **empty state** in
    Sustena's design language (see below). Do not hide the section.
 3. If you encounter existing hardcoded/mock data anywhere in the frontend while working
