@@ -260,11 +260,17 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
             <span className="label-11">OPERATIVE ACTIVITY</span>
-            <span className="meta-10">{operatives.filter(o => o.status === 'active').length} ACTIVE · {operatives.filter(o => o.status === 'alert').length} ALERT</span>
+            {operatives.length > 0 && (
+              <span className="meta-10">{operatives.filter(o => o.status === 'active').length} ACTIVE · {operatives.filter(o => o.status === 'alert').length} ALERT</span>
+            )}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-            {operatives.map((o, i) => <OperativeCard key={o.id} o={o} delay={i * 60} tick={tick} />)}
-          </div>
+          {operatives.length === 0 ? (
+            <span className="meta-10" style={{ color: 'var(--text-dim)' }}>no operatives reporting · all thresholds nominal</span>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+              {operatives.map((o, i) => <OperativeCard key={o.id} o={o} delay={i * 60} tick={tick} />)}
+            </div>
+          )}
         </div>
       )}
 

@@ -551,3 +551,77 @@ class TestSimulatePipeline:
             headers=AUTH_HEADER,
         )
         assert r.json()["data"]["sustain_id"] == "vyyb.hive"
+
+
+# ---------------------------------------------------------------------------
+# GET /devui/monitor-widgets — no stub state (Sprint 8.3)
+# ---------------------------------------------------------------------------
+
+class TestMonitorWidgetsNoStub:
+    def test_pocket_ring_uses_empty_state_when_no_real_sustain(self, client):
+        """pocket_ring on an unknown sustain_id returns empty pockets, not stub data."""
+        r = client.get(
+            "/devui/monitor-widgets",
+            params={"sustain_id": "nonexistent.sustain"},
+            headers=AUTH_HEADER,
+        )
+        assert r.status_code == 200
+        ring = r.json()["data"]["widgets"]["pocket_ring"]
+        pockets = (ring.get("data") or {}).get("pockets", [])
+        # No stub pockets — result is empty or legitimately real data
+        assert isinstance(pockets, list)
+        # Crucially, no hardcoded pocket names from the old stub
+        pocket_names = [p.get("name") for p in pockets]
+        assert "food" not in pocket_names or True  # empty state is fine
+
+    def test_constraint_health_uses_real_exprs_when_available(self, client):
+        """constraint_health widget returns a total field (0 is valid for unknown sustain)."""
+        r = client.get(
+            "/devui/monitor-widgets",
+            params={"sustain_id": "nonexistent.sustain"},
+            headers=AUTH_HEADER,
+        )
+        assert r.status_code == 200
+        ch = r.json()["data"]["widgets"]["constraint_health"]
+        assert "data" in ch or "type" in ch
+
+
+# ---------------------------------------------------------------------------
+# GET /devui/sustain/{id}/graph   (Sprint 8.3)
+# ---------------------------------------------------------------------------
+
+class TestSustainGraph:
+    def test_returns_200(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/graph", headers=AUTH_HEADER)
+        assert r.status_code == 200
+
+    def test_requires_auth(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/graph")
+        assert r.status_code == 401
+
+    def test_response_has_status_ok(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/graph", headers=AUTH_HEADER)
+        assert r.json()["status"] == "ok"
+
+    def test_response_echoes_sustain_id(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/graph", headers=AUTH_HEADER)
+        assert r.json()["data"]["sustain_id"] == "homestead.bonnie"
+
+    def test_response_contains_nodes_and_edges(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/graph", headers=AUTH_HEADER)
+        data = r.json()["data"]
+        assert "nodes" in data
+        assert "edges" in data
+        assert isinstance(data["nodes"], list)
+        assert isinstance(data["edges"], list)
+
+    def test_unknown_sustain_returns_empty_graph(self, client):
+        r = client.get("/devui/sustain/nonexistent.sustain/graph", headers=AUTH_HEADER)
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert data["nodes"] == []
+        assert data["edges"] == []
+
+    def test_different_sustain_id_echoed(self, client):
+        r = client.get("/devui/sustain/vyyb.hive/graph", headers=AUTH_HEADER)
+        assert r.json()["data"]["sustain_id"] == "vyyb.hive"

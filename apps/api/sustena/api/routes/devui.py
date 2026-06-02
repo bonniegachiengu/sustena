@@ -12,6 +12,7 @@ GET  /devui/state?sustain_id=...      — full state for one sustain
 POST /devui/console/execute           — run an operator from the console
 POST /devui/simulate                  — forward-simulate a proposal
 WS   /devui/state-stream?sustain_id=  — real-time state push
+GET  /devui/sustain/{id}/graph        — operative council graph for a sustain
 
 Legacy path-param routes are kept for backwards compatibility:
 GET  /devui/sustain/{id}/state
@@ -465,25 +466,6 @@ async def list_widgets(_: str = Depends(verify_admin)) -> dict:
 
 # ── 7. GET /devui/monitor-widgets ────────────────────────────────────────────
 
-_MONITOR_STUB_STATE = {
-    "finances": {
-        "liquid": {"balance": 24730},
-        "pockets": {
-            "food":      {"allocated": 8420,  "spent": 3200, "target": 10000},
-            "transport": {"allocated": 4100,  "spent": 2800, "target": 5000},
-            "savings":   {"allocated": 22000, "spent": 0,    "target": 25000},
-            "rent":      {"allocated": 15000, "spent": 15000,"target": 15000},
-        },
-    },
-    "system": {
-        "constraints": [
-            "finances.pockets.food.allocated > 0",
-            "finances.pockets.savings.allocated > 0",
-        ],
-    },
-}
-
-
 @router.get("/monitor-widgets", summary="Rendered visualize.* widgets for the Monitor Panel")
 async def get_monitor_widgets(
     sustain_id: str = Query(default="homestead.bonnie"),
@@ -492,25 +474,24 @@ async def get_monitor_widgets(
     """
     Calls visualize.pocket_ring, visualize.event_feed, and
     visualize.constraint_health against the current sustain state and returns
-    their ResponseWidget outputs.  Falls back to stub state when the engine
-    is not initialised.
+    their ResponseWidget outputs.  Returns empty-state widgets when the engine
+    is not initialised or the sustain has no state.
     """
     from sustena.core.events import EventBus
     from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext
     from sustena.core.pawa import PawaLedger
     from sustena.core.state import StateAccessor
 
-    # Try live state first
-    state_dict = None
+    state_dict: dict = {}
+    constraint_exprs: list[str] = []
     try:
         from sustena.core.engine_singleton import get_shared_engine
         engine = get_shared_engine()
-        state_dict = engine.get_state(sustain_id)
+        state_dict = engine.get_state(sustain_id) or {}
+        constraint_data = engine.evaluate_constraints(sustain_id)
+        constraint_exprs = [c["expr"] for c in constraint_data]
     except Exception:
         pass
-
-    if not state_dict:
-        state_dict = _MONITOR_STUB_STATE
 
     ctx = OperatorContext(
         state=StateAccessor(state_dict),
@@ -522,13 +503,13 @@ async def get_monitor_widgets(
 
     widgets: dict[str, Any] = {}
 
-    for op_name, widget_key in [
-        ("visualize.pocket_ring",       "pocket_ring"),
-        ("visualize.event_feed",        "event_feed"),
-        ("visualize.constraint_health", "constraint_health"),
+    for op_name, widget_key, extra_kwargs in [
+        ("visualize.pocket_ring",       "pocket_ring",       {}),
+        ("visualize.event_feed",        "event_feed",        {}),
+        ("visualize.constraint_health", "constraint_health", {"constraints": constraint_exprs}),
     ]:
         try:
-            result = await OPERATOR_REGISTRY[op_name].fn(ctx, sustain_id=sustain_id)
+            result = await OPERATOR_REGISTRY[op_name].fn(ctx, sustain_id=sustain_id, **extra_kwargs)
             widgets[widget_key] = result.data
         except Exception as exc:
             logger.warning("monitor-widgets: %s failed: %s", op_name, exc)
@@ -559,17 +540,13 @@ async def simulate_pipeline(
     from sustena.core.pawa import PawaLedger
     from sustena.core.state import StateAccessor
 
-    # Try live state first
-    state_dict = None
+    state_dict: dict = {}
     try:
         from sustena.core.engine_singleton import get_shared_engine
         engine = get_shared_engine()
-        state_dict = engine.get_state(body.sustain_id)
+        state_dict = engine.get_state(body.sustain_id) or {}
     except Exception:
         pass
-
-    if not state_dict:
-        state_dict = _MONITOR_STUB_STATE
 
     ctx = OperatorContext(
         state=StateAccessor(state_dict),
@@ -666,3 +643,82 @@ async def preview_widget(
     }
 
     return ok({"widget": widget})
+
+
+# ── 11. GET /devui/sustain/{id}/graph ─────────────────────────────────────────
+
+_OPERATIVE_ROLE_LABELS: dict[str, str] = {
+    "mentor":    "Strategic advisor · finance",
+    "protege":   "Learning · pattern recognition",
+    "attache":   "Contacts & governance",
+    "navigator": "Logistics & routing",
+    "curator":   "Assets & procurement",
+}
+
+
+@router.get("/sustain/{sustain_id}/graph", summary="Operative council graph for a sustain")
+async def get_sustain_graph(
+    sustain_id: str,
+    _: str = Depends(verify_admin),
+) -> dict:
+    """
+    Returns the operative council graph for a sustain — nodes (Orchie +
+    council operatives + their sub-operatives) and edges (delegation
+    relationships).  Used by the Orchie panel graph tree.
+
+    Returns empty nodes/edges when the sustain is not found.
+    """
+    spec = None
+    try:
+        from sustena.core.engine_singleton import get_shared_engine
+        engine = get_shared_engine()
+        spec = engine.get_spec(sustain_id)
+    except Exception as exc:
+        logger.debug("get_sustain_graph(%s) engine error: %s", sustain_id, exc)
+
+    if spec is None:
+        return ok({"sustain_id": sustain_id, "nodes": [], "edges": []})
+
+    operatives_cfg = spec.get("operatives", {})
+    if not isinstance(operatives_cfg, dict):
+        operatives_cfg = {name: {} for name in operatives_cfg}
+
+    nodes: list[dict] = [
+        {
+            "id":    "orchie",
+            "label": "Orchie",
+            "role":  "AI orchestrator",
+            "type":  "orchie",
+        }
+    ]
+    edges: list[dict] = []
+
+    for name, cfg in operatives_cfg.items():
+        if not isinstance(cfg, dict):
+            cfg = {}
+        nodes.append({
+            "id":     name,
+            "label":  name.capitalize(),
+            "role":   _OPERATIVE_ROLE_LABELS.get(name, "operative"),
+            "type":   "operative",
+            "domain": cfg.get("domain", []),
+        })
+        edges.append({"from": "orchie", "to": name, "type": "council"})
+
+        for sub_name in cfg.get("sub_operatives", {}):
+            sub_id = f"{name}.{sub_name}"
+            nodes.append({
+                "id":     sub_id,
+                "label":  sub_name.replace("_", " ").title(),
+                "role":   "sub-operative",
+                "type":   "sub_operative",
+                "parent": name,
+            })
+            edges.append({"from": name, "to": sub_id, "type": "delegation"})
+
+    return ok({
+        "sustain_id":  sustain_id,
+        "template_id": spec.get("id", ""),
+        "nodes":       nodes,
+        "edges":       edges,
+    })
