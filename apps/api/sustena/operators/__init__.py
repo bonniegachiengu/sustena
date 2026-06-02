@@ -18,3 +18,4 @@ from sustena.operators import control_ops  # noqa: F401  (registers control.* op
 from sustena.operators import mentor_ops     # noqa: F401  (registers mentor.* operators)
 from sustena.operators import operative_ops  # noqa: F401  (registers operative.* operators)
 from sustena.operators import tasks          # noqa: F401  (registers homestead.tasks.* operators)
+from sustena.operators import orchie_ops     # noqa: F401  (registers orchie.* operators)

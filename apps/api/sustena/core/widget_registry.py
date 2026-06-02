@@ -155,6 +155,26 @@ class WidgetTypeRegistry:
                 "description": "Procurement or purchase order with vendor, amount, and delivery status.",
                 "schema": {"fields": ["Vendor", "Amount", "Status", "Delivery Date"], "ctas": ["Approve", "Reject"]},
             },
+            {
+                "widget_type": "morning_brief_card",
+                "description": "Daily morning brief — tasks due today, calendar events, passed council strategies, liquid balance.",
+                "schema": {"fields": ["Tasks Due Today", "Events Today", "Passed Strategies", "Liquid Balance"], "ctas": ["View Tasks", "Ask Orchie"]},
+            },
+            {
+                "widget_type": "task_card",
+                "description": "Single task card with title, due date, priority, and assigned member.",
+                "schema": {"fields": ["Title", "Due", "Priority", "Assigned To"], "ctas": ["Complete", "View Tasks"]},
+            },
+            {
+                "widget_type": "task_list",
+                "description": "Filtered list of household tasks.",
+                "schema": {"fields": ["Filter", "Tasks"], "ctas": ["Add Task"]},
+            },
+            {
+                "widget_type": "task_carryover_summary",
+                "description": "Summary of tasks marked as carryover from a prior polling cycle.",
+                "schema": {"fields": ["Carried Over"], "ctas": ["View Tasks"]},
+            },
         ]
         for b in _BUILTINS:
             self.register(

@@ -135,6 +135,10 @@ TASKS_OPERATORS = [
     "homestead.tasks.carryover",
 ]
 
+ORCHIE_OPERATORS = [
+    "orchie.morning_brief",
+]
+
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + BIASHARA_OPERATORS + VYYB_OPERATORS  # Epic 1.5.2
@@ -148,6 +152,7 @@ ALL_KNOWN_OPERATORS = (
     + MENTOR_OPERATORS                     # Sprint 5.3
     + OPERATIVE_OPERATORS                  # Sprint 5.7
     + TASKS_OPERATORS                      # Sprint 6.1
+    + ORCHIE_OPERATORS                     # Sprint 6.2
 )
 
 
