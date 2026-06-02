@@ -218,7 +218,19 @@ Sprint 8.11 Council panel polish + WS     ← 8.3 + 8.10
 - Journal (`/api/v1/journal/`): private, always authenticated, linked to sustains, types = DECISION/NOTE/REFLECTION/UPDATE, never published publicly
 - Lore (`/api/v1/lore/`): public-read, authenticated write, editorial content, types = VISION/TECHNICAL/REFLECTION/UPDATE, draft → published lifecycle
 
-**Core blocker (Sprint 8.2):** `devui.py` creates a new `SustainEngine()` per request (= `:memory:`, always empty). Fix: `engine_singleton.py` module with `get_shared_engine()` backed by persistent `sustena.db`. All 5 TODO stubs in `devui.py` resolve after this fix.
+**Sprint 8.1 status (2 Jun 2026):**
+- ✅ Vertical scroll fixed: removed `overflow:hidden` + `height:100vh` from `globals.css` (`html/body/#root`); `ProfilePage`, `ArenaPage`, `LoreLayout` changed to `minHeight:100vh`.
+- ✅ ControllerPanel: switched from `gridTemplateRows: 'auto auto 1fr'` to flex-column + `overflowY:auto`; Terminal/IoT/Rollback section given `minHeight:440` so it's never squished.
+- ✅ MonitorPanel: added `overflowY:auto`; moved State Stream + Event Log to the bottom (after operative cards + widget grid); replaced `flex:1,minHeight:0` with `minHeight:380`.
+- ✅ GitHub folder cleanup: `brand/`, `vyyb/`, `homestead/`, `biashara/`, `mkulima/`, `colosso/`, `scripts/`, `lore/`, `archive/`, `Briefs/` removed from git tracking. `.gitignore` updated.
+
+**Sprint 8.2 status (2 Jun 2026):**
+- ✅ `engine_singleton.py` — `get_shared_engine()` backed by `sustena.db`; `reset_shared_engine()` for tests.
+- ✅ `sustain_engine.py` — fixed truncated `_get_spec`; added `get_spec()`, `get_operative_statuses()`, `evaluate_constraints()`.
+- ✅ `devui.py` — replaced all 8 `SustainEngine()` calls with `get_shared_engine()`; wired `get_state()` to real engine; wired proposals to `council_proposals` table; wired operative registry to `_OPERATIVE_MAP`.
+- ✅ `main.py` lifespan — seeds one homestead sustain on startup if DB is empty.
+- ✅ `conftest.py` — resets engine singleton between test modules.
+- ✅ 18 new tests in `test_engine_singleton.py`. 1446 tests pass.
 
 **New routes added in Sprints 8–11:**
 - `POST /api/v1/users/register`, `POST /api/v1/users/login`, `GET /api/v1/users/me`, `GET /api/v1/users/me/stats`, `GET /api/v1/users/me/activity`
