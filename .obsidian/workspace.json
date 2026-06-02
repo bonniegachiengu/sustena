@@ -8,31 +8,13 @@
         "type": "tabs",
         "children": [
           {
-            "id": "573068049587cebe",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "docs/Bonnie_Master_Roadmap.md",
-                "mode": "preview",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "Bonnie_Master_Roadmap"
-            }
-          },
-          {
             "id": "048e09095d3c7fc5",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "sustena/Sustena_XII_Feature_Spec.md",
-                "mode": "source",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "Sustena_XII_Feature_Spec"
+              "title": "New tab"
             }
           },
           {
@@ -185,13 +167,12 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "docs/Bonnie_Master_Roadmap.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of Bonnie_Master_Roadmap"
+              "title": "Outline"
             }
           }
         ],
@@ -212,8 +193,10 @@
       "bases:Create new base": false
     }
   },
-  "active": "573068049587cebe",
+  "active": "048e09095d3c7fc5",
   "lastOpenFiles": [
+    "docs/Bonnie_Master_Roadmap.md",
+    "whatsapp_mock_outbox.jsonl",
     "apps/web/src/pages/LoreLayout.jsx.tmp.27084.dc8bb5a3e02d",
     "apps/web/src/pages/ArenaPage.jsx.tmp.27084.ef70a47a9c1e",
     "apps/web/src/styles/globals.css.tmp.27084.db33ab3e2637",
@@ -223,8 +206,6 @@
     "apps/api/tests/test_sandbox_simulation.py.tmp.27084.cae1412ca456",
     "apps/api/tests/test_sandbox_simulation.py.tmp.27084.266143728614",
     "apps/api/sustena/core/council.py.tmp.27084.0eba485e1153",
-    "CLAUDE.md.tmp.27084.6e7c03870667",
-    "apps/api/tests/__pycache__/test_delegated_votes.cpython-311-pytest-9.0.3.pyc",
     "CLAUDE.md",
     "docs/Sustena_XII_Roadmap_Jun2026.md",
     "apps/web/node_modules/@rollup/rollup-linux-x64-musl/README.md",
@@ -256,7 +237,6 @@
     "apps/api/README.md",
     "apps/api/venv/Lib/site-packages/starlette-1.2.0.dist-info/licenses/LICENSE.md",
     "vyyb/Technical Brief & Project Summary.md",
-    "docs/Bonnie_Master_Roadmap.md",
     "frontend/README.md",
     "backend/venv/Lib/site-packages/anthropic/lib/foundry.md",
     "backend/venv/Lib/site-packages/httpcore-1.0.9.dist-info/licenses/LICENSE.md"
