@@ -32,6 +32,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from sustena.operatives.base import OperativeVote, VoteChoice
+
 logger = logging.getLogger(__name__)
 
 # Graph files live at sustena/operatives/graphs/ — council.py is in sustena/core/
@@ -136,6 +138,112 @@ def load_councillor_configs(operatives_spec: dict) -> dict[str, "CouncillorConfi
             sub_operatives=dict(spec.get("sub_operatives", {})),
         )
     return configs
+
+
+# ── DelegatedVote — sub-operative vote aggregation (Sprint 7.4) ───────────────
+
+
+@dataclass
+class DelegatedVote:
+    """
+    A vote cast by a single sub-operative inside a councillor's sandbox.
+
+    position   : YES | NO | ABSTAIN
+    confidence : 0.0–1.0 — how certain the sub-operative is
+    reasoning  : free-text explanation from the sub-operative's simulation result
+    """
+
+    position:   VoteChoice
+    confidence: float
+    reasoning:  str
+
+
+def aggregate_delegated_votes(delegated: list[DelegatedVote]) -> OperativeVote:
+    """
+    Aggregate a list of DelegatedVotes into a single OperativeVote.
+
+    Rules:
+      - ABSTAIN votes carry weight=0 and are excluded from weighted sums
+        (unless ALL votes are ABSTAIN).
+      - weighted_yes = Σ confidence for YES votes
+      - weighted_no  = Σ confidence for NO votes
+      - YES wins if weighted_yes > weighted_no
+      - NO wins  if weighted_no > weighted_yes
+      - Tie or all-ABSTAIN → ABSTAIN
+      - utility = mean of YES confidences; 0.5 if no YES votes
+      - reasoning = all individual reasonings joined by " | "
+    """
+    if not delegated:
+        return OperativeVote(
+            vote=VoteChoice.ABSTAIN,
+            reasoning="No delegated votes.",
+            utility=0.5,
+        )
+
+    reasoning = " | ".join(d.reasoning for d in delegated)
+
+    yes_votes = [d for d in delegated if d.position == VoteChoice.YES]
+    no_votes  = [d for d in delegated if d.position == VoteChoice.NO]
+
+    # All-ABSTAIN shortcut
+    if not yes_votes and not no_votes:
+        return OperativeVote(
+            vote=VoteChoice.ABSTAIN,
+            reasoning=reasoning,
+            utility=0.5,
+        )
+
+    weighted_yes = sum(d.confidence for d in yes_votes)
+    weighted_no  = sum(d.confidence for d in no_votes)
+
+    if weighted_yes > weighted_no:
+        final_vote = VoteChoice.YES
+    elif weighted_no > weighted_yes:
+        final_vote = VoteChoice.NO
+    else:
+        final_vote = VoteChoice.ABSTAIN
+
+    utility = sum(d.confidence for d in yes_votes) / len(yes_votes) if yes_votes else 0.5
+
+    return OperativeVote(vote=final_vote, reasoning=reasoning, utility=utility)
+
+
+def _parse_sandbox_to_delegated_votes(sandbox_results: dict) -> list[DelegatedVote]:
+    """
+    Convert raw sandbox_results dict into a list of DelegatedVotes.
+
+    For each sub-operative entry:
+      - status != "ok"  → DelegatedVote(ABSTAIN, 0.0, reason_string)
+      - status == "ok"  → read vote/confidence/reasoning from simulation_results;
+                          absent keys default to ABSTAIN / 0.5 / ""
+    """
+    delegated: list[DelegatedVote] = []
+
+    for sub_op_name, result in sandbox_results.items():
+        status = result.get("status", "error")
+        if status != "ok":
+            reason = result.get("reason", f"sub-op '{sub_op_name}' status={status}")
+            delegated.append(DelegatedVote(
+                position=VoteChoice.ABSTAIN,
+                confidence=0.0,
+                reasoning=reason,
+            ))
+        else:
+            sim = result.get("simulation_results") or {}
+            raw_vote = sim.get("vote", "ABSTAIN")
+            try:
+                position = VoteChoice(str(raw_vote).upper())
+            except ValueError:
+                position = VoteChoice.ABSTAIN
+            confidence = float(sim.get("confidence", 0.5))
+            reasoning  = str(sim.get("reasoning", ""))
+            delegated.append(DelegatedVote(
+                position=position,
+                confidence=confidence,
+                reasoning=reasoning,
+            ))
+
+    return delegated
 
 
 # ── Proposal status constants ──────────────────────────────────────────────────
