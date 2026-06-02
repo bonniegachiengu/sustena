@@ -298,6 +298,192 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
           </div>
         </div>
       )}
+
+      {/* visualize.* widget grid */}
+      {!loading && <VisualizeWidgetGrid sustain={sustain} />}
+    </div>
+  );
+}
+
+/* ── VisualizeWidgetGrid — calls GET /devui/monitor-widgets ──────────────── */
+function VisualizeWidgetGrid({ sustain }) {
+  const [widgets, setWidgets] = dUseState(null);
+  const [loading, setLoading] = dUseState(true);
+
+  dUseEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.get(`/devui/monitor-widgets?sustain_id=${encodeURIComponent(sustain.id)}`)
+      .then(d => {
+        if (!cancelled) { setWidgets(d?.data?.widgets || null); setLoading(false); }
+      })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [sustain.id]);
+
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ animation: 'pulse 0.8s ease-in-out infinite', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>⟳ loading widgets…</span>
+    </div>
+  );
+  if (!widgets) return null;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+        <span className="label-11">WIDGET GRID · VISUALIZE OPERATORS</span>
+        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.pocket_ring · event_feed · constraint_health</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        {widgets.pocket_ring       && <PocketRingWidget w={widgets.pocket_ring} />}
+        {widgets.event_feed        && <EventFeedWidget  w={widgets.event_feed} />}
+        {widgets.constraint_health && <ConstraintHealthWidget w={widgets.constraint_health} />}
+      </div>
+    </div>
+  );
+}
+
+function PocketRingWidget({ w }) {
+  const d = w.data || {};
+  const pockets = d.pockets || [];
+  const pctSpent = d.pct_spent ?? 0;
+  const liquid = d.liquid ?? 0;
+  const color = pctSpent > 90 ? 'var(--danger)' : pctSpent > 70 ? 'var(--amber)' : 'var(--teal)';
+
+  return (
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', padding: 14,
+      display: 'flex', flexDirection: 'column', gap: 10,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span className="label-10">BUDGET RING</span>
+        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.pocket_ring</span>
+      </div>
+
+      {/* Donut ring summary */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <svg width="60" height="60" viewBox="0 0 60 60">
+          <circle cx="30" cy="30" r="22" fill="none" stroke="var(--bg-overlay)" strokeWidth="8" />
+          <circle cx="30" cy="30" r="22" fill="none" stroke={color} strokeWidth="8"
+            strokeDasharray={`${2 * Math.PI * 22 * pctSpent / 100} 999`}
+            transform="rotate(-90 30 30)"
+            strokeLinecap="round"
+            style={{ filter: `drop-shadow(0 0 4px ${color})` }}
+          />
+          <text x="30" y="35" textAnchor="middle"
+            style={{ fontFamily: 'var(--mono)', fontSize: 12, fill: color, fontWeight: 600 }}>
+            {Math.round(pctSpent)}%
+          </text>
+        </svg>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 18, fontWeight: 500, color, lineHeight: 1.1 }}>
+            {Math.round(pctSpent)}%
+          </div>
+          <div className="meta-10" style={{ color: 'var(--text-muted)', marginTop: 2 }}>of budget spent</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+            KES {liquid.toLocaleString()} liquid
+          </div>
+        </div>
+      </div>
+
+      {/* Pocket breakdown */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {pockets.slice(0, 4).map(p => {
+          const c = p.status === 'over' ? 'var(--danger)' : p.status === 'warn' ? 'var(--amber)' : 'var(--teal)';
+          return (
+            <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)', width: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+              <div style={{ flex: 1, height: 3, background: 'var(--bg-overlay)', borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{ width: `${Math.min(100, p.pct_spent)}%`, height: '100%', background: c }} />
+              </div>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: c, minWidth: 28, textAlign: 'right' }}>{Math.round(p.pct_spent)}%</span>
+            </div>
+          );
+        })}
+      </div>
+      {w.summary && <span className="meta-10" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 6 }}>{w.summary}</span>}
+    </div>
+  );
+}
+
+function EventFeedWidget({ w }) {
+  const d = w.data || {};
+  const events = d.events || [];
+  const total = d.total ?? events.length;
+
+  return (
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', padding: 14,
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span className="label-10">EVENT FEED</span>
+        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.event_feed · streaming</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 500, color: 'var(--node-event)' }}>{total}</span>
+        <span className="meta-10">recent events</span>
+      </div>
+      {events.length === 0 ? (
+        <span className="meta-10" style={{ color: 'var(--text-dim)' }}>No events yet — run operators to generate events</span>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {events.slice(0, 5).map((e, i) => (
+            <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+              <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--node-event)', flexShrink: 0, marginTop: 4 }} />
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {e.event_name || e.type || 'unknown'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {w.summary && <span className="meta-10" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 6 }}>{w.summary}</span>}
+    </div>
+  );
+}
+
+function ConstraintHealthWidget({ w }) {
+  const d = w.data || {};
+  const passing = d.passing ?? 0;
+  const total = d.total ?? 0;
+  const constraints = d.constraints || [];
+  const allPass = total > 0 && passing === total;
+  const color = allPass ? 'var(--teal)' : passing > 0 ? 'var(--amber)' : 'var(--danger)';
+
+  return (
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', padding: 14,
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span className="label-10">CONSTRAINT HEALTH</span>
+        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.constraint_health</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 500, color }}>{passing}</span>
+        <span className="meta-10">/ {total} passing</span>
+      </div>
+      {constraints.length === 0 ? (
+        <span className="meta-10" style={{ color: 'var(--text-dim)' }}>No constraints configured</span>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {constraints.map((c, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', borderBottom: i < constraints.length - 1 ? '1px solid var(--border)' : 'none' }}>
+              <span style={{ color: c.passing ? 'var(--teal)' : 'var(--danger)', fontSize: 11, flexShrink: 0 }}>
+                {c.passing ? '✓' : '✗'}
+              </span>
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {c.constraint}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {w.summary && <span className="meta-10" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 6 }}>{w.summary}</span>}
     </div>
   );
 }
