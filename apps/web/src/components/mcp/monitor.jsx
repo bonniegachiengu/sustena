@@ -211,7 +211,7 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
   const activeSustains = (sustains && sustains.length ? sustains : SUSTAINS).filter(s => s.status === 'live').length;
 
   return (
-    <div className="panel-enter" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 18, padding: '24px 28px' }}>
+    <div className="panel-enter" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 18, padding: '24px 28px', overflowY: 'auto' }}>
       {/* Stream health pill row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <StreamHealthPill health={streamHealth} tick={tick} />
@@ -255,9 +255,25 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
         </div>
       )}
 
-      {/* 2-col main: state stream + event log */}
+      {/* Operative activity strip */}
       {!loading && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)', gap: 14, flex: 1, minHeight: 0 }}>
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+            <span className="label-11">OPERATIVE ACTIVITY</span>
+            <span className="meta-10">{operatives.filter(o => o.status === 'active').length} ACTIVE · {operatives.filter(o => o.status === 'alert').length} ALERT</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+            {operatives.map((o, i) => <OperativeCard key={o.id} o={o} delay={i * 60} tick={tick} />)}
+          </div>
+        </div>
+      )}
+
+      {/* visualize.* widget grid */}
+      {!loading && <VisualizeWidgetGrid sustain={sustain} />}
+
+      {/* 2-col: state stream + event log — at the bottom */}
+      {!loading && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)', gap: 14, minHeight: 380 }}>
           {/* Live State Stream */}
           <Card title="LIVE STATE STREAM" sub={`${sustain.label}`} padded={false} scroll
             actions={
@@ -285,22 +301,6 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
           </Card>
         </div>
       )}
-
-      {/* Operative activity strip */}
-      {!loading && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-            <span className="label-11">OPERATIVE ACTIVITY</span>
-            <span className="meta-10">{operatives.filter(o => o.status === 'active').length} ACTIVE · {operatives.filter(o => o.status === 'alert').length} ALERT</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-            {operatives.map((o, i) => <OperativeCard key={o.id} o={o} delay={i * 60} tick={tick} />)}
-          </div>
-        </div>
-      )}
-
-      {/* visualize.* widget grid */}
-      {!loading && <VisualizeWidgetGrid sustain={sustain} />}
     </div>
   );
 }

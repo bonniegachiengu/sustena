@@ -322,7 +322,7 @@ function ControllerPanel({ tick, sustain, openModal }) {
   const [emergency, setEmergency] = dUseState(false);
 
   return (
-    <div className="panel-enter" style={{ display: 'grid', gridTemplateRows: 'auto auto 1fr', height: '100%', gap: 14, padding: '24px 28px', overflow: 'auto' }}>
+    <div className="panel-enter" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 14, padding: '24px 28px', overflowY: 'auto' }}>
       {/* Proposal queue */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
@@ -462,10 +462,10 @@ function ControllerPanel({ tick, sustain, openModal }) {
       </Card>
 
       {/* Terminal + IoT + Rollback */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 14, minHeight: 0 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 14, minHeight: 440 }}>
         <OperatorConsoleCard tick={tick} sustain={sustain} />
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Card title="IOT · CONNECTED DEVICES" sub="5 ONLINE" padded scroll>
             <IotList />
           </Card>
