@@ -125,6 +125,15 @@ class SustainEngine:
                 version_number  INTEGER NOT NULL DEFAULT 1,
                 updated_at      TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS events (
+                id              TEXT PRIMARY KEY,
+                sustain_id      TEXT NOT NULL,
+                event_name      TEXT NOT NULL,
+                payload_json    TEXT NOT NULL,
+                operator_log_id TEXT,
+                timestamp       TEXT NOT NULL
+            );
         """)
         self._db.commit()
 
@@ -469,11 +478,77 @@ class SustainEngine:
                 constraint_violated="operator_runtime_error",
             )
 
-        # Persist mutated state only on success
+        # Persist mutated state + any emitted events only on success
         if result.succeeded:
             self._persist_state(sustain_id, state.snapshot())
+            self._persist_events(sustain_id, bus)
 
         return result
+
+    def _persist_events(self, sustain_id: str, bus) -> None:
+        """
+        Persist events published during an operator run to the events table.
+
+        SustainEngine is synchronous and builds the EventBus without an async
+        DB session, so published events live only in memory (bus._published).
+        We write them here through the engine's own sqlite3 connection so the
+        Monitor event feed and counter reflect real activity. Best-effort —
+        a persistence failure must never invalidate a successful operator.
+        """
+        published = getattr(bus, "_published", None) or []
+        if not published:
+            return
+        try:
+            for ev in published:
+                payload = ev.get("_payload", {})
+                try:
+                    payload_json = json.dumps(payload, default=str)
+                except (TypeError, ValueError):
+                    payload_json = json.dumps(str(payload))
+                self._db.execute(
+                    "INSERT INTO events "
+                    "(id, sustain_id, event_name, payload_json, operator_log_id, timestamp) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        ev.get("id") or str(uuid.uuid4()),
+                        sustain_id,
+                        ev.get("event_name", "event.unknown"),
+                        payload_json,
+                        ev.get("operator_log_id"),
+                        ev.get("timestamp") or datetime.utcnow().isoformat(),
+                    ),
+                )
+            self._db.commit()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[SustainEngine] failed to persist events: %s", exc)
+
+    def get_events(self, sustain_id: str, limit: int = 20) -> list[dict]:
+        """
+        Return recent events for a sustain (newest first) from the events table.
+        Shape: [{"event_name": str, "payload": dict, "timestamp": str}].
+        Used by GET /devui/state and POST /devui/console/execute.
+        """
+        try:
+            rows = self._db.execute(
+                "SELECT event_name, payload_json, timestamp FROM events "
+                "WHERE sustain_id = ? ORDER BY timestamp DESC LIMIT ?",
+                (sustain_id, limit),
+            ).fetchall()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("get_events(%s) failed: %s", sustain_id, exc)
+            return []
+        out: list[dict] = []
+        for r in rows:
+            try:
+                payload = json.loads(r["payload_json"]) if r["payload_json"] else {}
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+            out.append({
+                "event_name": r["event_name"],
+                "payload": payload,
+                "timestamp": r["timestamp"],
+            })
+        return out
 
     # ── simulate ───────────────────────────────────────────────────────────────
 

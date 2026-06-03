@@ -228,11 +228,9 @@ async def get_state(
         logger.debug("get_state(%s) engine error: %s", sustain_id, exc)
 
     try:
-        from sustena.core.events import EventBus
-        bus = EventBus(sustain_id=sustain_id)
-        events = await bus.get_history(limit=20)
+        events = engine.get_events(sustain_id, limit=20)
     except Exception as exc:
-        logger.debug("EventBus.get_history(%s) failed: %s", sustain_id, exc)
+        logger.debug("get_events(%s) failed: %s", sustain_id, exc)
 
     return ok({
         "sustain_id": sustain_id,
@@ -268,11 +266,15 @@ async def console_execute(
             operator_name=operator_name,
             params=params,
         )
+        try:
+            recent_events = engine.get_events(body.sustain_id, limit=10)
+        except Exception:
+            recent_events = []
         return ok({
             "result": result.to_response(),
             "sustain_id": body.sustain_id,
             "operator": operator_name,
-            "events": [],
+            "events": recent_events,
         })
     except Exception as exc:
         logger.warning("console_execute failed: %s", exc)
