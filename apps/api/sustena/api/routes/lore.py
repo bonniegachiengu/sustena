@@ -233,3 +233,32 @@ async def publish_entry(
             "published_at": now.isoformat(),
         }
     )
+
+
+# ── DELETE /entries/{id} ──────────────────────────────────────────────────────
+
+@router.delete("/entries/{entry_id}", summary="Delete own lore entry (auth required)")
+async def delete_entry(
+    entry_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                select(lore_table).where(lore_table.c.id == entry_id)
+            )
+        ).first()
+
+        if row is None:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        entry = dict(row._mapping)
+        if entry["author_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Not your entry")
+
+        await conn.execute(
+            lore_table.delete().where(lore_table.c.id == entry_id)
+        )
+        await conn.commit()
+
+    return _ok({"deleted": True, "id": entry_id})

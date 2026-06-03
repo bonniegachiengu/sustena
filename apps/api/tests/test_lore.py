@@ -274,3 +274,53 @@ class TestPublishEntry:
     async def test_no_auth_returns_401(self, client):
         r = await client.post("/api/v1/lore/entries/any-id/publish")
         assert r.status_code == 401
+
+
+# ── DELETE /entries/{id} ──────────────────────────────────────────────────────
+
+class TestDeleteEntry:
+    async def test_returns_200(self, client):
+        token = await _register(client)
+        entry_id = (await _create_entry(client, token)).json()["data"]["id"]
+        r = await client.delete(
+            f"/api/v1/lore/entries/{entry_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200
+        assert r.json()["data"]["deleted"] is True
+
+    async def test_entry_gone_after_delete(self, client):
+        token = await _register(client)
+        entry_id = (await _create_entry(client, token)).json()["data"]["id"]
+        await client.post(
+            f"/api/v1/lore/entries/{entry_id}/publish",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        await client.delete(
+            f"/api/v1/lore/entries/{entry_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        listed = (await client.get("/api/v1/lore/entries")).json()["data"]["entries"]
+        assert all(e["id"] != entry_id for e in listed)
+
+    async def test_other_user_cannot_delete(self, client):
+        token_a = await _register(client, email="a@test.com")
+        entry_id = (await _create_entry(client, token_a)).json()["data"]["id"]
+        token_b = await _register(client, email="b@test.com")
+        r = await client.delete(
+            f"/api/v1/lore/entries/{entry_id}",
+            headers={"Authorization": f"Bearer {token_b}"},
+        )
+        assert r.status_code == 403
+
+    async def test_nonexistent_returns_404(self, client):
+        token = await _register(client)
+        r = await client.delete(
+            "/api/v1/lore/entries/no-such-entry",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 404
+
+    async def test_no_auth_returns_401(self, client):
+        r = await client.delete("/api/v1/lore/entries/any-id")
+        assert r.status_code == 401
