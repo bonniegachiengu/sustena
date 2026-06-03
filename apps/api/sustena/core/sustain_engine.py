@@ -550,6 +550,44 @@ class SustainEngine:
             })
         return out
 
+    def seed_pocket(self, sustain_id: str, name: str, allocated: float, ceiling: float = 0.0) -> bool:
+        """
+        Directly set/replace a budget pocket in a sustain's live engine state so
+        seeded pockets appear in the Monitor (which reads engine state). Used by
+        POST /seed/pocket. Returns False if the sustain has no engine state
+        (e.g. a free-text seed id that was never instantiated).
+        """
+        try:
+            state_dict = self._load_state_dict(sustain_id)
+        except ValueError:
+            return False
+        finances = state_dict.setdefault("finances", {})
+        pockets = finances.setdefault("pockets", {})
+        prev = pockets.get(name) if isinstance(pockets.get(name), dict) else {}
+        pockets[name] = {
+            "allocated": float(allocated),
+            "spent": float(prev.get("spent", 0.0)),
+            "limit": float(ceiling),
+        }
+        self._persist_state(sustain_id, state_dict)
+        return True
+
+    def seed_event(self, sustain_id: str, event_name: str, payload: dict) -> bool:
+        """Record a seeded event so it shows in the Monitor event feed/log."""
+        try:
+            self._db.execute(
+                "INSERT INTO events "
+                "(id, sustain_id, event_name, payload_json, operator_log_id, timestamp) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), sustain_id, event_name,
+                 json.dumps(payload, default=str), None, datetime.utcnow().isoformat()),
+            )
+            self._db.commit()
+            return True
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[SustainEngine] seed_event failed: %s", exc)
+            return False
+
     # ── simulate ───────────────────────────────────────────────────────────────
 
     async def simulate(

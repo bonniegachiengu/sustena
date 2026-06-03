@@ -240,8 +240,19 @@ async def seed_pocket(
             )
             action = "created"
 
-    logger.info("seed_pocket: %s sustain=%s pocket=%s", action, body.sustain_id, body.name)
-    return ok({"sustain_id": body.sustain_id, "pocket": body.name, "action": action})
+    # Bridge into engine state so the pocket shows in the Monitor (best-effort —
+    # succeeds only when sustain_id is a real engine sustain).
+    bridged = False
+    try:
+        from sustena.core.engine_singleton import get_shared_engine
+        bridged = get_shared_engine().seed_pocket(
+            body.sustain_id, body.name, body.allocation, body.ceiling
+        )
+    except Exception as exc:
+        logger.debug("seed_pocket engine bridge failed: %s", exc)
+
+    logger.info("seed_pocket: %s sustain=%s pocket=%s bridged=%s", action, body.sustain_id, body.name, bridged)
+    return ok({"sustain_id": body.sustain_id, "pocket": body.name, "action": action, "bridged_to_monitor": bridged})
 
 
 # ── POST /seed/operative ──────────────────────────────────────────────────────

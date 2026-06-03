@@ -70,3 +70,27 @@ async def test_failed_operator_persists_no_event():
 def test_get_events_unknown_sustain_is_empty():
     eng = _engine()
     assert eng.get_events("does-not-exist") == []
+
+
+# ── seed_pocket / seed_event bridge (Seed → Monitor) ──────────────────────────
+
+def test_seed_pocket_writes_into_engine_state():
+    eng = _engine()
+    sid = eng.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
+    assert eng.seed_pocket(sid, "food", 30000, 50000) is True
+    pockets = eng.get_state(sid)["finances"]["pockets"]
+    assert pockets["food"]["allocated"] == 30000
+    assert pockets["food"]["limit"] == 50000
+    assert pockets["food"]["spent"] == 0.0
+
+
+def test_seed_pocket_unknown_sustain_returns_false():
+    eng = _engine()
+    assert eng.seed_pocket("does-not-exist", "food", 100) is False
+
+
+def test_seed_event_shows_in_get_events():
+    eng = _engine()
+    sid = eng.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
+    assert eng.seed_event(sid, "event.seed.note", {"amount": 5}) is True
+    assert any(e["event_name"] == "event.seed.note" for e in eng.get_events(sid))
