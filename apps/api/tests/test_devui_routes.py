@@ -679,3 +679,79 @@ class TestSustainOperators:
     def test_different_sustain_id_echoed(self, client):
         r = client.get("/devui/sustain/vyyb.hive/operators", headers=AUTH_HEADER)
         assert r.json()["data"]["sustain_id"] == "vyyb.hive"
+
+
+# ---------------------------------------------------------------------------
+# GET /devui/templates  +  POST /devui/sustains  (engine-backed create)
+# ---------------------------------------------------------------------------
+
+class TestListTemplates:
+
+    def test_no_auth_returns_401(self, client):
+        assert client.get("/devui/templates").status_code == 401
+
+    def test_returns_200(self, client):
+        r = client.get("/devui/templates", headers=AUTH_HEADER)
+        assert r.status_code == 200
+
+    def test_includes_homestead(self, client):
+        r = client.get("/devui/templates", headers=AUTH_HEADER)
+        ids = [t["template_id"] for t in r.json()["data"]["templates"]]
+        assert "homestead" in ids
+
+    def test_template_has_required_fields(self, client):
+        r = client.get("/devui/templates", headers=AUTH_HEADER)
+        for t in r.json()["data"]["templates"]:
+            assert "template_id" in t
+            assert "display_name" in t
+            assert "parameters" in t
+
+
+class TestCreateSustain:
+
+    def test_no_auth_returns_401(self, client):
+        r = client.post("/devui/sustains", json={"template_id": "homestead"})
+        assert r.status_code == 401
+
+    def test_create_homestead_returns_200(self, client):
+        r = client.post(
+            "/devui/sustains",
+            json={"template_id": "homestead", "user_id": "owner"},
+            headers=AUTH_HEADER,
+        )
+        assert r.status_code == 200
+        assert r.json()["data"]["sustain_id"]
+
+    def test_created_sustain_has_template_id(self, client):
+        r = client.post(
+            "/devui/sustains",
+            json={"template_id": "homestead", "user_id": "owner"},
+            headers=AUTH_HEADER,
+        )
+        assert r.json()["data"]["sustain"]["template_id"] == "homestead"
+
+    def test_created_sustain_appears_in_list(self, client):
+        sid = client.post(
+            "/devui/sustains",
+            json={"template_id": "homestead", "user_id": "owner"},
+            headers=AUTH_HEADER,
+        ).json()["data"]["sustain_id"]
+        listed = client.get("/devui/sustains", headers=AUTH_HEADER).json()["data"]["sustains"]
+        assert any(s["id"] == sid for s in listed)
+
+    def test_owner_ids_defaults_to_user_id(self, client):
+        # Should not 422 even though owner_ids (required param) was not supplied.
+        r = client.post(
+            "/devui/sustains",
+            json={"template_id": "homestead", "user_id": "bonventure"},
+            headers=AUTH_HEADER,
+        )
+        assert r.status_code == 200
+
+    def test_unknown_template_returns_422(self, client):
+        r = client.post(
+            "/devui/sustains",
+            json={"template_id": "does_not_exist"},
+            headers=AUTH_HEADER,
+        )
+        assert r.status_code == 422

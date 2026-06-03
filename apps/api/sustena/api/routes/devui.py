@@ -130,6 +130,75 @@ async def list_sustains(_: str = Depends(verify_admin)) -> dict:
     return ok({"sustains": []})
 
 
+# ── 1b. GET /devui/templates ──────────────────────────────────────────────────
+
+@router.get("/templates", summary="Available sustain spec templates for creation")
+async def list_templates(_: str = Depends(verify_admin)) -> dict:
+    """
+    List the sustain spec templates that can be instantiated (homestead, vyyb,
+    chama, …). Powers the 'create sustain' control in the UI.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    specs_dir = _Path(__file__).resolve().parent.parent.parent / "sustains"
+    templates: list[dict] = []
+    for path in sorted(specs_dir.glob("*.json")):
+        try:
+            spec = _json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        # operatives may be a dict (homestead) or a list (vyyb, chama, …).
+        ops = spec.get("operatives") or {}
+        operative_names = list(ops.keys()) if isinstance(ops, dict) else list(ops)
+        templates.append({
+            "template_id":  path.stem,
+            "display_name": spec.get("display_name") or path.stem.replace("_", " ").title(),
+            "description":  spec.get("description", ""),
+            "operatives":   operative_names,
+            "parameters":   spec.get("parameters", []),
+        })
+    return ok({"templates": templates})
+
+
+# ── 1c. POST /devui/sustains ──────────────────────────────────────────────────
+
+class CreateSustainRequest(BaseModel):
+    template_id: str = Field(description="Spec template to instantiate, e.g. 'homestead'")
+    user_id: str = Field(default="owner", description="Owner user id for the new sustain")
+    parameters: dict = Field(
+        default_factory=dict,
+        description="Spec parameters. owner_ids defaults to [user_id] when omitted.",
+    )
+
+
+@router.post("/sustains", summary="Create + hydrate a sustain from a template")
+async def create_sustain(body: CreateSustainRequest, _: str = Depends(verify_admin)) -> dict:
+    """
+    Instantiate a fully-hydrated sustain via SustainEngine — operators allowed,
+    operatives enabled, and an initial state built from the template's
+    default_state. Returns the new sustain_id plus the selector-shaped entry.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    params = dict(body.parameters or {})
+    params.setdefault("owner_ids", [body.user_id])
+
+    try:
+        sustain_id = engine.instantiate(body.template_id, body.user_id, params)
+    except ValueError as exc:
+        # Unknown template spec or a required parameter is missing.
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    entry = next(
+        (s for s in engine.list_all() if s.get("id") == sustain_id),
+        {"id": sustain_id, "template_id": body.template_id, "status": "live"},
+    )
+    logger.info("Created sustain %s from template %s", sustain_id, body.template_id)
+    return ok({"sustain_id": sustain_id, "sustain": entry})
+
+
 # ── 2. GET /devui/state?sustain_id= ──────────────────────────────────────────
 
 @router.get("/state", summary="Full current state for a sustain")
