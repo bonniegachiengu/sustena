@@ -43,6 +43,8 @@ function App() {
   const [liveState, setLiveState] = dUseState(null);  // pushed from WS
   const [apiSustains, setApiSustains] = dUseState([]);
   const wsRef = dUseRef(null);
+  const lastEventCountRef = dUseRef(null);  // heartbeat: last seen event count
+  const onlineRef = dUseRef(true);          // heartbeat: backend reachability
 
   // Per-panel side-rail visibility (Sim & Editor)
   const [simLeft, setSimLeft] = dUseState(true);
@@ -70,6 +72,33 @@ function App() {
       .then(d => { const list = d?.data?.sustains || []; if (list.length) setApiSustains(list); })
       .catch(() => {});
   }, []);
+
+  // Refetch the sustain list; optionally select one by id.
+  async function refreshSustains(selectId) {
+    try {
+      const d = await api.get('/devui/sustains');
+      const list = d?.data?.sustains || [];
+      setApiSustains(list);
+      if (selectId) { setSustainId(selectId); setTweak('sustain', selectId); }
+      return list;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // Birth a fully-hydrated sustain from a template via the engine, then select it.
+  async function createSustain(templateId) {
+    try {
+      const d = await api.post('/devui/sustains', { template_id: templateId, user_id: 'bonventure' });
+      const sid = d?.data?.sustain_id;
+      await refreshSustains(sid);
+      window.flash?.(`${templateId} sustain created`, 'ok');
+      return sid;
+    } catch (e) {
+      window.flash?.(`create failed · ${String(e?.message || e)}`, 'err');
+      return null;
+    }
+  }
 
   // WebSocket — open on mount and whenever sustainId changes, close on unmount/change
   dUseEffect(() => {
@@ -104,6 +133,33 @@ function App() {
     }, rate);
     return () => clearInterval(id);
   }, [t.tickRate]);
+
+  // Heartbeat — every 1s, poll the backend for this sustain. Honest, real-data
+  // notifications: flash on new events and on connection drop/restore. No mock pulses.
+  dUseEffect(() => {
+    if (!sustainId) return;
+    lastEventCountRef.current = null;  // reset baseline when the sustain changes
+    let cancelled = false;
+    const beat = async () => {
+      try {
+        const d = await api.get(`/devui/monitor-widgets?sustain_id=${encodeURIComponent(sustainId)}`);
+        if (cancelled) return;
+        if (!onlineRef.current) { onlineRef.current = true; window.flash?.('backend reconnected', 'ok'); }
+        const total = d?.data?.widgets?.event_feed?.data?.total ?? 0;
+        const prev = lastEventCountRef.current;
+        if (prev != null && total > prev) {
+          const n = total - prev;
+          window.flash?.(`${n} new event${n > 1 ? 's' : ''} · ${sustain?.label ?? 'sustain'}`, 'info');
+        }
+        lastEventCountRef.current = total;
+      } catch {
+        if (!cancelled && onlineRef.current) { onlineRef.current = false; window.flash?.('backend unreachable', 'danger'); }
+      }
+    };
+    beat();
+    const id = setInterval(beat, 1000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [sustainId]);
 
   const sustains   = apiSustains.length ? apiSustains : SUSTAINS;
   const sustain    = sustains.find(s => s.id === sustainId) || sustains[0] || { id: '', label: '—', sub: 'no sustains', status: 'seed' };
@@ -140,6 +196,7 @@ function App() {
       <TopBar
         clock={clock} sustain={sustain}
         sustains={sustains} onSustainChange={(id) => { setSustainId(id); setTweak('sustain', id); }}
+        onCreate={createSustain}
       />
       <LeftNav
         panels={PANELS} active={panel} onSelect={switchPanel}
@@ -216,8 +273,19 @@ function App() {
 }
 
 /* ─── Top bar ──────────────────────────────────────────────── */
-function TopBar({ clock, sustain, sustains, onSustainChange }) {
+function TopBar({ clock, sustain, sustains, onSustainChange, onCreate }) {
   const [open, setOpen] = dUseState(false);
+  const [templates, setTemplates] = dUseState(null);  // null = not yet loaded
+  const [busy, setBusy] = dUseState(false);
+
+  // Load creatable templates the first time the dropdown opens.
+  dUseEffect(() => {
+    if (open && templates === null) {
+      api.get('/devui/templates')
+        .then(d => setTemplates(d?.data?.templates || []))
+        .catch(() => setTemplates([]));
+    }
+  }, [open]);
   return (
     <header style={{
       gridArea: 'header',
@@ -277,6 +345,40 @@ function TopBar({ clock, sustain, sustains, onSustainChange }) {
                     <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{s.sub}</span>
                   </div>
                   <span style={{ width: 5, height: 5, borderRadius: '50%', background: s.status === 'live' ? 'var(--teal)' : 'var(--text-muted)' }} />
+                </button>
+              ))}
+
+              {sustains.length === 0 && (
+                <div style={{ padding: '8px 10px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)' }}>
+                  no sustains yet · create one below
+                </div>
+              )}
+
+              {/* Create section */}
+              <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+              <div style={{ padding: '6px 10px 2px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.12em', color: 'var(--text-muted)' }}>
+                CREATE SUSTAIN
+              </div>
+              {templates === null && (
+                <div style={{ padding: '6px 10px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)' }}>loading templates…</div>
+              )}
+              {Array.isArray(templates) && templates.map(tpl => (
+                <button key={tpl.template_id} disabled={busy}
+                  onClick={async () => { setBusy(true); await onCreate?.(tpl.template_id); setBusy(false); setOpen(false); }}
+                  style={{
+                    width: '100%', textAlign: 'left', padding: '8px 10px',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    borderRadius: 'var(--radius-sm)', background: 'transparent',
+                    opacity: busy ? 0.5 : 1, cursor: busy ? 'default' : 'pointer',
+                  }}
+                  onMouseEnter={e => !busy && (e.currentTarget.style.background = 'var(--bg-overlay)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)' }}>{tpl.display_name}</span>
+                    <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{(tpl.operatives || []).length} operatives</span>
+                  </div>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--amber)' }}>+</span>
                 </button>
               ))}
             </div>

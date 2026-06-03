@@ -183,11 +183,19 @@ function SignInPanel({ open, onClose, onSuccess }) {
 
 // ── Compose panel ─────────────────────────────────────────────
 
-function ComposePanel({ open, onClose, onSaved }) {
+function ComposePanel({ open, onClose, onSaved, editEntry }) {
   const [body, setBody] = useState('');
   const [type, setType] = useState('note');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // Pre-fill when editing an existing entry
+  useEffect(() => {
+    if (open && editEntry) {
+      setBody(editEntry._raw?.body ?? '');
+      setType(editEntry.type ?? 'note');
+    }
+  }, [open, editEntry]);
 
   const reset = () => { setBody(''); setType('note'); setError(''); };
 
@@ -195,10 +203,12 @@ function ComposePanel({ open, onClose, onSaved }) {
     if (!body.trim()) return;
     setSaving(true); setError('');
     try {
-      await journalFetch('/api/v1/journal/entries', 'POST', {
-        kind: type.toUpperCase(),
-        body: body.trim(),
-      });
+      const payload = { kind: type.toUpperCase(), body: body.trim() };
+      if (editEntry) {
+        await journalFetch(`/api/v1/journal/entries/${editEntry.id}`, 'PUT', payload);
+      } else {
+        await journalFetch('/api/v1/journal/entries', 'POST', payload);
+      }
       reset();
       onSaved();
     } catch (e) {
@@ -229,7 +239,7 @@ function ComposePanel({ open, onClose, onSaved }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 24px 12px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--text-secondary)' }}>COMPOSE ENTRY</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--text-secondary)' }}>{editEntry ? 'EDIT ENTRY' : 'COMPOSE ENTRY'}</span>
             <div style={{ display: 'flex', gap: 4 }}>
               {Object.entries(ENTRY_TYPES).map(([k, v]) => (
                 <button key={k} onClick={() => setType(k)} style={{
@@ -247,7 +257,7 @@ function ComposePanel({ open, onClose, onSaved }) {
             {error && <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--danger)' }}>{error}</span>}
             <PBtn variant="ghost" onClick={handleClose}>CANCEL</PBtn>
             <PBtn onClick={handleSave} disabled={!body.trim() || saving}>
-              {saving ? 'SAVING…' : 'SAVE ENTRY'}
+              {saving ? 'SAVING…' : (editEntry ? 'UPDATE' : 'SAVE ENTRY')}
             </PBtn>
           </div>
         </div>
@@ -300,9 +310,20 @@ function EntryCard({ entry, onClick, delay }) {
 }
 
 /* ── Entry reader ────────────────────────────────────────────── */
-function EntryReader({ entry }) {
+function EntryReader({ entry, onEdit, onDelete }) {
   const et = ENTRY_TYPES[entry.type] ?? ENTRY_TYPES.note;
   const hasSidenotes = entry.sidenotes?.length > 0;
+  const actionBtn = (label, onClick, danger) => (
+    <button onClick={onClick} style={{
+      fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase',
+      color: danger ? 'var(--danger)' : 'var(--text-muted)',
+      background: 'none', border: '1px solid var(--border)', borderRadius: 3,
+      padding: '3px 8px', cursor: 'pointer', transition: 'all var(--t-fast)',
+    }}
+    onMouseEnter={e => { e.currentTarget.style.color = danger ? 'var(--danger)' : 'var(--text-primary)'; e.currentTarget.style.borderColor = 'var(--border-mid)'; }}
+    onMouseLeave={e => { e.currentTarget.style.color = danger ? 'var(--danger)' : 'var(--text-muted)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+    >{label}</button>
+  );
 
   return (
     <div className="panel-enter" style={{
@@ -325,6 +346,8 @@ function EntryReader({ entry }) {
             </div>
             <span style={{ flex: 1 }} />
             <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{entry.date}</span>
+            {onEdit && <span style={{ marginLeft: 12 }}>{actionBtn('Edit', () => onEdit(entry))}</span>}
+            {onDelete && <span style={{ marginLeft: 6 }}>{actionBtn('Delete', () => onDelete(entry), true)}</span>}
           </div>
         </div>
         <div style={{ maxWidth: 660 }}>
@@ -480,6 +503,7 @@ function JournalPage() {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(() => localStorage.getItem('sustena_token'));
+  const [editEntry, setEditEntry] = useState(null);
 
   const fetchEntries = useCallback(() => {
     if (!getToken()) { setLoading(false); return; }
@@ -514,7 +538,24 @@ function JournalPage() {
 
   const handleSaved = () => {
     setComposeOpen(false);
+    setEditEntry(null);
     fetchEntries();
+  };
+
+  const handleEdit = (entry) => {
+    setEditEntry(entry);
+    setComposeOpen(true);
+  };
+
+  const handleDelete = async (entry) => {
+    if (!window.confirm('Delete this journal entry? This cannot be undone.')) return;
+    try {
+      await journalFetch(`/api/v1/journal/entries/${entry.id}`, 'DELETE');
+      setActiveEntry(null);
+      fetchEntries();
+    } catch (e) {
+      window.alert(`Delete failed: ${e.message ?? e}`);
+    }
   };
 
   return (
@@ -541,7 +582,7 @@ function JournalPage() {
 
         <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
           {activeEntry ? (
-            <EntryReader entry={activeEntry} />
+            <EntryReader entry={activeEntry} onEdit={handleEdit} onDelete={handleDelete} />
           ) : (
             <div style={{ height: '100%', overflow: 'auto', padding: '28px 32px' }}>
               <div style={{ marginBottom: 20 }}>
@@ -591,7 +632,7 @@ function JournalPage() {
       </div>
 
       <SignInPanel open={showSignIn} onClose={() => setShowSignIn(false)} onSuccess={handleSignedIn} />
-      <ComposePanel open={composeOpen} onClose={() => setComposeOpen(false)} onSaved={handleSaved} />
+      <ComposePanel open={composeOpen} editEntry={editEntry} onClose={() => { setComposeOpen(false); setEditEntry(null); }} onSaved={handleSaved} />
     </div>
   );
 }

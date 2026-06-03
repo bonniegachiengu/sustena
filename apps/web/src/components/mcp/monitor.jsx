@@ -9,19 +9,22 @@ function apiStateToStateTree(state) {
   if (!state) return null;
   const rows = [];
 
-  // finances.pockets — value may be a number or {allocated, target, status}
+  // finances.pockets — pocket is {allocated, spent, limit}. Show live REMAINING
+  // (allocated − spent) against allocated, so the stream reflects real spending.
   const pockets = state.finances?.pockets || {};
   Object.entries(pockets).forEach(([k, v]) => {
-    const allocated = typeof v === 'object' ? (v.allocated ?? 0) : v;
-    const target = typeof v === 'object' ? (v.target ?? null) : null;
-    const st = typeof v === 'object' ? (v.status || 'ok') : 'ok';
+    const obj = typeof v === 'object' && v != null;
+    const allocated = obj ? (v.allocated ?? 0) : v;
+    const spent = obj ? (v.spent ?? 0) : 0;
+    const remaining = allocated - spent;
+    const pct = allocated > 0 ? spent / allocated : 0;
     rows.push({
       path: `finances.pockets.${k}`,
-      value: allocated,
-      target,
+      value: remaining,
+      target: allocated,
       fmt: 'ksh',
-      cstr: st === 'amber' ? 'amber' : st === 'fail' ? 'red' : 'ok',
-      desc: `${k} pocket`,
+      cstr: pct >= 1 ? 'red' : pct >= 0.8 ? 'amber' : 'ok',
+      desc: `${k} · ${Math.round(spent).toLocaleString()} spent of ${Math.round(allocated).toLocaleString()}`,
     });
   });
 
@@ -432,21 +435,12 @@ function EventFeedWidget({ w }) {
         <span style={{ fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 500, color: 'var(--node-event)' }}>{total}</span>
         <span className="meta-10">recent events</span>
       </div>
-      {events.length === 0 ? (
+      {total === 0 && (
         <span className="meta-10" style={{ color: 'var(--text-dim)' }}>No events yet — run operators to generate events</span>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {events.slice(0, 5).map((e, i) => (
-            <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-              <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--node-event)', flexShrink: 0, marginTop: 4 }} />
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {e.event_name || e.type || 'unknown'}
-              </span>
-            </div>
-          ))}
-        </div>
       )}
-      {w.summary && <span className="meta-10" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 6 }}>{w.summary}</span>}
+      <span className="meta-10" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+        see EVENT LOG · STREAM below for detail
+      </span>
     </div>
   );
 }

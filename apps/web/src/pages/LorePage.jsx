@@ -37,6 +37,12 @@ function textToBlocks(text) {
   });
 }
 
+function blocksToText(blocks) {
+  return (blocks ?? [])
+    .map(b => (b.type === 'h2' ? `## ${b.text}` : b.text))
+    .join('\n\n');
+}
+
 function normalizeEntry(raw) {
   let body = [];
   try {
@@ -51,7 +57,9 @@ function normalizeEntry(raw) {
   const preview = body.find(b => b.type === 'lead' || b.type === 'p')?.text ?? '';
   return {
     id: raw.id,
+    authorId: raw.author_id ?? null,
     type: (raw.kind ?? 'REFLECTION').toLowerCase(),
+    kind: (raw.kind ?? 'REFLECTION'),
     title: raw.title,
     date,
     tags: Array.isArray(raw.tags) ? raw.tags : [],
@@ -177,12 +185,21 @@ function SignInPanel({ open, onClose, onSuccess }) {
 
 // ── Compose panel ─────────────────────────────────────────────
 
-function ComposePanel({ open, token, onClose, onPublished }) {
+function ComposePanel({ open, token, onClose, onPublished, editEntry }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [kind, setKind] = useState('VISION');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // Pre-fill when editing an existing post
+  useEffect(() => {
+    if (open && editEntry) {
+      setTitle(editEntry.title ?? '');
+      setBody(blocksToText(editEntry.body));
+      setKind((editEntry.kind ?? 'VISION').toUpperCase());
+    }
+  }, [open, editEntry]);
 
   const reset = () => { setTitle(''); setBody(''); setKind('VISION'); setError(''); };
 
@@ -191,12 +208,21 @@ function ComposePanel({ open, token, onClose, onPublished }) {
     setSaving(true); setError('');
     try {
       const blocks = textToBlocks(body);
-      const created = await authFetch('/api/v1/lore/entries', 'POST', {
-        title: title.trim(),
-        body_json: JSON.stringify(blocks),
-        kind,
-      }, token);
-      await authFetch(`/api/v1/lore/entries/${created.data.id}/publish`, 'POST', null, token);
+      if (editEntry) {
+        // Edit in place — already-published posts stay published.
+        await authFetch(`/api/v1/lore/entries/${editEntry.id}`, 'PUT', {
+          title: title.trim(),
+          body_json: JSON.stringify(blocks),
+          kind,
+        }, token);
+      } else {
+        const created = await authFetch('/api/v1/lore/entries', 'POST', {
+          title: title.trim(),
+          body_json: JSON.stringify(blocks),
+          kind,
+        }, token);
+        await authFetch(`/api/v1/lore/entries/${created.data.id}/publish`, 'POST', null, token);
+      }
       reset();
       onPublished();
     } catch (e) {
@@ -229,7 +255,7 @@ function ComposePanel({ open, token, onClose, onPublished }) {
         {/* Header row */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 24px 12px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--text-secondary)' }}>NEW POST</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--text-secondary)' }}>{editEntry ? 'EDIT POST' : 'NEW POST'}</span>
             <div style={{ display: 'flex', gap: 4 }}>
               {KINDS.map(k => (
                 <button key={k} onClick={() => setKind(k)} style={{
@@ -247,7 +273,7 @@ function ComposePanel({ open, token, onClose, onPublished }) {
             {error && <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--danger)' }}>{error}</span>}
             <PBtn variant="ghost" onClick={handleClose}>CANCEL</PBtn>
             <PBtn onClick={handlePublish} disabled={!title.trim() || !body.trim() || saving}>
-              {saving ? 'PUBLISHING…' : 'PUBLISH →'}
+              {saving ? 'SAVING…' : (editEntry ? 'SAVE →' : 'PUBLISH →')}
             </PBtn>
           </div>
         </div>
@@ -327,8 +353,16 @@ function EntryCard({ entry, active, onSelect }) {
 
 // ── Entry reader ──────────────────────────────────────────────
 
-function EntryReader({ entry }) {
+function EntryReader({ entry, onEdit, onDelete }) {
   const t = ENTRY_TYPES[entry.type] || ENTRY_TYPES.reflection;
+  const actionBtn = (label, onClick, danger) => (
+    <button onClick={onClick} style={{
+      fontFamily: 'var(--mono)', fontSize: 8, letterSpacing: '0.1em', textTransform: 'uppercase',
+      color: danger ? 'var(--danger)' : 'var(--text-muted)',
+      background: 'none', border: '1px solid var(--border)', borderRadius: 3,
+      padding: '3px 8px', cursor: 'pointer',
+    }}>{label}</button>
+  );
   return (
     <div className="panel-enter" style={{ display: 'grid', gridTemplateColumns: '1fr 180px', height: '100%', overflow: 'hidden' }}>
       <div style={{ overflowY: 'auto', padding: '56px 52px 80px 52px' }}>
@@ -337,6 +371,9 @@ function EntryReader({ entry }) {
             <span>{t.label}</span>
             <span style={{ opacity: 0.4 }}>·</span>
             <span>{entry.date}</span>
+            <span style={{ flex: 1 }} />
+            {onEdit && actionBtn('Edit', () => onEdit(entry))}
+            {onDelete && actionBtn('Delete', () => onDelete(entry), true)}
           </div>
           <h1 style={{ fontFamily: 'var(--ui)', fontSize: 22, fontWeight: 500, lineHeight: 1.35, letterSpacing: '-0.015em', color: 'var(--text-primary)', marginBottom: 20 }}>
             {entry.title}
@@ -378,6 +415,17 @@ function LorePage() {
   const [token, setToken] = useState(() => localStorage.getItem('sustena_token'));
   const [showSignIn, setShowSignIn] = useState(false);
   const [showCompose, setShowCompose] = useState(false);
+  const [myId, setMyId] = useState(null);
+  const [editEntry, setEditEntry] = useState(null);
+
+  // Resolve the signed-in user's id so we can show Edit/Delete only on own posts.
+  useEffect(() => {
+    if (!token) { setMyId(null); return; }
+    fetch(`${API_BASE}/api/v1/users/me`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => setMyId(d?.data?.user_id ?? d?.data?.id ?? null))
+      .catch(() => setMyId(null));
+  }, [token]);
 
   const fetchEntries = useCallback(() => {
     api.get('/api/v1/lore/entries')
@@ -424,9 +472,29 @@ function LorePage() {
 
   const handlePublished = () => {
     setShowCompose(false);
+    setEditEntry(null);
     setLoading(true);
     fetchEntries();
   };
+
+  const handleEdit = (entry) => {
+    setEditEntry(entry);
+    setShowCompose(true);
+  };
+
+  const handleDelete = async (entry) => {
+    if (!window.confirm('Delete this post? This cannot be undone.')) return;
+    try {
+      await authFetch(`/api/v1/lore/entries/${entry.id}`, 'DELETE', null, token);
+      setActiveId(null);
+      setLoading(true);
+      fetchEntries();
+    } catch (e) {
+      window.alert(`Delete failed: ${e.message ?? e}`);
+    }
+  };
+
+  const canManage = !!token && !!myId && active?.authorId === myId;
 
   return (
     <div style={{ height: '100%', background: 'var(--bg-base)' }}>
@@ -496,7 +564,7 @@ function LorePage() {
         {/* Reader */}
         <div style={{ overflow: 'hidden' }}>
           {active
-            ? <EntryReader entry={active} />
+            ? <EntryReader entry={active} onEdit={canManage ? handleEdit : undefined} onDelete={canManage ? handleDelete : undefined} />
             : (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>
@@ -516,7 +584,8 @@ function LorePage() {
       <ComposePanel
         open={showCompose}
         token={token}
-        onClose={() => setShowCompose(false)}
+        editEntry={editEntry}
+        onClose={() => { setShowCompose(false); setEditEntry(null); }}
         onPublished={handlePublished}
       />
     </div>

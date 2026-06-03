@@ -256,6 +256,11 @@ Sprint 8.11 Council panel polish + WS ✅  ← 8.3 + 8.10
 - ✅ 5 new tests in `test_sustains_migration.py` (adds column, preserves rows, NULL template_id after copy, idempotent, no-op when present). Expected total **1590 tests** — confirm with a local run.
 - ⚠️ The on-disk `apps/api/sustena.db` was found corrupted ("database disk image is malformed") — classic OneDrive-syncing-a-live-SQLite hazard. It held only 1 user + 0 sustains. Fix: delete it and restart the backend; `init_db()` recreates a clean DB with the correct schema. Recommend moving the dev DB outside OneDrive.
 
+**Create-sustain via UI (2 Jun 2026, post-8.11):**
+- ✅ `devui.py` — `GET /devui/templates` (lists homestead/vyyb/chama/biashara/colosso with display_name, description, operatives, parameters; handles `operatives` as **dict OR list** — only homestead.json uses a dict) and `POST /devui/sustains` → `SustainEngine.instantiate(template_id, user_id, params)`; `owner_ids` defaults to `[user_id]`; unknown template → 422. Returns `{sustain_id, sustain}`.
+- ✅ `shell.jsx` TopBar selector — a `CREATE SUSTAIN` section in the dropdown: loads `/devui/templates` on open; clicking a template POSTs `/devui/sustains`, refreshes the list and auto-selects the new sustain; empty-state "no sustains yet · create one below". `createSustain()`/`refreshSustains()` helpers in `App()`.
+- ✅ 10 new backend tests (`TestListTemplates`, `TestCreateSustain`). **1600 tests.**
+
 **Sprint 8.6 status (2 Jun 2026):**
 - ✅ `schema.py` `users` table — added `email` (unique, nullable) + `password_hash`; made `phone_number` nullable; `_migrate_users_auth` sync migration recreates the table on old DBs using rename→recreate→copy→drop (SQLite cannot ALTER COLUMN).
 - ✅ `users.py` full rewrite — PBKDF2-SHA256 password hashing via stdlib `hashlib` (avoids passlib/bcrypt 5.x incompatibility); HS256 JWT with 30-day expiry via `python-jose`; `register`, `login`, `/me`, `/me/stats`, `/me/activity`.

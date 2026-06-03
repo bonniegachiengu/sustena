@@ -2039,23 +2039,43 @@ function ControllerTerminal({ tick, sustain }) {
       // resp shape: { status, data: { result: { status, data: { delta, ... } }, events, ... }, timestamp }
       const payload   = resp?.data || {};
       const opResult  = payload?.result?.data || {};
+      const opStatus  = payload?.result?.status || 'ok';
+      const reason    = payload?.result?.reason || payload?.result?.constraint_violated;
       const delta     = opResult?.delta || {};
       const events    = payload?.events || [];
 
-      // Show delta fields
+      // Outcome line — surface failures/deferrals instead of silently saying "ok"
+      if (opStatus === 'failed') {
+        addLine('danger', `[FAIL] ${operator}${reason ? ' · ' + reason : ''}`);
+      } else if (opStatus === 'deferred') {
+        addLine('meta', `[DEFERRED] ${operator} → council${reason ? ' · ' + reason : ''}`);
+      }
+
+      // Show delta fields (operators that return a delta map)
       Object.entries(delta).forEach(([field, val]) => {
         addLine('exec', `[ΔSTATE] ${field}: ${val}`);
       });
 
-      // Show emitted events
+      // Show the operator's committed result fields (e.g. liquid_balance, amount_credited)
+      const resultFields = opStatus === 'ok'
+        ? Object.entries(opResult).filter(([k, v]) => k !== 'delta' && v !== null && typeof v !== 'object')
+        : [];
+      resultFields.forEach(([k, v]) => addLine('exec', `[RESULT] ${k}: ${v}`));
+
+      // Show emitted events (event_name/payload from the events table, or type/data)
       events.forEach(e => {
         const ts = e.timestamp ? new Date(e.timestamp).toISOString().slice(11, 19) + 'Z' : formatClock(new Date());
-        addLine('event', `[EVENT] ${e.type || e.name || 'UNKNOWN'} · ${JSON.stringify(e.data || {})} · t=${ts}`);
+        addLine('event', `[EVENT] ${e.event_name || e.type || e.name || 'UNKNOWN'} · ${JSON.stringify(e.payload || e.data || {})} · t=${ts}`);
       });
 
-      if (!Object.keys(delta).length && !events.length) {
-        addLine('check', '[OK] executed · no state delta');
+      if (opStatus === 'ok' && !Object.keys(delta).length && !resultFields.length && !events.length) {
+        addLine('check', '[OK] executed · no state change');
       }
+
+      // Toast notification mirroring the outcome
+      if (opStatus === 'failed') window.flash?.(`✗ ${operator}${reason ? ' · ' + reason : ' failed'}`, 'danger');
+      else if (opStatus === 'deferred') window.flash?.(`${operator} → council review`, 'amber');
+      else window.flash?.(`✓ ${operator} committed`, 'ok');
 
       const ms   = opResult?.duration_ms ?? '—';
       const pawa = opResult?.pawa_cost ?? opResult?.pawa ?? '—';
