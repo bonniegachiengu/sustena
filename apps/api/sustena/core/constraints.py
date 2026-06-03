@@ -343,21 +343,45 @@ class ConstraintEngine:
     def _eval_quantifier(
         self, quantifier: str, tokens: list[str], state: StateAccessor, params: dict
     ) -> tuple[bool, str]:
-        """Handle ALL <path> FIELD <pred> and EXISTS <path> FIELD <pred>."""
-        try:
-            field_idx = next(i for i, t in enumerate(tokens) if t.upper() == 'FIELD')
-        except StopIteration:
-            return False, f"{quantifier}: missing FIELD keyword"
+        """
+        Handle ALL/EXISTS over a list OR dict. Supported forms:
+          ALL <path> FIELD <field> <pred>     (legacy keyword form)
+          ALL <path>[*].<field> <op> <value>  (array/dict wildcard)
 
-        list_path = tokens[1] if len(tokens) > 1 else ""
-        pred_tokens = tokens[field_idx + 1:]
+        The wildcard `[*]` tokenises to '[' ']' tokens, e.g.
+        'ALL finances.pockets[*].allocated >= 0' →
+        ['ALL','finances.pockets','[',']','allocated','>=','0'].
+        Aggregate/block forms (`[*]: SUM(...)`) are not supported here.
+        """
+        if '[' in tokens and ']' in tokens:
+            lb = tokens.index('[')
+            rb = tokens.index(']')
+            list_path = tokens[lb - 1] if lb - 1 >= 1 else ""
+            pred_tokens = tokens[rb + 1:]
+            if not pred_tokens or pred_tokens[0] == ':' or any(
+                t.upper() in ('SUM', 'COUNT', 'AVG', 'MIN', 'MAX') for t in pred_tokens
+            ):
+                return False, f"{quantifier}: unsupported aggregate/block expression"
+        else:
+            try:
+                field_idx = next(i for i, t in enumerate(tokens) if t.upper() == 'FIELD')
+            except StopIteration:
+                return False, f"{quantifier}: missing FIELD keyword"
+            list_path = tokens[1] if len(tokens) > 1 else ""
+            pred_tokens = tokens[field_idx + 1:]
 
         items = state.get(list_path)
-        if not isinstance(items, list):
-            return False, f"{quantifier}: '{list_path}' is not a list"
+        # Iterate dict values (e.g. finances.pockets) or list elements.
+        if isinstance(items, dict):
+            item_list = list(items.values())
+        elif isinstance(items, list):
+            item_list = items
+        else:
+            return False, f"{quantifier}: '{list_path}' is not a list or dict"
 
-        for idx, item in enumerate(items):
-            merged = {**state.snapshot(), **item}
+        for idx, item in enumerate(item_list):
+            merged = {**state.snapshot(), **item} if isinstance(item, dict) \
+                else {**state.snapshot(), "value": item}
             item_state = StateAccessor(merged)
             ok, reason = self._eval(pred_tokens, item_state, params)
             if quantifier == 'ALL' and not ok:
