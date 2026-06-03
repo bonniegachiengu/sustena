@@ -556,12 +556,14 @@ async def get_monitor_widgets(
 
     state_dict: dict = {}
     constraint_exprs: list[str] = []
+    real_events: list = []
     try:
         from sustena.core.engine_singleton import get_shared_engine
         engine = get_shared_engine()
         state_dict = engine.get_state(sustain_id) or {}
         constraint_data = engine.evaluate_constraints(sustain_id)
         constraint_exprs = [c["expr"] for c in constraint_data]
+        real_events = engine.get_events(sustain_id, limit=20)
     except Exception:
         pass
 
@@ -586,6 +588,21 @@ async def get_monitor_widgets(
         except Exception as exc:
             logger.warning("monitor-widgets: %s failed: %s", op_name, exc)
             widgets[widget_key] = {"widget_type": op_name.split(".")[-1], "data": {}, "summary": str(exc)}
+
+    # visualize.event_feed runs in a fresh context with no events; populate the
+    # widget from the persisted events table so the Monitor feed + counter are real.
+    widgets["event_feed"] = {
+        "widget_type": "event_feed",
+        "data": {
+            "events": [
+                {"event_name": e["event_name"], "timestamp": e["timestamp"], "payload": e["payload"]}
+                for e in real_events
+            ],
+            "total": len(real_events),
+            "sustain_id": sustain_id,
+        },
+        "summary": f"{len(real_events)} recent event(s)",
+    }
 
     return ok({"sustain_id": sustain_id, "widgets": widgets})
 

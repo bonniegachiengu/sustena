@@ -755,3 +755,34 @@ class TestCreateSustain:
             headers=AUTH_HEADER,
         )
         assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Monitor event-feed widget reflects persisted events (E2.1)
+# ---------------------------------------------------------------------------
+
+class TestEventFeedWidgetReal:
+    def _sustain_id(self, client):
+        sustains = client.get("/devui/sustains", headers=AUTH_HEADER).json()["data"]["sustains"]
+        if sustains:
+            return sustains[0]["id"]
+        return client.post(
+            "/devui/sustains",
+            json={"template_id": "homestead", "user_id": "owner"},
+            headers=AUTH_HEADER,
+        ).json()["data"]["sustain_id"]
+
+    def test_event_feed_total_reflects_real_events(self, client):
+        sid = self._sustain_id(client)
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sid, "operator_id": "budget.record_income",
+                  "params": {"amount": 50000, "source": "Salary"}},
+            headers=AUTH_HEADER,
+        )
+        widgets = client.get(
+            f"/devui/monitor-widgets?sustain_id={sid}", headers=AUTH_HEADER
+        ).json()["data"]["widgets"]
+        feed = widgets["event_feed"]["data"]
+        assert feed["total"] >= 1
+        assert any("income" in e["event_name"] for e in feed["events"])
