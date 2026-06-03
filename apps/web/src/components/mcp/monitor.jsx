@@ -80,7 +80,7 @@ function apiOperativesToCards(operatives) {
     name: o.name || o.id,
     role: o.role || '',
     status: o.status || 'active',
-    confidence: o.confidence ?? 80,
+    confidence: typeof o.confidence === 'number' ? o.confidence : null,
     pawa: o.pawa ?? o.pawa_session ?? 0,
     task: o.task || o.current_task || '',
     subtasks: o.subtasks || [],
@@ -141,9 +141,9 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
     return () => { cancelled = true; };
   }, [sustain.id]);
 
-  // Re-fetch on tick (every ~5s at 1s tick rate)
+  // Re-fetch every heartbeat (1s tick) — keep all cards fresh, no lag
   dUseEffect(() => {
-    if (tick === 0 || tick % 5 !== 0) return;
+    if (tick === 0) return;
     api.get(`/devui/state?sustain_id=${encodeURIComponent(sustain.id)}`)
       .then(d => { setApiData(normaliseGetResponse(d)); setOffline(false); setWsStatus('connected'); })
       .catch(() => setOffline(true));
@@ -164,14 +164,16 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
   const stateRows = dUseMemo(() => {
     const fromApi = apiStateToStateTree(apiData?.state);
     if (fromApi) {
-      return fromApi.map((s, i) => {
-        const live = s.value;
-        const sparkline = Array.from({ length: 7 }).map((_, t) => {
-          const ago = 6 - t;
-          return s.value + Math.sin((tick - ago * 4) * 0.1 + i) * (s.value * 0.003);
-        });
-        return { ...s, live, sparkline };
-      });
+      return fromApi
+        .map((s, i) => {
+          const live = s.value;
+          const sparkline = Array.from({ length: 7 }).map((_, t) => {
+            const ago = 6 - t;
+            return s.value + Math.sin((tick - ago * 4) * 0.1 + i) * (s.value * 0.003);
+          });
+          return { ...s, live, sparkline };
+        })
+        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));  // highest balance first
     }
     // Fallback: nothing to show
     return STATE_TREE.map((s, i) => {
@@ -188,8 +190,14 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
   }, [apiData, tick]);
 
   const operatives = dUseMemo(() =>
-    apiOperativesToCards(apiData?.operatives) || OPERATIVES,
+    apiOperativesToCards(apiData?.operatives) || [],
   [apiData]);
+
+  // Add Orchie (the orchestrator) as a 6th card — idle until its scenario engine runs.
+  const operativeCards = dUseMemo(() => ([
+    ...operatives,
+    { id: 'orchie', name: 'Orchie', role: 'orchestrator · scenario engine', status: 'active', confidence: null, pawa: 0, task: '' },
+  ]), [operatives]);
 
   // Event log: accumulate API events, fall back to synthetic
   const [logEntries, setLogEntries] = dUseState(() =>
@@ -248,37 +256,26 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
         </div>
       )}
 
-      {/* Hero strip: 4 sparse live metrics */}
+      {/* Top region: Active Sustains (count + list) ⅓ · operatives 3×2 ⅔ */}
       {!loading && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
-          <HeroTile label="ACTIVE SUSTAINS" value={activeSustains} sub="in scope" tone="ok" />
-          <HeroTile label="OPERATORS / MIN" value={opsPerMin ?? '—'} live={opsPerMin != null} sub="rolling 60s" />
-          <HeroTile label="API P95" value={apiData?.state?.system?.api_p95_ms != null ? `${apiData.state.system.api_p95_ms}` : '—'} unit={apiData?.state?.system?.api_p95_ms != null ? 'ms' : ''} live sub="haiku · inference" />
-          <HeroTile label="PAWA BALANCE" value={pawaBalance != null ? pawaBalance : '—'} unit={pawaBalance != null ? 'pwa' : ''} sub="orchie tokens" tone="default" />
-        </div>
-      )}
-
-      {/* Operative activity strip */}
-      {!loading && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-            <span className="label-11">OPERATIVE ACTIVITY</span>
-            {operatives.length > 0 && (
-              <span className="meta-10">{operatives.filter(o => o.status === 'active').length} ACTIVE · {operatives.filter(o => o.status === 'alert').length} ALERT</span>
-            )}
-          </div>
-          {operatives.length === 0 ? (
-            <span className="meta-10" style={{ color: 'var(--text-dim)' }}>no operatives reporting · all thresholds nominal</span>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-              {operatives.map((o, i) => <OperativeCard key={o.id} o={o} delay={i * 60} tick={tick} />)}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 14, alignItems: 'start' }}>
+          <ActiveSustainsCard count={activeSustains} sustains={sustains} currentId={sustain.id} />
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+              <span className="label-11">OPERATIVE ACTIVITY</span>
+              <span className="meta-10">
+                {operativeCards.filter(o => o.status === 'active').length} ACTIVE · {operativeCards.filter(o => o.status === 'alert').length} ALERT
+              </span>
             </div>
-          )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+              {operativeCards.map((o, i) => <OperativeCard key={o.id} o={o} delay={i * 60} />)}
+            </div>
+          </div>
         </div>
       )}
 
       {/* visualize.* widget grid */}
-      {!loading && <VisualizeWidgetGrid sustain={sustain} />}
+      {!loading && <VisualizeWidgetGrid sustain={sustain} tick={tick} />}
 
       {/* 2-col: state stream + event log — at the bottom */}
       {!loading && (
@@ -315,7 +312,7 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
 }
 
 /* ── VisualizeWidgetGrid — calls GET /devui/monitor-widgets ──────────────── */
-function VisualizeWidgetGrid({ sustain }) {
+function VisualizeWidgetGrid({ sustain, tick }) {
   const [widgets, setWidgets] = dUseState(null);
   const [loading, setLoading] = dUseState(true);
 
@@ -329,6 +326,14 @@ function VisualizeWidgetGrid({ sustain }) {
       .catch(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [sustain.id]);
+
+  // Refresh widgets every heartbeat (1s tick) so the grid never lags state.
+  dUseEffect(() => {
+    if (!tick) return;
+    api.get(`/devui/monitor-widgets?sustain_id=${encodeURIComponent(sustain.id)}`)
+      .then(d => setWidgets(d?.data?.widgets || null))
+      .catch(() => {});
+  }, [tick, sustain.id]);
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -396,21 +401,6 @@ function PocketRingWidget({ w }) {
         </div>
       </div>
 
-      {/* Pocket breakdown */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {pockets.slice(0, 4).map(p => {
-          const c = p.status === 'over' ? 'var(--danger)' : p.status === 'warn' ? 'var(--amber)' : 'var(--teal)';
-          return (
-            <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)', width: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
-              <div style={{ flex: 1, height: 3, background: 'var(--bg-overlay)', borderRadius: 2, overflow: 'hidden' }}>
-                <div style={{ width: `${Math.min(100, p.pct_spent)}%`, height: '100%', background: c }} />
-              </div>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: c, minWidth: 28, textAlign: 'right' }}>{Math.round(p.pct_spent)}%</span>
-            </div>
-          );
-        })}
-      </div>
       {w.summary && <span className="meta-10" style={{ color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 6 }}>{w.summary}</span>}
     </div>
   );
@@ -510,6 +500,37 @@ function StreamHealthPill({ health, tick }) {
       <span className="meta-10" style={{ color: 'var(--text-muted)' }}>
         {formatClock(new Date())}
       </span>
+    </div>
+  );
+}
+
+function ActiveSustainsCard({ count, sustains, currentId }) {
+  const live = (sustains || []).filter(s => s.status === 'live');
+  return (
+    <div className="fade-up" style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', padding: '14px 16px',
+      display: 'flex', flexDirection: 'column', gap: 10, height: '100%',
+    }}>
+      <span className="label-10">ACTIVE SUSTAINS</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 40, fontWeight: 600, color: 'var(--teal)', lineHeight: 1 }}>{count}</span>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 72, overflowY: 'auto' }}>
+          {live.length === 0 ? (
+            <span className="meta-10" style={{ color: 'var(--text-dim)' }}>none live</span>
+          ) : live.map(s => (
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--teal)', flexShrink: 0 }} />
+              <span style={{
+                fontFamily: 'var(--mono)', fontSize: 10,
+                color: s.id === currentId ? 'var(--amber)' : 'var(--text-secondary)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{s.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <span className="meta-10" style={{ color: 'var(--text-muted)' }}>in scope</span>
     </div>
   );
 }
@@ -718,37 +739,28 @@ function LogRow({ e, first }) {
   );
 }
 
-function OperativeCard({ o, delay, tick }) {
+function OperativeCard({ o, delay }) {
   const statusColor = o.status === 'active' ? 'var(--teal)' : o.status === 'alert' ? 'var(--amber)' : 'var(--text-muted)';
-  // Animate the "in progress" subtask
-  const inProg = o.subtasks.find(t => t.progress > 0 && t.progress < 100);
-  const animatedProgress = inProg ? Math.min(100, inProg.progress + ((tick % 20) * 0.5)) : null;
-  // Live confidence drift
-  const liveConfidence = Math.max(0, Math.min(100, o.confidence + Math.sin(tick * 0.18 + o.id.charCodeAt(0)) * 3));
-  // Activity sparkline — synthesize from tick
-  const series = dUseMemo(() => {
-    const N = 16;
-    return Array.from({ length: N }).map((_, i) => {
-      const base = o.status === 'idle' ? 8 : o.status === 'alert' ? 70 : 45;
-      return base + Math.sin((tick + i * 7) * 0.3 + o.id.charCodeAt(0)) * 18 + (Math.sin(i * 11.3) * 0.5 + 0.5) * 8;
-    });
-  }, [tick]);
+  const hasConf = typeof o.confidence === 'number';
+  const conf = hasConf ? Math.max(0, Math.min(100, o.confidence)) : null;
+  const hasTask = !!(o.task && String(o.task).trim());
 
   return (
     <button onClick={() => window.confirmAction?.({
       title: `${o.name} · ${o.role}`,
-      body: `${o.task}. Confidence ${o.confidence}%. Pawa burn ${o.pawa} / session.`,
+      body: hasTask
+        ? `${o.task}.${hasConf ? ` Confidence ${conf}%.` : ''} Pawa burn ${o.pawa} / session.`
+        : `${o.name} is idle — no task assigned. Operatives act when a Council proposal touches their domain (${o.role}).`,
       ctaLabel: 'VIEW DETAILS',
-    })} style={{
+    })}
+    className="fade-up"
+    style={{
       display: 'flex', flexDirection: 'column', gap: 8,
       background: 'var(--bg-surface)', border: '1px solid var(--border)',
       borderRadius: 'var(--radius-md)', padding: '12px 14px',
-      textAlign: 'left', width: '100%',
-      transition: 'border-color var(--t-fast)',
-      cursor: 'pointer',
+      textAlign: 'left', width: '100%', animationDelay: `${delay}ms`,
+      transition: 'border-color var(--t-fast)', cursor: 'pointer',
     }}
-    className="fade-up"
-    style2={{ animationDelay: `${delay}ms` }}
     onMouseEnter={e => e.currentTarget.style.borderColor = statusColor}
     onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
     >
@@ -764,31 +776,28 @@ function OperativeCard({ o, delay, tick }) {
       {/* Role */}
       <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>{o.role}</span>
 
-      {/* Confidence bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ flex: 1, height: 3, background: 'var(--bg-base)', borderRadius: 2, overflow: 'hidden' }}>
-          <div style={{
-            width: `${liveConfidence}%`, height: '100%',
-            background: liveConfidence >= 80 ? 'var(--teal)' : liveConfidence >= 60 ? 'var(--amber)' : 'var(--danger)',
-            borderRadius: 2, transition: 'width 0.4s ease',
-          }} />
+      {/* Confidence — only when the operative reports a real value */}
+      {hasConf ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ flex: 1, height: 3, background: 'var(--bg-base)', borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{
+              width: `${conf}%`, height: '100%',
+              background: conf >= 80 ? 'var(--teal)' : conf >= 60 ? 'var(--amber)' : 'var(--danger)',
+              borderRadius: 2, transition: 'width 0.4s ease',
+            }} />
+          </div>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)', minWidth: 28 }}>{Math.round(conf)}%</span>
         </div>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)', minWidth: 28 }}>{Math.round(liveConfidence)}%</span>
-      </div>
+      ) : (
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)' }}>confidence · n/a</span>
+      )}
 
-      {/* Task */}
+      {/* Task or idle */}
       <span style={{
-        fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)',
+        fontFamily: 'var(--mono)', fontSize: 9,
+        color: hasTask ? 'var(--text-secondary)' : 'var(--text-dim)',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>{o.task}</span>
-
-      {/* Activity sparkline */}
-      <svg width="100%" height="18" viewBox={`0 0 ${series.length * 6} 18`} preserveAspectRatio="none" style={{ display: 'block' }}>
-        {series.map((v, i) => {
-          const barH = Math.max(2, (v / 100) * 16);
-          return <rect key={i} x={i * 6} y={18 - barH} width={4} height={barH} fill={statusColor} opacity={0.5 + (i / series.length) * 0.5} rx={1} />;
-        })}
-      </svg>
+      }}>{hasTask ? o.task : 'idle · awaiting council trigger'}</span>
     </button>
   );
 }

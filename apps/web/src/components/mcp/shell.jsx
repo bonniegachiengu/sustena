@@ -42,6 +42,7 @@ function App() {
   const [navCollapsed, setNavCollapsed] = dUseState(false);
   const [liveState, setLiveState] = dUseState(null);  // pushed from WS
   const [apiSustains, setApiSustains] = dUseState([]);
+  const [userPawa, setUserPawa] = dUseState(null);   // real pawa balance from /me
   const wsRef = dUseRef(null);
   const lastEventCountRef = dUseRef(null);  // heartbeat: last seen event count
   const onlineRef = dUseRef(true);          // heartbeat: backend reachability
@@ -70,6 +71,17 @@ function App() {
   dUseEffect(() => {
     api.get('/devui/sustains')
       .then(d => { const list = d?.data?.sustains || []; if (list.length) setApiSustains(list); })
+      .catch(() => {});
+  }, []);
+
+  // Fetch the signed-in user's real pawa balance for the sidebar gauge.
+  // Falls back to null (—) when signed out.
+  dUseEffect(() => {
+    const token = localStorage.getItem('sustena_token');
+    if (!token) { setUserPawa(null); return; }
+    fetch(`${import.meta.env.VITE_API_BASE ?? ''}/api/v1/users/me`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => setUserPawa(d?.data?.pawa_balance ?? null))
       .catch(() => {});
   }, []);
 
@@ -164,7 +176,7 @@ function App() {
   const sustains   = apiSustains.length ? apiSustains : SUSTAINS;
   const sustain    = sustains.find(s => s.id === sustainId) || sustains[0] || { id: '', label: '—', sub: 'no sustains', status: 'seed' };
   const sysStats   = liveState?.state?.system || {};
-  const pawaBalance = sysStats.pawa_balance ?? null;
+  const pawaBalance = sysStats.pawa_balance ?? userPawa ?? null;
 
   const switchPanel = (id) => {
     setPanel(id);
@@ -214,7 +226,7 @@ function App() {
         {panel === 'editor'     && <EditorPanel sustain={sustain} />}
         {panel === 'controller' && <ControllerPanel tick={tick} sustain={sustain} openModal={(p) => setModal({ kind: 'proposal', data: p })} />}
         {panel === 'library'    && <LibraryPanel openModal={(it, kind) => setModal({ kind: 'library', data: { item: it, kind } })} />}
-        {panel === 'seed'       && <SeedPanel />}
+        {panel === 'seed'       && <SeedPanel sustain={sustain} />}
       </main>
 
       {/* Floating Orchie button + drawer */}
@@ -398,7 +410,7 @@ function TopBar({ clock, sustain, sustains, onSustainChange, onCreate }) {
           <span className="label-10">OP</span>
           <span style={{ color: 'var(--text-primary)' }}>B.GACHIENGU</span>
         </div>
-        <span className="val-12" style={{ color: 'var(--text-secondary)' }}>{clock} <span style={{ color: 'var(--text-muted)' }}>UTC</span></span>
+        <span className="val-12" style={{ color: 'var(--text-secondary)' }}>{clock} <span style={{ color: 'var(--text-muted)' }}>EAT</span></span>
       </div>
     </header>
   );

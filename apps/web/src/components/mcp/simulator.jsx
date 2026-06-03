@@ -358,6 +358,94 @@ function ProposalDag({ proposal, stepResults }) {
 
 /* ── StateDiff — uses simulate.fork → run_path → score pipeline ─────────── */
 
+/* ── Param-name extraction (tolerant of list-of-strings, list-of-objects, dict) ── */
+function paramNamesOf(op) {
+  const p = op?.params;
+  if (Array.isArray(p)) return p.map(x => (typeof x === 'string' ? x : x?.name)).filter(Boolean);
+  if (p && typeof p === 'object') return Object.keys(p);
+  return [];
+}
+function coerceVal(v) {
+  if (v === '' || v == null) return '';
+  const n = Number(v);
+  return Number.isNaN(n) || v.trim?.() === '' ? v : n;
+}
+
+/* ── OperatorSequenceCards — draggable cards replacing the JSON sequence editor ── */
+function OperatorSequenceCards({ proposal, onChange }) {
+  const dragIdx = dUseRef(null);
+
+  const reorder = (to) => {
+    const from = dragIdx.current;
+    if (from == null || from === to) return;
+    const next = [...proposal];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    dragIdx.current = null;
+    onChange(next);
+  };
+  const removeStep = (i) => onChange(proposal.filter((_, j) => j !== i));
+  const setParamKey = (i, oldKey, newKey) => {
+    const entries = Object.entries(proposal[i].params || {}).map(([k, v]) => (k === oldKey ? [newKey, v] : [k, v]));
+    onChange(proposal.map((s, j) => (j === i ? { ...s, params: Object.fromEntries(entries) } : s)));
+  };
+  const setParamVal = (i, key, val) => {
+    onChange(proposal.map((s, j) => (j === i ? { ...s, params: { ...s.params, [key]: coerceVal(val) } } : s)));
+  };
+  const removeParam = (i, key) => {
+    const { [key]: _drop, ...rest } = proposal[i].params || {};
+    onChange(proposal.map((s, j) => (j === i ? { ...s, params: rest } : s)));
+  };
+  const addParam = (i) => {
+    const params = proposal[i].params || {};
+    if ('' in params) return;
+    onChange(proposal.map((s, j) => (j === i ? { ...s, params: { ...params, '': '' } } : s)));
+  };
+
+  if (!proposal.length) {
+    return <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)' }}>no steps · add operators above</span>;
+  }
+
+  const inp = {
+    background: 'var(--bg-surface)', border: '1px solid var(--border-mid)', borderRadius: 3,
+    padding: '3px 6px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)', outline: 'none',
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {proposal.map((step, i) => (
+        <div key={i}
+          draggable
+          onDragStart={() => { dragIdx.current = i; }}
+          onDragOver={e => e.preventDefault()}
+          onDrop={() => reorder(i)}
+          style={{
+            background: 'var(--bg-base)', border: '1px solid var(--border-mid)',
+            borderRadius: 'var(--radius-sm)', padding: '8px 10px',
+            display: 'flex', flexDirection: 'column', gap: 6,
+          }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span title="drag to reorder" style={{ cursor: 'grab', color: 'var(--text-dim)', fontFamily: 'var(--mono)', fontSize: 12 }}>⠿</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)' }}>{i + 1}</span>
+            <span style={{ flex: 1, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--amber)' }}>{step.operator}</span>
+            <button onClick={() => removeStep(i)} title="remove step"
+              style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 12 }}>×</button>
+          </div>
+          {Object.entries(step.params || {}).map(([k, v], pi) => (
+            <div key={pi} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 20 }}>
+              <input value={k} placeholder="param" onChange={e => setParamKey(i, k, e.target.value)} style={{ ...inp, width: 110 }} />
+              <span style={{ color: 'var(--text-dim)' }}>=</span>
+              <input value={String(v)} placeholder="value" onChange={e => setParamVal(i, k, e.target.value)} style={{ ...inp, flex: 1 }} />
+              <button onClick={() => removeParam(i, k)} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11 }}>×</button>
+            </div>
+          ))}
+          <button onClick={() => addParam(i)} style={{ alignSelf: 'flex-start', marginLeft: 20, background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em' }}>+ param</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function StateDiff({ tick, sustain, selectedBranch }) {
   const [result, setResult] = dUseState(null);
   const [loading, setLoading] = dUseState(false);
@@ -377,15 +465,13 @@ function StateDiff({ tick, sustain, selectedBranch }) {
   }, [sustainId]);
 
   const addOperatorStep = (opName) => {
-    try {
-      const current = JSON.parse(proposalText);
-      const base = Array.isArray(current) ? current : [];
-      setProposalText(JSON.stringify([...base, { operator: opName, params: {} }], null, 2));
-      setProposalError(null);
-    } catch {
-      setProposalText(JSON.stringify([{ operator: opName, params: {} }], null, 2));
-      setProposalError(null);
-    }
+    const op = allowedOps.find(o => o.name === opName);
+    const params = {};
+    paramNamesOf(op).forEach(n => { params[n] = ''; });   // pre-fill known param fields
+    let base = [];
+    try { const c = JSON.parse(proposalText); base = Array.isArray(c) ? c : []; } catch {}
+    setProposalText(JSON.stringify([...base, { operator: opName, params }], null, 2));
+    setProposalError(null);
   };
 
   let parsedProposal = [];
@@ -483,17 +569,9 @@ function StateDiff({ tick, sustain, selectedBranch }) {
       {/* Proposal editor */}
       <div>
         <span className="label-10" style={{ display: 'block', marginBottom: 4 }}>PROPOSAL · OPERATOR SEQUENCE</span>
-        <textarea
-          value={proposalText}
-          onChange={e => { setProposalText(e.target.value); setProposalError(null); }}
-          spellCheck={false}
-          rows={5}
-          style={{
-            width: '100%', boxSizing: 'border-box', resize: 'vertical',
-            background: 'var(--bg-base)', border: `1px solid ${proposalError ? 'var(--danger)' : 'var(--border-mid)'}`,
-            borderRadius: 'var(--radius-sm)', padding: '6px 8px',
-            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)', outline: 'none',
-          }}
+        <OperatorSequenceCards
+          proposal={parsedProposal}
+          onChange={next => { setProposalText(JSON.stringify(next, null, 2)); setProposalError(null); }}
         />
         {proposalError && <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--danger)' }}>{proposalError}</span>}
       </div>

@@ -2911,7 +2911,7 @@ function Stat({ label, value }) {
 /* ───────────────────────────────────────────────────────────
    SEED PANEL — inject real sustain data through the UI
    ─────────────────────────────────────────────────────────── */
-function SeedPanel() {
+function SeedPanel({ sustain }) {
   /* ── local state ── */
   const [sustainId,   setSustainId]   = dUseState('homestead.bonnie');
   const [label,       setLabel]       = dUseState('Bonnie\'s Homestead');
@@ -2937,6 +2937,16 @@ function SeedPanel() {
 
   const [status,        setStatus]        = dUseState(null);
   const [statusLoading, setStatusLoading] = dUseState(false);
+
+  // Default pocket/operative/event targets to the SELECTED engine sustain so seeded
+  // data lands on the sustain the Monitor is showing (free-text ids never bridge).
+  dUseEffect(() => {
+    if (sustain?.id) {
+      setPocketSid(sustain.id);
+      setOperativeSid(sustain.id);
+      setEvSid(sustain.id);
+    }
+  }, [sustain?.id]);
 
   /* ── helpers ── */
   const flash = (msg, tone = 'ok') => window.flash?.(msg, tone);

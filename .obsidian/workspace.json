@@ -88,8 +88,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 220.50104904174805,
-    "collapsed": true
+    "width": 220.50104904174805
   },
   "right": {
     "id": "8bfd5add7ee55f56",
@@ -193,8 +192,9 @@
       "bases:Create new base": false
     }
   },
-  "active": "048e09095d3c7fc5",
+  "active": "8635391deb12af42",
   "lastOpenFiles": [
+    "apps/api/sustena.db-journal",
     "docs/Bonnie_Master_Roadmap.md",
     "whatsapp_mock_outbox.jsonl",
     "apps/web/src/pages/LoreLayout.jsx.tmp.27084.dc8bb5a3e02d",

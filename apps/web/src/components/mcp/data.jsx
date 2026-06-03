@@ -1016,8 +1016,8 @@ function useTweaks(defaults) {
 }
 
 function formatClock(d) {
-  const pad = n => n.toString().padStart(2, '0');
-  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+  // Nairobi / East Africa Time (UTC+3, no DST)
+  return d.toLocaleTimeString('en-GB', { timeZone: 'Africa/Nairobi', hour12: false });
 }
 
 /* ─── CSS variables for node colours (injected once) ────── */
