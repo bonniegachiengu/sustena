@@ -218,7 +218,7 @@ function App() {
       />
 
       <main style={{ gridArea: 'main', overflow: 'hidden', minHeight: 0, position: 'relative' }}>
-        {panel === 'monitor'    && <MonitorPanel tick={tick} sustain={sustain} liveState={liveState} sustains={sustains} />}
+        {panel === 'monitor'    && <MonitorPanel tick={tick} sustain={sustain} sustains={sustains} />}
         {panel === 'simulator'  && <SimulatorPanel tick={tick} sustain={sustain}
           leftOpen={simLeft} rightOpen={simRight}
           onToggleLeft={() => setSimLeft(v => !v)}

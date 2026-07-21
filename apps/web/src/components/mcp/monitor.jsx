@@ -4,13 +4,19 @@ import { api } from '../../lib/api.js';
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
 
-/* ─── helpers to normalise API state → STATE_TREE shape ─── */
+/* ─── helpers to normalise API state → STATE_TREE shape ───
+   Only binds to state paths a real operator actually writes:
+   finances.pockets.* (budget.allocate / budget.spend). Removed
+   system.pawa_balance (real balance lives on users.pawa_balance,
+   shown in the sidebar), system.api_p95_ms (no writer exists), and
+   pantry.* (not part of any sustain's default_state or operator). */
 function apiStateToStateTree(state) {
   if (!state) return null;
   const rows = [];
 
   // finances.pockets — pocket is {allocated, spent, limit}. Show live REMAINING
   // (allocated − spent) against allocated, so the stream reflects real spending.
+  // pct is also the urgency signal: how close the pocket is to its own limit.
   const pockets = state.finances?.pockets || {};
   Object.entries(pockets).forEach(([k, v]) => {
     const obj = typeof v === 'object' && v != null;
@@ -24,51 +30,10 @@ function apiStateToStateTree(state) {
       target: allocated,
       fmt: 'ksh',
       cstr: pct >= 1 ? 'red' : pct >= 0.8 ? 'amber' : 'ok',
+      pct,
       desc: `${k} · ${Math.round(spent).toLocaleString()} spent of ${Math.round(allocated).toLocaleString()}`,
     });
   });
-
-  // pantry — numeric entries only
-  const pantry = state.pantry || {};
-  Object.entries(pantry).forEach(([k, v]) => {
-    if (typeof v !== 'number') return;
-    const fmt = k.endsWith('_L') ? 'L' : k.endsWith('_kg') ? 'kg' : '';
-    rows.push({
-      path: `pantry.${k}`,
-      value: v,
-      target: null,
-      fmt,
-      cstr: 'ok',
-      desc: k.replace(/_/g, ' '),
-    });
-  });
-
-  // system.pawa_balance
-  if (state.system?.pawa_balance != null) {
-    const pb = state.system.pawa_balance;
-    rows.push({
-      path: 'system.pawa_balance',
-      value: pb,
-      target: 10000,
-      fmt: 'pwa',
-      cstr: pb < 2000 ? 'red' : pb < 5000 ? 'amber' : 'ok',
-      desc: 'Orchie tokens',
-    });
-  }
-
-  // system.api_p95_ms
-  if (state.system?.api_p95_ms != null) {
-    const ms = state.system.api_p95_ms;
-    rows.push({
-      path: 'system.api_p95_ms',
-      value: ms,
-      target: 500,
-      fmt: 'ms',
-      cstr: ms > 800 ? 'red' : ms > 500 ? 'amber' : 'ok',
-      desc: 'API latency p95',
-      lowerBetter: true,
-    });
-  }
 
   return rows.length ? rows : null;
 }
@@ -106,21 +71,20 @@ function apiEventsToLogEntries(events) {
   });
 }
 
-/* Stream health: LIVE when ws is connected, STALE/DELAYED otherwise */
-function useStreamHealth(wsStatus) {
-  if (wsStatus === 'connected') return { status: 'LIVE',    color: 'var(--teal)',   lag: 'ws' };
-  if (wsStatus === 'stale')     return { status: 'STALE',   color: 'var(--danger)', lag: '>10s' };
-  return                               { status: 'OFFLINE', color: 'var(--text-muted)', lag: '—' };
+/* Stream health: LIVE while the 1s poll is succeeding, OFFLINE on failure */
+function useStreamHealth(offline) {
+  return offline
+    ? { status: 'OFFLINE', color: 'var(--text-muted)', lag: '—' }
+    : { status: 'LIVE',    color: 'var(--teal)',        lag: '1s' };
 }
 
-function MonitorPanel({ tick, sustain, liveState, sustains }) {
-  // liveState is pushed from shell.jsx via the WS stream (may be null on first render)
-  const [apiData, setApiData]   = dUseState(null);   // last good GET /devui/state result
-  const [loading, setLoading]   = dUseState(true);
-  const [offline, setOffline]   = dUseState(false);
-  const [wsStatus, setWsStatus] = dUseState('connecting');
+function MonitorPanel({ tick, sustain, sustains }) {
+  const [apiData, setApiData] = dUseState(null);   // last good GET /devui/state result — state, events, operatives, constraints, widgets all from ONE fetch
+  const [loading, setLoading] = dUseState(true);
+  const [offline, setOffline] = dUseState(false);
+  const [sortMode, setSortMode] = dUseState('urgency');  // 'urgency' | 'balance'
 
-  // Normalise GET /devui/state response → { state, events, operatives, constraints }
+  // Normalise GET /devui/state response — single source of truth for the whole panel
   const normaliseGetResponse = (d) => {
     const payload = d?.data || {};
     return {
@@ -128,97 +92,66 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
       events: payload.events || [],
       operatives: payload.operatives || [],
       constraints: payload.constraints || [],
+      widgets: payload.widgets || null,
     };
   };
+
+  const fetchState = () => api.get(`/devui/state?sustain_id=${encodeURIComponent(sustain.id)}`);
 
   // Initial fetch
   dUseEffect(() => {
     let cancelled = false;
     setLoading(true);
-    api.get(`/devui/state?sustain_id=${encodeURIComponent(sustain.id)}`)
+    fetchState()
       .then(d => { if (!cancelled) { setApiData(normaliseGetResponse(d)); setLoading(false); setOffline(false); } })
       .catch(() => { if (!cancelled) { setLoading(false); setOffline(true); } });
     return () => { cancelled = true; };
   }, [sustain.id]);
 
-  // Re-fetch every heartbeat (1s tick) — keep all cards fresh, no lag
+  // Re-fetch every heartbeat (1s tick) — one call drives every card, so nothing can disagree
   dUseEffect(() => {
     if (tick === 0) return;
-    api.get(`/devui/state?sustain_id=${encodeURIComponent(sustain.id)}`)
-      .then(d => { setApiData(normaliseGetResponse(d)); setOffline(false); setWsStatus('connected'); })
+    fetchState()
+      .then(d => { setApiData(normaliseGetResponse(d)); setOffline(false); })
       .catch(() => setOffline(true));
   }, [tick, sustain.id]);
 
-  // Merge liveState (from WS) — update state only, preserve events/operatives from REST
-  dUseEffect(() => {
-    if (liveState && liveState.sustain_id === sustain.id && liveState.state) {
-      setApiData(prev => ({ ...prev, state: liveState.state }));
-      setOffline(false);
-      setWsStatus('connected');
-    }
-  }, [liveState, sustain.id]);
+  const streamHealth = useStreamHealth(offline);
 
-  const streamHealth = useStreamHealth(offline ? 'stale' : wsStatus);
-
-  // Derive display data — fall back to empty when offline
+  // Derive display data — empty when there's no pocket data yet
   const stateRows = dUseMemo(() => {
     const fromApi = apiStateToStateTree(apiData?.state);
-    if (fromApi) {
-      return fromApi
-        .map((s, i) => {
-          const live = s.value;
-          const sparkline = Array.from({ length: 7 }).map((_, t) => {
-            const ago = 6 - t;
-            return s.value + Math.sin((tick - ago * 4) * 0.1 + i) * (s.value * 0.003);
-          });
-          return { ...s, live, sparkline };
-        })
-        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));  // highest balance first
-    }
-    // Fallback: nothing to show
-    return STATE_TREE.map((s, i) => {
-      const live = s.value + (s.fmt === 'ksh' ? Math.sin(tick * 0.1 + i) * (s.value * 0.001) : 0);
+    if (!fromApi) return [];
+    const withLive = fromApi.map((s, i) => {
+      const live = s.value;
       const sparkline = Array.from({ length: 7 }).map((_, t) => {
         const ago = 6 - t;
-        const base = s.value;
-        if (s.fmt === 'ksh' || s.fmt === 'pwa') return base + Math.sin((tick - ago * 4) * 0.1 + i) * (base * 0.005);
-        if (s.fmt === '%' || s.fmt === 'L' || s.fmt === 'kg') return base + Math.sin((tick - ago * 4) * 0.15 + i) * (base * 0.03);
-        return base + Math.sin((tick - ago * 4) * 0.12 + i) * (base * 0.02);
+        return s.value + Math.sin((tick - ago * 4) * 0.1 + i) * (s.value * 0.003);
       });
       return { ...s, live, sparkline };
     });
-  }, [apiData, tick]);
+    return sortMode === 'urgency'
+      ? withLive.sort((a, b) => (b.pct ?? 0) - (a.pct ?? 0))       // closest to its own limit first
+      : withLive.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));  // highest remaining balance first
+  }, [apiData, tick, sortMode]);
 
   const operatives = dUseMemo(() =>
     apiOperativesToCards(apiData?.operatives) || [],
   [apiData]);
 
-  // Add Orchie (the orchestrator) as a 6th card — idle until its scenario engine runs.
+  // Add Orchie (the orchestrator) as a 6th card. Orchie has no backing engine
+  // operative object (it's not in _OPERATIVE_MAP / the sustain spec), so there
+  // is no real status/pawa signal to bind to — show it idle/n-a like any other
+  // operative with no data, rather than asserting activity that isn't real.
   const operativeCards = dUseMemo(() => ([
     ...operatives,
-    { id: 'orchie', name: 'Orchie', role: 'orchestrator · scenario engine', status: 'active', confidence: null, pawa: 0, task: '' },
+    { id: 'orchie', name: 'Orchie', role: 'orchestrator · scenario engine', status: 'idle', confidence: null, pawa: null, task: '' },
   ]), [operatives]);
 
-  // Event log: accumulate API events, fall back to synthetic
-  const [logEntries, setLogEntries] = dUseState(() =>
-    Array.from({ length: 8 }).map((_, i) => pickEvent(i + 1000))
-  );
-  dUseEffect(() => {
-    const fromApi = apiEventsToLogEntries(apiData?.events);
-    if (fromApi && fromApi.length) {
-      setLogEntries(fromApi);
-    }
-  }, [apiData]);
-  // Keep synthetic trickle when offline
-  dUseEffect(() => {
-    if (!offline || tick === 0 || tick % 3 !== 0) return;
-    const next = pickEvent(tick + 4321);
-    setLogEntries(prev => [next, ...prev].slice(0, 24));
-  }, [tick, offline]);
+  // Event log — real events only. No synthetic fallback: an empty feed is
+  // shown as a designed empty state, never as fabricated rows.
+  const logEntries = dUseMemo(() => apiEventsToLogEntries(apiData?.events) || [], [apiData]);
 
-  // Hero metrics from API or fallback
-  const pawaBalance    = apiData?.state?.system?.pawa_balance ?? null;
-  const opsPerMin      = apiData?.state?.system?.ops_per_min ?? null;
   const activeSustains = (sustains && sustains.length ? sustains : SUSTAINS).filter(s => s.status === 'live').length;
 
   return (
@@ -274,8 +207,8 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
         </div>
       )}
 
-      {/* visualize.* widget grid */}
-      {!loading && <VisualizeWidgetGrid sustain={sustain} tick={tick} />}
+      {/* visualize.* widget grid — same apiData.widgets the rest of the panel reads, no separate fetch */}
+      {!loading && <VisualizeWidgetGrid widgets={apiData?.widgets} />}
 
       {/* 2-col: state stream + event log — at the bottom */}
       {!loading && (
@@ -284,12 +217,16 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
           <Card title="LIVE STATE STREAM" sub={`${sustain.label}`} padded={false} scroll
             actions={
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <TBtn active={sortMode === 'urgency'} onClick={() => setSortMode('urgency')}>URGENCY</TBtn>
+                <TBtn active={sortMode === 'balance'} onClick={() => setSortMode('balance')}>BALANCE</TBtn>
                 <span className={offline ? '' : 'pulse'} style={{ width: 5, height: 5, borderRadius: '50%', background: offline ? 'var(--text-muted)' : 'var(--teal)', opacity: offline ? 0.5 : 1 }} />
                 <span className="meta-10" style={{ color: offline ? 'var(--text-muted)' : 'var(--teal)' }}>{offline ? 'OFFLINE' : 'SYNC · live'}</span>
               </div>
             }
           >
-            {stateRows.map((s, i) => <StateRow key={s.path} s={s} delay={i * 30} />)}
+            {stateRows.length
+              ? stateRows.map((s, i) => <StateRow key={s.path} s={s} delay={i * 30} />)
+              : <EmptyRow text="no state signals yet · sustain is fresh" />}
           </Card>
 
           {/* Event Log Stream */}
@@ -303,7 +240,9 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
               </div>
             }
           >
-            {logEntries.map((e, i) => <LogRow key={e.key} e={e} first={i === 0} />)}
+            {logEntries.length
+              ? logEntries.map((e, i) => <LogRow key={e.key} e={e} first={i === 0} />)
+              : <EmptyRow text="no events recorded yet" />}
           </Card>
         </div>
       )}
@@ -311,35 +250,16 @@ function MonitorPanel({ tick, sustain, liveState, sustains }) {
   );
 }
 
-/* ── VisualizeWidgetGrid — calls GET /devui/monitor-widgets ──────────────── */
-function VisualizeWidgetGrid({ sustain, tick }) {
-  const [widgets, setWidgets] = dUseState(null);
-  const [loading, setLoading] = dUseState(true);
-
-  dUseEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    api.get(`/devui/monitor-widgets?sustain_id=${encodeURIComponent(sustain.id)}`)
-      .then(d => {
-        if (!cancelled) { setWidgets(d?.data?.widgets || null); setLoading(false); }
-      })
-      .catch(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [sustain.id]);
-
-  // Refresh widgets every heartbeat (1s tick) so the grid never lags state.
-  dUseEffect(() => {
-    if (!tick) return;
-    api.get(`/devui/monitor-widgets?sustain_id=${encodeURIComponent(sustain.id)}`)
-      .then(d => setWidgets(d?.data?.widgets || null))
-      .catch(() => {});
-  }, [tick, sustain.id]);
-
-  if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ animation: 'pulse 0.8s ease-in-out infinite', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)' }}>⟳ loading widgets…</span>
+function EmptyRow({ text }) {
+  return (
+    <div style={{ padding: '18px 16px' }}>
+      <span className="meta-10" style={{ color: 'var(--text-dim)' }}>{text}</span>
     </div>
   );
+}
+
+/* ── VisualizeWidgetGrid — presentational; widgets come from GET /devui/state ── */
+function VisualizeWidgetGrid({ widgets }) {
   if (!widgets) return null;
 
   return (

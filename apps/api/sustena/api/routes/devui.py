@@ -199,6 +199,63 @@ async def create_sustain(body: CreateSustainRequest, _: str = Depends(verify_adm
     return ok({"sustain_id": sustain_id, "sustain": entry})
 
 
+# ── Shared: visualize.* widget computation ───────────────────────────────────
+# Used by both GET /devui/state and GET /devui/monitor-widgets so the Monitor
+# panel's pocket ring / event feed / constraint health widgets are computed
+# from the SAME state snapshot the rest of the panel reads — one computation,
+# not two independently-fetched ones that can disagree at a given instant.
+
+async def _compute_monitor_widgets(
+    sustain_id: str,
+    state_dict: dict,
+    constraint_exprs: list[str],
+    real_events: list,
+) -> dict[str, Any]:
+    from sustena.core.events import EventBus
+    from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext
+    from sustena.core.pawa import PawaLedger
+    from sustena.core.state import StateAccessor
+
+    ctx = OperatorContext(
+        state=StateAccessor(state_dict),
+        events=EventBus(sustain_id=sustain_id),
+        pawa=PawaLedger(),
+        sustain_id=sustain_id,
+        user_id="devui",
+    )
+
+    widgets: dict[str, Any] = {}
+
+    for op_name, widget_key, extra_kwargs in [
+        ("visualize.pocket_ring",       "pocket_ring",       {}),
+        ("visualize.event_feed",        "event_feed",        {}),
+        ("visualize.constraint_health", "constraint_health", {"constraints": constraint_exprs}),
+    ]:
+        try:
+            result = await OPERATOR_REGISTRY[op_name].fn(ctx, sustain_id=sustain_id, **extra_kwargs)
+            widgets[widget_key] = result.data
+        except Exception as exc:
+            logger.warning("monitor-widgets: %s failed: %s", op_name, exc)
+            widgets[widget_key] = {"widget_type": op_name.split(".")[-1], "data": {}, "summary": str(exc)}
+
+    # visualize.event_feed runs in a fresh context with no events; populate the
+    # widget from the persisted events table so the Monitor feed + counter are real.
+    widgets["event_feed"] = {
+        "widget_type": "event_feed",
+        "data": {
+            "events": [
+                {"event_name": e["event_name"], "timestamp": e["timestamp"], "payload": e["payload"]}
+                for e in real_events
+            ],
+            "total": len(real_events),
+            "sustain_id": sustain_id,
+        },
+        "summary": f"{len(real_events)} recent event(s)",
+    }
+
+    return widgets
+
+
 # ── 2. GET /devui/state?sustain_id= ──────────────────────────────────────────
 
 @router.get("/state", summary="Full current state for a sustain")
@@ -208,7 +265,8 @@ async def get_state(
 ) -> dict:
     """
     Returns pockets, events feed, operative statuses, constraint health,
-    and pawa balance — all the data the Monitor panel consumes.
+    and the visualize.* Monitor widgets — all computed from one state
+    snapshot so every card on the Monitor panel reflects the same instant.
     """
     from sustena.core.engine_singleton import get_shared_engine
     engine = get_shared_engine()
@@ -232,12 +290,16 @@ async def get_state(
     except Exception as exc:
         logger.debug("get_events(%s) failed: %s", sustain_id, exc)
 
+    constraint_exprs = [c["expr"] for c in constraints]
+    widgets = await _compute_monitor_widgets(sustain_id, state, constraint_exprs, events)
+
     return ok({
         "sustain_id": sustain_id,
         "state": state,
         "events": events,
         "operatives": operatives,
         "constraints": constraints,
+        "widgets": widgets,
     })
 
 
@@ -548,12 +610,11 @@ async def get_monitor_widgets(
     visualize.constraint_health against the current sustain state and returns
     their ResponseWidget outputs.  Returns empty-state widgets when the engine
     is not initialised or the sustain has no state.
-    """
-    from sustena.core.events import EventBus
-    from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext
-    from sustena.core.pawa import PawaLedger
-    from sustena.core.state import StateAccessor
 
+    Kept as a standalone endpoint for callers that only need the widgets (e.g.
+    the shell's event-count heartbeat); GET /devui/state uses the same
+    _compute_monitor_widgets() helper so the two never compute this differently.
+    """
     state_dict: dict = {}
     constraint_exprs: list[str] = []
     real_events: list = []
@@ -567,43 +628,7 @@ async def get_monitor_widgets(
     except Exception:
         pass
 
-    ctx = OperatorContext(
-        state=StateAccessor(state_dict),
-        events=EventBus(sustain_id=sustain_id),
-        pawa=PawaLedger(),
-        sustain_id=sustain_id,
-        user_id="devui",
-    )
-
-    widgets: dict[str, Any] = {}
-
-    for op_name, widget_key, extra_kwargs in [
-        ("visualize.pocket_ring",       "pocket_ring",       {}),
-        ("visualize.event_feed",        "event_feed",        {}),
-        ("visualize.constraint_health", "constraint_health", {"constraints": constraint_exprs}),
-    ]:
-        try:
-            result = await OPERATOR_REGISTRY[op_name].fn(ctx, sustain_id=sustain_id, **extra_kwargs)
-            widgets[widget_key] = result.data
-        except Exception as exc:
-            logger.warning("monitor-widgets: %s failed: %s", op_name, exc)
-            widgets[widget_key] = {"widget_type": op_name.split(".")[-1], "data": {}, "summary": str(exc)}
-
-    # visualize.event_feed runs in a fresh context with no events; populate the
-    # widget from the persisted events table so the Monitor feed + counter are real.
-    widgets["event_feed"] = {
-        "widget_type": "event_feed",
-        "data": {
-            "events": [
-                {"event_name": e["event_name"], "timestamp": e["timestamp"], "payload": e["payload"]}
-                for e in real_events
-            ],
-            "total": len(real_events),
-            "sustain_id": sustain_id,
-        },
-        "summary": f"{len(real_events)} recent event(s)",
-    }
-
+    widgets = await _compute_monitor_widgets(sustain_id, state_dict, constraint_exprs, real_events)
     return ok({"sustain_id": sustain_id, "widgets": widgets})
 
 

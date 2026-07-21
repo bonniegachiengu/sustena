@@ -14,7 +14,7 @@ Responsibilities:
   - Instantiate operative instances for each sustain
 
 Usage:
-    engine = SustainEngine()                       # in-memory SQLite by default
+    engine = SustainEngine() # in-memory SQLite by default
     sid    = engine.instantiate("homestead", uid, {"owner_ids": [uid]})
     result = await engine.execute_operator(sid, "budget.record_income", {"amount": 5000})
     state  = engine.get_state(sid)
@@ -133,6 +133,13 @@ class SustainEngine:
                 payload_json    TEXT NOT NULL,
                 operator_log_id TEXT,
                 timestamp       TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS operative_overrides (
+                sustain_id      TEXT NOT NULL,
+                operative_id    TEXT NOT NULL,
+                enabled         INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (sustain_id, operative_id)
             );
         """)
         self._db.commit()
@@ -727,15 +734,27 @@ class SustainEngine:
 
     def get_operative_statuses(self, sustain_id: str) -> list[dict]:
         """
-        Return a status entry for each operative declared in this sustain's spec.
-        Names are derived from the spec dict; confidence and task are None until
-        the runtime tracks them in a future sprint.
+        Return a status entry for each operative declared in this sustain's spec,
+        excluding any explicitly disabled via set_operative_enabled(). Names are
+        derived from the spec dict; confidence and task are None until the
+        runtime tracks them in a future sprint.
         """
         spec = self._get_spec(sustain_id)
         if spec is None:
             return []
         operatives_cfg = spec.get("operatives", {})
         names = list(operatives_cfg.keys()) if isinstance(operatives_cfg, dict) else list(operatives_cfg)
+
+        disabled: set[str] = set()
+        try:
+            rows = self._db.execute(
+                "SELECT operative_id FROM operative_overrides WHERE sustain_id = ? AND enabled = 0",
+                (sustain_id,),
+            ).fetchall()
+            disabled = {r["operative_id"] for r in rows}
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("get_operative_statuses(%s) override lookup failed: %s", sustain_id, exc)
+
         return [
             {
                 "id": f"op-{name}",
@@ -747,7 +766,26 @@ class SustainEngine:
                 "task": None,
             }
             for name in names
+            if name not in disabled
         ]
+
+    def set_operative_enabled(self, sustain_id: str, operative_id: str, enabled: bool) -> bool:
+        """
+        Enable/disable an operative for a sustain so the Monitor's operative
+        cards (which read get_operative_statuses()) reflect it. Used by
+        POST /seed/operative. Returns False if the sustain has no engine spec
+        (e.g. a free-text seed id that was never instantiated).
+        """
+        if self._get_spec(sustain_id) is None:
+            return False
+        self._db.execute(
+            "INSERT INTO operative_overrides (sustain_id, operative_id, enabled) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(sustain_id, operative_id) DO UPDATE SET enabled = excluded.enabled",
+            (sustain_id, operative_id, 1 if enabled else 0),
+        )
+        self._db.commit()
+        return True
 
     def evaluate_constraints(self, sustain_id: str) -> list[dict]:
         """

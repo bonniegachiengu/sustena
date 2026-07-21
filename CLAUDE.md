@@ -326,6 +326,37 @@ Sprint 8.11 Council panel polish + WS ✅  ← 8.3 + 8.10
 
 ---
 
+### Slice 0 ✅ — Make the Monitor tell the truth (21 Jul 2026)
+
+Audit-driven pass: every value the Monitor panel displays must trace to a real writer; racing/duplicate fetches that let cards disagree must collapse to one refresh path. 1628 tests pass (5 new).
+
+**A1 — Seeded data reaching the Monitor:**
+- `seed_pockets`/`seed_event` were already bridged into engine state in a prior session (`SustainEngine.seed_pocket()`, `seed_event()`). Verified still correct.
+- `seed_operatives` was still an orphaned table — enabling/disabling an operative via the Seed panel had zero effect on the Monitor. Fixed: new `operative_overrides` table in `SustainEngine` (`_ensure_tables`), `set_operative_enabled(sustain_id, operative_id, enabled)`, and `get_operative_statuses()` now filters out explicitly-disabled operatives. `POST /seed/operative` calls the bridge and returns `bridged_to_monitor`, mirroring `seed_pocket`'s pattern.
+
+**A2 + A3 — One computation, one refresh path:**
+- `GET /devui/state` now also returns `widgets` (pocket_ring/event_feed/constraint_health), computed via a shared `_compute_monitor_widgets()` helper in `devui.py` used by both `/devui/state` and `/devui/monitor-widgets` — same computation, not two independently-fetched ones. `/devui/monitor-widgets` is kept standalone (used by the shell's event-count heartbeat) but delegates to the same helper.
+- `MonitorPanel` (`monitor.jsx`) now makes **one** fetch per tick (`/devui/state`) driving state, events, operatives, constraints, and widgets together. Removed the separate `/devui/monitor-widgets` polling effect and the WS `liveState` partial-state merge (which only updated `state`, the actual source of card disagreement). `VisualizeWidgetGrid` is now presentational — receives `widgets` as a prop instead of self-fetching. `liveState` prop dropped from the `<MonitorPanel>` call in `shell.jsx` (shell's own WS connection/Footer/pawa-balance fallback untouched).
+
+**B — Honest metrics, sweep results:**
+- Removed `system.pawa_balance` and `system.api_p95_ms` rows from `apiStateToStateTree` (`monitor.jsx`) — neither is ever written by any operator; the real pawa balance was already correctly wired into the lower-left sidebar (`LeftNav` in `shell.jsx`, falling back to `GET /api/v1/users/me`) in a prior session.
+- Removed the dead `pantry.*` row-generation block — `pantry` isn't in any sustain's `default_state` or written by any operator; it was inert (never populated) but had no real writer, so per the audit rule it's deleted rather than left as speculative code.
+- Removed dead unused `pawaBalance`/`opsPerMin` variables in `monitor.jsx`.
+- `ops_per_min` (Footer "bottom margin belt", `shell.jsx`) — confirmed no writer exists anywhere. Left as the existing honest `—` (no fabricated computation added).
+- Orchie's operative card hardcoded `status:'active', pawa:0`. Orchie has no backing engine operative object (not in `_OPERATIVE_MAP` or any sustain spec), so there's nothing real to bind to — changed to `status:'idle', pawa:null, confidence:null` (same honest-idle treatment already used for operatives with no task/confidence data).
+- Sweep also caught: the Event Log's offline/initial fallback used `pickEvent()` against `LOG_EVENTS` which had already been emptied to `[]` in a prior de-mocking pass — instead of showing mock data it rendered blank junk rows (timestamp + empty fields). Replaced with the design-language empty state `"no events recorded yet"`; same treatment added to LIVE STATE STREAM (`"no state signals yet · sustain is fresh"`) for consistency.
+
+**C — Ordering:**
+- Urgency ranking **was** possible: pockets have `allocated`/`spent`, so `pct = spent/allocated` (already computed for the existing red/amber/ok color coding) is a real "distance from the pocket's own limit" signal — no new schema/threshold data needed. Default sort is now urgency (highest pct first); a `URGENCY`/`BALANCE` toggle in the LIVE STATE STREAM header switches to descending remaining balance. Verified live: seeded a 90%-spent pocket next to a 0%-spent one, confirmed both sort orders.
+
+**D — Layout:** Active Sustains big-digit-plus-list and the 6-operative 3×2 grid were already in place from a prior session (commit `18d1109`) — verified live via browser, no changes needed.
+
+**Not fixed / flagged for a later slice:**
+- The shell-level WS connection to `/devui/state-stream` (`shell.jsx`) currently errors in local dev (`[api.ws] error: Event`) and, even when connected, only ever pushes `state.system` fields that no operator writes — so it contributes nothing the REST poll + real user-balance fallback don't already cover. Not touched in this slice (out of the Monitor-panel-specific scope); worth a dedicated look.
+- Event-log timestamp timezone bug (naive `datetime.utcnow().isoformat()`) — confirmed still present, per the brief this is Slice 1, not touched here.
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:

@@ -94,3 +94,32 @@ def test_seed_event_shows_in_get_events():
     sid = eng.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
     assert eng.seed_event(sid, "event.seed.note", {"amount": 5}) is True
     assert any(e["event_name"] == "event.seed.note" for e in eng.get_events(sid))
+
+
+# ── seed_operative bridge (Seed → Monitor operative cards) ────────────────────
+
+def test_set_operative_enabled_unknown_sustain_returns_false():
+    eng = _engine()
+    assert eng.set_operative_enabled("does-not-exist", "mentor", False) is False
+
+
+def test_disabled_operative_excluded_from_statuses():
+    eng = _engine()
+    sid = eng.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
+    names_before = {o["name"] for o in eng.get_operative_statuses(sid)}
+    assert "Mentor" in names_before
+
+    assert eng.set_operative_enabled(sid, "mentor", False) is True
+    names_after = {o["name"] for o in eng.get_operative_statuses(sid)}
+    assert "Mentor" not in names_after
+    assert names_after == names_before - {"Mentor"}
+
+
+def test_re_enabled_operative_reappears_in_statuses():
+    eng = _engine()
+    sid = eng.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
+    eng.set_operative_enabled(sid, "mentor", False)
+    assert "Mentor" not in {o["name"] for o in eng.get_operative_statuses(sid)}
+
+    eng.set_operative_enabled(sid, "mentor", True)
+    assert "Mentor" in {o["name"] for o in eng.get_operative_statuses(sid)}

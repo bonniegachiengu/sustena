@@ -306,13 +306,26 @@ async def seed_operative(
             )
             action = "created"
 
+    # Bridge into engine state so enabling/disabling actually changes what the
+    # Monitor's operative cards show (best-effort — succeeds only when
+    # sustain_id is a real engine sustain with this operative in its spec).
+    bridged = False
+    try:
+        from sustena.core.engine_singleton import get_shared_engine
+        bridged = get_shared_engine().set_operative_enabled(
+            body.sustain_id, body.operative_id, body.enabled
+        )
+    except Exception as exc:
+        logger.debug("seed_operative engine bridge failed: %s", exc)
+
     status_label = "enabled" if body.enabled else "disabled"
-    logger.info("seed_operative: %s %s for sustain=%s", status_label, body.operative_id, body.sustain_id)
+    logger.info("seed_operative: %s %s for sustain=%s bridged=%s", status_label, body.operative_id, body.sustain_id, bridged)
     return ok({
         "sustain_id": body.sustain_id,
         "operative_id": body.operative_id,
         "enabled": body.enabled,
         "action": action,
+        "bridged_to_monitor": bridged,
     })
 
 

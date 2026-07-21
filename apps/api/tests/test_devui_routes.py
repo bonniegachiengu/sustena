@@ -146,6 +146,33 @@ class TestGetState:
         )
         assert r.json()["data"]["sustain_id"] == "vyyb.hive"
 
+    def test_response_contains_widgets_key(self, client):
+        # GET /devui/state must carry the same visualize.* widget shapes as
+        # /devui/monitor-widgets so the Monitor panel can render everything
+        # from one fetch (Slice 0 — single source of truth, no racing polls).
+        r = client.get(
+            "/devui/state",
+            params={"sustain_id": "homestead.bonnie"},
+            headers=AUTH_HEADER,
+        )
+        widgets = r.json()["data"]["widgets"]
+        assert "pocket_ring" in widgets
+        assert "event_feed" in widgets
+        assert "constraint_health" in widgets
+
+    def test_widgets_match_monitor_widgets_endpoint(self, client):
+        state_r = client.get(
+            "/devui/state",
+            params={"sustain_id": "homestead.bonnie"},
+            headers=AUTH_HEADER,
+        )
+        widgets_r = client.get(
+            "/devui/monitor-widgets",
+            params={"sustain_id": "homestead.bonnie"},
+            headers=AUTH_HEADER,
+        )
+        assert state_r.json()["data"]["widgets"] == widgets_r.json()["data"]["widgets"]
+
 
 # ---------------------------------------------------------------------------
 # POST /devui/console/execute
