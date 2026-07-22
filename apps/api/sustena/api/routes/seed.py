@@ -21,27 +21,19 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from sustena.config import settings
+from sustena.api.routes.users import get_current_user
 from sustena.db.schema import get_engine
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-
-# ── Auth ──────────────────────────────────────────────────────────────────────
-
-def verify_admin(authorization: str | None = Header(default=None)) -> str:
-    if authorization is None:
-        raise HTTPException(status_code=401, detail="Authorization header required")
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or token != settings.admin_token:
-        raise HTTPException(status_code=401, detail="Invalid admin token")
-    return token
+# Every route below requires a real user session (get_current_user) — see
+# devui.py for the reasoning; this used to be the same shared ADMIN_TOKEN.
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -136,7 +128,7 @@ class EventBody(BaseModel):
 @router.post("/sustain")
 async def seed_sustain(
     body: SustainBody,
-    _token: str = Depends(verify_admin),
+    _current_user: dict = Depends(get_current_user),
 ):
     """Create or update a sustain by ID."""
     # Map seed 'type' to schema's sustain_type vocabulary
@@ -195,7 +187,7 @@ async def seed_sustain(
 @router.post("/pocket")
 async def seed_pocket(
     body: PocketBody,
-    _token: str = Depends(verify_admin),
+    _current_user: dict = Depends(get_current_user),
 ):
     """Create or update a pocket for a sustain."""
     now = _now_iso()
@@ -260,7 +252,7 @@ async def seed_pocket(
 @router.post("/operative")
 async def seed_operative(
     body: OperativeBody,
-    _token: str = Depends(verify_admin),
+    _current_user: dict = Depends(get_current_user),
 ):
     """Enable or disable an operative for a sustain."""
     now = _now_iso()
@@ -334,7 +326,7 @@ async def seed_operative(
 @router.post("/event")
 async def seed_event(
     body: EventBody,
-    _token: str = Depends(verify_admin),
+    _current_user: dict = Depends(get_current_user),
 ):
     """Manually inject an event into a sustain's event log."""
     event_id = str(uuid.uuid4())
@@ -382,7 +374,7 @@ async def seed_event(
 
 @router.get("/status")
 async def seed_status(
-    _token: str = Depends(verify_admin),
+    _current_user: dict = Depends(get_current_user),
 ):
     """Return what's currently seeded: sustains, pocket counts, event counts."""
     engine = get_engine()

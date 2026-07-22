@@ -33,24 +33,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from sustena.config import settings
+from sustena.api.routes.users import get_current_user, get_user_from_token
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-
-# ── Auth ──────────────────────────────────────────────────────────────────────
-
-from fastapi import Header as _Header
-
-
-def verify_admin(authorization: str | None = _Header(default=None)) -> str:
-    if authorization is None:
-        raise HTTPException(status_code=401, detail="Authorization header required")
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or token != settings.admin_token:
-        raise HTTPException(status_code=401, detail="Invalid admin token")
-    return token
+# Every route below requires a real user session (get_current_user, a JWT
+# obtained via POST /api/v1/users/login or /register) — this used to be a
+# single shared ADMIN_TOKEN, which meant anyone with the token had full
+# access and the token itself had to live in the public frontend bundle.
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -114,7 +105,7 @@ class PreviewWidgetRequest(BaseModel):
 # ── 1. GET /devui/sustains ────────────────────────────────────────────────────
 
 @router.get("/sustains", summary="List sustains for the selector dropdown")
-async def list_sustains(_: str = Depends(verify_admin)) -> dict:
+async def list_sustains(_: dict = Depends(get_current_user)) -> dict:
     """
     Returns all sustains with id, label, status, pockets summary, and
     active operative count — enough for the TopBar selector and Monitor hero tiles.
@@ -133,7 +124,7 @@ async def list_sustains(_: str = Depends(verify_admin)) -> dict:
 # ── 1b. GET /devui/templates ──────────────────────────────────────────────────
 
 @router.get("/templates", summary="Available sustain spec templates for creation")
-async def list_templates(_: str = Depends(verify_admin)) -> dict:
+async def list_templates(_: dict = Depends(get_current_user)) -> dict:
     """
     List the sustain spec templates that can be instantiated (homestead, vyyb,
     chama, …). Powers the 'create sustain' control in the UI.
@@ -173,7 +164,7 @@ class CreateSustainRequest(BaseModel):
 
 
 @router.post("/sustains", summary="Create + hydrate a sustain from a template")
-async def create_sustain(body: CreateSustainRequest, _: str = Depends(verify_admin)) -> dict:
+async def create_sustain(body: CreateSustainRequest, _: dict = Depends(get_current_user)) -> dict:
     """
     Instantiate a fully-hydrated sustain via SustainEngine — operators allowed,
     operatives enabled, and an initial state built from the template's
@@ -204,6 +195,41 @@ async def create_sustain(body: CreateSustainRequest, _: str = Depends(verify_adm
 # panel's pocket ring / event feed / constraint health widgets are computed
 # from the SAME state snapshot the rest of the panel reads — one computation,
 # not two independently-fetched ones that can disagree at a given instant.
+
+async def _get_proposals_in_voting(sustain_id: str) -> list[dict]:
+    """
+    Council proposals still awaiting a vote — a real, already-computable
+    needs-attention signal (council_proposals already exists; this isn't
+    new backend state, just a read the Monitor never surfaced before).
+    Best-effort: returns [] on any failure rather than breaking /devui/state.
+    """
+    try:
+        from sqlalchemy import text as _text
+        from sustena.db.schema import get_engine as _get_sqlalchemy_engine
+
+        db_engine = _get_sqlalchemy_engine()
+        async with db_engine.connect() as conn:
+            rows = await conn.execute(
+                _text(
+                    "SELECT id, proposed_by, operator_name, created_at "
+                    "FROM council_proposals WHERE sustain_id = :sid AND status = 'IN_VOTING' "
+                    "ORDER BY created_at DESC"
+                ),
+                {"sid": sustain_id},
+            )
+            return [
+                {
+                    "id": r[0],
+                    "proposed_by": r[1],
+                    "operator_name": r[2],
+                    "created_at": r[3].isoformat() if hasattr(r[3], "isoformat") else str(r[3]),
+                }
+                for r in rows
+            ]
+    except Exception as exc:
+        logger.debug("_get_proposals_in_voting(%s) failed: %s", sustain_id, exc)
+        return []
+
 
 async def _compute_monitor_widgets(
     sustain_id: str,
@@ -261,12 +287,13 @@ async def _compute_monitor_widgets(
 @router.get("/state", summary="Full current state for a sustain")
 async def get_state(
     sustain_id: str = Query(..., description="e.g. homestead.bonnie"),
-    _: str = Depends(verify_admin),
+    _: dict = Depends(get_current_user),
 ) -> dict:
     """
     Returns pockets, events feed, operative statuses, constraint health,
-    and the visualize.* Monitor widgets — all computed from one state
-    snapshot so every card on the Monitor panel reflects the same instant.
+    proposals awaiting a vote, and the visualize.* Monitor widgets — all
+    computed from one state snapshot so every card on the Monitor panel
+    (including the needs-attention block) reflects the same instant.
     """
     from sustena.core.engine_singleton import get_shared_engine
     engine = get_shared_engine()
@@ -292,6 +319,7 @@ async def get_state(
 
     constraint_exprs = [c["expr"] for c in constraints]
     widgets = await _compute_monitor_widgets(sustain_id, state, constraint_exprs, events)
+    proposals_in_voting = await _get_proposals_in_voting(sustain_id)
 
     return ok({
         "sustain_id": sustain_id,
@@ -300,6 +328,7 @@ async def get_state(
         "operatives": operatives,
         "constraints": constraints,
         "widgets": widgets,
+        "proposals_in_voting": proposals_in_voting,
     })
 
 
@@ -308,7 +337,7 @@ async def get_state(
 @router.post("/console/execute", summary="Execute an operator from the dev console")
 async def console_execute(
     body: ConsoleExecuteRequest,
-    _: str = Depends(verify_admin),
+    _: dict = Depends(get_current_user),
 ) -> dict:
     """
     Runs an operator through OperatorContext against live state.
@@ -357,7 +386,7 @@ async def console_execute(
 @router.post("/simulate", summary="Simulate a proposal against a forked state")
 async def simulate(
     body: SimulateRequest,
-    _: str = Depends(verify_admin),
+    _: dict = Depends(get_current_user),
 ) -> dict:
     """
     Runs a sequence of operators against a forked copy of the sustain state
@@ -420,9 +449,14 @@ async def state_stream_query(
     WebSocket state stream (query-param form): /devui/state-stream?sustain_id=homestead.bonnie&token=...
     Sends a full state snapshot on connect, then pushes events as they arrive.
     Falls back to polling every 2s until EventBus subscription is wired.
+
+    token= must be a valid user session JWT (same one used for REST calls) —
+    browsers can't set a custom Authorization header on a WS handshake, so
+    the token travels as a query param instead. Validated the same way as
+    every other route, including the token_version / logout check.
     """
     token = websocket.query_params.get("token", "")
-    if token != settings.admin_token:
+    if not await get_user_from_token(token):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -459,7 +493,7 @@ async def state_stream_query(
 # ── Legacy path-param routes (backwards compat) ───────────────────────────────
 
 @router.get("/sustain/{sustain_id}/state", summary="Full state dict for a sustain (path-param form)")
-async def get_sustain_state(sustain_id: str, _: str = Depends(verify_admin)) -> dict:
+async def get_sustain_state(sustain_id: str, _: dict = Depends(get_current_user)) -> dict:
     """Delegates to the canonical query-param handler."""
     return await get_state(sustain_id=sustain_id, _=_)
 
@@ -468,7 +502,7 @@ async def get_sustain_state(sustain_id: str, _: str = Depends(verify_admin)) -> 
 async def get_sustain_events(
     sustain_id: str,
     limit: int = 100,
-    _: str = Depends(verify_admin),
+    _: dict = Depends(get_current_user),
 ) -> dict:
     try:
         from sustena.core.events import EventBus
@@ -481,7 +515,7 @@ async def get_sustain_events(
 
 
 @router.get("/sustain/{sustain_id}/proposals", summary="Council proposals")
-async def get_sustain_proposals(sustain_id: str, _: str = Depends(verify_admin)) -> dict:
+async def get_sustain_proposals(sustain_id: str, _: dict = Depends(get_current_user)) -> dict:
     try:
         from sustena.db.schema import get_engine
         from sqlalchemy import text as _text
@@ -511,7 +545,7 @@ async def get_sustain_proposals(sustain_id: str, _: str = Depends(verify_admin))
 
 
 @router.get("/registry/operators", summary="List operator registry")
-async def get_operator_registry(_: str = Depends(verify_admin)) -> dict:
+async def get_operator_registry(_: dict = Depends(get_current_user)) -> dict:
     try:
         from sustena.core.operator import OPERATOR_REGISTRY
         return ok({
@@ -541,7 +575,7 @@ async def get_operator_registry(_: str = Depends(verify_admin)) -> dict:
 
 
 @router.get("/registry/operatives", summary="List operative classes")
-async def get_operative_registry(_: str = Depends(verify_admin)) -> dict:
+async def get_operative_registry(_: dict = Depends(get_current_user)) -> dict:
     from sustena.core.sustain_engine import _OPERATIVE_MAP
     return ok({
         "operatives": list(_OPERATIVE_MAP.keys()),
@@ -552,7 +586,7 @@ async def get_operative_registry(_: str = Depends(verify_admin)) -> dict:
 async def state_stream_path(websocket: WebSocket, sustain_id: str):
     """Legacy path-param WebSocket — delegates to the same stream logic."""
     token = websocket.query_params.get("token", "")
-    if token != settings.admin_token:
+    if not await get_user_from_token(token):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -589,7 +623,7 @@ async def state_stream_path(websocket: WebSocket, sustain_id: str):
 # ── 6. GET /devui/widgets ─────────────────────────────────────────────────────
 
 @router.get("/widgets", summary="List all registered widget types")
-async def list_widgets(_: str = Depends(verify_admin)) -> dict:
+async def list_widgets(_: dict = Depends(get_current_user)) -> dict:
     """
     Returns all widget types registered in the WidgetTypeRegistry.
     Used by the UIParser Preview tab and the Mycelium Library.
@@ -603,7 +637,7 @@ async def list_widgets(_: str = Depends(verify_admin)) -> dict:
 @router.get("/monitor-widgets", summary="Rendered visualize.* widgets for the Monitor Panel")
 async def get_monitor_widgets(
     sustain_id: str = Query(default="homestead.bonnie"),
-    _: str = Depends(verify_admin),
+    _: dict = Depends(get_current_user),
 ) -> dict:
     """
     Calls visualize.pocket_ring, visualize.event_feed, and
@@ -638,7 +672,7 @@ async def get_monitor_widgets(
 @router.post("/simulate-pipeline", summary="Simulate via simulate.fork → run_path → score pipeline")
 async def simulate_pipeline(
     body: SimulatePipelineRequest,
-    _: str = Depends(verify_admin),
+    _: dict = Depends(get_current_user),
 ) -> dict:
     """
     Chains the three simulate.* operators in sequence:
@@ -717,7 +751,7 @@ async def simulate_pipeline(
 @router.post("/preview-widget", summary="Render a widget from a spec JSON (dev console preview)")
 async def preview_widget(
     body: PreviewWidgetRequest,
-    _: str = Depends(verify_admin),
+    _: dict = Depends(get_current_user),
 ) -> dict:
     """
     Accepts a ui_schema (or full operator spec) and optional mock state,
@@ -773,7 +807,7 @@ _OPERATIVE_ROLE_LABELS: dict[str, str] = {
 @router.get("/sustain/{sustain_id}/graph", summary="Operative council graph for a sustain")
 async def get_sustain_graph(
     sustain_id: str,
-    _: str = Depends(verify_admin),
+    _: dict = Depends(get_current_user),
 ) -> dict:
     """
     Returns the operative council graph for a sustain — nodes (Orchie +
@@ -841,7 +875,7 @@ async def get_sustain_graph(
 # ── 12. GET /devui/library ───────────────────────────────────────────────────
 
 @router.get("/library", summary="Arena packages grouped by kind for the Library panel")
-async def get_library(_: str = Depends(verify_admin)) -> dict:
+async def get_library(_: dict = Depends(get_current_user)) -> dict:
     """
     Returns all arena_packages grouped by kind (operative, operator, spore, widget).
     Used by the LibraryPanel in the DevUI. Falls back to empty groups when the
@@ -902,7 +936,7 @@ async def get_library(_: str = Depends(verify_admin)) -> dict:
 @router.get("/sustain/{sustain_id}/operators", summary="Operators allowed by a sustain spec")
 async def get_sustain_operators(
     sustain_id: str,
-    _: str = Depends(verify_admin),
+    _: dict = Depends(get_current_user),
 ) -> dict:
     """
     Returns the operator list declared in the sustain's spec under the "operators"

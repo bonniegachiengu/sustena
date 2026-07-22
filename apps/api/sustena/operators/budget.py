@@ -506,9 +506,9 @@ async def budget_summary(ctx: OperatorContext) -> OperatorResult:
 
     Primitives used:
       ConstraintEngine  — no constraints declared (read-only, always permitted)
-      PawaLedger        — deducts 0 pawa (free operator)
-      StateAccessor     — reads liquid balance and all pockets
-      EventBus          — no events (read-only)
+      PawaLedger — deducts 0 pawa (free operator)
+      StateAccessor — reads liquid balance and all pockets
+      EventBus — no events (read-only)
     """
     # 1+2. No constraints; deduct 0 pawa
     fail = await _charge_pawa("budget.summary", ctx)

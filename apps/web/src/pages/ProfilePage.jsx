@@ -138,7 +138,7 @@ function AggregateBalanceCard({ pawa }) {
 
 // ── Sign-in / Register panel ─────────────────────────────────
 
-function SignInPanel({ open, onClose, onSuccess, defaultMode = 'login' }) {
+export function SignInPanel({ open, onClose, onSuccess, defaultMode = 'login' }) {
   const [mode, setMode] = useState(defaultMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

@@ -141,7 +141,7 @@ class BaseOperative(ABC):
     ) -> None:
         """
         Args:
-            config:         Operative-specific config (thresholds, prompts, etc.)
+            config: Operative-specific config (thresholds, prompts, etc.)
             state_accessor: StateAccessor bound to the sustain being watched.
             claude_client:  Anthropic client (real or mock). Exposes .messages.create().
             sustain_id:     Sustain this operative belongs to (used in OperatorContext).

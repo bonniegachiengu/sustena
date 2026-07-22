@@ -8,10 +8,10 @@ All operators here are:
   - side_effects = []  (read-only, no mutations, no events)
 
 Operators:
-  ui.render.operator_card       — renders a single operator result card from its ui_schema
+  ui.render.operator_card — renders a single operator result card from its ui_schema
   ui.render.operative_dashboard — renders an operative's status panel
-  ui.render.sustain_home        — renders the sustain home screen
-  ui.render.preview             — dev console live preview (spec JSON + mock state → widget)
+  ui.render.sustain_home — renders the sustain home screen
+  ui.render.preview — dev console live preview (spec JSON + mock state → widget)
 """
 
 from sustena.core.operator import OperatorContext, OperatorResult, sustena_operator
@@ -153,8 +153,8 @@ async def ui_render_sustain_home(
     Render the sustain home screen from a ui_schema.
 
     params:
-      ui_schema         — home-screen ui_schema
-      full_state        — full sustain state snapshot (used as plain dict fallback)
+      ui_schema — home-screen ui_schema
+      full_state — full sustain state snapshot (used as plain dict fallback)
       active_operatives — list of operative state dicts to include in the widget
     """
     active_operatives = active_operatives or []
@@ -209,7 +209,7 @@ async def ui_render_preview(
       { "ui_schema": { "widget_type": ..., "fields": [...] } }
 
     params:
-      spec_json  — a ui_schema dict or an operator spec containing ui_schema
+      spec_json — a ui_schema dict or an operator spec containing ui_schema
       mock_state — optional mock state/inputs for source resolution
                    shape: { "inputs": {...}, "state": {...} }
     """
@@ -224,7 +224,7 @@ async def ui_render_preview(
     except ValueError as exc:
         return OperatorResult.fail(reason=f"Cannot parse spec: {exc}")
 
-    # For preview we resolve against mock_state as a plain dict
+    # For preview, we resolve against mock_state as a plain dict
     widget = ResponseWidget(
         widget_type=schema.widget_type,
         data={

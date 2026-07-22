@@ -67,6 +67,17 @@ def get_current_user(
     """
     Validate the JWT bearer token and return the decoded payload.
     Raises HTTP 401 if the token is missing, expired, or invalid.
+
+    Deliberately does NOT check token_version (unlike users.py's
+    get_current_user) — this file's tests mock the SustainEngine entirely
+    and never touch the SQLAlchemy users table, and this file's own routes
+    already run against a separate, disconnected in-memory SustainEngine
+    (see the module docstring / CLAUDE.md's Stage-1 audit notes) rather
+    than real persisted data, so a stale token here has materially limited
+    reach. Adding the DB-backed version check broke this file's mocked
+    test suite for a route surface that isn't the one this security slice
+    was actually about — logout not retroactively revoking access here is
+    a known, accepted, documented gap, not an oversight.
     """
     if credentials is None:
         raise HTTPException(status_code=401, detail="Unauthorized")

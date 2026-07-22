@@ -1,7 +1,10 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api.js';
+import { SignInPanel } from '../../pages/ProfilePage';
 /* Mycelium Control Panel — app shell, nav, state, Tweaks integration */
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
 
@@ -29,8 +32,21 @@ const PAGE_LINKS = [
   { id: 'profile', label: 'PROFILE', icon: 'council', sub: 'identity & history',  href: '/profile' },
 ];
 
-function App() {
+const SHELL_MOBILE_BREAKPOINT = 640;
+
+function useShellIsMobile() {
+  const [width, setWidth] = dUseState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280));
+  dUseEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return width < SHELL_MOBILE_BREAKPOINT;
+}
+
+function App({ authUser, onLogout }) {
   const navigate = useNavigate();
+  const isMobile = useShellIsMobile();
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [panel, setPanel] = dUseState(t.panel || 'monitor');
   const [sustainId, setSustainId] = dUseState(t.sustain || 'homestead.bonnie');
@@ -42,7 +58,6 @@ function App() {
   const [navCollapsed, setNavCollapsed] = dUseState(false);
   const [liveState, setLiveState] = dUseState(null);  // pushed from WS
   const [apiSustains, setApiSustains] = dUseState([]);
-  const [userPawa, setUserPawa] = dUseState(null);   // real pawa balance from /me
   const wsRef = dUseRef(null);
   const lastEventCountRef = dUseRef(null);  // heartbeat: last seen event count
   const onlineRef = dUseRef(true);          // heartbeat: backend reachability
@@ -71,17 +86,6 @@ function App() {
   dUseEffect(() => {
     api.get('/devui/sustains')
       .then(d => { const list = d?.data?.sustains || []; if (list.length) setApiSustains(list); })
-      .catch(() => {});
-  }, []);
-
-  // Fetch the signed-in user's real pawa balance for the sidebar gauge.
-  // Falls back to null (—) when signed out.
-  dUseEffect(() => {
-    const token = localStorage.getItem('sustena_token');
-    if (!token) { setUserPawa(null); return; }
-    fetch(`${import.meta.env.VITE_API_BASE ?? ''}/api/v1/users/me`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => (r.ok ? r.json() : null))
-      .then(d => setUserPawa(d?.data?.pawa_balance ?? null))
       .catch(() => {});
   }, []);
 
@@ -176,7 +180,7 @@ function App() {
   const sustains   = apiSustains.length ? apiSustains : SUSTAINS;
   const sustain    = sustains.find(s => s.id === sustainId) || sustains[0] || { id: '', label: '—', sub: 'no sustains', status: 'seed' };
   const sysStats   = liveState?.state?.system || {};
-  const pawaBalance = sysStats.pawa_balance ?? userPawa ?? null;
+  const pawaBalance = sysStats.pawa_balance ?? authUser?.pawa_balance ?? null;
 
   const switchPanel = (id) => {
     setPanel(id);
@@ -190,7 +194,8 @@ function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const navWidth = navCollapsed ? 56 : 200;
+  const effectiveNavCollapsed = isMobile || navCollapsed;
+  const navWidth = effectiveNavCollapsed ? 56 : 200;
 
   return (
     <div data-density={t.density} style={{
@@ -204,21 +209,26 @@ function App() {
       gridTemplateColumns: `${navWidth}px 1fr`,
       height: '100vh', width: '100vw',
       background: 'var(--bg-base)',
+      overflowX: 'hidden',
     }}>
       <TopBar
         clock={clock} sustain={sustain}
         sustains={sustains} onSustainChange={(id) => { setSustainId(id); setTweak('sustain', id); }}
         onCreate={createSustain}
+        isMobile={isMobile}
       />
       <LeftNav
         panels={PANELS} active={panel} onSelect={switchPanel}
-        collapsed={navCollapsed} onToggle={() => setNavCollapsed(c => !c)}
+        collapsed={effectiveNavCollapsed} onToggle={() => setNavCollapsed(c => !c)}
+        toggleDisabled={isMobile}
         pageLinks={PAGE_LINKS}
         pawaBalance={pawaBalance}
+        authUser={authUser}
+        onLogout={onLogout}
       />
 
-      <main style={{ gridArea: 'main', overflow: 'hidden', minHeight: 0, position: 'relative' }}>
-        {panel === 'monitor'    && <MonitorPanel tick={tick} sustain={sustain} sustains={sustains} />}
+      <main style={{ gridArea: 'main', overflow: 'hidden', minWidth: 0, minHeight: 0, position: 'relative' }}>
+        {panel === 'monitor'    && <MonitorPanel tick={tick} sustain={sustain} sustains={sustains} switchPanel={switchPanel} />}
         {panel === 'simulator'  && <SimulatorPanel tick={tick} sustain={sustain}
           leftOpen={simLeft} rightOpen={simRight}
           onToggleLeft={() => setSimLeft(v => !v)}
@@ -236,7 +246,7 @@ function App() {
         sustainId={sustainId}
       />
 
-      <Footer tick={tick} stats={sysStats} />
+      <Footer tick={tick} stats={sysStats} isMobile={isMobile} />
 
       {modal?.kind === 'proposal' && <ProposalModal p={modal.data} onClose={() => setModal(null)} />}
       {modal?.kind === 'library' && <LibraryModal data={modal.data} onClose={() => setModal(null)} />}
@@ -285,7 +295,7 @@ function App() {
 }
 
 /* ─── Top bar ──────────────────────────────────────────────── */
-function TopBar({ clock, sustain, sustains, onSustainChange, onCreate }) {
+function TopBar({ clock, sustain, sustains, onSustainChange, onCreate, isMobile }) {
   const [open, setOpen] = dUseState(false);
   const [templates, setTemplates] = dUseState(null);  // null = not yet loaded
   const [busy, setBusy] = dUseState(false);
@@ -304,30 +314,35 @@ function TopBar({ clock, sustain, sustains, onSustainChange, onCreate }) {
       borderBottom: '1px solid var(--border)',
       background: 'var(--bg-surface)',
       display: 'flex', alignItems: 'stretch',
-      paddingLeft: 16, paddingRight: 16,
+      paddingLeft: isMobile ? 10 : 16, paddingRight: isMobile ? 10 : 16,
       flexShrink: 0,
+      minWidth: 0,
+      overflow: 'hidden',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', paddingRight: 20, borderRight: '1px solid var(--border)' }}>
-        <SustenaLogo size={16} />
-      </div>
+      {!isMobile && (
+        <div style={{ display: 'flex', alignItems: 'center', paddingRight: 20, borderRight: '1px solid var(--border)' }}>
+          <SustenaLogo size={16} />
+        </div>
+      )}
 
       {/* Sustain selector */}
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'stretch' }}>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'stretch', minWidth: 0 }}>
         <button onClick={() => setOpen(!open)} style={{
-          padding: '0 16px',
+          padding: isMobile ? '0 8px' : '0 16px',
           display: 'flex', alignItems: 'center', gap: 8,
           color: 'var(--text-secondary)',
           borderRight: '1px solid var(--border)',
           transition: 'color var(--t-fast)',
+          minWidth: 0,
         }}
         onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
         onMouseLeave={e => e.currentTarget.style.color = 'var(--text-secondary)'}
         >
-          <span className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: sustain.status === 'live' ? 'var(--teal)' : 'var(--text-muted)' }} />
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500, letterSpacing: '0.06em', color: 'var(--text-primary)' }}>
+          <span className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: sustain.status === 'live' ? 'var(--teal)' : 'var(--text-muted)' }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500, letterSpacing: '0.06em', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: isMobile ? 110 : 'none' }}>
             {sustain.label}
           </span>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)' }}>{sustain.sub}</span>
+          {!isMobile && <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)' }}>{sustain.sub}</span>}
           <Icon name="chevron" size={10} />
         </button>
         {open && (
@@ -398,26 +413,32 @@ function TopBar({ clock, sustain, sustains, onSustainChange, onCreate }) {
         )}
       </div>
 
-      <div style={{ flex: 1 }} />
+      <div style={{ flex: 1, minWidth: 8 }} />
 
       {/* Right cluster */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', border: '1px solid var(--amber-border)', background: 'var(--amber-glow)', borderRadius: 'var(--radius-sm)' }}>
-          <span className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--amber)' }} />
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', color: 'var(--amber)' }}>PROD · LIVE</span>
-        </div>
-        <div className="meta-11" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span className="label-10">OP</span>
-          <span style={{ color: 'var(--text-primary)' }}>B.GACHIENGU</span>
-        </div>
-        <span className="val-12" style={{ color: 'var(--text-secondary)' }}>{clock} <span style={{ color: 'var(--text-muted)' }}>EAT</span></span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 14, flexShrink: 0 }}>
+        {!isMobile && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', border: '1px solid var(--amber-border)', background: 'var(--amber-glow)', borderRadius: 'var(--radius-sm)' }}>
+            <span className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--amber)' }} />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.1em', color: 'var(--amber)' }}>PROD · LIVE</span>
+          </div>
+        )}
+        {isMobile ? (
+          <span className="pulse" title="PROD · LIVE" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--amber)', flexShrink: 0 }} />
+        ) : (
+          <div className="meta-11" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="label-10">OP</span>
+            <span style={{ color: 'var(--text-primary)' }}>B.GACHIENGU</span>
+          </div>
+        )}
+        <span className="val-12" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{clock}{!isMobile && <span style={{ color: 'var(--text-muted)' }}> EAT</span>}</span>
       </div>
     </header>
   );
 }
 
 /* ─── Left nav ────────────────────────────────────────────── */
-function LeftNav({ panels, active, onSelect, collapsed, onToggle, pageLinks, pawaBalance }) {
+function LeftNav({ panels, active, onSelect, collapsed, onToggle, toggleDisabled, pageLinks, pawaBalance, authUser, onLogout }) {
   const navigate = useNavigate();
   return (
     <aside style={{
@@ -442,25 +463,27 @@ function LeftNav({ panels, active, onSelect, collapsed, onToggle, pageLinks, paw
             <span className="val-12" style={{ color: 'var(--text-primary)', marginTop: 2, fontSize: 12 }}>Control Panel</span>
           </div>
         )}
-        <button onClick={onToggle} title={collapsed ? 'Expand' : 'Collapse'} style={{
-          width: 26, height: 26,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: 'var(--text-muted)',
-          background: 'transparent',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-sm)',
-          transition: 'all var(--t-fast)',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--amber-border)'; e.currentTarget.style.color = 'var(--amber)'; }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-        >
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-            {collapsed
-              ? <path d="M3 2 L7 5.5 L3 9" />
-              : <path d="M8 2 L4 5.5 L8 9" />
-            }
-          </svg>
-        </button>
+        {!toggleDisabled && (
+          <button onClick={onToggle} title={collapsed ? 'Expand' : 'Collapse'} style={{
+            width: 26, height: 26,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'var(--text-muted)',
+            background: 'transparent',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)',
+            transition: 'all var(--t-fast)',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--amber-border)'; e.currentTarget.style.color = 'var(--amber)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+          >
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+              {collapsed
+                ? <path d="M3 2 L7 5.5 L3 9" />
+                : <path d="M8 2 L4 5.5 L8 9" />
+              }
+            </svg>
+          </button>
+        )}
       </div>
 
       <nav style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: collapsed ? '0 6px' : 0 }}>
@@ -520,6 +543,36 @@ function LeftNav({ panels, active, onSelect, collapsed, onToggle, pageLinks, paw
           <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--amber)' }}>
             {pawaBalance != null ? pawaBalance.toLocaleString() : '—'}
           </span>
+        </div>
+      )}
+
+      {/* Identity + sign out */}
+      {!collapsed ? (
+        <div style={{ padding: '10px 16px 12px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <span className="meta-10" style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {authUser?.display_name || authUser?.email || '—'}
+          </span>
+          <button onClick={onLogout} title="Sign out" style={{
+            fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 500, letterSpacing: '0.06em',
+            color: 'var(--text-muted)', background: 'transparent', border: 'none',
+            cursor: 'pointer', padding: '2px 4px', flexShrink: 0,
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+          >SIGN OUT</button>
+        </div>
+      ) : (
+        <div style={{ padding: '8px 0 10px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'center' }}>
+          <button onClick={onLogout} title={`Sign out (${authUser?.email || ''})`} style={{
+            color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 4,
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
+          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+          >
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+              <path d="M5 1.5H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1H5M9 9l3-3-3-3M12 6H4.5" />
+            </svg>
+          </button>
         </div>
       )}
     </aside>
@@ -727,38 +780,52 @@ function FabBtn({ children, onClick, title }) {
 }
 
 /* ─── Footer telemetry ────────────────────────────────────── */
-function Footer({ tick, stats = {} }) {
+function Footer({ tick, stats = {}, isMobile }) {
   const latency    = stats.api_p95_ms != null ? `${stats.api_p95_ms}ms` : '—';
   const opsPerMin  = stats.ops_per_min != null ? stats.ops_per_min : '—';
   const orchieLoad = stats.orchie_load_pct != null ? `${stats.orchie_load_pct}%` : '—';
   const events     = stats.event_count != null ? stats.event_count : '—';
   return (
-    <footer style={{
+    <footer className="no-scrollbar" style={{
       gridArea: 'footer',
       borderTop: '1px solid var(--border)',
       background: 'var(--bg-surface)',
       display: 'flex', alignItems: 'center', gap: 18,
       paddingLeft: 14, paddingRight: 14,
-      flexShrink: 0, overflow: 'hidden',
+      flexShrink: 0, minWidth: 0,
+      overflowX: isMobile ? 'auto' : 'hidden',
+      overflowY: 'hidden',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
         <span className="pulse" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--teal)' }} />
         <span className="meta-10" style={{ color: 'var(--teal)' }}>NOMINAL</span>
       </div>
       <FSep />
-      <FTick label="LATENCY" value={latency} />
-      <FSep />
-      <FTick label="OPS / MIN" value={opsPerMin} />
-      <FSep />
-      <FTick label="ORCHIE LOAD" value={orchieLoad} />
-      <FSep />
+      {!isMobile && (
+        <>
+          <FTick label="LATENCY" value={latency} />
+          <FSep />
+          <FTick label="OPS / MIN" value={opsPerMin} />
+          <FSep />
+          <FTick label="ORCHIE LOAD" value={orchieLoad} />
+          <FSep />
+        </>
+      )}
       <FTick label="EVENTS" value={events} />
-      <FSep />
-      <FTick label="GAS" value="—" />
-      <div style={{ flex: 1 }} />
+      {!isMobile && (
+        <>
+          <FSep />
+          <FTick label="GAS" value="—" />
+        </>
+      )}
+      <div style={{ flex: 1, minWidth: isMobile ? 12 : 0 }} />
       <FTick label="LAST SYNC" value={`T-${tick % 60}s`} />
-      <FSep />
-      <FTick label="BUILD" value="2026.05.25-a4f8c1" />
+      {!isMobile && (
+        <>
+          <FSep />
+          <FTick label="BUILD" value="2026.05.25-a4f8c1" />
+        </>
+      )}
     </footer>
   );
 }
@@ -1158,4 +1225,83 @@ operatives: 4 default (Mentor, Protégé, Curator, Navigator)`}
   );
 }
 
-export default App;
+/* ─── AuthGate — the real default export ─────────────────────
+   Gates the whole console behind a real login. Holds every hook that
+   depends on auth state; App itself only mounts once a token has been
+   verified against the backend, so App's own hooks never need to branch
+   on "am I logged in yet." */
+function AuthGate() {
+  const [authToken, setAuthToken] = dUseState(() => localStorage.getItem('sustena_token'));
+  const [authUser, setAuthUser] = dUseState(null);
+  const [checking, setChecking] = dUseState(true);   // verifying a stored token, or nothing to verify yet
+
+  // Verify (or re-verify) the token against the backend whenever it changes.
+  // A token that decodes fine client-side but was already revoked (logout,
+  // expiry) must not grant access — this is a real server round-trip, not
+  // just "is there a string in localStorage."
+  dUseEffect(() => {
+    if (!authToken) { setAuthUser(null); setChecking(false); return; }
+    let cancelled = false;
+    setChecking(true);
+    fetch(`${API_BASE}/api/v1/users/me`, { headers: { Authorization: `Bearer ${authToken}` } })
+      .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then(d => {
+        if (cancelled) return;
+        setAuthUser(d?.data ?? null);
+        setChecking(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        localStorage.removeItem('sustena_token');
+        setAuthToken(null);
+        setAuthUser(null);
+        setChecking(false);
+      });
+    return () => { cancelled = true; };
+  }, [authToken]);
+
+  const handleSignedIn = (token) => setAuthToken(token);
+
+  const handleLogout = async () => {
+    // Best-effort — bumps token_version server-side so the token is
+    // actually revoked, not just forgotten locally. Still clear local
+    // state even if the network call fails (e.g. already offline); the
+    // point of logging out locally is to stop the browser from acting as
+    // this user regardless of whether the server round-trip lands.
+    try {
+      if (authToken) {
+        await fetch(`${API_BASE}/api/v1/users/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+      }
+    } catch { /* offline or unreachable — local sign-out still proceeds */ }
+    localStorage.removeItem('sustena_token');
+    setAuthToken(null);
+    setAuthUser(null);
+  };
+
+  if (checking) {
+    return (
+      <div style={{ height: '100vh', width: '100vw', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)' }}>
+        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>checking session…</span>
+      </div>
+    );
+  }
+
+  if (!authToken || !authUser) {
+    return (
+      <div style={{ height: '100vh', width: '100vw', position: 'relative', background: 'var(--bg-base)' }}>
+        <div style={{ position: 'absolute', top: '18%', left: 0, right: 0, textAlign: 'center' }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, letterSpacing: '0.1em', color: 'var(--text-primary)' }}>SUSTENA XII</span>
+          <div className="meta-10" style={{ marginTop: 6, color: 'var(--text-muted)' }}>sign in to continue</div>
+        </div>
+        <SignInPanel open={true} onClose={() => {}} onSuccess={handleSignedIn} defaultMode="login" />
+      </div>
+    );
+  }
+
+  return <App authUser={authUser} onLogout={handleLogout} />;
+}
+
+export default AuthGate;

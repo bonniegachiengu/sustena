@@ -15,9 +15,10 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from sustena.api.routes.users import get_current_user
 from sustena.db.schema import (
     council_proposals as proposals_table,
     council_votes as votes_table,
@@ -162,7 +163,11 @@ class CreateProposalRequest(BaseModel):
 
 
 @router.post("/{sustain_id}/proposals", summary="Create a council proposal", status_code=201)
-async def create_council_proposal(sustain_id: str, body: CreateProposalRequest) -> dict:
+async def create_council_proposal(
+    sustain_id: str,
+    body: CreateProposalRequest,
+    _current_user: dict = Depends(get_current_user),
+) -> dict:
     proposal_id = str(uuid.uuid4())
     now = datetime.utcnow()
     db_engine = get_engine()
@@ -198,7 +203,12 @@ class CastVoteRequest(BaseModel):
 
 
 @router.post("/{sustain_id}/proposals/{proposal_id}/vote", summary="Cast a vote on a proposal", status_code=201)
-async def cast_vote(sustain_id: str, proposal_id: str, body: CastVoteRequest) -> dict:
+async def cast_vote(
+    sustain_id: str,
+    proposal_id: str,
+    body: CastVoteRequest,
+    _current_user: dict = Depends(get_current_user),
+) -> dict:
     db_engine = get_engine()
     async with db_engine.connect() as conn:
         row = (await conn.execute(

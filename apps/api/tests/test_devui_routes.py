@@ -9,17 +9,30 @@ Tests for sustena/api/routes/devui.py
 Run: pytest tests/test_devui_routes.py -v
 """
 
+import uuid
+
 import pytest
 from starlette.testclient import TestClient
 
 from sustena.api.main import app
-from sustena.config import settings
 
 # The devui router is only mounted in development mode (the default in tests).
 # All tests use the singleton `app` — same as test_health.py.
+#
+# Auth model: devui routes require a real user session (get_current_user),
+# not the old shared ADMIN_TOKEN. AUTH_HEADER is populated below by an
+# autouse fixture that registers a real test user through the running app
+# and captures the JWT it returns — every test in this file still just
+# references the module-level AUTH_HEADER exactly as before; only where its
+# value comes from changed.
+#
+# Function-scoped, not module-scoped: conftest.py's _reset_engine_function
+# resets the SQLAlchemy engine (and with it, the in-memory SQLite DB) before
+# EVERY test function. A module-scoped registration would get wiped by that
+# reset before the first test body even ran — this bit, found by actually
+# running the suite rather than assuming the fixture would work.
 
-ADMIN_TOKEN = settings.admin_token          # default: "dev-admin-token"
-AUTH_HEADER = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
+AUTH_HEADER = {}  # populated by _seed_auth_header before each test
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +44,46 @@ def client():
     """Synchronous TestClient — required for WebSocket tests."""
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def _reset_engine_function():
+    """
+    Overrides conftest.py's same-named fixture for this file only (a
+    fixture defined in the test module shadows one from conftest with the
+    same name). That fixture resets _schema._engine to None before every
+    test to guard against aiosqlite event-loop contamination when a NEW
+    AsyncClient (and thus a new event loop) is created per test function.
+    This file doesn't do that — `client` above is module-scoped and wraps
+    one synchronous TestClient for the whole module, i.e. one event loop
+    for every test here, so that contamination can't happen.
+
+    Found by actually running the suite, not by inspection: once devui
+    routes started depending on get_current_user (which uses
+    sustena.db.schema's SQLAlchemy engine), the reset started wiping every
+    table between tests — this file's tables are created once, at
+    module-scoped TestClient startup (the FastAPI lifespan's init_db()),
+    not per function, so a mid-module reset left `get_engine()` pointing at
+    a brand new, empty database with no `users` table at all.
+    """
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _seed_auth_header(client):
+    """
+    Registers a fresh real user before every test and points AUTH_HEADER at
+    their JWT. Must be function-scoped to run after conftest's per-function
+    engine reset, not before it — see note above.
+    """
+    r = client.post(
+        "/api/v1/users/register",
+        json={"email": f"devui-tests-{uuid.uuid4().hex[:12]}@example.com", "password": "test-password-123"},
+    )
+    assert r.status_code == 200, f"test user registration failed: {r.text}"
+    token = r.json()["data"]["token"]
+    AUTH_HEADER["Authorization"] = f"Bearer {token}"
+    yield
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +225,37 @@ class TestGetState:
             headers=AUTH_HEADER,
         )
         assert state_r.json()["data"]["widgets"] == widgets_r.json()["data"]["widgets"]
+
+    def test_response_contains_proposals_in_voting_list(self, client):
+        r = client.get(
+            "/devui/state",
+            params={"sustain_id": "homestead.bonnie"},
+            headers=AUTH_HEADER,
+        )
+        data = r.json()["data"]
+        assert "proposals_in_voting" in data
+        assert isinstance(data["proposals_in_voting"], list)
+
+    def test_unknown_sustain_returns_empty_proposals_in_voting(self, client):
+        r = client.get(
+            "/devui/state",
+            params={"sustain_id": "does-not-exist"},
+            headers=AUTH_HEADER,
+        )
+        assert r.json()["data"]["proposals_in_voting"] == []
+
+    def test_real_in_voting_proposal_appears(self, client):
+        sid = "homestead.bonnie"
+        create_r = client.post(
+            f"/api/v1/council/{sid}/proposals",
+            json={"proposed_by": "mentor", "operator_name": "budget.allocate", "input_json": {}},
+            headers=AUTH_HEADER,
+        )
+        assert create_r.status_code == 201
+
+        r = client.get("/devui/state", params={"sustain_id": sid}, headers=AUTH_HEADER)
+        proposals = r.json()["data"]["proposals_in_voting"]
+        assert any(p["operator_name"] == "budget.allocate" for p in proposals)
 
 
 # ---------------------------------------------------------------------------
@@ -358,8 +442,9 @@ class TestStateStream:
 
     def test_valid_token_receives_state_snapshot(self, client):
         """Valid token → first message should be a state_snapshot frame."""
+        jwt_token = AUTH_HEADER["Authorization"].split(" ", 1)[1]
         with client.websocket_connect(
-            f"/devui/state-stream?sustain_id=homestead.bonnie&token={ADMIN_TOKEN}"
+            f"/devui/state-stream?sustain_id=homestead.bonnie&token={jwt_token}"
         ) as ws:
             msg = ws.receive_json()
         assert msg["type"] == "state_snapshot"
@@ -369,8 +454,9 @@ class TestStateStream:
 
     def test_valid_token_path_param_form_receives_snapshot(self, client):
         """Legacy path-param WS also works."""
+        jwt_token = AUTH_HEADER["Authorization"].split(" ", 1)[1]
         with client.websocket_connect(
-            f"/devui/state-stream/homestead.bonnie?token={ADMIN_TOKEN}"
+            f"/devui/state-stream/homestead.bonnie?token={jwt_token}"
         ) as ws:
             msg = ws.receive_json()
         assert msg["type"] == "state_snapshot"

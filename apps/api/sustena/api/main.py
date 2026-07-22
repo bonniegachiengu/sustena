@@ -190,3 +190,35 @@ if settings.is_development:
     app.include_router(dev.router, prefix="/dev", tags=["dev"])
     app.include_router(devui.router, prefix="/devui", tags=["devui"])
     app.include_router(seed.router, prefix="/seed", tags=["seed"])
+
+
+# -- Serve the built frontend (single hostname for UI + API) ------------------
+# apps/web/dist doesn't exist in a fresh checkout or in test runs (no `npm run
+# build` has happened) -- guard on it so importing this module never breaks
+# pytest or a backend-only dev setup. Registered LAST: FastAPI matches routes
+# in registration order, so every API route above still takes precedence over
+# the catch-all below.
+
+from pathlib import Path as _Path
+
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+_DIST_DIR = _Path(__file__).resolve().parent.parent.parent.parent / "web" / "dist"
+
+if _DIST_DIR.is_dir():
+    app.mount("/assets", StaticFiles(directory=_DIST_DIR / "assets"), name="frontend-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str) -> FileResponse:
+        """
+        SPA fallback. Any path not matched by an API route above (a
+        client-side react-router path like /profile, or a hard refresh /
+        deep link) serves index.html so the app boots and its own router
+        takes over client-side.
+        """
+        return FileResponse(_DIST_DIR / "index.html")
+
+    logger.info("Serving built frontend from %s", _DIST_DIR)
+else:
+    logger.info("No apps/web/dist found at %s -- API-only mode (run `npm run build` in apps/web to enable single-hostname serving).", _DIST_DIR)

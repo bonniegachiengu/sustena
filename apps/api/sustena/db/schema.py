@@ -43,6 +43,11 @@ users = Table(
     Column("pawa_balance", Integer, default=100, nullable=False),
     Column("created_at", DateTime, default=datetime.utcnow, nullable=False),
     Column("last_active_at", DateTime, nullable=True),
+    # Bumped on logout (or password change). A JWT's embedded token_version
+    # claim must match this or get_current_user rejects it — this is what
+    # makes logout genuinely revoke access rather than just clearing the
+    # browser's copy of a token that would otherwise still be valid.
+    Column("token_version", Integer, default=0, nullable=False),
 )
 
 # ── sustains ───────────────────────────────────────────────────────────────────
@@ -198,8 +203,7 @@ arena_packages = Table(
 )
 
 # ── arena_products ─────────────────────────────────────────────────────────────
-# Real-world products listed by Vyyb food businesses and Mkulima farms.
-# seller_type: vyyb | mkulima
+# Real-world products listed by sustains
 arena_products = Table(
     "arena_products",
     metadata,
@@ -305,6 +309,49 @@ def _migrate_users_auth(sync_conn) -> None:
     logger.info("Migrated users table — added email and password_hash columns.")
 
 
+def _migrate_users_token_version(sync_conn) -> None:
+    """
+    Add token_version to the users table on existing DBs. SQLite cannot
+    ALTER COLUMN, so rename -> recreate -> copy -> drop, same pattern as
+    _migrate_sustains_schema. Uses PRAGMA table_info for detection (not a
+    failing SELECT) — a failing statement inside this shared transaction
+    would invalidate the connection and abort the recreate below.
+    No-op when the column already exists.
+    """
+    old_cols = [row[1] for row in sync_conn.execute(text("PRAGMA table_info(users)"))]
+    if not old_cols or "token_version" in old_cols:
+        return  # no users table yet (create_all handles it), or already migrated
+
+    carry = [
+        c for c in [
+            "id", "phone_number", "email", "password_hash", "display_name",
+            "pawa_balance", "created_at", "last_active_at",
+        ]
+        if c in old_cols
+    ]
+    cols_csv = ", ".join(carry)
+
+    sync_conn.execute(text("ALTER TABLE users RENAME TO _users_old_tv"))
+    sync_conn.execute(text("""
+        CREATE TABLE users (
+            id             VARCHAR(36) PRIMARY KEY,
+            phone_number   VARCHAR(20)  UNIQUE,
+            email          VARCHAR(200) UNIQUE,
+            password_hash  VARCHAR(200),
+            display_name   VARCHAR(100),
+            pawa_balance   INTEGER NOT NULL DEFAULT 100,
+            created_at     DATETIME NOT NULL,
+            last_active_at DATETIME,
+            token_version  INTEGER NOT NULL DEFAULT 0
+        )
+    """))
+    sync_conn.execute(text(
+        f"INSERT INTO users ({cols_csv}) SELECT {cols_csv} FROM _users_old_tv"
+    ))
+    sync_conn.execute(text("DROP TABLE _users_old_tv"))
+    logger.info("Migrated users table — added token_version column (default 0).")
+
+
 def _migrate_sustains_schema(sync_conn) -> None:
     """
     Add template_id to the sustains table on existing DBs and relax the
@@ -360,6 +407,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
         await conn.run_sync(_migrate_users_auth)
+        await conn.run_sync(_migrate_users_token_version)
         await conn.run_sync(_migrate_sustains_schema)
     logger.info("Database initialised — all tables ready.")
 

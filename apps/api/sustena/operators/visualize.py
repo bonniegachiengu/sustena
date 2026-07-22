@@ -7,8 +7,8 @@ Wires UIParser into operator outputs. All are read-only (pawa_cost=0, no
 side_effects). Every operator that produces a display should use visualize.*.
 
 Operators:
-  visualize.pocket_ring       — budget ring chart (rpc)
-  visualize.event_feed        — recent event feed widget (streaming)
+  visualize.pocket_ring — budget ring chart (rpc)
+  visualize.event_feed — recent event feed widget (streaming)
   visualize.constraint_health — constraint health grid (rpc)
 """
 

@@ -2,7 +2,10 @@
 sustena/api/routes/dev.py
 
 Development-only endpoints. ONLY mounted when ENVIRONMENT=development.
-These endpoints are NEVER available in production.
+These endpoints are NEVER available in production. Every route also requires
+a real user session (get_current_user) — the is_development mount gate alone
+isn't route-level auth, and this router exposes session/support-queue data
+plus mutating endpoints (reset session, mark addressed).
 
 Endpoints:
   POST /dev/simulate        — Simulate an inbound WhatsApp message
@@ -10,9 +13,6 @@ Endpoints:
   DELETE /dev/sessions/{phone} — Reset a user's session (re-test onboarding)
   GET  /dev/outbox          — Read whatsapp_mock_outbox.jsonl
   GET  /dev/support-queue   — View support queue
-
-Admin endpoints (also dev-only for now, move to /admin with auth in Phase 1):
-  GET  /dev/support-queue
   PATCH /dev/support-queue/{event_id}/addressed
 """
 
@@ -20,9 +20,10 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
+from sustena.api.routes.users import get_current_user
 from sustena.core.whatsapp_handler import WhatsAppHandler
 
 router = APIRouter()
@@ -52,7 +53,7 @@ class SimulateRequest(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/simulate", summary="Simulate an inbound WhatsApp message")
-async def simulate_message(body: SimulateRequest) -> dict:
+async def simulate_message(body: SimulateRequest, _: dict = Depends(get_current_user)) -> dict:
     """
     Send a test message as if it came from a WhatsApp user.
 
@@ -79,13 +80,13 @@ async def simulate_message(body: SimulateRequest) -> dict:
 
 
 @router.get("/sessions", summary="Inspect all active user sessions")
-async def get_sessions() -> dict:
+async def get_sessions(_: dict = Depends(get_current_user)) -> dict:
     """View all in-memory sessions (onboarding state + user data)."""
     return {"sessions": WhatsAppHandler.get_sessions()}
 
 
 @router.delete("/sessions/{phone}", summary="Reset a user session")
-async def reset_session(phone: str) -> dict:
+async def reset_session(phone: str, _: dict = Depends(get_current_user)) -> dict:
     """
     Clear a user's session so you can re-test the onboarding flow.
     Strips leading '+' automatically.
@@ -95,7 +96,7 @@ async def reset_session(phone: str) -> dict:
 
 
 @router.get("/outbox", summary="Read mock outbox (sent messages)")
-async def get_outbox(limit: int = 20) -> dict:
+async def get_outbox(limit: int = 20, _: dict = Depends(get_current_user)) -> dict:
     """
     Read the last N messages from whatsapp_mock_outbox.jsonl.
     These are the replies Orchie sent (or would have sent) to users.
@@ -116,14 +117,14 @@ async def get_outbox(limit: int = 20) -> dict:
 
 
 @router.get("/support-queue", summary="View support queue")
-async def get_support_queue(addressed: bool | None = None) -> dict:
+async def get_support_queue(addressed: bool | None = None, _: dict = Depends(get_current_user)) -> dict:
     """View messages that couldn't be handled — queued for manual review."""
     items = WhatsAppHandler.get_support_queue(addressed=addressed)
     return {"count": len(items), "items": items}
 
 
 @router.patch("/support-queue/{event_id}/addressed", summary="Mark support item as addressed")
-async def mark_addressed(event_id: str) -> dict:
+async def mark_addressed(event_id: str, _: dict = Depends(get_current_user)) -> dict:
     """Mark a support queue item as addressed."""
     ok = WhatsAppHandler.mark_addressed(event_id)
     if not ok:

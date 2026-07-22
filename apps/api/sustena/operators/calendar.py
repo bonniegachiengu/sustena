@@ -111,9 +111,9 @@ async def calendar_add_event(
 
     Primitives used:
       ConstraintEngine  — enforces date must be in the future
-      PawaLedger        — deducts 0 pawa (free operator)
-      StateAccessor     — appends to calendar.events
-      EventBus          — fires event.calendar.event_added
+      PawaLedger — deducts 0 pawa (free operator)
+      StateAccessor — appends to calendar.events
+      EventBus — fires event.calendar.event_added
 
     params:
       title       -- event title e.g. "School fundraiser"
@@ -207,9 +207,9 @@ async def calendar_upcoming_events(
 
     Primitives used:
       ConstraintEngine  — no constraints declared (read-only, always permitted)
-      PawaLedger        — deducts 0 pawa (free operator)
-      StateAccessor     — reads calendar.events, filters by date window
-      EventBus          — no events (read-only)
+      PawaLedger — deducts 0 pawa (free operator)
+      StateAccessor — reads calendar.events, filters by date window
+      EventBus — no events (read-only)
     """
     params = {"days": days}
 
@@ -282,9 +282,9 @@ async def calendar_remove_event(
 
     Primitives used:
       ConstraintEngine  — enforces event_id is not None
-      PawaLedger        — deducts 0 pawa (free operator)
-      StateAccessor     — reads calendar.events, removes matching event
-      EventBus          — fires event.calendar.event_removed
+      PawaLedger — deducts 0 pawa (free operator)
+      StateAccessor — reads calendar.events, removes matching event
+      EventBus — fires event.calendar.event_removed
 
     params:
       event_id -- UUID of the event to remove

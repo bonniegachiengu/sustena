@@ -10,15 +10,15 @@ State schema additions (beyond biashara):
   state.production.batches    -- production batch list
   state.kds.tasks             -- KDS task queue
   state.staff.roster          -- staff profiles keyed by staff_id
-  state.staff.hours           -- clock-in/out records
-  state.staff.schedules       -- shift schedule list
-  state.procurement.*         -- QSR supplier and PO history
+  state.staff.hours -- clock-in/out records
+  state.staff.schedules -- shift schedule list
+  state.procurement.* -- QSR supplier and PO history
 
 All four primitives wired in every operator:
-  1. @sustena_operator   -- registers in OPERATOR_REGISTRY
-  2. ConstraintEngine    -- self-checks pre-conditions
+  1. @sustena_operator -- registers in OPERATOR_REGISTRY
+  2. ConstraintEngine -- self-checks pre-conditions
   3. StateAccessor       -- all state reads and mutations
-  4. EventBus            -- fires domain events after mutations
+  4. EventBus -- fires domain events after mutations
   5. PawaLedger          -- deducts pawa after constraints pass
 """
 

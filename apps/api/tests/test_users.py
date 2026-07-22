@@ -309,3 +309,65 @@ class TestMeCouncil:
     async def test_no_auth_returns_401(self, client):
         r = await client.get("/api/v1/users/me/council")
         assert r.status_code == 401
+
+
+# ── POST /logout ──────────────────────────────────────────────────────────────
+# The whole point of token_version: prove logout actually revokes the token
+# server-side, not just that the client forgets it.
+
+class TestLogout:
+    async def test_no_auth_returns_401(self, client):
+        r = await client.post("/api/v1/users/logout")
+        assert r.status_code == 401
+
+    async def test_returns_200_with_valid_token(self, client):
+        token = await _token(client)
+        r = await client.post("/api/v1/users/logout", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        assert r.json()["data"]["logged_out"] is True
+
+    async def test_old_token_rejected_after_logout(self, client):
+        """The exact behaviour this feature exists for: a token that was
+        valid a moment ago must stop working the instant logout runs,
+        without needing to wait for its 30-day expiry."""
+        token = await _token(client)
+
+        # Token works before logout.
+        r1 = await client.get("/api/v1/users/me", headers={"Authorization": f"Bearer {token}"})
+        assert r1.status_code == 200
+
+        await client.post("/api/v1/users/logout", headers={"Authorization": f"Bearer {token}"})
+
+        # Same token, now rejected — not because it's malformed or expired,
+        # but because token_version no longer matches.
+        r2 = await client.get("/api/v1/users/me", headers={"Authorization": f"Bearer {token}"})
+        assert r2.status_code == 401
+
+    async def test_logging_in_again_after_logout_issues_a_working_token(self, client):
+        """Logout must not permanently lock the user out — a fresh login
+        issues a token stamped with the new version and works normally."""
+        email, password = "logout-relogin@test.com", "password123"
+        old_token = await _token(client, email=email, password=password)
+        await client.post("/api/v1/users/logout", headers={"Authorization": f"Bearer {old_token}"})
+
+        login_r = await client.post("/api/v1/users/login", json={"email": email, "password": password})
+        assert login_r.status_code == 200
+        new_token = login_r.json()["data"]["token"]
+        assert new_token != old_token
+
+        r = await client.get("/api/v1/users/me", headers={"Authorization": f"Bearer {new_token}"})
+        assert r.status_code == 200
+
+    async def test_logout_only_affects_the_logged_out_user(self, client):
+        """Two different users' sessions are independent — logging one out
+        must not touch the other's."""
+        token_a = await _token(client, email="user-a@test.com")
+        token_b = await _token(client, email="user-b@test.com")
+
+        await client.post("/api/v1/users/logout", headers={"Authorization": f"Bearer {token_a}"})
+
+        r_a = await client.get("/api/v1/users/me", headers={"Authorization": f"Bearer {token_a}"})
+        assert r_a.status_code == 401
+
+        r_b = await client.get("/api/v1/users/me", headers={"Authorization": f"Bearer {token_b}"})
+        assert r_b.status_code == 200

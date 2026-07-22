@@ -41,6 +41,15 @@ async def client():
 SUSTAIN_ID = "homestead.test"
 
 
+async def _register(client, email="council-user@test.com", password="password123"):
+    r = await client.post("/api/v1/users/register", json={"email": email, "password": password})
+    return r.json()["data"]["token"]
+
+
+def _auth(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
 # ── root ──────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -63,17 +72,18 @@ async def test_list_proposals_empty(client):
 
 @pytest.mark.asyncio
 async def test_list_proposals_status_filter(client):
+    token = await _register(client)
     # Create two proposals
     await client.post(f"/api/v1/council/{SUSTAIN_ID}/proposals", json={
         "proposed_by": "mentor",
         "operator_name": "budget.allocate",
         "input_json": {"pocket_name": "food", "amount": 5000},
-    })
+    }, headers=_auth(token))
     await client.post(f"/api/v1/council/{SUSTAIN_ID}/proposals", json={
         "proposed_by": "curator",
         "operator_name": "budget.record_income",
         "input_json": {},
-    })
+    }, headers=_auth(token))
 
     r_all = await client.get(f"/api/v1/council/{SUSTAIN_ID}/proposals")
     assert r_all.json()["data"]["count"] == 2
@@ -89,11 +99,12 @@ async def test_list_proposals_status_filter(client):
 
 @pytest.mark.asyncio
 async def test_create_proposal(client):
+    token = await _register(client)
     r = await client.post(f"/api/v1/council/{SUSTAIN_ID}/proposals", json={
         "proposed_by": "mentor",
         "operator_name": "budget.allocate",
         "input_json": {"pocket_name": "food", "amount": 5000},
-    })
+    }, headers=_auth(token))
     assert r.status_code == 201
     data = r.json()["data"]
     assert data["status"] == "IN_VOTING"
@@ -101,15 +112,26 @@ async def test_create_proposal(client):
     assert "id" in data
 
 
-# ── get single proposal ───────────────────────────────────────────────────────
-
 @pytest.mark.asyncio
-async def test_get_proposal(client):
-    create_r = await client.post(f"/api/v1/council/{SUSTAIN_ID}/proposals", json={
+async def test_create_proposal_no_auth_returns_401(client):
+    r = await client.post(f"/api/v1/council/{SUSTAIN_ID}/proposals", json={
         "proposed_by": "mentor",
         "operator_name": "budget.allocate",
         "input_json": {},
     })
+    assert r.status_code == 401
+
+
+# ── get single proposal ───────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_get_proposal(client):
+    token = await _register(client)
+    create_r = await client.post(f"/api/v1/council/{SUSTAIN_ID}/proposals", json={
+        "proposed_by": "mentor",
+        "operator_name": "budget.allocate",
+        "input_json": {},
+    }, headers=_auth(token))
     proposal_id = create_r.json()["data"]["id"]
 
     r = await client.get(f"/api/v1/council/{SUSTAIN_ID}/proposals/{proposal_id}")
@@ -130,16 +152,18 @@ async def test_get_proposal_not_found(client):
 
 @pytest.mark.asyncio
 async def test_cast_vote(client):
+    token = await _register(client)
     create_r = await client.post(f"/api/v1/council/{SUSTAIN_ID}/proposals", json={
         "proposed_by": "mentor",
         "operator_name": "budget.allocate",
         "input_json": {},
-    })
+    }, headers=_auth(token))
     proposal_id = create_r.json()["data"]["id"]
 
     vote_r = await client.post(
         f"/api/v1/council/{SUSTAIN_ID}/proposals/{proposal_id}/vote",
         json={"operative_id": "mentor", "vote": "YES", "reasoning": "looks good"},
+        headers=_auth(token),
     )
     assert vote_r.status_code == 201
     assert vote_r.json()["data"]["vote"] == "YES"
@@ -156,8 +180,19 @@ async def test_cast_vote(client):
 @pytest.mark.asyncio
 async def test_cast_vote_invalid_status(client):
     """Cannot vote on non-IN_VOTING proposal."""
+    token = await _register(client)
+    r = await client.post(
+        f"/api/v1/council/{SUSTAIN_ID}/proposals/nonexistent/vote",
+        json={"operative_id": "mentor", "vote": "YES"},
+        headers=_auth(token),
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cast_vote_no_auth_returns_401(client):
     r = await client.post(
         f"/api/v1/council/{SUSTAIN_ID}/proposals/nonexistent/vote",
         json={"operative_id": "mentor", "vote": "YES"},
     )
-    assert r.status_code == 404
+    assert r.status_code == 401

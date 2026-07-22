@@ -62,10 +62,10 @@ def _verify_password(plain: str, stored: str) -> bool:
         return False
 
 
-def _create_token(user_id: str) -> str:
+def _create_token(user_id: str, token_version: int) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=_TOKEN_EXPIRE_DAYS)
     return jwt.encode(
-        {"user_id": user_id, "exp": expire},
+        {"user_id": user_id, "token_version": token_version, "exp": expire},
         settings.secret_key,
         algorithm=_ALGORITHM,
     )
@@ -96,7 +96,48 @@ async def get_current_user(
 
     if row is None:
         raise HTTPException(status_code=401, detail="User not found")
-    return dict(row._mapping)
+
+    user = dict(row._mapping)
+    # A mismatch means this token was issued before the user's most recent
+    # logout — reject it even though the signature and expiry are still
+    # valid. This is what makes logout actually revoke access instead of
+    # just deleting the browser's copy of a token that would otherwise
+    # keep working until its 30-day expiry.
+    if payload.get("token_version", 0) != user.get("token_version", 0):
+        raise HTTPException(status_code=401, detail="Session expired — please log in again")
+
+    return user
+
+
+async def get_user_from_token(token: str) -> dict | None:
+    """
+    Same validation as get_current_user, but for callers that don't have an
+    HTTP Authorization header to hand FastAPI's HTTPBearer — namely the
+    devui WebSocket routes, which receive the token as a ?token= query
+    param (browsers can't set custom headers on a WebSocket handshake).
+    Returns None instead of raising, so callers can close the socket with
+    an appropriate code rather than get an unhandled exception.
+    """
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[_ALGORITHM])
+        user_id: str = payload.get("user_id")
+        if not user_id:
+            return None
+    except (ExpiredSignatureError, JWTError):
+        return None
+
+    db_engine = get_engine()
+    async with db_engine.connect() as conn:
+        row = (
+            await conn.execute(select(users_table).where(users_table.c.id == user_id))
+        ).first()
+    if row is None:
+        return None
+
+    user = dict(row._mapping)
+    if payload.get("token_version", 0) != user.get("token_version", 0):
+        return None
+    return user
 
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
@@ -155,6 +196,7 @@ async def register(body: RegisterRequest) -> dict:
                 pawa_balance=100,
                 created_at=now,
                 last_active_at=now,
+                token_version=0,
             )
         )
         await conn.commit()
@@ -164,7 +206,7 @@ async def register(body: RegisterRequest) -> dict:
             "user_id": user_id,
             "email": body.email,
             "display_name": display_name,
-            "token": _create_token(user_id),
+            "token": _create_token(user_id, 0),
         }
     )
 
@@ -202,9 +244,30 @@ async def login(body: LoginRequest) -> dict:
             "user_id": user["id"],
             "email": body.email,
             "display_name": user.get("display_name"),
-            "token": _create_token(user["id"]),
+            "token": _create_token(user["id"], user.get("token_version", 0)),
         }
     )
+
+
+# ── POST /logout ──────────────────────────────────────────────────────────────
+
+@router.post("/logout", summary="Invalidate the current session and every other session for this user")
+async def logout(current_user: dict = Depends(get_current_user)) -> dict:
+    """
+    Bumps token_version, which makes every JWT issued before this moment
+    fail get_current_user's version check — including the one this request
+    just used, and any others (other tabs, other devices) that might exist.
+    This is a real revocation, not just "the browser forgot its token."
+    """
+    db_engine = get_engine()
+    async with db_engine.connect() as conn:
+        await conn.execute(
+            users_table.update()
+            .where(users_table.c.id == current_user["id"])
+            .values(token_version=(current_user.get("token_version", 0) + 1))
+        )
+        await conn.commit()
+    return _ok({"logged_out": True})
 
 
 # ── GET /me ───────────────────────────────────────────────────────────────────

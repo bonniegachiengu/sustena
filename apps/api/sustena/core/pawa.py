@@ -30,7 +30,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # Network treasury — receives 20% of all component charges
-NETWORK_TREASURY_ID = "sustena.network_treasury"
+NETWORK_TREASURY_ID = "sustena.network_treasury" # TODO: Perhaps rename this an other siblings to sustena.mycelium.treasury i.e., others will be sustena.mycelium.market, etc.
 
 # Pawa granted to new users on signup
 ONBOARDING_GRANT = 100

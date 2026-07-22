@@ -7,18 +7,42 @@
  *          No absolute base URL needed — all paths are relative.
  * In prod: set VITE_API_BASE to the deployed backend URL (e.g. https://api.sustena.io).
  *          Leave unset (or set to '') to use the same origin as the frontend.
+ *
+ * Auth: reads the real per-user session token from localStorage on every
+ * call (not a module-level constant) — the token changes at login/logout,
+ * and this file has to see that without a page reload forcing it to.
+ * There is deliberately no baked-in fallback token here: shell.jsx's
+ * AuthGate won't render anything that calls this module until a session
+ * exists, so an absent token here means something is genuinely wrong
+ * (session expired/revoked between checks), not "no one's logged in yet."
  */
 
-const BASE  = import.meta.env.VITE_API_BASE  ?? '';
-const TOKEN = import.meta.env.VITE_ADMIN_TOKEN ?? 'dev-admin-token';
+const BASE = import.meta.env.VITE_API_BASE ?? '';
 
-const headers = () => ({
-  'Content-Type': 'application/json',
-  'Authorization': `Bearer ${TOKEN}`,
-});
+function getToken() {
+  return localStorage.getItem('sustena_token');
+}
+
+function headers() {
+  const token = getToken();
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+  };
+}
+
+// A 401 here means the session that got us past AuthGate has since expired
+// or been revoked (logout in another tab, token_version bumped, natural
+// expiry). Clear it and reload — the cleanest way to land back on AuthGate
+// without this plain module reaching into React state directly.
+function handleUnauthorized() {
+  localStorage.removeItem('sustena_token');
+  window.location.reload();
+}
 
 async function get(path) {
   const res = await fetch(`${BASE}${path}`, { headers: headers() });
+  if (res.status === 401) { handleUnauthorized(); throw new Error(`GET ${path} → 401 (session expired)`); }
   if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
   return res.json();
 }
@@ -29,6 +53,7 @@ async function post(path, body) {
     headers: headers(),
     body: JSON.stringify(body),
   });
+  if (res.status === 401) { handleUnauthorized(); throw new Error(`POST ${path} → 401 (session expired)`); }
   if (!res.ok) throw new Error(`POST ${path} → ${res.status}`);
   return res.json();
 }
@@ -38,10 +63,11 @@ async function post(path, body) {
  * In dev Vite proxies /devui with ws:true so a relative path works.
  */
 function ws(sustainId, onMessage, onClose) {
+  const token = getToken();
   const base = BASE
     ? BASE.replace(/^http/, 'ws')
     : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
-  const url = `${base}/devui/state-stream?sustain_id=${encodeURIComponent(sustainId)}&token=${encodeURIComponent(TOKEN)}`;
+  const url = `${base}/devui/state-stream?sustain_id=${encodeURIComponent(sustainId)}&token=${encodeURIComponent(token ?? '')}`;
   const socket = new WebSocket(url);
 
   socket.onmessage = (event) => {

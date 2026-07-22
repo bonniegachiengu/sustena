@@ -163,11 +163,38 @@ async def test_cors_headers_on_options():
 
 
 @pytest.mark.asyncio
-async def test_unknown_route_returns_404():
-    """Requests to non-existent routes must return 404, not 500."""
+async def test_unknown_route_serves_frontend_shell_not_500():
+    """
+    Unmatched non-API paths now hit the SPA fallback (apps/web/dist/index.html)
+    so client-side routes like /profile work on a hard refresh -- this is
+    intentional, added when the API started serving the built frontend on one
+    hostname. The real invariant this test protects is "never a 500"; it must
+    NOT silently regress to a raw 404 either, since that would mean the SPA
+    fallback broke.
+    """
     async with _client() as client:
         response = await client.get("/this/route/does/not/exist")
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert "root" in response.text  # apps/web/dist/index.html has <div id="root">
+
+
+@pytest.mark.asyncio
+async def test_malformed_api_subpath_never_500s():
+    """
+    Documenting real, tested behavior rather than an assumption: the SPA
+    catch-all (@app.get("/{full_path:path}")) matches ANY unmatched path,
+    including a malformed sub-path nested under a real API prefix like
+    /api/v1/sustains/... that doesn't match any of that router's specific
+    routes -- it also falls through to the SPA shell (200), not a JSON 404.
+    This was verified directly, not assumed; it's a minor rough edge of the
+    simple catch-all (a route-prefix-aware version would exclude /api,
+    /devui, etc.), not a security issue -- no auth-guarded route is bypassed,
+    only genuinely unmatched paths hit it. The invariant that actually
+    matters is protected here: never a 500.
+    """
+    async with _client() as client:
+        response = await client.get("/api/v1/sustains/does-not-exist/nonexistent-subpath/x/y/z")
+    assert response.status_code != 500
 
 
 # ── Request logging smoke test ─────────────────────────────────────────────────

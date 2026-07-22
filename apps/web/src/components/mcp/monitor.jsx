@@ -78,11 +78,136 @@ function useStreamHealth(offline) {
     : { status: 'LIVE',    color: 'var(--teal)',        lag: '1s' };
 }
 
-function MonitorPanel({ tick, sustain, sustains }) {
-  const [apiData, setApiData] = dUseState(null);   // last good GET /devui/state result — state, events, operatives, constraints, widgets all from ONE fetch
+/* The phone's attention budget is real in a way desktop's isn't — this is
+   what decides "mobile" for layout purposes. One breakpoint, not several:
+   the brief calls for phone-width verification (360/390/414) plus a
+   desktop that still works: two compositions, not five. */
+const MOBILE_BREAKPOINT = 640;
+
+function useViewportWidth() {
+  const [width, setWidth] = dUseState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280));
+  dUseEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return width;
+}
+
+/* ─── Needs-attention: same urgency ranking as the state stream, surfaced
+   as its own block so the system comes to the user instead of the user
+   hunting through widgets. Every source here is data the panel already
+   fetches on its normal 1s cycle — nothing new invented, nothing polled
+   separately. Each item answers "why am I seeing this?" in its own text,
+   not just a severity color. ───────────────────────────────────────── */
+function computeNeedsAttention(apiData, stateRows) {
+  const items = [];
+
+  // Pockets at or over their own limit — identical pct signal the state
+  // stream's urgency sort already uses (Slice 0), not recomputed here.
+  stateRows.forEach(s => {
+    if ((s.pct ?? 0) < 0.8) return;
+    const name = s.path.split('.').pop();
+    items.push({
+      id: `pocket:${s.path}`,
+      urgency: s.pct,
+      tone: s.pct >= 1 ? 'danger' : 'amber',
+      title: `${name} pocket ${s.pct >= 1 ? 'over limit' : 'nearly spent'}`,
+      why: `${Math.round(s.pct * 100)}% spent · ${Math.round(s.value).toLocaleString()} of ${Math.round(s.target).toLocaleString()} left`,
+      action: null,  // already on the panel that shows this (state stream, below)
+    });
+  });
+
+  // Failing constraints — the constraint-health widget already evaluates
+  // these; a failing invariant is definitionally a needs-attention item.
+  (apiData?.constraints || []).forEach(c => {
+    if (c.status === 'ok') return;
+    items.push({
+      id: `constraint:${c.expr}`,
+      urgency: 1.5,  // a broken invariant outranks a pocket that's merely close
+      tone: 'danger',
+      title: 'constraint failing',
+      why: c.expr,
+      action: null,
+    });
+  });
+
+  // Council proposals awaiting this user's vote — real, already-existing
+  // data (council_proposals) the Monitor never surfaced before.
+  (apiData?.proposalsInVoting || []).forEach(p => {
+    items.push({
+      id: `proposal:${p.id}`,
+      urgency: 1.2,
+      tone: 'amber',
+      title: `${p.operator_name} awaiting a vote`,
+      why: `proposed by ${p.proposed_by}`,
+      action: 'controller',
+    });
+  });
+
+  return items.sort((a, b) => b.urgency - a.urgency);
+}
+
+function NeedsAttentionBlock({ items, switchPanel }) {
+  return (
+    <div className="fade-up" style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', overflow: 'hidden',
+    }}>
+      <div style={{ padding: '10px 14px', borderBottom: items.length ? '1px solid var(--border)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span className="label-11">NEEDS ATTENTION</span>
+        {items.length > 0 && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{items.length}</span>}
+      </div>
+      {items.length === 0 ? (
+        <div style={{ padding: '14px' }}>
+          <span className="meta-10" style={{ color: 'var(--text-dim)' }}>nothing needs you right now · all clear</span>
+        </div>
+      ) : (
+        <div>
+          {items.map((it, i) => {
+            const color = it.tone === 'danger' ? 'var(--danger)' : 'var(--amber)';
+            const clickable = !!it.action;
+            return (
+              <div
+                key={it.id}
+                onClick={clickable ? () => switchPanel?.(it.action) : undefined}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 14px',
+                  borderBottom: i < items.length - 1 ? '1px solid var(--border)' : 'none',
+                  cursor: clickable ? 'pointer' : 'default',
+                }}
+                onMouseEnter={clickable ? (e => e.currentTarget.style.background = 'var(--bg-raised)') : undefined}
+                onMouseLeave={clickable ? (e => e.currentTarget.style.background = 'transparent') : undefined}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, boxShadow: `0 0 5px ${color}`, flexShrink: 0 }} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                    {it.title}
+                  </span>
+                  <span className="meta-10" style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {it.why}
+                  </span>
+                </div>
+                {clickable && (
+                  <span className="meta-10" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>→</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
+  const [apiData, setApiData] = dUseState(null);   // last good GET /devui/state result — state, events, operatives, constraints, widgets, proposalsInVoting all from ONE fetch
   const [loading, setLoading] = dUseState(true);
   const [offline, setOffline] = dUseState(false);
   const [sortMode, setSortMode] = dUseState('urgency');  // 'urgency' | 'balance'
+  const viewportWidth = useViewportWidth();
+  const isMobile = viewportWidth < MOBILE_BREAKPOINT;
 
   // Normalise GET /devui/state response — single source of truth for the whole panel
   const normaliseGetResponse = (d) => {
@@ -93,6 +218,7 @@ function MonitorPanel({ tick, sustain, sustains }) {
       operatives: payload.operatives || [],
       constraints: payload.constraints || [],
       widgets: payload.widgets || null,
+      proposalsInVoting: payload.proposals_in_voting || [],
     };
   };
 
@@ -152,12 +278,25 @@ function MonitorPanel({ tick, sustain, sustains }) {
   // shown as a designed empty state, never as fabricated rows.
   const logEntries = dUseMemo(() => apiEventsToLogEntries(apiData?.events) || [], [apiData]);
 
+  const needsAttention = dUseMemo(() => computeNeedsAttention(apiData, stateRows), [apiData, stateRows]);
+
+  // Progressive disclosure — the actual attention-budget mechanism, not
+  // just smaller text. On a phone there's room for ~4 rows before a
+  // section is competing with everything else on the screen; desktop
+  // shows everything since the room is real there. Two independent
+  // expand toggles since the two lists earn their place separately.
+  const MOBILE_ROW_CAP = 4;
+  const [stateExpanded, setStateExpanded] = dUseState(false);
+  const [logExpanded, setLogExpanded] = dUseState(false);
+  const visibleStateRows = (isMobile && !stateExpanded) ? stateRows.slice(0, MOBILE_ROW_CAP) : stateRows;
+  const visibleLogEntries = (isMobile && !logExpanded) ? logEntries.slice(0, MOBILE_ROW_CAP) : logEntries;
+
   const activeSustains = (sustains && sustains.length ? sustains : SUSTAINS).filter(s => s.status === 'live').length;
 
   return (
-    <div className="panel-enter" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 18, padding: '24px 28px', overflowY: 'auto' }}>
+    <div className="panel-enter" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: isMobile ? 14 : 18, padding: isMobile ? '14px 12px' : '24px 28px', overflowY: 'auto', overflowX: 'hidden' }}>
       {/* Stream health pill row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <StreamHealthPill health={streamHealth} tick={tick} />
         {offline && (
           <span style={{
@@ -166,12 +305,12 @@ function MonitorPanel({ tick, sustain, sustains }) {
             borderRadius: 10, opacity: 0.7,
           }}>OFFLINE · LAST KNOWN DATA</span>
         )}
-        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>SUSTENA XII · MCP MONITOR · ALL SUSTAINS</span>
+        {!isMobile && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>SUSTENA XII · MCP MONITOR · ALL SUSTAINS</span>}
       </div>
 
       {/* Loading skeleton */}
       {loading && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)', gap: 14 }}>
           {[0,1,2,3].map(i => (
             <div key={i} style={{
               height: 80, borderRadius: 'var(--radius-md)',
@@ -189,9 +328,16 @@ function MonitorPanel({ tick, sustain, sustains }) {
         </div>
       )}
 
-      {/* Top region: Active Sustains (count + list) ⅓ · operatives 3×2 ⅔ */}
+      {/* Needs attention — first thing on the panel, mobile or desktop: the
+          system comes to the user before they go hunting through widgets. */}
+      {!loading && <NeedsAttentionBlock items={needsAttention} switchPanel={switchPanel} />}
+
+      {/* Top region: Active Sustains (count + list) · operatives.
+          Desktop: side by side, 3x2 grid. Mobile: stacked, operatives as
+          full-width compact rows — the 3-column grid is what was clipping
+          labels mid-word at phone widths. */}
       {!loading && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 14, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap: 14, alignItems: 'start' }}>
           <ActiveSustainsCard count={activeSustains} sustains={sustains} currentId={sustain.id} />
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
@@ -200,23 +346,25 @@ function MonitorPanel({ tick, sustain, sustains }) {
                 {operativeCards.filter(o => o.status === 'active').length} ACTIVE · {operativeCards.filter(o => o.status === 'alert').length} ALERT
               </span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
-              {operativeCards.map((o, i) => <OperativeCard key={o.id} o={o} delay={i * 60} />)}
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: isMobile ? 8 : 12 }}>
+              {operativeCards.map((o, i) => <OperativeCard key={o.id} o={o} delay={i * 60} compact={isMobile} />)}
             </div>
           </div>
         </div>
       )}
 
       {/* visualize.* widget grid — same apiData.widgets the rest of the panel reads, no separate fetch */}
-      {!loading && <VisualizeWidgetGrid widgets={apiData?.widgets} />}
+      {!loading && <VisualizeWidgetGrid widgets={apiData?.widgets} isMobile={isMobile} />}
 
-      {/* 2-col: state stream + event log — at the bottom */}
+      {/* State stream + event log — side by side on desktop, stacked with
+          progressive disclosure on mobile (capped rows + show-more, the
+          actual attention-budget mechanism, not just a narrower column). */}
       {!loading && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)', gap: 14, minHeight: 380 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1.3fr)', gap: 14, minHeight: isMobile ? 0 : 380 }}>
           {/* Live State Stream */}
-          <Card title="LIVE STATE STREAM" sub={`${sustain.label}`} padded={false} scroll
+          <Card title="LIVE STATE STREAM" sub={`${sustain.label}`} padded={false} scroll={!isMobile}
             actions={
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <TBtn active={sortMode === 'urgency'} onClick={() => setSortMode('urgency')}>URGENCY</TBtn>
                 <TBtn active={sortMode === 'balance'} onClick={() => setSortMode('balance')}>BALANCE</TBtn>
                 <span className={offline ? '' : 'pulse'} style={{ width: 5, height: 5, borderRadius: '50%', background: offline ? 'var(--text-muted)' : 'var(--teal)', opacity: offline ? 0.5 : 1 }} />
@@ -225,12 +373,15 @@ function MonitorPanel({ tick, sustain, sustains }) {
             }
           >
             {stateRows.length
-              ? stateRows.map((s, i) => <StateRow key={s.path} s={s} delay={i * 30} />)
+              ? visibleStateRows.map((s, i) => <StateRow key={s.path} s={s} delay={i * 30} compact={isMobile} />)
               : <EmptyRow text="no state signals yet · sustain is fresh" />}
+            {isMobile && stateRows.length > MOBILE_ROW_CAP && (
+              <ShowMoreRow expanded={stateExpanded} onToggle={() => setStateExpanded(v => !v)} hiddenCount={stateRows.length - MOBILE_ROW_CAP} />
+            )}
           </Card>
 
           {/* Event Log Stream */}
-          <Card title="EVENT LOG · STREAM" sub={`LAST ${logEntries.length} · ALL SUSTAINS`} padded={false} scroll
+          <Card title="EVENT LOG · STREAM" sub={`LAST ${logEntries.length} · ALL SUSTAINS`} padded={false} scroll={!isMobile}
             actions={
               <div style={{ display: 'flex', gap: 6 }}>
                 <TBtn active>ALL</TBtn>
@@ -241,8 +392,11 @@ function MonitorPanel({ tick, sustain, sustains }) {
             }
           >
             {logEntries.length
-              ? logEntries.map((e, i) => <LogRow key={e.key} e={e} first={i === 0} />)
+              ? visibleLogEntries.map((e, i) => <LogRow key={e.key} e={e} first={i === 0} compact={isMobile} />)
               : <EmptyRow text="no events recorded yet" />}
+            {isMobile && logEntries.length > MOBILE_ROW_CAP && (
+              <ShowMoreRow expanded={logExpanded} onToggle={() => setLogExpanded(v => !v)} hiddenCount={logEntries.length - MOBILE_ROW_CAP} />
+            )}
           </Card>
         </div>
       )}
@@ -258,26 +412,42 @@ function EmptyRow({ text }) {
   );
 }
 
+/* Progressive disclosure control — the mobile attention-budget mechanism.
+   Shown only when there's more to see than the mobile cap allows. */
+function ShowMoreRow({ expanded, onToggle, hiddenCount }) {
+  return (
+    <button onClick={onToggle} style={{
+      width: '100%', padding: '10px 16px',
+      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.06em',
+      color: 'var(--text-secondary)', background: 'transparent',
+      border: 'none', borderTop: '1px solid var(--border)',
+      cursor: 'pointer', textAlign: 'center',
+    }}>
+      {expanded ? 'SHOW LESS ▲' : `SHOW ${hiddenCount} MORE ▼`}
+    </button>
+  );
+}
+
 /* ── VisualizeWidgetGrid — presentational; widgets come from GET /devui/state ── */
-function VisualizeWidgetGrid({ widgets }) {
+function VisualizeWidgetGrid({ widgets, isMobile }) {
   if (!widgets) return null;
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'baseline', gap: isMobile ? 2 : 8, marginBottom: 8 }}>
         <span className="label-11">WIDGET GRID · VISUALIZE OPERATORS</span>
-        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.pocket_ring · event_feed · constraint_health</span>
+        {!isMobile && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.pocket_ring · event_feed · constraint_health</span>}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-        {widgets.pocket_ring       && <PocketRingWidget w={widgets.pocket_ring} />}
-        {widgets.event_feed        && <EventFeedWidget  w={widgets.event_feed} />}
-        {widgets.constraint_health && <ConstraintHealthWidget w={widgets.constraint_health} />}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 12 }}>
+        {widgets.pocket_ring       && <PocketRingWidget w={widgets.pocket_ring} isMobile={isMobile} />}
+        {widgets.event_feed        && <EventFeedWidget  w={widgets.event_feed} isMobile={isMobile} />}
+        {widgets.constraint_health && <ConstraintHealthWidget w={widgets.constraint_health} isMobile={isMobile} />}
       </div>
     </div>
   );
 }
 
-function PocketRingWidget({ w }) {
+function PocketRingWidget({ w, isMobile }) {
   const d = w.data || {};
   const pockets = d.pockets || [];
   const pctSpent = d.pct_spent ?? 0;
@@ -290,9 +460,13 @@ function PocketRingWidget({ w }) {
       borderRadius: 'var(--radius-md)', padding: 14,
       display: 'flex', flexDirection: 'column', gap: 10,
     }}>
+      {/* The operator-name subtitle collided with the title at narrow
+          widths (space-between has nowhere to put the gap when both sides
+          are wide relative to the container) — dropped on mobile rather
+          than wrapped, since it's a developer-facing detail, not content. */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="label-10">BUDGET RING</span>
-        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.pocket_ring</span>
+        {!isMobile && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.pocket_ring</span>}
       </div>
 
       {/* Donut ring summary */}
@@ -326,7 +500,7 @@ function PocketRingWidget({ w }) {
   );
 }
 
-function EventFeedWidget({ w }) {
+function EventFeedWidget({ w, isMobile }) {
   const d = w.data || {};
   const events = d.events || [];
   const total = d.total ?? events.length;
@@ -339,7 +513,7 @@ function EventFeedWidget({ w }) {
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="label-10">EVENT FEED</span>
-        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.event_feed · streaming</span>
+        {!isMobile && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.event_feed · streaming</span>}
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 500, color: 'var(--node-event)' }}>{total}</span>
@@ -355,7 +529,7 @@ function EventFeedWidget({ w }) {
   );
 }
 
-function ConstraintHealthWidget({ w }) {
+function ConstraintHealthWidget({ w, isMobile }) {
   const d = w.data || {};
   const passing = d.passing ?? 0;
   const total = d.total ?? 0;
@@ -371,7 +545,7 @@ function ConstraintHealthWidget({ w }) {
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span className="label-10">CONSTRAINT HEALTH</span>
-        <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.constraint_health</span>
+        {!isMobile && <span className="meta-10" style={{ color: 'var(--text-muted)' }}>visualize.constraint_health</span>}
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 500, color }}>{passing}</span>
@@ -479,7 +653,7 @@ function HeroTile({ label, value, unit, sub, tone, live }) {
   );
 }
 
-function StateRow({ s, delay }) {
+function StateRow({ s, delay, compact }) {
   const c = s.cstr === 'ok' ? 'var(--ok)' : s.cstr === 'amber' ? 'var(--amber)' : 'var(--danger)';
 
   const fmtVal = (v) => {
@@ -521,6 +695,52 @@ function StateRow({ s, delay }) {
   }).join(' ');
 
   const shortPath = s.path.split('.').slice(-1)[0].replace(/_/g, ' ');
+
+  // Compact: the desktop row's fixed pixel columns (130px name + 86px
+  // value + 60px sparkline, none of which shrink) are exactly what caused
+  // horizontal overflow at phone widths — this is a genuinely different
+  // layout (two lines, no fixed-width columns), not a smaller version of
+  // the same grid. Sparkline dropped: real signal, but not essential when
+  // vertical space is the scarce resource, and full labels are kept
+  // instead of abbreviating.
+  if (compact) {
+    return (
+      <div className="fade-up" style={{
+        padding: '10px 14px',
+        borderBottom: '1px solid var(--border)',
+        animationDelay: `${delay}ms`,
+        display: 'flex', flexDirection: 'column', gap: 6,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: c, boxShadow: s.cstr === 'red' ? `0 0 5px ${c}` : 'none', flexShrink: 0 }} />
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 500, color: 'var(--text-primary)',
+            textTransform: 'uppercase', letterSpacing: '0.04em', flex: 1, minWidth: 0,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{shortPath}</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: c, flexShrink: 0 }}>
+            {fmtVal(s.live)}
+          </span>
+          {s.target ? (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>/ {fmtTarget(s.target)}</span>
+          ) : null}
+        </div>
+        {s.desc && (
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', paddingLeft: 14 }}>{s.desc}</span>
+        )}
+        <div style={{ position: 'relative', height: 5, marginLeft: 14 }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-base)', borderRadius: 3, border: '1px solid var(--border)', overflow: 'hidden' }}>
+            <div style={{
+              position: 'absolute', top: 0, left: 0, bottom: 0,
+              width: `${fillRatio * 100}%`, background: c, borderRadius: 3,
+              opacity: s.cstr === 'red' ? 1 : 0.85,
+              boxShadow: s.cstr === 'red' ? `0 0 4px ${c}` : 'none',
+            }} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fade-up" style={{
@@ -638,8 +858,33 @@ function StateRow({ s, delay }) {
   );
 }
 
-function LogRow({ e, first }) {
+function LogRow({ e, first, compact }) {
   const c = e.tone === 'ok' ? 'var(--ok)' : e.tone === 'amber' ? 'var(--amber)' : e.tone === 'danger' ? 'var(--danger)' : 'var(--teal)';
+
+  // Compact: same reasoning as StateRow — the desktop grid's fixed 70px +
+  // 90px columns don't shrink and caused horizontal overflow at phone
+  // widths. Two lines instead: time/dot/op-badge, then the actual event
+  // text on its own full-width line.
+  if (compact) {
+    return (
+      <div className={first ? 'log-in' : ''} style={{
+        padding: '10px 14px', borderBottom: '1px solid var(--border)',
+        display: 'flex', flexDirection: 'column', gap: 4,
+        fontFamily: 'var(--mono)', fontSize: 11,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 5, height: 5, borderRadius: '50%', background: c, flexShrink: 0 }} />
+          <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{e.time}</span>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{e.sustain}</span>
+          <span style={{ color: c, fontSize: 10, marginLeft: 'auto' }}>{e.op}</span>
+        </div>
+        <span style={{ color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingLeft: 13 }}>
+          <span style={{ color: 'var(--amber)' }}>{e.operator}</span> <span style={{ color: 'var(--text-muted)' }}>→</span> {e.delta}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className={first ? 'log-in' : ''} style={{
       display: 'grid', gridTemplateColumns: '70px 6px 1.2fr 1.6fr 90px',
@@ -659,20 +904,57 @@ function LogRow({ e, first }) {
   );
 }
 
-function OperativeCard({ o, delay }) {
+function OperativeCard({ o, delay, compact }) {
   const statusColor = o.status === 'active' ? 'var(--teal)' : o.status === 'alert' ? 'var(--amber)' : 'var(--text-muted)';
   const hasConf = typeof o.confidence === 'number';
   const conf = hasConf ? Math.max(0, Math.min(100, o.confidence)) : null;
   const hasTask = !!(o.task && String(o.task).trim());
 
-  return (
-    <button onClick={() => window.confirmAction?.({
+  const clickProps = {
+    onClick: () => window.confirmAction?.({
       title: `${o.name} · ${o.role}`,
       body: hasTask
         ? `${o.task}.${hasConf ? ` Confidence ${conf}%.` : ''} Pawa burn ${o.pawa} / session.`
         : `${o.name} is idle — no task assigned. Operatives act when a Council proposal touches their domain (${o.role}).`,
       ctaLabel: 'VIEW DETAILS',
-    })}
+    }),
+  };
+
+  // Compact: one dense row (dot + name + role, status, confidence) instead
+  // of the desktop card's four stacked sections — six of these stack
+  // reasonably on a phone; six full desktop cards would not. Full labels
+  // throughout, nothing abbreviated — this is about density, not clipping.
+  if (compact) {
+    return (
+      <button {...clickProps} className="fade-up" style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        background: 'var(--bg-surface)', border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-md)', padding: '10px 12px',
+        textAlign: 'left', width: '100%', animationDelay: `${delay}ms`,
+        transition: 'border-color var(--t-fast)', cursor: 'pointer',
+      }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: statusColor, boxShadow: `0 0 5px ${statusColor}`, flexShrink: 0 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1, gap: 2 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '0.04em', flexShrink: 0 }}>{o.name}</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.role}</span>
+          </div>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 9,
+            color: hasTask ? 'var(--text-secondary)' : 'var(--text-dim)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{hasTask ? o.task : 'idle · awaiting council trigger'}</span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: statusColor, letterSpacing: '0.06em' }}>{o.status.toUpperCase()}</span>
+          {hasConf && <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-secondary)' }}>{Math.round(conf)}%</span>}
+        </div>
+      </button>
+    );
+  }
+
+  return (
+    <button {...clickProps}
     className="fade-up"
     style={{
       display: 'flex', flexDirection: 'column', gap: 8,

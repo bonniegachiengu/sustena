@@ -30,6 +30,8 @@ lore/
 # ── Secrets and environment ───────────────────────────────────────────────────
 backend/.env
 *.env
+.env.local
+.env.*.local
 !*.env.example
 service-account*.json
 *-credentials.json

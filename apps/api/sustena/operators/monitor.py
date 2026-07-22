@@ -35,12 +35,12 @@ async def monitor_state_path(
     Watch a state path and fire alert_event if the condition is met.
 
     Accepts two condition formats:
-      Partial:  "> 80"   or ">= 1.0"   — compared against state[path]
-      Full:     "finances.pockets.food.spent > 80"   — full ConstraintEngine expression
+      Partial: "> 80" or ">= 1.0" — compared against state[path]
+      Full: "finances.pockets.food.spent > 80" — full ConstraintEngine expression
 
     params:
       path        -- dot-path to watch e.g. "finances.pockets.food.spent"
-      condition   -- comparison ("> 80") or full ConstraintEngine expression
+      condition -- comparison ("> 80") or full ConstraintEngine expression
       alert_event -- event name to publish when condition is True
     """
     current_value = ctx.state.get(path)
