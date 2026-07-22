@@ -357,6 +357,32 @@ Audit-driven pass: every value the Monitor panel displays must trace to a real w
 
 ---
 
+### Slice 1 ✅ — Public access + real per-user auth (21 Jul 2026)
+
+- Exposed the app publicly at `sustena.vyybandasky.online` via the existing WSL-hosted `vyyb-tunnel` cloudflared tunnel (new ingress entry + DNS route only — VOS/`vyyb-os` untouched). FastAPI now serves the built `apps/web/dist` directly (`StaticFiles` mount in `main.py`), so frontend + API share one hostname.
+- Replaced the shared `ADMIN_TOKEN` model with real per-user JWT auth: `users` table gained `email`/`password_hash` (PBKDF2-SHA256) + `token_version` (for genuine logout revocation, not just client-side token deletion). All `devui.py`/`seed.py`/`dev.py`/`council.py` routes converted from `verify_admin` to `get_current_user`. Full-page login gate in `shell.jsx` (`AuthGate` + `SignInPanel`, reused from `ProfilePage.jsx`); `api.js` reads the session token from `localStorage.getItem('sustena_token')` per request, `VITE_ADMIN_TOKEN` removed entirely.
+- Accounts created/reset for Bonnie; a keepalive watchdog (PowerShell + hidden VBS launcher) keeps the local dev stack running so the public hostname stays reachable.
+
+---
+
+### Slice 2 ✅ — Needs-attention + real mobile responsive layout (22 Jul 2026)
+
+The first deliberately-visible slice after two invisible ones (Slice 0, Slice 1's login). Two parts, built as one mechanism: the same urgency-ranking logic that drives mobile's attention budget also drives the needs-attention block.
+
+**Part A — Needs-attention block:**
+- `GET /devui/state` extended with `proposals_in_voting` (new `_get_proposals_in_voting()` helper in `devui.py`, reads the already-existing `council_proposals` table — no new backend state, added to the same unified per-tick fetch rather than a second poll).
+- `computeNeedsAttention()` in `monitor.jsx` ranks three real, already-computed signals: pockets ≥80% spent (reuses Slice 0's urgency `pct`), failing constraints (from `evaluate_constraints`), proposals awaiting a vote. Each row states what/why/how urgent (e.g. "90% spent · 100 of 1,000 left") and is tappable to the relevant panel where one exists. Empty categories render nothing; genuinely-clear state shows one plain line, never a zero-filled list.
+- Deliberately excluded the WhatsApp support-queue count despite technically fitting "a total already computed and discarded" — CLAUDE.md's no-new-WhatsApp-development rule stands even for read-only surfacing.
+
+**Part B — Responsive layout, not a shrunk desktop:**
+- `useViewportWidth()` hook (640px breakpoint) drives `isMobile` in `monitor.jsx`; single-column stack, `compact` variants of `OperativeCard`/`StateRow`/`LogRow` (genuinely different layouts, not narrower copies of the fixed-pixel-grid desktop versions), progressive disclosure (4-row cap + "SHOW N MORE" toggle) on the state stream and event log.
+- Root cause of the reported "BUDGETvisualize.pocket_ring" label collision: each `visualize.*` widget card showed its technical operator-name subtitle via `justify-content:space-between` with no wrap protection — hidden on mobile as decorative/developer-facing detail.
+- **The actual blocker for "no horizontal scroll at any width" turned out to live in `shell.jsx`, not `monitor.jsx`.** The app-shell grid (`200px sidebar | 1fr main`) had no `minWidth:0` on the `main` grid track, so unconstrained child content forced the track wider than the viewport; `TopBar`'s right cluster (PROD·LIVE badge, OP identity, clock) didn't shrink or hide anything below its natural width either. Fixed: `LeftNav` auto-collapses to a 56px icon rail below the breakpoint (`useShellIsMobile()`, same 640px cutoff), `TopBar` trims to a single presence dot + bare clock + truncated sustain label, `Footer` becomes internally horizontally-scrollable (`overflowX:auto` + `.no-scrollbar`) with non-essential ticks hidden, and `main` got `minWidth:0`.
+- Verified at 360/390/414px and 1440px desktop via direct DOM measurement (`getBoundingClientRect`, `scrollLeft` manipulation to confirm the page **cannot** actually scroll horizontally, `gridTemplateColumns` to confirm the correct layout branch is live) rather than screenshots — the in-app browser tool's screenshot/zoom actions reliably time out in this environment; this was confirmed as a tool limitation, not an app issue, before falling back. Confirmed live over the public hostname (`sustena.vyybandasky.online`) at both phone and desktop widths, authenticated as Bonnie, showing his real session data.
+- 1649 backend tests pass (5 new: `proposals_in_voting` shape/empty/real-data cases). Frontend rebuilt (`npm run build`) and confirmed the public hostname is serving the new asset hashes without a backend restart (`StaticFiles` reads from disk per request).
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:
