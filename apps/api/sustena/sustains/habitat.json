@@ -1,0 +1,185 @@
+{
+  "id": "habitat",
+  "version": "1.0.0",
+  "display_name": "Habitat",
+  "description": "The person-level primary Sustain — the smallest complete unit in the holon model. Every user has exactly one habitat: their own state, independent of any household or group Sustain (e.g. a Homestead) they may also belong to as a member.",
+  "state_schema": {
+    "identity": {
+      "type": "object",
+      "description": "Who this habitat belongs to.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The person's name."
+        },
+        "role_in_family": {
+          "type": "string",
+          "description": "Free-text role within a parent Sustain (e.g. 'parent', 'child') — not enforced, informational only."
+        }
+      },
+      "required": ["name"]
+    },
+    "finances": {
+      "type": "object",
+      "description": "Personal finances — same shape as Homestead's, scoped to one person.",
+      "properties": {
+        "liquid": {
+          "type": "object",
+          "description": "Unallocated liquid balance — money not yet assigned to any pocket.",
+          "properties": {
+            "balance": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": ["balance"]
+        },
+        "pockets": {
+          "type": "object",
+          "description": "Named personal budget pockets keyed by pocket name.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "allocated": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Total moved into this pocket from liquid"
+              },
+              "spent": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Amount deducted via budget.spend"
+              },
+              "limit": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Optional hard cap (0 = no limit)"
+              }
+            },
+            "required": ["allocated", "spent", "limit"]
+          }
+        },
+        "income": {
+          "type": "object",
+          "description": "Personal income tracking — most recent recording.",
+          "properties": {
+            "amount": {
+              "type": "number",
+              "minimum": 0
+            },
+            "frequency": {
+              "type": "string",
+              "enum": ["once", "daily", "weekly", "monthly"]
+            },
+            "last_recorded": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": ["amount", "frequency", "last_recorded"]
+        }
+      },
+      "required": ["liquid", "pockets", "income"]
+    }
+  },
+  "operators": [
+    {
+      "name": "budget.record_income",
+      "description": "Record a personal income transaction and credit the liquid balance.",
+      "params": ["amount", "source", "frequency"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "budget.allocate",
+      "description": "Move an amount from liquid balance into a named personal pocket.",
+      "params": ["pocket_name", "amount", "period"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "budget.spend",
+      "description": "Record a spend against a personal pocket.",
+      "params": ["pocket_name", "amount", "description", "category"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "budget.summary",
+      "description": "Return a budget ring ResponseWidget showing all personal pockets and key metrics.",
+      "params": [],
+      "pawa_cost": 0
+    }
+  ],
+  "operatives": {},
+  "invariants": [
+    {
+      "id": "liquid_non_negative",
+      "expression": "finances.liquid.balance >= 0",
+      "description": "A habitat's liquid balance can never go below zero. Same rule as Homestead's, scoped to one person."
+    }
+  ],
+  "enforcement": {
+    "enabled": true,
+    "_note": "Same reasoning as homestead.json's opt-in: the single invariant compiles clean against state_schema and budget.allocate already self-guards to the same effect — a last-line-of-defense gate, not expected to trip in normal use."
+  },
+  "ui_schema": {
+    "sustain_home": {
+      "widget": "sustain_home"
+    }
+  },
+  "access_policy": {
+    "owner_ids": "{{owner_ids}}"
+  },
+  "default_state": {
+    "identity": {
+      "name": "{{name}}",
+      "role_in_family": "{{role_in_family}}"
+    },
+    "finances": {
+      "liquid": {
+        "balance": 0.0
+      },
+      "pockets": {},
+      "income": {
+        "amount": 0.0,
+        "frequency": "monthly",
+        "last_recorded": null,
+        "monthly_total": 0.0,
+        "sources": []
+      }
+    }
+  },
+  "parameters": [
+    {
+      "name": "owner_ids",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of user IDs who have owner (Level 0) access to this habitat. Required at instantiation.",
+      "required": true
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "description": "The person's name.",
+      "required": true
+    },
+    {
+      "name": "role_in_family",
+      "type": "string",
+      "description": "Optional free-text role within a parent Sustain (e.g. 'parent', 'child').",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "initial_income",
+      "type": "number",
+      "description": "Starting income amount (KES). Defaults to 0 if not provided.",
+      "required": false,
+      "default": 0.0
+    }
+  ],
+  "_notes": {
+    "slice_status": "Declared as a spec/template only (prune-and-habitat slice). Auto-provisioning a habitat on user signup is deliberately NOT wired here — that belongs to the create/definition slice (Slice 5). No live habitat instances exist yet from this change alone.",
+    "reuses_existing_operators": "All four declared operators are the existing sustena/operators/budget.py implementations, already tested via homestead — no new operator code was written for habitat. homestead.tasks.* operators were deliberately left out to avoid a dot-protocol namespace mismatch (a 'homestead.*'-prefixed operator inside a non-homestead sustain) rather than papering over it."
+  }
+}
