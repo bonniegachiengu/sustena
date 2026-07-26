@@ -407,6 +407,19 @@
     "enabled": true,
     "_note": "Opt-in per Slice 2 rollout discipline. Both invariants above compile clean against state_schema and are already respected by every current operator's own guards — this is a last-line-of-defense gate, not expected to trip in normal use."
   },
+  "habitats": {
+    "_notes": "Prune-and-habitat slice scaffolding. Homestead is declared as a holon composed of 6 member habitats (Gachiengu family) — one habitat.json instance per member. This is a STRUCTURAL DECLARATION ONLY: no live sustain_id linkage exists yet (each is null below), and homestead's own state, invariants, and enforcement gate are completely unaffected by any member's habitat state. Real parent/child instantiation and ⊕ (composition) / ρ (roll-up) aggregation — a habitat's finances folding up into homestead's totals — require the dedicated composition/coordination slice (Slice 8), per the §4D holon gap the Slice 2 audit flagged. Auto-provisioning a habitat per member on signup is also deliberately not wired here — that belongs to the create/definition slice (Slice 5). Nothing in sustena/core reads this block; it cannot affect engine behaviour.",
+    "composition_status": "declared",
+    "roll_up_status": "PENDING — not computed; requires Slice 8 (composition/coordination)",
+    "members": [
+      { "slot": "habitat_1", "member": "Bonnie",  "template": "habitat", "sustain_id": null, "status": "declared" },
+      { "slot": "habitat_2", "member": "Cira",     "template": "habitat", "sustain_id": null, "status": "declared" },
+      { "slot": "habitat_3", "member": "Epha",     "template": "habitat", "sustain_id": null, "status": "declared" },
+      { "slot": "habitat_4", "member": "Mum",      "template": "habitat", "sustain_id": null, "status": "declared" },
+      { "slot": "habitat_5", "member": "Kui",      "template": "habitat", "sustain_id": null, "status": "declared" },
+      { "slot": "habitat_6", "member": "Frankie",  "template": "habitat", "sustain_id": null, "status": "declared" }
+    ]
+  },
   "ui_schema": {
     "sustain_home": {
       "widget": "sustain_home"
