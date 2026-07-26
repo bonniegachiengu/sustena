@@ -88,6 +88,9 @@ Thumbs.db
 desktop.ini
 
 # ── Obsidian workspace (local-only UI state) ──────────────────────────────────
+# **/ so this also covers nested vaults (e.g. docs/.obsidian/workspace.json),
+# not just the repo-root one the bare pattern below matched.
+**/.obsidian/workspace.json
 .obsidian/workspace.json
 .obsidian/app.json
 .obsidian/appearance.json
