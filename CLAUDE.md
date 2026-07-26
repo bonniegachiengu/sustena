@@ -383,6 +383,40 @@ The first deliberately-visible slice after two invisible ones (Slice 0, Slice 1'
 
 ---
 
+### Slice 2 ✅ — Typed predicate invariants + the enforcing gate (the keystone) (22 Jul 2026)
+
+Backend correctness — mostly invisible by design. The one visible payoff is honest *refusals* replacing silent bad state, nothing more was built to make it look bigger.
+
+**What the audit had established:** `ConstraintEngine.evaluate_constraints()` existed but was purely advisory — called only from `devui.py` diagnostic routes, never gating a mutation. `ConstraintEngine.evaluate()` was single-state (no typed AST, no schema binding). Sustain `invariants` were flat strings. Operator `post_constraints` (and `min_privilege`) were declared on `OperatorMeta` but only ever stored, never evaluated.
+
+**Move 1 — typed predicate invariants (`sustena/core/predicates.py`, new):**
+- A full AST (`Comparison`, `Membership`, `LogicalAnd/Or/Not`, `Quantifier`, `Aggregate`, ...) with its own hand-written recursive-descent parser — no `eval()`/`exec()`/`compile()`, same discipline as the existing `constraints.py`.
+- Grammar matches what the *shipped* sustain specs actually use (`path[*].field`, brackets after the path) rather than the older `Sustena_DSL_Dot_Protocol.md` reference doc's `[path].field` form — the running specs are the contract this follows, the doc is stale and worth reconciling separately.
+- Added the `SUM`/`COUNT`/`AVG`/`MIN`/`MAX` aggregate-function grammar that was previously flagged as an explicit gap (`ConstraintEngine`'s old quantifier code literally rejected `SUM(...)` with "unsupported aggregate/block expression") — needed for the `journal_balanced` invariant (`ALL accounts.journal_entries[*]: SUM(lines[*].debit) == SUM(lines[*].credit)`) used by biashara/vyyb/colosso.
+- `validate_against_schema(node, state_schema)` walks every state-path reference in the AST against the sustain's declared `state_schema` (handling `properties`, `items`, `additionalProperties` for the dict-of-objects pattern pockets/inventory use) — a predicate referencing an undeclared dimension is a **load-time finding**, not a silent runtime `None`-comparison.
+- Real semantic subtlety caught and fixed during build: inside a quantifier body, a bare name must resolve against the current *item*'s own fields first, but still fall through to the top-level state for anything not shadowed (e.g. `rules.fine_reasons` referenced from inside `ALL fines[*]...`) — mirrors the old engine's `{**state.snapshot(), **item}` merge; both the evaluator and the schema validator thread a constant `global_root`/`root_schema` alongside the per-quantifier `scope`/`scope_schema` to get this right.
+- `sustena/core/sustain_engine.py._compile_spec_invariants()` compiles + schema-binds every invariant once at spec load (idempotent, cached on the spec dict as `_compiled_invariants` / `_invariant_compile_errors`), non-fatal — an invalid invariant is logged and skipped from enforcement, it does not block the sustain from loading.
+
+**Move 2 — the enforcing gate (`SustainEngine.execute_operator` + `simulate`):**
+- After the operator function returns and `result.succeeded`, **before persisting**, `_check_enforcement_gate()` evaluates every compiled sustain invariant and the operator's declared `post_constraints` against the mutated `StateAccessor`. Any failure → `OperatorResult.fail(reason="would violate invariant '<id>' (<expr>): <legible reason>", constraint_violated="enforcement_gate")` — live state is **not** persisted, no exception thrown. Wired identically into `simulate()`'s per-step loop so a forked simulation can never advance past a state the live path would refuse (matches the DSL doc's "Simulator runs all constraints before Council deliberates").
+- Only the `refuse` strategy from §4E's three (refuse / clamp / defer) is implemented, as scoped. Clamp/defer are not stubbed — no declared-but-unwired hooks were cheap enough to add honestly in this pass.
+- `min_privilege` enforcement (the separate `privilege.check` mechanism from Master Strategy §4.5) remains unbuilt — out of scope for this slice, needs `access_policy` tier resolution that doesn't exist yet.
+
+**Rollout — opt-in per sustain, not default-on:** a sustain spec must declare `"enforcement": {"enabled": true}` for the gate to do anything; everything else behaves exactly as before. Enabled explicitly on:
+- **`homestead.json`** — both invariants (`liquid_non_negative`, `pocket_allocated_non_negative`) compile clean; every current homestead operator already self-guards to the same effect (`budget.allocate`'s own pre-check `finances.liquid.balance >= params.amount` is mathematically equivalent to the invariant), so this is a last-line-of-defense gate, not expected to trip in Bonnie's normal use — confirmed via the full homestead/budget/sustain_engine/sustain_specs test subset (272 tests) passing unchanged with the gate live.
+- **`biashara.json`** — both invariants (`journal_balanced` using the new `SUM` aggregate, `inventory_qty_non_negative`) compile clean against its schema. No existing test currently exercises a biashara-templated sustain end-to-end through the engine, so this is validated statically (schema-correct, parses+binds) rather than empirically exercised — lower confidence than homestead, but zero risk to Bonnie's live usage since he isn't on a biashara sustain.
+
+**Left disabled — real findings, not silently patched over:**
+- **`vyyb.json`** — `journal_balanced` and `inventory_qty_non_negative` reference `accounts.*`/`inventory.*`, both present in `default_state` but **missing from `state_schema` entirely**. Pre-existing spec inconsistency; `state_schema` needs the same fields biashara's already has.
+- **`colosso.json`** — same `accounts`/`inventory` schema gap (inherited invariants copied from Biashara without updating `state_schema`); `kyc_before_loan` additionally uses dynamic bracket indexing (`members[loan.member_id]`) which is outside the documented DSL grammar (`'[' number ']'` or `'[' '*' ']'` only) — deliberately not invented to accommodate it.
+- **`chama.json`** — `loan_within_max_ratio` uses arithmetic (`rules.max_loan_ratio * pool.balance`) — the DSL grammar has no arithmetic operators, not invented for this slice. `contribution_within_range` is missing its `[*]` bracket entirely (`ALL contribution:` — not even valid under either bracket convention). `pool_balance_non_negative` and `fine_reason_valid` **do** compile clean, but the sustain as a whole is left off pending the other two being fixed.
+
+All four non-homestead/biashara findings are pre-existing spec bugs that predate this slice — none were introduced by it, and none block enforcement anywhere it's actually enabled.
+
+**Tests:** `tests/test_predicates.py` (39 tests — parser, schema binder, evaluator, plus a dedicated class that compiles every real invariant string from all 5 shipped specs and asserts the expected pass/fail per the findings above) + 8 new tests in `tests/test_sustain_engine.py::TestEnforcementGate` (refuses a bad transition via a monkeypatched operator that bypasses `StateAccessor.decrement()`'s own guard, confirms live state is untouched on refusal, confirms the reason names the failing dimension, confirms a real good transition still commits — including the `>= 0` boundary landing exactly on zero, confirms `simulate()` won't advance a forked state past a refused step, confirms a non-enforced sustain like vyyb is a true no-op). **1696 tests pass** (1688 + 8).
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:
