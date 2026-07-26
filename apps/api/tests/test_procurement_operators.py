@@ -139,8 +139,8 @@ class TestProcurementOperatorRegistry:
             OPERATOR_REGISTRY["procurement.confirm_delivery"].side_effects
 
     def test_previous_operators_still_registered(self):
-        """Regression: adding procurement must not break budget and chama registrations."""
-        for name in ["budget.record_income", "budget.allocate", "chama.contribution.record"]:
+        """Regression: adding procurement must not break budget registrations."""
+        for name in ["budget.record_income", "budget.allocate"]:
             assert name in OPERATOR_REGISTRY, f"'{name}' missing after procurement import"
 
 

@@ -18,7 +18,7 @@ class TestBuiltins:
         expected = {
             "budget_allocation_card", "budget_ring", "transaction_confirmation",
             "calendar_event_card", "operative_status_card", "constraint_health_grid",
-            "sustain_home", "chama_summary_card", "procurement_order_card",
+            "sustain_home", "procurement_order_card",
         }
         registered = {w["widget_type"] for w in registry.list_all()}
         assert expected <= registered

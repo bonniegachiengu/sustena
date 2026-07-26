@@ -29,17 +29,6 @@ BUDGET_OPERATORS = [
     "budget.summary",
 ]
 
-CHAMA_OPERATORS = [
-    "chama.contribution.record",
-    "chama.loan.request",
-    "chama.loan.disburse",
-    "chama.loan.repay",
-    "chama.fine.record",
-    "chama.meeting.schedule",
-    "chama.dividend.calculate",
-    "chama.rotation.advance",
-]
-
 PROCUREMENT_OPERATORS = [
     "mkulima.broadcast_supply_signal",
     "mkulima.receive_signal",
@@ -114,7 +103,7 @@ ORCHIE_OPERATORS = [
 ]
 
 ALL_KNOWN_OPERATORS = (
-    BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
+    BUDGET_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + UI_RENDER_OPERATORS                  # Sprint 2 UIParser
     + API_OPERATORS                        # Sprint 3.1
     + MONITOR_OPERATORS                    # Sprint 3.2
@@ -134,11 +123,6 @@ class TestRegistryCompleteness:
     def test_all_budget_operators_present(self):
         """All five Epic 1.1 budget operators must be in the registry."""
         missing = [op for op in BUDGET_OPERATORS if op not in OPERATOR_REGISTRY]
-        assert not missing, f"Missing from OPERATOR_REGISTRY: {missing}"
-
-    def test_all_chama_operators_present(self):
-        """All seven Epic 1.1.2 chama operators must be in the registry."""
-        missing = [op for op in CHAMA_OPERATORS if op not in OPERATOR_REGISTRY]
         assert not missing, f"Missing from OPERATOR_REGISTRY: {missing}"
 
     def test_no_unknown_operators_present(self):

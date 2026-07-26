@@ -37,7 +37,7 @@ class WidgetTypeRegistry:
     """
     Local registry mapping widget_type strings to their metadata and templates.
 
-    All budget, calendar, chama, and other built-in widgets are pre-registered
+    All budget, calendar, and other built-in widgets are pre-registered
     at instantiation time. New widget types can be registered at any time.
     """
 
@@ -144,11 +144,6 @@ class WidgetTypeRegistry:
                 "widget_type": "sustain_home",
                 "description": "Home screen with key metrics, active operatives, and quick actions.",
                 "schema": {"fields": ["Pawa Balance", "Active Operatives", "Open Proposals"], "ctas": ["Ask Orchie", "View Budget", "Council"]},
-            },
-            {
-                "widget_type": "chama_summary_card",
-                "description": "Chama group summary: members, total contributions, last activity.",
-                "schema": {"fields": ["Members", "Total Contributions", "Last Activity"], "ctas": ["Record Contribution", "View Members"]},
             },
             {
                 "widget_type": "procurement_order_card",

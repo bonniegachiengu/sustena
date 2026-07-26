@@ -285,12 +285,14 @@ class TestRealSustainSpecs:
     Compile every declared invariant from every shipped sustain spec. This is
     the load-time validation Move 1 exists for — a predicate referencing a
     dimension the schema doesn't declare must fail here, not silently at
-    runtime. homestead is expected fully clean; chama has pre-existing spec
-    gaps (documented in CLAUDE.md) that predate this slice.
+    runtime.
 
-    biashara/vyyb/colosso were removed in the homestead-only prune — their
+    biashara/vyyb/colosso were removed in the homestead-only prune, and chama
+    followed in the same slice ("only homestead should remain") — their
     dedicated compile-error assertions went with them rather than being kept
-    around to test files that no longer exist.
+    around to test files that no longer exist. Only homestead and habitat
+    remain (plus habitat's siblings, if any are added later); both are
+    expected fully clean.
     """
 
     @staticmethod
@@ -309,14 +311,3 @@ class TestRealSustainSpecs:
         for inv in spec["invariants"]:
             node, errors = compile_invariant(inv["expression"], spec["state_schema"])
             assert not errors, f"{inv['id']}: {errors}"
-
-    def test_chama_invariants_surface_known_grammar_gaps(self):
-        spec = self._load("chama")
-        results = {
-            inv["id"]: compile_invariant(inv["expression"], spec["state_schema"])[1]
-            for inv in spec["invariants"]
-        }
-        assert not results["pool_balance_non_negative"]
-        assert not results["fine_reason_valid"]
-        assert results["loan_within_max_ratio"], "expected a real finding: arithmetic (*) is not in the DSL grammar"
-        assert results["contribution_within_range"], "expected a real finding: missing '[*]' bracket"

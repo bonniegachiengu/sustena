@@ -3121,9 +3121,6 @@ function SeedPanel({ sustain }) {
                 <label style={labelStyle}>TYPE</label>
                 <select style={selectStyle} value={type} onChange={e => setType(e.target.value)}>
                   <option value="household">Household</option>
-                  <option value="business">Business</option>
-                  <option value="chama">Chama</option>
-                  <option value="farm">Farm</option>
                 </select>
               </div>
               <div style={fieldStyle}>

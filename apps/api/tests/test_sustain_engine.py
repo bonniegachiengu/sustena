@@ -490,21 +490,41 @@ class TestEnforcementGate:
         assert engine.get_state(homestead_sid)["finances"]["liquid"]["balance"] == 0.0
 
     @pytest.mark.asyncio
-    async def test_non_enforced_sustain_is_unaffected(self, engine: SustainEngine):
-        """chama.json has no enforcement block — the gate must be a true no-op there."""
-        sid = engine.instantiate(
-            "chama", "u1",
-            {"owner_ids": ["u1"], "secretary_id": "u1", "member_ids": ["u1"], "chama_name": "Test Chama"},
-        )
-        spec = engine.get_spec(sid)
-        assert not spec.get("enforcement", {}).get("enabled")
+    async def test_non_enforced_sustain_is_unaffected(self, engine: SustainEngine, homestead_sid: str):
+        """
+        A sustain without spec["enforcement"]["enabled"] must be a true no-op
+        for the gate. homestead and habitat are now the only two shipped
+        sustains (chama was removed in this slice — "only homestead should
+        remain" — and both biashara/vyyb were removed earlier), and both ship
+        with enforcement ON, so there's no real non-enforced sustain left to
+        instantiate. Proven instead by disabling homestead's enforcement
+        in-memory on its already-compiled spec and confirming a transition
+        that would otherwise be refused now commits — a stronger check than
+        the old version, which only inspected the flag and never actually
+        exercised a bad transition against a disabled gate.
+        """
+        from sustena.core.operator import OPERATOR_REGISTRY, OperatorResult
 
-        # chama has a mixed profile (2 of its 4 invariants fail schema binding —
-        # pre-existing, disclosed spec gaps from Slice 2) — confirming the gate
-        # has real invariants available but still enforces nothing, since
-        # enforcement itself is off for this sustain.
-        assert len(spec["_compiled_invariants"]) == 2
-        assert len(spec["_invariant_compile_errors"]) == 2
+        spec = engine.get_spec(homestead_sid)
+        assert spec.get("enforcement", {}).get("enabled") is True  # sanity: normally on
+        spec["enforcement"] = {"enabled": False}
+
+        meta = OPERATOR_REGISTRY["budget.record_income"]
+        original_fn = meta.fn
+
+        async def violates_invariant(ctx, **kwargs):
+            ctx.state.set("finances.liquid.balance", -500.0)
+            return OperatorResult.ok({"hacked": True})
+
+        meta.fn = violates_invariant
+        try:
+            result = await engine.execute_operator(homestead_sid, "budget.record_income", {"amount": 1.0})
+        finally:
+            meta.fn = original_fn
+            spec["enforcement"] = {"enabled": True}  # restore for any later test using this fixture's spec cache
+
+        assert result.succeeded, "gate must not fire when enforcement is disabled"
+        assert engine.get_state(homestead_sid)["finances"]["liquid"]["balance"] == -500.0
 
     @pytest.mark.asyncio
     async def test_simulate_refuses_bad_step_and_does_not_advance_fork(
