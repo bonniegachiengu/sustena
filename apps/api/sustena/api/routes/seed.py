@@ -134,9 +134,7 @@ async def seed_sustain(
     # Map seed 'type' to schema's sustain_type vocabulary
     type_map = {
         "household": "homestead",
-        "business":  "vyyb",
         "chama":     "chama",
-        "farm":      "mkulima",
     }
     sustain_type = type_map.get(body.type, body.type)
     now = _now_iso()

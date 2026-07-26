@@ -285,8 +285,12 @@ class TestRealSustainSpecs:
     Compile every declared invariant from every shipped sustain spec. This is
     the load-time validation Move 1 exists for — a predicate referencing a
     dimension the schema doesn't declare must fail here, not silently at
-    runtime. homestead and biashara are expected fully clean; vyyb/chama/colosso
-    have pre-existing spec gaps (documented in CLAUDE.md) that predate this slice.
+    runtime. homestead is expected fully clean; chama has pre-existing spec
+    gaps (documented in CLAUDE.md) that predate this slice.
+
+    biashara/vyyb/colosso were removed in the homestead-only prune — their
+    dedicated compile-error assertions went with them rather than being kept
+    around to test files that no longer exist.
     """
 
     @staticmethod
@@ -300,20 +304,11 @@ class TestRealSustainSpecs:
             node, errors = compile_invariant(inv["expression"], spec["state_schema"])
             assert not errors, f"{inv['id']}: {errors}"
 
-    def test_biashara_invariants_all_compile_clean(self):
-        spec = self._load("biashara")
+    def test_habitat_invariants_all_compile_clean(self):
+        spec = self._load("habitat")
         for inv in spec["invariants"]:
             node, errors = compile_invariant(inv["expression"], spec["state_schema"])
             assert not errors, f"{inv['id']}: {errors}"
-
-    def test_vyyb_invariants_surface_known_schema_gap(self):
-        spec = self._load("vyyb")
-        results = {
-            inv["id"]: compile_invariant(inv["expression"], spec["state_schema"])[1]
-            for inv in spec["invariants"]
-        }
-        assert results["journal_balanced"], "expected a real finding: accounts.* is missing from vyyb's state_schema"
-        assert results["inventory_qty_non_negative"], "expected a real finding: inventory.* is missing from vyyb's state_schema"
 
     def test_chama_invariants_surface_known_grammar_gaps(self):
         spec = self._load("chama")
@@ -325,14 +320,3 @@ class TestRealSustainSpecs:
         assert not results["fine_reason_valid"]
         assert results["loan_within_max_ratio"], "expected a real finding: arithmetic (*) is not in the DSL grammar"
         assert results["contribution_within_range"], "expected a real finding: missing '[*]' bracket"
-
-    def test_colosso_invariants_surface_known_gaps(self):
-        spec = self._load("colosso")
-        results = {
-            inv["id"]: compile_invariant(inv["expression"], spec["state_schema"])[1]
-            for inv in spec["invariants"]
-        }
-        assert not results["loan_outstanding_non_negative"]
-        assert results["journal_balanced"], "expected a real finding: accounts.* is missing from colosso's state_schema"
-        assert results["inventory_qty_non_negative"], "expected a real finding: inventory.* is missing from colosso's state_schema"
-        assert results["kyc_before_loan"], "expected a real finding: dynamic bracket indexing is not in the DSL grammar"

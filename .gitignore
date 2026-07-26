@@ -12,6 +12,9 @@ docs/Sustena_XII_Entity_Structure_Kenya.md
 archive/
 Briefs/
 
+# ── Local safety backups (DB snapshots before destructive changes) ─────────────
+backups/
+
 # ── Non-code content directories (keep locally, not in GitHub) ────────────────
 brand/
 vyyb/

@@ -53,32 +53,6 @@ CALENDAR_OPERATORS = [
     "homestead.calendar.remove_event",
 ]
 
-BIASHARA_OPERATORS = [
-    "biashara.inventory.restock",
-    "biashara.inventory.adjust",
-    "biashara.orders.place",
-    "biashara.orders.fulfill",
-    "biashara.purchases.record",
-    "biashara.po.raise",
-    "biashara.po.receive",
-    "biashara.accounts.journal_entry",
-    "biashara.tax.calculate_vat",
-    "biashara.assets.depreciate",
-    "biashara.expenses.record",
-]
-
-VYYB_OPERATORS = [
-    "vyyb.production.start_batch",
-    "vyyb.production.complete_batch",
-    "vyyb.kds.dispatch_task",
-    "vyyb.kds.complete_task",
-    "vyyb.staff.clock_in",
-    "vyyb.staff.clock_out",
-    "vyyb.staff.schedule_shift",
-    "vyyb.procurement.raise_po",
-    "vyyb.procurement.receive_po",
-]
-
 UI_RENDER_OPERATORS = [
     "ui.render.operator_card",
     "ui.render.operative_dashboard",
@@ -141,7 +115,6 @@ ORCHIE_OPERATORS = [
 
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + CHAMA_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
-    + BIASHARA_OPERATORS + VYYB_OPERATORS  # Epic 1.5.2
     + UI_RENDER_OPERATORS                  # Sprint 2 UIParser
     + API_OPERATORS                        # Sprint 3.1
     + MONITOR_OPERATORS                    # Sprint 3.2

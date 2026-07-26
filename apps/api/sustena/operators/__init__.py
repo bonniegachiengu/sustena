@@ -6,8 +6,6 @@ from sustena.operators import budget       # noqa: F401  (registers budget.* ope
 from sustena.operators import calendar     # noqa: F401  (registers homestead.calendar.* operators)
 from sustena.operators import chama        # noqa: F401  (registers chama.* operators)
 from sustena.operators import procurement  # noqa: F401  (registers mkulima.* and procurement.* operators)
-from sustena.operators import biashara     # noqa: F401  (registers biashara.* operators)
-from sustena.operators import vyyb         # noqa: F401  (registers vyyb.* operators)
 from sustena.operators import ui_render    # noqa: F401  (registers ui.render.* operators)
 from sustena.operators import api_ops      # noqa: F401  (registers api.* operators)
 from sustena.operators import monitor      # noqa: F401  (registers monitor.* operators)

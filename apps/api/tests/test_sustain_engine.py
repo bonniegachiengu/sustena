@@ -491,20 +491,19 @@ class TestEnforcementGate:
 
     @pytest.mark.asyncio
     async def test_non_enforced_sustain_is_unaffected(self, engine: SustainEngine):
-        """vyyb.json has no enforcement block — the gate must be a true no-op there."""
-        from sustena.core.operator import OPERATOR_REGISTRY, OperatorResult
-
+        """chama.json has no enforcement block — the gate must be a true no-op there."""
         sid = engine.instantiate(
-            "vyyb", "u1",
-            {"owner_ids": ["u1"], "business_name": "Test Vyyb", "outlet_name": "Test Outlet"},
+            "chama", "u1",
+            {"owner_ids": ["u1"], "secretary_id": "u1", "member_ids": ["u1"], "chama_name": "Test Chama"},
         )
         spec = engine.get_spec(sid)
         assert not spec.get("enforcement", {}).get("enabled")
 
-        # vyyb's compiled invariants list should be empty (both its invariants
-        # fail schema binding — a pre-existing, disclosed spec gap) — confirming
-        # the gate has nothing to enforce here even if it were turned on.
-        assert spec["_compiled_invariants"] == []
+        # chama has a mixed profile (2 of its 4 invariants fail schema binding —
+        # pre-existing, disclosed spec gaps from Slice 2) — confirming the gate
+        # has real invariants available but still enforces nothing, since
+        # enforcement itself is off for this sustain.
+        assert len(spec["_compiled_invariants"]) == 2
         assert len(spec["_invariant_compile_errors"]) == 2
 
     @pytest.mark.asyncio
