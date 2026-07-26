@@ -398,3 +398,130 @@ class TestInstantiateMissingParam:
             {"owner_ids": ["u1"]},  # only required param
         )
         assert sid  # instantiated successfully
+
+
+# ── 8. Slice 2 — the enforcing gate (Move 2) ───────────────────────────────────
+
+class TestEnforcementGate:
+    """
+    homestead.json ships with enforcement.enabled=true (Slice 2). Every real
+    homestead operator already self-guards against its own invariants, so to
+    prove the ENGINE-level gate independently — not just re-test operators
+    that were already safe — these tests temporarily monkeypatch an operator's
+    registered .fn to a version that violates an invariant directly, bypassing
+    StateAccessor.decrement()'s own negative-balance guard. This simulates
+    exactly the scenario the gate exists for: a coding mistake in some future
+    operator that doesn't self-guard.
+    """
+
+    @pytest.fixture
+    def bad_income_fn(self):
+        """budget.record_income, monkeypatched to push liquid balance negative."""
+        from sustena.core.operator import OPERATOR_REGISTRY, OperatorResult
+
+        meta = OPERATOR_REGISTRY["budget.record_income"]
+        original_fn = meta.fn
+
+        async def violates_invariant(ctx, **kwargs):
+            ctx.state.set("finances.liquid.balance", -500.0)
+            return OperatorResult.ok({"hacked": True})
+
+        meta.fn = violates_invariant
+        yield
+        meta.fn = original_fn
+
+    @pytest.mark.asyncio
+    async def test_bad_transition_is_refused(
+        self, engine: SustainEngine, homestead_sid: str, bad_income_fn
+    ):
+        result = await engine.execute_operator(homestead_sid, "budget.record_income", {"amount": 1.0})
+        assert result.failed
+        assert result.constraint_violated == "enforcement_gate"
+        assert "liquid_non_negative" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_bad_transition_leaves_live_state_untouched(
+        self, engine: SustainEngine, homestead_sid: str, bad_income_fn
+    ):
+        before = engine.get_state(homestead_sid)["finances"]["liquid"]["balance"]
+        await engine.execute_operator(homestead_sid, "budget.record_income", {"amount": 1.0})
+        after = engine.get_state(homestead_sid)["finances"]["liquid"]["balance"]
+        assert after == before
+        assert after != -500.0
+
+    @pytest.mark.asyncio
+    async def test_refusal_reason_names_the_failing_dimension(
+        self, engine: SustainEngine, homestead_sid: str, bad_income_fn
+    ):
+        result = await engine.execute_operator(homestead_sid, "budget.record_income", {"amount": 1.0})
+        assert "finances.liquid.balance" in result.reason
+        assert "-500" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_good_transition_still_commits_under_enforcement(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        """budget.allocate with sufficient liquid balance — real operator, no patching."""
+        state = engine.get_state(homestead_sid)
+        state["finances"]["liquid"]["balance"] = 10000.0
+        engine._persist_state(homestead_sid, state)
+
+        result = await engine.execute_operator(
+            homestead_sid, "budget.allocate", {"pocket_name": "food", "amount": 3000.0}
+        )
+        assert result.succeeded, f"Expected ok, got: {result.reason}"
+        after = engine.get_state(homestead_sid)
+        assert after["finances"]["liquid"]["balance"] == 7000.0
+        assert after["finances"]["pockets"]["food"]["allocated"] == 3000.0
+
+    @pytest.mark.asyncio
+    async def test_boundary_transition_to_exactly_zero_commits(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        """liquid_non_negative is >= 0 (inclusive) — landing exactly on 0 must not be refused."""
+        state = engine.get_state(homestead_sid)
+        state["finances"]["liquid"]["balance"] = 500.0
+        engine._persist_state(homestead_sid, state)
+
+        result = await engine.execute_operator(
+            homestead_sid, "budget.allocate", {"pocket_name": "rent", "amount": 500.0}
+        )
+        assert result.succeeded, f"Expected ok, got: {result.reason}"
+        assert engine.get_state(homestead_sid)["finances"]["liquid"]["balance"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_non_enforced_sustain_is_unaffected(self, engine: SustainEngine):
+        """vyyb.json has no enforcement block — the gate must be a true no-op there."""
+        from sustena.core.operator import OPERATOR_REGISTRY, OperatorResult
+
+        sid = engine.instantiate(
+            "vyyb", "u1",
+            {"owner_ids": ["u1"], "business_name": "Test Vyyb", "outlet_name": "Test Outlet"},
+        )
+        spec = engine.get_spec(sid)
+        assert not spec.get("enforcement", {}).get("enabled")
+
+        # vyyb's compiled invariants list should be empty (both its invariants
+        # fail schema binding — a pre-existing, disclosed spec gap) — confirming
+        # the gate has nothing to enforce here even if it were turned on.
+        assert spec["_compiled_invariants"] == []
+        assert len(spec["_invariant_compile_errors"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_simulate_refuses_bad_step_and_does_not_advance_fork(
+        self, engine: SustainEngine, homestead_sid: str, bad_income_fn
+    ):
+        results = await engine.simulate(
+            homestead_sid,
+            [{"operator": "budget.record_income", "params": {"amount": 1.0}}],
+        )
+        assert len(results) == 1
+        assert results[0]["result"].failed
+        assert results[0]["result"].constraint_violated == "enforcement_gate"
+        assert results[0]["state_after"]["finances"]["liquid"]["balance"] != -500.0
+
+    def test_compiled_invariants_cached_on_spec(self, engine: SustainEngine, homestead_sid: str):
+        spec = engine.get_spec(homestead_sid)
+        ids = {inv["id"] for inv in spec["_compiled_invariants"]}
+        assert ids == {"liquid_non_negative", "pocket_allocated_non_negative"}
+        assert spec["_invariant_compile_errors"] == []

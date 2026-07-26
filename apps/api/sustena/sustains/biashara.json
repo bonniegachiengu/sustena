@@ -601,6 +601,10 @@
       "description": "No inventory item may have a negative quantity. biashara.inventory.adjust enforces this before mutating state."
     }
   ],
+  "enforcement": {
+    "enabled": true,
+    "_note": "Opt-in per Slice 2 rollout discipline. Both invariants compile clean against state_schema (verified — this is the sustain the SUM aggregate extension was built for). Enabled empirically after confirming the full biashara/procurement/vyyb operator test suites pass unchanged with the gate live."
+  },
   "ui_schema": {
     "sustain_home": {
       "widget": "sustain_home"

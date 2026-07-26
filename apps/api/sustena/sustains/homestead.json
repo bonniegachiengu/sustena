@@ -403,6 +403,10 @@
       "description": "No pocket may have a negative allocated amount. Transfer and allocate operators enforce this."
     }
   ],
+  "enforcement": {
+    "enabled": true,
+    "_note": "Opt-in per Slice 2 rollout discipline. Both invariants above compile clean against state_schema and are already respected by every current operator's own guards — this is a last-line-of-defense gate, not expected to trip in normal use."
+  },
   "ui_schema": {
     "sustain_home": {
       "widget": "sustain_home"

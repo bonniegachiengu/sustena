@@ -35,6 +35,7 @@ import sustena.operators  # noqa: F401 — triggers OPERATOR_REGISTRY population
 from sustena.core.events import EventBus
 from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext, OperatorResult
 from sustena.core.pawa import PawaLedger
+from sustena.core.predicates import compile_invariant, evaluate_predicate
 from sustena.core.state import StateAccessor
 from sustena.operatives import (
     AttacheOperative,
@@ -160,6 +161,75 @@ class SustainEngine:
         with spec_path.open(encoding="utf-8") as fh:
             return json.load(fh)
 
+    def _compile_spec_invariants(self, spec: dict) -> None:
+        """
+        Parse + schema-bind every declared invariant into a typed predicate AST
+        (Move 1). Mutates spec in place, caching:
+          spec["_compiled_invariants"]      -- [{id, description, expr, node}]
+          spec["_invariant_compile_errors"] -- [{id, expr, errors}]
+
+        A predicate referencing a state dimension the schema doesn't declare
+        fails HERE, at load time — never silently at runtime. Idempotent and
+        non-fatal: an invalid invariant is skipped from enforcement and
+        recorded as a compile error, it does not block the sustain from
+        loading (existing sustains keep working; see enforcement gate below).
+        """
+        if "_compiled_invariants" in spec:
+            return
+        state_schema = spec.get("state_schema", {})
+        compiled: list[dict] = []
+        errors: list[dict] = []
+        for inv in spec.get("invariants", []):
+            expr = inv.get("expression", "")
+            node, inv_errors = compile_invariant(expr, state_schema)
+            if inv_errors:
+                errors.append({"id": inv.get("id"), "expr": expr, "errors": inv_errors})
+                logger.warning(
+                    "[SustainEngine] invariant '%s' (%s) failed to compile against state_schema: %s",
+                    inv.get("id"), expr, inv_errors,
+                )
+                continue
+            compiled.append({
+                "id": inv.get("id"), "description": inv.get("description", ""), "expr": expr, "node": node,
+            })
+        spec["_compiled_invariants"] = compiled
+        spec["_invariant_compile_errors"] = errors
+
+    def _enforcement_enabled(self, spec: dict) -> bool:
+        """Opt-in per sustain — spec["enforcement"]["enabled"] must be explicitly true."""
+        return bool(spec.get("enforcement", {}).get("enabled", False))
+
+    def _check_enforcement_gate(self, spec: dict, state: StateAccessor, params: dict, meta) -> tuple[bool, str]:
+        """
+        Move 2 — the enforcing gate. Evaluates the sustain's compiled invariants
+        and the operator's declared post_constraints against the candidate
+        post-effect state. Returns (True, "") if the transition may commit,
+        or (False, reason) if it must be refused.
+
+        Only called when enforcement is enabled for this sustain — callers
+        must check _enforcement_enabled() first (kept separate so callers can
+        skip building this call's args entirely on non-enforced sustains).
+        """
+        for inv in spec.get("_compiled_invariants", []):
+            ok, reason = evaluate_predicate(inv["node"], state, params)
+            if not ok:
+                return False, f"would violate invariant '{inv['id']}' ({inv['expr']}): {reason}"
+
+        state_schema = spec.get("state_schema", {})
+        for expr in getattr(meta, "post_constraints", []) or []:
+            node, compile_errors = compile_invariant(expr, state_schema)
+            if compile_errors:
+                logger.warning(
+                    "[SustainEngine] post_constraint '%s' on operator failed to compile: %s",
+                    expr, compile_errors,
+                )
+                continue
+            ok, reason = evaluate_predicate(node, state, params)
+            if not ok:
+                return False, f"would violate post_constraint ({expr}): {reason}"
+
+        return True, ""
+
     def _resolve_tokens(self, obj: Any, params: dict) -> Any:
         """
         Recursively replace {{placeholder}} tokens in every string within obj.
@@ -256,6 +326,7 @@ class SustainEngine:
             ValueError: required parameter missing, or spec file not found.
         """
         spec = self._load_spec(template_id)
+        self._compile_spec_invariants(spec)
 
         # 1. Validate required parameters
         for param_def in spec.get("parameters", []):
@@ -485,6 +556,18 @@ class SustainEngine:
                 constraint_violated="operator_runtime_error",
             )
 
+        # Move 2 — enforcing gate. Only on sustains that have opted in
+        # (spec["enforcement"]["enabled"]); refusal is a typed OperatorResult.fail,
+        # not an exception, and leaves the live state untouched (nothing persisted).
+        if result.succeeded and self._enforcement_enabled(spec):
+            gate_ok, gate_reason = self._check_enforcement_gate(spec, state, params, meta)
+            if not gate_ok:
+                logger.info(
+                    "[SustainEngine] operator '%s' refused on sustain '%s': %s",
+                    operator_name, sustain_id, gate_reason,
+                )
+                return OperatorResult.fail(reason=gate_reason, constraint_violated="enforcement_gate")
+
         # Persist mutated state + any emitted events only on success
         if result.succeeded:
             self._persist_state(sustain_id, state.snapshot())
@@ -687,6 +770,13 @@ class SustainEngine:
                     constraint_violated="operator_runtime_error",
                 )
 
+            # Move 2 — same enforcing gate as execute_operator, so a forked
+            # simulation can never advance past a state the live path would refuse.
+            if result.succeeded and self._enforcement_enabled(spec):
+                gate_ok, gate_reason = self._check_enforcement_gate(spec, state_accessor, params, meta)
+                if not gate_ok:
+                    result = OperatorResult.fail(reason=gate_reason, constraint_violated="enforcement_gate")
+
             # Advance forked state only on success
             if result.succeeded:
                 forked_dict = state_accessor.snapshot()
@@ -723,6 +813,7 @@ class SustainEngine:
         except ValueError:
             return None
 
+        self._compile_spec_invariants(spec)
         self._specs[sustain_id] = spec
         return spec
 
