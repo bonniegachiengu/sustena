@@ -46,8 +46,7 @@ sustena/
                     uiparser.py, widget_registry.py,         ← added Sprint 2
                     operative_graph.py,                      ← added Sprint 5
                     operative_runtime.py                     ← added Sprint 5
-  operators/      budget.py, chama.py, procurement.py, vyyb.py,
-                  biashara.py, calendar.py,
+  operators/      budget.py, chama.py, procurement.py, calendar.py,
                   ui_render.py,                             ← added Sprint 2
                   api_ops.py, monitor.py, visualize.py,     ← added Sprint 3
                   simulate_ops.py, edit_ops.py, control_ops.py,
@@ -59,7 +58,7 @@ sustena/
                     mentor_evaluation.json, mentor_deliberation.json,
                     protege_*.json, attache_*.json, curator_*.json,
                     navigator_*.json, orchie_evaluation.json
-  sustains/       homestead.json, vyyb.json, chama.json, biashara.json, colosso.json
+  sustains/       homestead.json, habitat.json, chama.json     ← pruned to homestead-only + habitat, see below
   api/
     main.py       FastAPI app, lifespan (init_db + Claude client mode log), CORS
     routes/       sustains.py, devui.py, orchie.py, council.py, whatsapp.py, ...
@@ -414,6 +413,37 @@ Backend correctness — mostly invisible by design. The one visible payoff is ho
 All four non-homestead/biashara findings are pre-existing spec bugs that predate this slice — none were introduced by it, and none block enforcement anywhere it's actually enabled.
 
 **Tests:** `tests/test_predicates.py` (39 tests — parser, schema binder, evaluator, plus a dedicated class that compiles every real invariant string from all 5 shipped specs and asserts the expected pass/fail per the findings above) + 8 new tests in `tests/test_sustain_engine.py::TestEnforcementGate` (refuses a bad transition via a monkeypatched operator that bypasses `StateAccessor.decrement()`'s own guard, confirms live state is untouched on refusal, confirms the reason names the failing dimension, confirms a real good transition still commits — including the `>= 0` boundary landing exactly on zero, confirms `simulate()` won't advance a forked state past a refused step, confirms a non-enforced sustain like vyyb is a true no-op). **1696 tests pass** (1688 + 8).
+
+*(Note: the "vyyb is a true no-op" test above references a sustain removed in the very next slice — see below. Its assertions were rewritten to use `chama` instead; this historical paragraph is left as-written since it was accurate at the time.)*
+
+---
+
+### Slice 3 ✅ — Prune to homestead-only + introduce `habitat` (27 Jul 2026)
+
+Scope confirmed with Bonnie before starting: do only the "do now" part below — auto-provisioning a habitat on signup and real parent/child roll-up are explicitly deferred to later slices (5 and 8 respectively), not built here even partially.
+
+**Pre-flight:** git confirmed clean and in sync with `origin/main` before any deletion; `apps/api/sustena.db` (the live DB) copied to `backups/sustena_pre_prune_<timestamp>.db`; confirmed via direct query that the live DB holds exactly 2 sustain rows, both `template_id="homestead"` — zero biashara/vyyb/colosso instances existed anywhere, so the deletion carried zero data risk.
+
+**1 — Deleted biashara/vyyb/colosso everywhere:**
+- Removed `sustena/sustains/{biashara,vyyb,colosso}.json`, `sustena/sustains/seeds/vyyb_seed.json` (already-orphaned, referenced by nothing), `sustena/operators/{biashara,vyyb}.py` (no `colosso.py` ever existed — colosso's spec declared 6 `colosso.*` operators that were never implemented anywhere, a pre-existing dead end now moot), and the three dedicated test files (`test_biashara_operators.py`, `test_vyyb_operators.py`, `test_sustain_specs.py` — the last was 100% biashara/vyyb/colosso content, nothing homestead/chama-specific despite the generic filename).
+- Updated `operators/__init__.py` (dropped the two now-dead imports), `test_operator_registry.py` (dropped `BIASHARA_OPERATORS`/`VYYB_OPERATORS` from `ALL_KNOWN_OPERATORS`), `test_predicates.py::TestRealSustainSpecs` (dropped the vyyb/colosso/biashara compile-check methods; homestead's stays, chama's stays since chama is untouched, added habitat's), `test_sustain_engine.py::test_non_enforced_sustain_is_unaffected` (rewritten against `chama` instead of `vyyb`, with chama's real 2-valid/2-error invariant profile).
+- Minor cosmetic cleanup: `seed.py`'s legacy `type_map` dropped its `"business"→"vyyb"` and `"farm"→"mkulima"` entries (the latter already pointed at a template that's never existed — not part of this slice's ask, but equally dead either way, fixed while there); `claude_client.py`'s mock Orchie responses dropped the `"vyyb"` keyed reply and the Vyyb-specific clauses from `"burn"`/`"status"`.
+- Deliberately left untouched (verified each is non-functional / out of scope, not silently missed): `procurement.py`'s `event.biashara.signal_evaluation_requested` event name and doc comments (a string literal / forward-looking hook, never coupled to biashara.json — its own tests still pass unchanged); `navigator.py`'s domain-list entry and docstring mentioning Vyyb dispatch (same — a domain-string match, not a file dependency); `chama_secretary.py`'s "this is a Colosso product" comment (business/brand context, not the deleted sustain template); ~8 incidental `"vyyb.hive"`/`"event.vyyb.order_placed"` example strings across `test_devui_routes.py`/`test_council_operatives.py`/`test_sustains_migration.py` (arbitrary example IDs, not real instantiation); `arena.py`'s Vyyb/Mkulima marketplace product listings and `profile.jsx`'s "Vyyb"/"Colosso" company-affiliation entries (real-world business names in demo/marketplace content, unrelated to the sustain-template system); `whatsapp_handler.py`'s Biashara onboarding copy — **not touched, per the standing no-`whatsapp_*`-files rule**, even though it now references a removed sustain.
+- Chama was evaluated and left completely alone as instructed — it has real, independent code (`operators/chama.py`, `operatives/chama_secretary.py`, its own spec) and was never a fork of or dependency on biashara.
+- **Verified:** app imports cleanly, `OPERATOR_REGISTRY` has zero biashara/vyyb/colosso entries (47 operators total), `sustena/sustains/*.json` glob returns exactly `chama`, `habitat`, `homestead`. Full suite: **1409 tests pass** (down from 1696 — the difference is the deleted dedicated test files, not a regression).
+
+**2 — Introduced `habitat` (declared as a template only, per the explicit scope cut):**
+- New `sustena/sustains/habitat.json` — the person-level primary Sustain: `identity` (name + free-text role) and a scaled-down `finances` block (liquid/pockets/income) identical in shape to homestead's own. Reuses the existing, already-tested `budget.record_income/allocate/spend/summary` operators verbatim — **no new operator code was written**. Deliberately excludes `homestead.tasks.*` to avoid using a `homestead.`-namespaced operator inside a non-homestead sustain (a real dot-protocol mismatch, not papered over).
+- Ships its own `liquid_non_negative` invariant with `enforcement.enabled: true` — verified via `predicates.compile_invariant()` before enabling, exactly like homestead's and biashara's opt-ins in Slice 2.
+- End-to-end verified live (not just compiled): instantiated a habitat, ran `budget.record_income` then `budget.allocate` — both succeeded and mutated state correctly. Then monkeypatched an operator to push the balance negative directly — the enforcement gate refused it, `constraint_violated="enforcement_gate"`, state unchanged. Caught and fixed a real bug in the process: the initial `default_state` was missing `finances.income.monthly_total`/`sources`, which `budget.record_income` needs internally — homestead's own spec carries these two fields in `default_state` despite them not being declared in `state_schema`; habitat's spec now matches that same pattern.
+- **Auto-provisioning a habitat per new user on signup is NOT wired** — confirmed explicitly out of scope, belongs to Slice 5 (create/definition). Nothing currently creates a habitat instance automatically; it only exists as an instantiable template today.
+
+**3 — Homestead recomposed as a declared holon of 6 habitats — honest answer: this is SCAFFOLDING, not real composition:**
+- The earlier Slice 2 audit is correct and still stands: child-sustain composition (⊕) and state roll-up (ρ) are **not built**. `homestead.json` gained a new `"habitats"` block (structural spec metadata, not `state_schema`/`default_state`) declaring 6 member slots — **Bonnie, Cira, Epha, Mum, Kui, Frankie**, exactly as given, no names invented or expanded — each with `template: "habitat"`, `sustain_id: null`, `status: "declared"`, `composition_status: "declared"`, and `roll_up_status: "PENDING — not computed; requires Slice 8 (composition/coordination)"`.
+- This block is **inert**: no code anywhere in `sustena/core` reads or acts on a `"habitats"` key. It cannot affect homestead's own state, its invariants, or the enforcement gate — confirmed by re-running the full suite and a direct spec-load check after adding it. There is no live linkage (`sustain_id` stays `null` for all 6 — no habitat instances were created for any Gachiengu member), and homestead's totals do **not** include, and cannot be made to include, any habitat's numbers until Slice 8 actually builds ⊕/ρ.
+- What's real vs scaffolded, stated plainly: the *habitat template* is real and functional (proven above). The *declaration* that homestead is composed of 6 named habitats is real (it's genuine, correctly-typed JSON, not a lie). The *composition* — actually linking 6 live habitat instances as homestead's children and rolling their state up — does **not exist** and this slice does not pretend it does.
+
+**What Bonnie still needs to provide:** nothing further on the member list — all 6 names (Bonnie, Cira, Epha, Mum, Kui, Frankie) were supplied directly in this slice's scope confirmation, so there's no fillable placeholder left in `homestead.json`. What's genuinely still needed is a decision on *when* to greenlight Slice 5 (auto-provisioning) and Slice 8 (real composition/roll-up) — both are scoped and understood, neither is scheduled.
 
 ---
 
