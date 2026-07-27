@@ -1,7 +1,7 @@
 # Sustena XII — Claude Code Context
 
 > Read this before touching any code. It tells you where we are, how things are built,
-> and how Bonnie works. Everything here is current as of 2 June 2026 (updated Sprint 8.3 + CI schema fix).
+> and how Bonnie works. Everything here is current as of 27 Jul 2026 (updated through Slice 5 — Ingest & capture pipeline).
 
 ---
 
@@ -47,7 +47,9 @@ sustena/
                     operative_graph.py,                      ← added Sprint 5
                     operative_runtime.py,                    ← added Sprint 5
                     predicates.py,                           ← added Slice 2
-                    event_fold.py                            ← added Slice 4
+                    event_fold.py,                           ← added Slice 4
+                    transducer.py, ingest_engine.py,         ← added Slice 5
+                    ingest_singleton.py                      ← added Slice 5
   operators/      budget.py, procurement.py, calendar.py,
                   ui_render.py,                             ← added Sprint 2
                   api_ops.py, monitor.py, visualize.py,     ← added Sprint 3
@@ -63,7 +65,9 @@ sustena/
   sustains/       homestead.json, habitat.json     ← pruned to homestead-only + habitat, see below
   api/
     main.py       FastAPI app, lifespan (init_db + Claude client mode log), CORS
-    routes/       sustains.py, devui.py, orchie.py, council.py, whatsapp.py, ...
+    routes/       sustains.py, devui.py, orchie.py, council.py, whatsapp.py,
+                  ingest.py,                                 ← added Slice 5
+                  ...
   db/schema.py    SQLAlchemy tables + async engine singleton (_engine)
   config.py       Pydantic BaseSettings (extra="ignore") — reads .env
 ```
@@ -494,6 +498,49 @@ The walking skeleton for event sourcing. Foundational and deliberately invisible
 **8 — `get_events()` ordering fixed as a direct consequence of having `seq`:** previously `ORDER BY timestamp DESC` — harmless when events were spaced out by real user activity, but a real correctness bug once genesis events made near-simultaneous same-millisecond timestamps common (caught by a test, not by inspection: `get_events()[0]` was nondeterministically returning the genesis event instead of the just-seeded one). Now `ORDER BY seq DESC, timestamp DESC` — `seq` is monotonic and never ties, so ordering is always correct going forward; the timestamp tiebreaker only matters for the vanishingly small window of not-yet-migrated data, which no longer exists in production.
 
 **Tests:** `tests/test_event_fold.py` (15 — pure reducer correctness for every op, error handling, and a round-trip check that folding real `StateAccessor.mutations()` output reproduces its own final snapshot) + `tests/test_sustain_engine.py::TestEventSourcing` (14) + `::TestMigrateToEventSourcing` (6) + one existing test in `test_event_persistence.py` updated to reflect that a fresh sustain now has one event, not zero. **1302 tests pass** (1267 + 35). Frontend build unaffected (byte-identical asset hash) — no API response shape changed.
+
+---
+
+### Slice 5 ✅ — Ingest & capture pipeline, server-side (27 Jul 2026)
+
+Unblocked by the fold slice above (called "S3" in conversation shorthand — state=fold(events) — the previous entry's header numbering follows the doc's own running count, not that shorthand). **This slice IS user-visible**, but minimally: no new panel — a captured message that maps cleanly just flows through the existing operator/event/state surfaces, and the only genuinely new UI is two more row-types inside the Monitor's already-existing NEEDS ATTENTION block.
+
+**Pre-flight:** git confirmed clean; fresh `apps/api/sustena.db` copy to `backups/sustena_pre_ingest_<timestamp>.db`. No migration was needed for this slice (unlike the fold slice) — ingest only adds new, additive tables via `IngestEngine._ensure_tables()`.
+
+**The transducer (`sustena/core/transducer.py`) — deterministic, not an LLM call:** `parse_message(raw_text) -> TransductionResult`, same no-eval/no-magic discipline as `constraints.py`/`predicates.py`. Registered as an ordered list of parser functions (`_PARSERS`) so it generalises past M-Pesa (the first instance, not the target) — a future source is just another entry, tried in order. Three-tier result, never a boolean:
+- **`mapped`** — understood AND confidently routed to an operator (money received → `budget.record_income`; unambiguous, income always credits liquid balance).
+- **`parsed_unmapped`** — shape understood (amount, direction, counterparty, external ref) but the operator is deliberately NOT guessed — every outbound M-Pesa shape (paybill, till/buy-goods, person-to-person, withdrawal) lands here because *which pocket to spend from* is a real categorisation decision this slice does not invent a heuristic for.
+- **`unparsed`** — no registered parser recognised the shape at all (including empty text).
+
+`parsed_unmapped` and `unparsed` both surface as `needs_attention` upstream — neither is ever silently dropped.
+
+**Idempotent intake (`sustena/core/ingest_engine.py`):** `IngestEngine` wraps a `SustainEngine`, reusing its exact sqlite3 connection (`self._sustain_engine._db`) rather than opening a second one. `capture(source_id, sustain_id, raw_payload)`:
+1. `_dedup_key = sha256(sustain_id + source_id + raw_payload)`, enforced via `INSERT OR IGNORE` on a UNIQUE column, `cursor.rowcount == 0` atomically detects "already captured" — no SELECT-then-INSERT race window.
+2. A dedup hit returns the **first** capture's recorded outcome with `is_duplicate: true` and does no new work — safe for a flaky capture client to retry a POST it isn't sure landed.
+3. A dedup miss calls `parse_message()`, then for `mapped` results calls `self._sustain_engine.execute_operator(...)` — the exact same call path every other operator invocation uses, inheriting the S2 enforcing gate and the S3 fold-append **for free**. No parallel mutation or persistence path was built for ingest.
+
+**Replay lands on the fold exactly once — proved, not asserted:** `tests/test_ingest_engine.py::TestDedupAndReplay::test_double_replay_applies_the_operator_exactly_once` captures the identical `(source_id, sustain_id, raw_payload)` three times and asserts the balance moved by one increment (not three) and exactly one new event was appended (not three); `rebuild_state() == get_state()` is asserted after replay too. Confirmed again live against the running backend (not just in-memory tests): a real capture, an identical replay, `is_duplicate: true` on the second with the same `message_id`, balance unchanged.
+
+**Two real bugs found by testing, not by inspection, and fixed before this slice was called done:**
+- The dedup key (as first written) was `sha256(source_id + raw_payload)` — **no `sustain_id`**. Two different sustains capturing identical text from a same-named source would silently collide: the second sustain's capture would be reported as a duplicate of the first's and its event would never apply. Fixed by folding `sustain_id` into the key. Caught by `test_ingest_routes.py` reusing a literal source id (`"d1"`) across per-test sustains — a realistic shape (a generic device label, or the same physical phone relabelled) not an artificial test-only scenario.
+- `ingest_sources` had the identical class of bug: primary-keyed on `source_id` alone, so the same `source_id` string registered against two different sustains overwrote one row instead of creating two. Fixed by making the primary key `(sustain_id, source_id)` — a source's identity is scoped to the sustain it feeds, matching the dedup key's reasoning exactly.
+
+**The gate governs ingested events exactly as it governs every other operator call — because it's the same call.** No ingest-specific gate code exists; `execute_operator()` already runs the S2 enforcing gate before persisting. `tests/test_ingest_engine.py::TestGateGovernsIngestedEvents` monkeypatches `budget.record_income` to force the balance negative directly (bypassing the operator's own guard, same technique as the S2 slice's own tests) and confirms: `status == "refused"`, the reason names the violated invariant, state is byte-identical to before the attempt, no event was appended, and `rebuild_state() == get_state()` still holds. Verified live too, against the real running backend.
+
+**Staleness — never fabricated:** `get_sources()` only ever reports `is_stale: true` for a source with an explicitly configured `expected_interval_minutes` (via `register_source`); a source with no configured cadence is never flagged, because guessing one would be exactly the kind of dishonest state this slice exists to prevent. `_mark_source_seen` stamps `last_seen_at` on **every** capture — successful, refused, or needs_attention alike — since staleness is about whether the source is alive, not whether any one message happened to parse.
+
+**Device/source-as-Sustain framing — deliberately kept as lightweight metadata, not full instantiation:** per the Master Strategy's "nanosustain controller" framing, a capture source writes into its *parent* sustain's log; it doesn't need to be its own Sustain instance for this walking skeleton. `ingest_sources` is just `(sustain_id, source_id) → label, expected cadence, last_seen_at` — real, but intentionally not gold-plated into a device-instantiation system nothing yet needs.
+
+**Surfaces — "why am I seeing this?" answered inline:**
+- `GET /devui/state` gained `ingest_attention: {messages, stale_sources}` (a new `_get_ingest_attention()` helper in `devui.py`, same best-effort-empty-on-failure contract as the existing `_get_proposals_in_voting()`, added to the same single per-tick fetch — nothing new polled separately).
+- `monitor.jsx`'s `computeNeedsAttention()` extended with two new row types: an unmapped/unparsed capture (title distinguishes "unrecognised capture" vs "capture needs a pocket/operator", `why` shows the transducer's own reason text, routes to the Controller/Console panel — resolving one means running the right operator by hand, per `resolve_message`'s own contract) and a stale source (title names the source, `why` shows last-seen time or "never reported in"; no click-through yet since there's no dedicated source-management panel — informational until one exists, disclosed rather than faked). Applied captures need **no** new UI: they flow through `execute_operator` and already appear in the existing event log / state stream.
+- API surface: `POST /api/v1/ingest/capture`, `GET /api/v1/ingest/messages` (+ `sustain_id`/`status` filters), `GET /api/v1/ingest/messages/{id}`, `POST /api/v1/ingest/messages/{id}/resolve` (acknowledgement only — never retries or mutates state itself), `GET /api/v1/ingest/sources`, `POST /api/v1/ingest/sources`. Auth reuses the real `get_current_user` (from `users.py`) and a real `_assert_owns_sustain` ownership check (404-for-both-cases on not-found vs not-owned, same choice `sustains.py` makes) — every route backed by `get_shared_engine()`, the same real, persistent-DB-backed engine `devui.py`/`journal.py` use.
+
+**Scope boundary, honoured:** this is the *server-side* pipeline only. The native capture app is downstream and out of scope — the intake API (`POST /capture` taking `source_id` + `sustain_id` + `raw_payload`) is shaped so a dumb capture client can be built against it later without change (dumb-app/smart-server, as specified).
+
+**Disclosed, not fixed (pre-existing, found while choosing which auth/engine pattern to reuse):** `sustains.py` defines its own local `get_current_user` and its own disconnected `SustainEngine()` (no `db_path`, defaults to `:memory:`) via a local `get_engine()` — that entire route file operates on ephemeral, non-persistent data, disconnected from the real `sustena.db`. The new ingest routes deliberately did **not** copy this pattern — they use `devui.py`/`journal.py`'s correct one instead. Not fixed here; out of scope for this slice.
+
+**Tests:** `tests/test_transducer.py` (19 — mapped/parsed_unmapped/unparsed tiers, the paybill-before-buygoods ordering guarantee, determinism) + `tests/test_ingest_engine.py` (29 — mapped-applies, dedup/replay-is-once, gate governance, needs-attention queue + resolve, staleness) + `tests/test_ingest_routes.py` (24 — auth guard, ownership boundary, capture/messages/resolve/sources, `/devui/state` carrying `ingest_attention`). **1374 tests pass** (1302 + 72). Frontend builds clean (`npm run build`, same single 633 kB bundle — no new dependency added). Live end-to-end smoke test run against the actually-running backend process (confirmed via `/health` throughout — VOS/tunnel/keepalive untouched): registered a throwaway test user, created a real sustain, captured a mapped message (balance moved, event appended), replayed it (flagged duplicate, balance unchanged, same `message_id`), captured an unmappable one (appeared in `ingest_attention.messages` with a legible reason), registered a source with a cadence and confirmed it reported `is_stale: true` before ever capturing, then resolved the needs-attention message and confirmed it cleared from `/devui/state`.
 
 ---
 
