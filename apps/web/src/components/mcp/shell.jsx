@@ -20,6 +20,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 
 const PANELS = [
   { id: 'monitor',    label: 'MONITOR',    icon: 'pulse',    sub: 'live observability' },
+  { id: 'define',     label: 'DEFINE',     icon: 'plus',     sub: 'create your own sustain' },
   { id: 'simulator',  label: 'SIMULATOR',  icon: 'crosshair', sub: 'forked execution' },
   { id: 'editor',     label: 'EDITOR',     icon: 'agent',    sub: 'spec & graph' },
   { id: 'controller', label: 'CONTROLLER', icon: 'vault',    sub: 'approved execution' },
@@ -229,6 +230,7 @@ function App({ authUser, onLogout }) {
 
       <main style={{ gridArea: 'main', overflow: 'hidden', minWidth: 0, minHeight: 0, position: 'relative' }}>
         {panel === 'monitor'    && <MonitorPanel tick={tick} sustain={sustain} sustains={sustains} switchPanel={switchPanel} />}
+        {panel === 'define'     && <DefinePanel authUser={authUser} refreshSustains={refreshSustains} switchPanel={switchPanel} />}
         {panel === 'simulator'  && <SimulatorPanel tick={tick} sustain={sustain}
           leftOpen={simLeft} rightOpen={simRight}
           onToggleLeft={() => setSimLeft(v => !v)}

@@ -58,6 +58,17 @@ async function post(path, body) {
   return res.json();
 }
 
+async function patch(path, body) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'PATCH',
+    headers: headers(),
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401) { handleUnauthorized(); throw new Error(`PATCH ${path} → 401 (session expired)`); }
+  if (!res.ok) throw new Error(`PATCH ${path} → ${res.status}`);
+  return res.json();
+}
+
 /**
  * Open a WebSocket to /devui/state-stream.
  * In dev Vite proxies /devui with ws:true so a relative path works.
@@ -85,4 +96,4 @@ function ws(sustainId, onMessage, onClose) {
   return socket;
 }
 
-export const api = { get, post, ws };
+export const api = { get, post, patch, ws };

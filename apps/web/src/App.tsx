@@ -34,6 +34,9 @@ import './components/ui/journal.jsx'
 // 7. Simulator panel
 import './components/mcp/simulator.jsx'
 
+// 7b. Define panel — create/edit sustain definitions (Slice 6)
+import './components/mcp/define.jsx'
+
 // 8. App shell
 import ShellApp from './components/mcp/shell.jsx'
 
