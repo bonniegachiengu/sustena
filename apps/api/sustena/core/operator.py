@@ -72,6 +72,10 @@ class OperatorContext:
     - state: read/write access to the sustain's live state
     - events: publish events to the event log
     - pawa: charge pawa tokens
+    - egress: queue an outbound effect (Slice 11) — never sends anything
+      itself, see sustena/core/egress.py. Defaults to None for the many
+      operators that never queue egress; execute_operator()/simulate()
+      always pass a real EgressQueue.
     - sustain_id, user_id: execution context
     - operative_id: which operative called this (None = user direct call)
     - timestamp: execution timestamp (use this, not datetime.utcnow())
@@ -84,6 +88,7 @@ class OperatorContext:
     operative_id: str | None = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger("sustena.operator"))
+    egress: Any = None      # EgressQueue
 
 
 # ── Operator result ───────────────────────────────────────────────────────────

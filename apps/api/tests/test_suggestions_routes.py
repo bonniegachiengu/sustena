@@ -58,6 +58,19 @@ def _make_urgent_pocket(client, headers, sid, pocket, allocate_amt, spend_amt):
     }, headers=headers)
 
 
+def _unallocated_income(suggestions):
+    """
+    Isolate the unallocated_income suggestion. A fresh homestead has never
+    sent an egress, so Mentor's other rule (summary_not_exported) also
+    legitimately fires on every evaluate() here — real Slice 11 behavior,
+    not noise, so tests that only care about the income condition select
+    it explicitly.
+    """
+    matches = [s for s in suggestions if s["rule_id"] == "unallocated_income"]
+    assert len(matches) == 1, f"expected exactly one unallocated_income suggestion, got {suggestions}"
+    return matches[0]
+
+
 @pytest.fixture
 def homestead_with_condition(client, user):
     headers, user_id = user
@@ -80,8 +93,8 @@ class TestEvaluateRoute:
         r = client.post(f"/devui/sustain/{sid}/evaluate-operatives", json={}, headers=headers)
         assert r.status_code == 200
         suggestions = r.json()["data"]["suggestions"]
-        assert len(suggestions) == 1
-        assert suggestions[0]["operative_id"] == "mentor"
+        sug = _unallocated_income(suggestions)
+        assert sug["operative_id"] == "mentor"
 
     def test_evaluate_never_mutates_state(self, client, homestead_with_condition):
         headers, _, sid = homestead_with_condition
@@ -107,7 +120,8 @@ class TestDevuiStateCarriesSuggestions:
         headers, _, sid = homestead_with_condition
         client.post(f"/devui/sustain/{sid}/evaluate-operatives", json={}, headers=headers)
         r = client.get(f"/devui/state?sustain_id={sid}", headers=headers)
-        assert len(r.json()["data"]["suggestions"]) == 1
+        suggestions = r.json()["data"]["suggestions"]
+        _unallocated_income(suggestions)  # present among possibly others
 
 
 class TestListSuggestionsRoute:
@@ -118,7 +132,7 @@ class TestListSuggestionsRoute:
         headers, _, sid = homestead_with_condition
         client.post(f"/devui/sustain/{sid}/evaluate-operatives", json={}, headers=headers)
         pending = client.get(f"/devui/sustain/{sid}/suggestions?status=pending", headers=headers).json()["data"]["suggestions"]
-        assert len(pending) == 1
+        _unallocated_income(pending)  # present among possibly others
         dismissed = client.get(f"/devui/sustain/{sid}/suggestions?status=dismissed", headers=headers).json()["data"]["suggestions"]
         assert dismissed == []
 
@@ -130,7 +144,8 @@ class TestAcceptRoute:
 
     def test_accept_runs_real_operator(self, client, homestead_with_condition):
         headers, _, sid = homestead_with_condition
-        sug = client.post(f"/devui/sustain/{sid}/evaluate-operatives", json={}, headers=headers).json()["data"]["suggestions"][0]
+        suggestions = client.post(f"/devui/sustain/{sid}/evaluate-operatives", json={}, headers=headers).json()["data"]["suggestions"]
+        sug = _unallocated_income(suggestions)
 
         r = client.post(f"/devui/sustain/{sid}/suggestions/{sug['id']}/accept", json={}, headers=headers)
         assert r.status_code == 200
@@ -148,7 +163,8 @@ class TestAcceptRoute:
 
     def test_accept_honestly_reports_gate_refusal(self, client, homestead_with_condition):
         headers, _, sid = homestead_with_condition
-        sug = client.post(f"/devui/sustain/{sid}/evaluate-operatives", json={}, headers=headers).json()["data"]["suggestions"][0]
+        suggestions = client.post(f"/devui/sustain/{sid}/evaluate-operatives", json={}, headers=headers).json()["data"]["suggestions"]
+        sug = _unallocated_income(suggestions)
         proposed_amount = sug["proposed_params"]["amount"]
 
         # Drift live state for real via a different real operator call.
@@ -174,13 +190,14 @@ class TestDismissRoute:
 
     def test_dismiss_removes_from_pending(self, client, homestead_with_condition):
         headers, _, sid = homestead_with_condition
-        sug = client.post(f"/devui/sustain/{sid}/evaluate-operatives", json={}, headers=headers).json()["data"]["suggestions"][0]
+        suggestions = client.post(f"/devui/sustain/{sid}/evaluate-operatives", json={}, headers=headers).json()["data"]["suggestions"]
+        sug = _unallocated_income(suggestions)
 
         r = client.post(f"/devui/sustain/{sid}/suggestions/{sug['id']}/dismiss", json={}, headers=headers)
         assert r.status_code == 200
 
         pending = client.get(f"/devui/sustain/{sid}/suggestions?status=pending", headers=headers).json()["data"]["suggestions"]
-        assert pending == []
+        assert not any(s["id"] == sug["id"] for s in pending)
 
     def test_dismiss_unknown_returns_404(self, client, user):
         headers, _ = user

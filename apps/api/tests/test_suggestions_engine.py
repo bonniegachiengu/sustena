@@ -30,6 +30,21 @@ async def _make_urgent_pocket(engine, sid, pocket_name, allocate_amt, spend_amt)
     await engine.execute_operator(sid, "budget.spend", {"pocket_name": pocket_name, "amount": spend_amt, "description": "", "category": "general"})
 
 
+def _unallocated_income(suggestions):
+    """
+    Isolate the unallocated_income suggestion from a fresh homestead's
+    evaluate_operatives() result. A brand-new :memory: sustain has never
+    sent an egress, so Mentor's OTHER rule (rule_summary_not_exported)
+    legitimately fires too on every evaluate() in these fixtures — that's
+    real, correct behavior (Slice 11), not noise to suppress, so tests
+    that only care about the income condition select it explicitly rather
+    than assuming it's the only suggestion present.
+    """
+    matches = [s for s in suggestions if s["rule_id"] == "unallocated_income"]
+    assert len(matches) == 1, f"expected exactly one unallocated_income suggestion, got {suggestions}"
+    return matches[0]
+
+
 class TestEvaluateOperatives:
     @pytest.mark.asyncio
     async def test_no_operatives_declared_returns_empty(self, engine: SustainEngine):
@@ -44,10 +59,10 @@ class TestEvaluateOperatives:
         await engine.execute_operator(sid, "budget.record_income", {"amount": 5000, "source": "x", "frequency": "once"})
         await _make_urgent_pocket(engine, sid, "food", 1000, 950)
         suggestions = engine.evaluate_operatives(sid)
-        assert len(suggestions) == 1
-        assert suggestions[0]["operative_id"] == "mentor"
-        assert suggestions[0]["proposed_operator"] == "budget.allocate"
-        assert suggestions[0]["status"] == "pending"
+        sug = _unallocated_income(suggestions)
+        assert sug["operative_id"] == "mentor"
+        assert sug["proposed_operator"] == "budget.allocate"
+        assert sug["status"] == "pending"
 
     @pytest.mark.asyncio
     async def test_evaluate_never_mutates_state_or_events(self, engine: SustainEngine):
@@ -73,9 +88,10 @@ class TestDedupeAndExpire:
         await engine.execute_operator(sid, "budget.record_income", {"amount": 5000, "source": "x", "frequency": "once"})
         await _make_urgent_pocket(engine, sid, "food", 1000, 950)
         first = engine.evaluate_operatives(sid)
-        engine.dismiss_suggestion(first[0]["id"])
+        sug = _unallocated_income(first)
+        engine.dismiss_suggestion(sug["id"])
         second = engine.evaluate_operatives(sid)
-        assert second == []
+        assert not any(s["rule_id"] == "unallocated_income" for s in second)
 
     @pytest.mark.asyncio
     async def test_meaningfully_different_condition_resurfaces_after_dismiss(self, engine: SustainEngine):
@@ -83,12 +99,13 @@ class TestDedupeAndExpire:
         await engine.execute_operator(sid, "budget.record_income", {"amount": 5000, "source": "x", "frequency": "once"})
         await _make_urgent_pocket(engine, sid, "food", 1000, 950)
         first = engine.evaluate_operatives(sid)
-        engine.dismiss_suggestion(first[0]["id"])
+        sug = _unallocated_income(first)
+        engine.dismiss_suggestion(sug["id"])
 
         await engine.execute_operator(sid, "budget.record_income", {"amount": 50000, "source": "y", "frequency": "once"})
         third = engine.evaluate_operatives(sid)
-        assert len(third) == 1
-        assert third[0]["dedupe_key"] != first[0]["dedupe_key"]
+        new_sug = _unallocated_income(third)
+        assert new_sug["dedupe_key"] != sug["dedupe_key"]
 
     @pytest.mark.asyncio
     async def test_pending_suggestion_expires_when_condition_resolves(self, engine: SustainEngine):
@@ -96,14 +113,14 @@ class TestDedupeAndExpire:
         await engine.execute_operator(sid, "budget.record_income", {"amount": 5000, "source": "x", "frequency": "once"})
         await _make_urgent_pocket(engine, sid, "food", 1000, 950)
         first = engine.evaluate_operatives(sid)
-        assert len(first) == 1
+        sug = _unallocated_income(first)
 
         # Resolve the condition for real: allocate MORE so the pocket's pct drops below threshold.
         await engine.execute_operator(sid, "budget.allocate", {"pocket_name": "food", "amount": 3000, "period": "monthly"})
         second = engine.evaluate_operatives(sid)
-        assert second == []
+        assert not any(s["rule_id"] == "unallocated_income" for s in second)
         all_rows = engine.get_suggestions(sid, status=None)
-        expired = [r for r in all_rows if r["id"] == first[0]["id"]]
+        expired = [r for r in all_rows if r["id"] == sug["id"]]
         assert expired[0]["status"] == "expired"
 
     @pytest.mark.asyncio
@@ -113,8 +130,9 @@ class TestDedupeAndExpire:
         await _make_urgent_pocket(engine, sid, "food", 1000, 950)
         first = engine.evaluate_operatives(sid)
         second = engine.evaluate_operatives(sid)
-        assert len(second) == 1
-        assert second[0]["id"] == first[0]["id"]  # same row, not a duplicate
+        sug1 = _unallocated_income(first)
+        sug2 = _unallocated_income(second)
+        assert sug1["id"] == sug2["id"]  # same row, not a duplicate
 
     @pytest.mark.asyncio
     async def test_accepted_does_not_resurface(self, engine: SustainEngine):
@@ -122,13 +140,14 @@ class TestDedupeAndExpire:
         await engine.execute_operator(sid, "budget.record_income", {"amount": 5000, "source": "x", "frequency": "once"})
         await _make_urgent_pocket(engine, sid, "food", 1000, 950)
         first = engine.evaluate_operatives(sid)
-        await engine.accept_suggestion(first[0]["id"])
+        sug = _unallocated_income(first)
+        await engine.accept_suggestion(sug["id"])
         # accepting fully allocates liquid into food, so the condition itself
         # is now resolved too -- but even the exact dedupe_key must never
         # resurface once accepted, regardless of whether liquid is refilled
         # into a state that would rebuild the identical bucket.
         second = engine.evaluate_operatives(sid)
-        assert all(s["dedupe_key"] != first[0]["dedupe_key"] for s in second)
+        assert all(s["dedupe_key"] != sug["dedupe_key"] for s in second)
 
 
 class TestAcceptSuggestion:
@@ -138,7 +157,7 @@ class TestAcceptSuggestion:
         await engine.execute_operator(sid, "budget.record_income", {"amount": 5000, "source": "x", "frequency": "once"})
         await _make_urgent_pocket(engine, sid, "food", 1000, 950)
         before_events = len(engine.get_events(sid, limit=100))
-        sug = engine.evaluate_operatives(sid)[0]
+        sug = _unallocated_income(engine.evaluate_operatives(sid))
 
         outcome = await engine.accept_suggestion(sug["id"])
         assert outcome["result"].succeeded
@@ -154,7 +173,7 @@ class TestAcceptSuggestion:
         sid = engine.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
         await engine.execute_operator(sid, "budget.record_income", {"amount": 2000, "source": "x", "frequency": "once"})
         await _make_urgent_pocket(engine, sid, "food", 100, 99)
-        sug = engine.evaluate_operatives(sid)[0]
+        sug = _unallocated_income(engine.evaluate_operatives(sid))
         proposed_amount = sug["proposed_params"]["amount"]
         assert proposed_amount > 0
 
@@ -179,7 +198,7 @@ class TestAcceptSuggestion:
         sid = engine.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
         await engine.execute_operator(sid, "budget.record_income", {"amount": 5000, "source": "x", "frequency": "once"})
         await _make_urgent_pocket(engine, sid, "food", 1000, 950)
-        sug = engine.evaluate_operatives(sid)[0]
+        sug = _unallocated_income(engine.evaluate_operatives(sid))
         engine.dismiss_suggestion(sug["id"])
         with pytest.raises(ValueError):
             await engine.accept_suggestion(sug["id"])
@@ -214,9 +233,10 @@ class TestDismissSuggestion:
         sid = engine.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
         await engine.execute_operator(sid, "budget.record_income", {"amount": 5000, "source": "x", "frequency": "once"})
         await _make_urgent_pocket(engine, sid, "food", 1000, 950)
-        sug = engine.evaluate_operatives(sid)[0]
+        sug = _unallocated_income(engine.evaluate_operatives(sid))
         assert engine.dismiss_suggestion(sug["id"]) is True
-        assert engine.get_suggestions(sid, status="dismissed")[0]["id"] == sug["id"]
+        dismissed = engine.get_suggestions(sid, status="dismissed")
+        assert any(s["id"] == sug["id"] for s in dismissed)
 
     def test_dismiss_unknown_returns_false(self, engine: SustainEngine):
         assert engine.dismiss_suggestion("does-not-exist") is False
@@ -226,7 +246,7 @@ class TestDismissSuggestion:
         sid = engine.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
         await engine.execute_operator(sid, "budget.record_income", {"amount": 5000, "source": "x", "frequency": "once"})
         await _make_urgent_pocket(engine, sid, "food", 1000, 950)
-        sug = engine.evaluate_operatives(sid)[0]
+        sug = _unallocated_income(engine.evaluate_operatives(sid))
         engine.dismiss_suggestion(sug["id"])
         assert engine.dismiss_suggestion(sug["id"]) is False
 
@@ -237,12 +257,21 @@ class TestGetSuggestions:
         sid = engine.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
         await engine.execute_operator(sid, "budget.record_income", {"amount": 5000, "source": "x", "frequency": "once"})
         await _make_urgent_pocket(engine, sid, "food", 1000, 950)
-        sug = engine.evaluate_operatives(sid)[0]
+        sug = _unallocated_income(engine.evaluate_operatives(sid))
         engine.dismiss_suggestion(sug["id"])
 
-        assert engine.get_suggestions(sid, status="pending") == []
-        assert len(engine.get_suggestions(sid, status="dismissed")) == 1
-        assert len(engine.get_suggestions(sid, status=None)) == 1
+        # Mentor's second rule (summary_not_exported) also legitimately
+        # fires on a fresh sustain that's never sent an egress — still
+        # pending, since only the income suggestion was dismissed.
+        pending = engine.get_suggestions(sid, status="pending")
+        assert not any(s["id"] == sug["id"] for s in pending)
+        assert any(s["rule_id"] == "summary_not_exported" for s in pending)
+
+        dismissed = engine.get_suggestions(sid, status="dismissed")
+        assert len(dismissed) == 1
+        assert dismissed[0]["id"] == sug["id"]
+
+        assert len(engine.get_suggestions(sid, status=None)) == 2
 
 
 class TestChildStaleComposition:

@@ -152,10 +152,52 @@ def rule_child_stale(children_meta: list[dict]) -> list[Suggestion]:
     return out
 
 
+# ── Rule: Mentor — a household summary export has gone stale ────────────────
+#
+# Demonstrates Slice 11's "an operative may SUGGEST an egress, but it's
+# still human-confirmed" requirement. Accepting this suggestion runs
+# egress.prepare_household_summary through the exact same real
+# execute_operator() path any other accepted suggestion uses — same S2
+# gate, same S3 fold. That call only ever QUEUES a 'prepared' outbox row;
+# it never confirms or sends anything. Sending still requires a completely
+# separate, explicit human confirm_egress() call. No suggestion — from this
+# rule or any other — can ever reach the send step on its own.
+
+_SUMMARY_EXPORT_STALE_DAYS = 7
+
+
+def rule_summary_not_exported(last_sent_days: float | None) -> list[Suggestion]:
+    """
+    Fires when no household summary has ever been sent, or the last one
+    was sent >= 7 days ago. last_sent_days is pre-computed by the engine
+    from egress_outbox (MAX(sent_at) WHERE status='sent') — kept out of
+    this pure module for the same reason days_since_last_event is passed
+    into rule_child_stale rather than computed here.
+    """
+    if last_sent_days is not None and last_sent_days < _SUMMARY_EXPORT_STALE_DAYS:
+        return []
+    bucket = -1 if last_sent_days is None else (int(last_sent_days) // 7) * 7
+    reason = (
+        "No household summary has ever been exported."
+        if last_sent_days is None
+        else f"The last exported summary was sent {int(last_sent_days)} day(s) ago."
+    )
+    return [Suggestion(
+        operative_id="mentor",
+        rule_id="summary_not_exported",
+        title="household summary hasn't been exported",
+        reason=reason,
+        severity="info",
+        dedupe_key=f"mentor:summary_not_exported:{bucket}",
+        proposed_operator="egress.prepare_household_summary",
+        proposed_params={},
+    )]
+
+
 # ── Registry — operative_id -> rules bound to it ─────────────────────────────
 
 ADVISORY_RULES: dict[str, list[Callable[..., list[Suggestion]]]] = {
-    "mentor": [rule_unallocated_income],
+    "mentor": [rule_unallocated_income, rule_summary_not_exported],
     "attache": [rule_child_stale],
 }
 
@@ -163,20 +205,28 @@ ADVISORY_RULES: dict[str, list[Callable[..., list[Suggestion]]]] = {
 def evaluate_operative(
     operative_id: str,
     state: dict,
-    children_meta: list[dict] | None = None,
+    extra: dict | None = None,
 ) -> list[Suggestion]:
     """
-    Run every rule bound to operative_id and return the combined suggestions.
+    Run every rule bound to operative_id and return the combined
+    suggestions. extra carries whatever engine-computed, non-state inputs
+    specific rules need (children_meta for rule_child_stale,
+    last_sent_days for rule_summary_not_exported) — this module stays
+    DB-free, the engine supplies these.
+
     Unknown operative_id (or one with no bound rules) returns [] — not an
     error, since not every operative advises (e.g. Navigator/Curator/Protege
     have no rules yet; a future slice can add them the same way without
     touching anything here).
     """
+    extra = extra or {}
     rules = ADVISORY_RULES.get(operative_id, [])
     out: list[Suggestion] = []
     for rule in rules:
         if rule is rule_child_stale:
-            out.extend(rule(children_meta or []))
+            out.extend(rule(extra.get("children_meta") or []))
+        elif rule is rule_summary_not_exported:
+            out.extend(rule(extra.get("last_sent_days")))
         else:
             out.extend(rule(state))
     return out

@@ -102,6 +102,10 @@ ORCHIE_OPERATORS = [
     "orchie.morning_brief",
 ]
 
+EGRESS_OPERATORS = [
+    "egress.prepare_household_summary",
+]
+
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + UI_RENDER_OPERATORS                  # Sprint 2 UIParser
@@ -115,6 +119,7 @@ ALL_KNOWN_OPERATORS = (
     + OPERATIVE_OPERATORS                  # Sprint 5.7
     + TASKS_OPERATORS                      # Sprint 6.1
     + ORCHIE_OPERATORS                     # Sprint 6.2
+    + EGRESS_OPERATORS                     # Slice 11 (Egress)
 )
 
 

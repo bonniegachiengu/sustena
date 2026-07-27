@@ -47,6 +47,8 @@ backend/whatsapp_mock_outbox.jsonl
 apps/api/sustena.db
 apps/api/*.db
 apps/api/whatsapp_mock_outbox.jsonl
+apps/api/exports/
+apps/api/debug_*.log
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/

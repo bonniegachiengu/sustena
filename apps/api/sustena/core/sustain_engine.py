@@ -34,6 +34,7 @@ from typing import Any
 import sustena.operators  # noqa: F401 — triggers OPERATOR_REGISTRY population
 
 from sustena.core.advisory import Suggestion, evaluate_operative
+from sustena.core.egress import EgressQueue
 from sustena.core.event_fold import fold_events
 from sustena.core.events import EventBus
 from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext, OperatorResult
@@ -87,6 +88,11 @@ _OPERATIVE_ROLES: dict[str, str] = {
 #   sustena/core/sustain_engine.py    ← this file
 # Path: __file__.parent(core) → parent(sustena) → parent(api) → sustena/sustains/
 _SUSTAINS_DIR = Path(__file__).parent.parent.parent / "sustena" / "sustains"
+
+# Slice 11 (Egress) — the ONLY implemented send target is a local file
+# under this directory. Not committed to git (see .gitignore); created on
+# first send, not at import time.
+_EXPORTS_DIR = Path(__file__).parent.parent.parent / "exports"
 
 # {{placeholder}} token pattern
 _TOKEN_RE = re.compile(r"\{\{(\w+)\}\}")
@@ -237,9 +243,48 @@ class SustainEngine:
                 resolved_at         TEXT,
                 UNIQUE(sustain_id, dedupe_key)
             );
+
+            CREATE TABLE IF NOT EXISTS egress_outbox (
+                id                  TEXT PRIMARY KEY,
+                sustain_id          TEXT NOT NULL,
+                kind                TEXT NOT NULL,
+                target              TEXT NOT NULL,
+                payload_json        TEXT NOT NULL,
+                idempotency_key     TEXT NOT NULL,
+                status              TEXT NOT NULL DEFAULT 'prepared',
+                prepared_at         TEXT NOT NULL,
+                updated_at          TEXT NOT NULL,
+                confirmed_at        TEXT,
+                sent_at             TEXT,
+                failed_at           TEXT,
+                failure_reason      TEXT,
+                result_json         TEXT,
+                attempts            INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(sustain_id, idempotency_key)
+            );
         """)
         self._db.commit()
         self._migrate_events_schema_sync()
+        self._migrate_egress_schema_sync()
+
+    def _migrate_egress_schema_sync(self) -> None:
+        """
+        Same class of fix as _migrate_events_schema_sync: CREATE TABLE IF
+        NOT EXISTS never adds a column to a table that already existed
+        under an older definition. Caught live: an earlier --reload cycle
+        during this slice's own development created egress_outbox before
+        updated_at was added to the schema above, leaving the real
+        sustena.db's table permanently missing it (0 rows at the time,
+        confirmed before this fix — no data at risk). Additive, nullable-
+        default-free ALTER TABLE; no-op once the column exists.
+        """
+        cols = [row[1] for row in self._db.execute("PRAGMA table_info(egress_outbox)").fetchall()]
+        if not cols or "updated_at" in cols:
+            return
+        self._db.execute("ALTER TABLE egress_outbox ADD COLUMN updated_at TEXT")
+        self._db.execute("UPDATE egress_outbox SET updated_at = prepared_at WHERE updated_at IS NULL")
+        self._db.commit()
+        logger.info("[SustainEngine] migrated egress_outbox table — added updated_at column.")
 
     def _migrate_events_schema_sync(self) -> None:
         """
@@ -997,6 +1042,7 @@ class SustainEngine:
         user_id = self._owners.get(sustain_id, "unknown")
         bus     = EventBus(sustain_id=sustain_id)
         ledger  = PawaLedger()
+        egress_queue = EgressQueue(sustain_id)
         ctx = OperatorContext(
             state=state,
             events=bus,
@@ -1005,6 +1051,7 @@ class SustainEngine:
             user_id=user_id,
             operative_id=operative_id,
             timestamp=datetime.utcnow(),
+            egress=egress_queue,
         )
 
         # Execute operator — catch all exceptions, return fail result
@@ -1094,6 +1141,19 @@ class SustainEngine:
                     for i, ev in enumerate(published)
                 ]
                 self._append_events_and_update_cache(sustain_id, state.snapshot(), events_norm)
+
+        # Slice 11 (Egress) — drain anything the operator queued via
+        # ctx.egress into the outbox. This is the ONLY place a queued
+        # egress intent becomes a real 'prepared' row: simulate() also
+        # passes a real EgressQueue so operators run identically in the
+        # sandbox, but simulate() never reaches this line, so a sandboxed
+        # egress.prepare_* call queues in-memory and is discarded with the
+        # rest of the forked context — nothing is ever persisted from a
+        # simulation. Persisting here (after the gate, after the fold) is
+        # itself never a send — see _queue_egress()/confirm_egress().
+        if result.succeeded:
+            for item in egress_queue.queued_this_context():
+                self._queue_egress(sustain_id, item)
 
         return result
 
@@ -1290,6 +1350,13 @@ class SustainEngine:
             state_accessor = StateAccessor(forked_dict)
             bus    = EventBus(sustain_id=f"sim:{sustain_id}")
             ledger = PawaLedger()
+            # A real EgressQueue so egress.* operators run identically in
+            # the sandbox — but simulate() never reads queued_this_context()
+            # into egress_outbox (only execute_operator() does), so anything
+            # queued here is discarded with the rest of the forked context.
+            # Nothing a simulated branch does can ever prepare a real outbox
+            # entry, exactly like it can never append a real event.
+            egress_queue = EgressQueue(sustain_id)
             ctx = OperatorContext(
                 state=state_accessor,
                 events=bus,
@@ -1298,6 +1365,7 @@ class SustainEngine:
                 user_id=user_id,
                 operative_id="simulate",
                 timestamp=datetime.utcnow(),
+                egress=egress_queue,
             )
 
             meta = OPERATOR_REGISTRY[operator_name]
@@ -1477,6 +1545,27 @@ class SustainEngine:
             })
         return out
 
+    def _egress_last_sent_days(self, sustain_id: str) -> float | None:
+        """
+        Days since this sustain's most recently 'sent' egress entry, or
+        None if it has never sent one. Feeds rule_summary_not_exported();
+        pure DB read, no mutation — never counts 'prepared'/'confirmed'/
+        'failed' entries, only genuinely 'sent' ones, so a never-confirmed
+        or failed preparation doesn't count as "already handled."
+        """
+        row = self._db.execute(
+            "SELECT sent_at FROM egress_outbox WHERE sustain_id = ? AND status = 'sent' "
+            "ORDER BY sent_at DESC LIMIT 1",
+            (sustain_id,),
+        ).fetchone()
+        if row is None or row["sent_at"] is None:
+            return None
+        try:
+            ts = datetime.fromisoformat(row["sent_at"])
+            return (datetime.utcnow() - ts.replace(tzinfo=None)).total_seconds() / 86400.0
+        except (ValueError, TypeError):
+            return None
+
     def evaluate_operatives(self, sustain_id: str) -> list[dict]:
         """
         The idle loop's triggered pass (Slice 10): run every rule bound to
@@ -1506,13 +1595,15 @@ class SustainEngine:
         statuses = self.get_operative_statuses(sustain_id)
         active_operative_ids = {s["name"].lower() for s in statuses}
 
-        children_meta: list[dict] | None = None
+        extra: dict = {}
         if "attache" in active_operative_ids:
-            children_meta = self._children_staleness(sustain_id)
+            extra["children_meta"] = self._children_staleness(sustain_id)
+        if "mentor" in active_operative_ids:
+            extra["last_sent_days"] = self._egress_last_sent_days(sustain_id)
 
         fired: list[Suggestion] = []
         for operative_id in active_operative_ids:
-            fired.extend(evaluate_operative(operative_id, state, children_meta))
+            fired.extend(evaluate_operative(operative_id, state, extra))
 
         fired_by_key = {s.dedupe_key: s for s in fired}
         now = datetime.utcnow().isoformat()
@@ -1640,6 +1731,155 @@ class SustainEngine:
             "UPDATE operative_suggestions SET status = 'dismissed', updated_at = ?, resolved_at = ? "
             "WHERE id = ? AND status = 'pending'",
             (now, now, suggestion_id),
+        )
+        self._db.commit()
+        return cur.rowcount > 0
+
+    # ── Egress (Slice 11) ────────────────────────────────────────────────────
+    #
+    # HARD SAFETY BOUNDARY: nothing below can move money, send a payment, or
+    # execute a trade. _send_egress() has exactly one implemented target,
+    # "local_file" — a JSON file written to _EXPORTS_DIR. There is no
+    # payment rail, no third-party messaging API, and no code path from any
+    # egress operator to one. Every egress action is prepared, then requires
+    # an explicit confirm_egress() call — a human action — before anything
+    # leaves the system. Nothing here is ever called automatically: not from
+    # execute_operator (which only ever calls _queue_egress, never
+    # confirm/_send), not from evaluate_operatives (advisory suggestions can
+    # only ever be *accepted* into a 'prepared' row via accept_suggestion's
+    # existing execute_operator() call, never auto-confirmed), and not from
+    # any scheduler (none exists).
+
+    def _queue_egress(self, sustain_id: str, item: dict) -> dict:
+        """
+        Persist one EgressQueue item as a 'prepared' outbox row. Idempotent
+        on (sustain_id, idempotency_key) — INSERT OR IGNORE, same pattern
+        Slice 5's ingest dedup established. Returns the row that now exists
+        for this key, whether it was just created or already there —
+        preparing the same content twice is a no-op, not a duplicate.
+        """
+        now = datetime.utcnow().isoformat()
+        # updated_at is seeded to the same value as prepared_at on insert.
+        self._db.execute(
+            "INSERT OR IGNORE INTO egress_outbox "
+            "(id, sustain_id, kind, target, payload_json, idempotency_key, status, prepared_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?, ?)",
+            (
+                str(uuid.uuid4()), sustain_id, item["kind"], item["target"],
+                json.dumps(item["payload"]), item["idempotency_key"], now, now,
+            ),
+        )
+        self._db.commit()
+        row = self._db.execute(
+            "SELECT * FROM egress_outbox WHERE sustain_id = ? AND idempotency_key = ?",
+            (sustain_id, item["idempotency_key"]),
+        ).fetchone()
+        return dict(row)
+
+    def list_egress(self, sustain_id: str, status: str | None = None) -> list[dict]:
+        """Read-only. status=None returns full history, newest first."""
+        if status is not None:
+            rows = self._db.execute(
+                "SELECT * FROM egress_outbox WHERE sustain_id = ? AND status = ? ORDER BY prepared_at DESC",
+                (sustain_id, status),
+            ).fetchall()
+        else:
+            rows = self._db.execute(
+                "SELECT * FROM egress_outbox WHERE sustain_id = ? ORDER BY prepared_at DESC",
+                (sustain_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def _send_egress(self, row: dict) -> dict:
+        """
+        The ONLY place an outbound effect actually happens. Real file I/O,
+        real exceptions propagate to the caller (confirm_egress) to be
+        recorded honestly as a failure — nothing here swallows an error.
+
+        target="local_file" is the only implemented target. The exports
+        subdirectory is named after the sustain_id (always a safe UUID);
+        the FILENAME is the raw idempotency_key (which may embed a raw,
+        unsanitized human-supplied label) — deliberately not sanitized, so
+        a label containing characters illegal in a filename produces a
+        genuine OSError here rather than a silently mangled export.
+        """
+        if row["target"] != "local_file":
+            raise ValueError(f"Unsupported egress target '{row['target']}'.")
+        payload = json.loads(row["payload_json"])
+        sustain_dir = _EXPORTS_DIR / row["sustain_id"]
+        sustain_dir.mkdir(parents=True, exist_ok=True)
+        file_path = sustain_dir / f"{row['idempotency_key']}.json"
+        file_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return {"file_path": str(file_path)}
+
+    async def confirm_egress(self, outbox_id: str) -> dict:
+        """
+        The ONLY path from 'prepared' to an actual outbound effect — and it
+        can only be called explicitly (never automatically). Also serves as
+        retry: a 'failed' row can be confirmed again (attempts increments
+        each time). Confirming an already-'sent' row is an idempotent
+        no-op — returns the existing result WITHOUT re-sending, so
+        double-clicking confirm (or a duplicate request) can never fire the
+        effect twice.
+
+        Passes through a real 'confirmed' status before attempting the
+        send, so confirmed_at is always set once a row reaches 'sent' or
+        'failed' — proof the explicit-confirm step genuinely happened, not
+        just an internal implementation detail.
+
+        Raises ValueError if the outbox entry doesn't exist or is in a
+        status that can't be confirmed (there is no such status today
+        besides 'sent', which is handled as an idempotent no-op above, but
+        this guards a future added status too).
+        """
+        row = self._db.execute("SELECT * FROM egress_outbox WHERE id = ?", (outbox_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"Egress outbox entry '{outbox_id}' not found.")
+        row = dict(row)
+        now = datetime.utcnow().isoformat()
+
+        if row["status"] == "sent":
+            return {"outbox": row, "already_sent": True}
+        if row["status"] not in ("prepared", "failed"):
+            raise ValueError(f"Egress outbox entry '{outbox_id}' is '{row['status']}', not confirmable.")
+
+        self._db.execute(
+            "UPDATE egress_outbox SET status = 'confirmed', confirmed_at = ?, updated_at = ?, attempts = attempts + 1 WHERE id = ?",
+            (now, now, outbox_id),
+        )
+        self._db.commit()
+
+        try:
+            result = self._send_egress(row)
+        except Exception as exc:
+            self._db.execute(
+                "UPDATE egress_outbox SET status = 'failed', failed_at = ?, updated_at = ?, failure_reason = ? WHERE id = ?",
+                (now, now, f"{type(exc).__name__}: {exc}", outbox_id),
+            )
+            self._db.commit()
+            updated = dict(self._db.execute("SELECT * FROM egress_outbox WHERE id = ?", (outbox_id,)).fetchone())
+            logger.info("[SustainEngine] egress '%s' confirm FAILED: %s", outbox_id, exc)
+            return {"outbox": updated, "already_sent": False, "error": str(exc)}
+
+        self._db.execute(
+            "UPDATE egress_outbox SET status = 'sent', sent_at = ?, updated_at = ?, result_json = ? WHERE id = ?",
+            (now, now, json.dumps(result), outbox_id),
+        )
+        self._db.commit()
+        updated = dict(self._db.execute("SELECT * FROM egress_outbox WHERE id = ?", (outbox_id,)).fetchone())
+        return {"outbox": updated, "already_sent": False}
+
+    def cancel_egress(self, outbox_id: str) -> bool:
+        """
+        Marks a 'prepared' or 'failed' row 'cancelled' — never sent, kept
+        for the audit trail rather than deleted. Returns False if the entry
+        doesn't exist or is already 'sent'/'cancelled'.
+        """
+        now = datetime.utcnow().isoformat()
+        cur = self._db.execute(
+            "UPDATE egress_outbox SET status = 'cancelled', updated_at = ? "
+            "WHERE id = ? AND status IN ('prepared', 'failed')",
+            (now, outbox_id),
         )
         self._db.commit()
         return cur.rowcount > 0

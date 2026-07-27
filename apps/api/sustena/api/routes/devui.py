@@ -559,6 +559,107 @@ async def _get_suggestions(sustain_id: str) -> list[dict]:
         return []
 
 
+# ── Egress / outbox (Slice 11) ────────────────────────────────────────────────
+# HARD SAFETY BOUNDARY: none of these routes can move money. prepare-summary
+# only ever QUEUES a 'prepared' row (a real, gated, fold-recorded operator
+# call — see egress.prepare_household_summary). confirm is the ONLY route
+# that can trigger an actual send, and it only ever writes a local JSON file
+# — there is no payment rail anywhere in this file or the engine methods it
+# calls. Nothing here ever runs automatically.
+
+class PrepareSummaryRequest(BaseModel):
+    label: str = Field(default="", description="Optional label — lets a human prepare more than one distinct summary per day.")
+
+
+@router.post("/sustain/{sustain_id}/egress/prepare-summary", summary="Prepare a household summary export (queues, does not send)")
+async def prepare_summary_route(
+    sustain_id: str, body: PrepareSummaryRequest, _: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Runs egress.prepare_household_summary through the real, gated
+    execute_operator() path. Only ever QUEUES a 'prepared' outbox row —
+    nothing leaves the system from this call. Idempotent: preparing the
+    same label (or the same day, with no label) twice returns the same row.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    result = await engine.execute_operator(
+        sustain_id, "egress.prepare_household_summary", {"label": body.label},
+    )
+    if not result.succeeded:
+        return ok({"result": result.to_response(), "outbox": None})
+
+    idempotency_key = result.data.get("idempotency_key")
+    matches = [
+        row for row in engine.list_egress(sustain_id, status=None)
+        if row["idempotency_key"] == idempotency_key
+    ]
+    return ok({"result": result.to_response(), "outbox": matches[0] if matches else None})
+
+
+@router.get("/sustain/{sustain_id}/egress", summary="List outbox entries for a sustain")
+async def list_egress_route(
+    sustain_id: str,
+    status: str | None = Query(default=None, description="prepared|confirmed|sent|failed|cancelled, or omit for full history"),
+    _: dict = Depends(get_current_user),
+) -> dict:
+    """Read-only — never triggers a send. Newest first."""
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    return ok({"egress": engine.list_egress(sustain_id, status=status)})
+
+
+@router.post("/sustain/{sustain_id}/egress/{outbox_id}/confirm", summary="Confirm an outbox entry — the ONLY route that can send")
+async def confirm_egress_route(
+    sustain_id: str, outbox_id: str, _: dict = Depends(get_current_user),
+) -> dict:
+    """
+    The explicit human confirm step. Also serves as retry for a 'failed'
+    entry. Confirming an already-'sent' entry is an idempotent no-op — the
+    response says so, nothing is re-sent. A send failure is reported as a
+    normal 200 body with status='failed' and a reason, never an HTTP error.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    try:
+        outcome = await engine.confirm_egress(outbox_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return ok(outcome)
+
+
+@router.post("/sustain/{sustain_id}/egress/{outbox_id}/cancel", summary="Cancel a prepared or failed outbox entry")
+async def cancel_egress_route(
+    sustain_id: str, outbox_id: str, _: dict = Depends(get_current_user),
+) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    cancelled = engine.cancel_egress(outbox_id)
+    if not cancelled:
+        raise HTTPException(status_code=404, detail="Outbox entry not found or already sent/cancelled.")
+    return ok({"cancelled": True})
+
+
+async def _get_egress(sustain_id: str) -> list[dict]:
+    """
+    Read-only outbox history for /devui/state — same best-effort-empty-on-
+    failure contract as the other needs-attention helpers. Never triggers
+    a send. Returns full history (usually short) so the Outbox card can
+    show sent/failed alongside prepared without a second poll.
+    """
+    try:
+        from sustena.core.engine_singleton import get_shared_engine
+        engine = get_shared_engine()
+        return engine.list_egress(sustain_id, status=None)
+    except Exception as exc:
+        logger.debug("_get_egress(%s) failed: %s", sustain_id, exc)
+        return []
+
+
 # ── Shared: visualize.* widget computation ───────────────────────────────────
 # Used by both GET /devui/state and GET /devui/monitor-widgets so the Monitor
 # panel's pocket ring / event feed / constraint health widgets are computed
@@ -729,6 +830,7 @@ async def get_state(
     ingest_attention = await _get_ingest_attention(sustain_id)
     rollup = _get_rollup(engine, sustain_id)
     suggestions = await _get_suggestions(sustain_id)
+    egress = await _get_egress(sustain_id)
 
     return ok({
         "sustain_id": sustain_id,
@@ -741,6 +843,7 @@ async def get_state(
         "ingest_attention": ingest_attention,
         "rollup": rollup,
         "suggestions": suggestions,
+        "egress": egress,
     })
 
 

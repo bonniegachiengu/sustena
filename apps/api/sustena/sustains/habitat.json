@@ -106,6 +106,12 @@
       "description": "Return a budget ring ResponseWidget showing all personal pockets and key metrics.",
       "params": [],
       "pawa_cost": 0
+    },
+    {
+      "name": "egress.prepare_household_summary",
+      "description": "Prepare a personal finance summary for export. Queued in the outbox as 'prepared' — nothing leaves the system until a human confirms it.",
+      "params": ["label"],
+      "pawa_cost": 0
     }
   ],
   "operatives": {},

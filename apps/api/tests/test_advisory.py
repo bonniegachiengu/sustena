@@ -14,6 +14,7 @@ from sustena.core.advisory import (
     Suggestion,
     evaluate_operative,
     rule_child_stale,
+    rule_summary_not_exported,
     rule_unallocated_income,
 )
 
@@ -119,12 +120,59 @@ class TestRuleChildStale:
         assert c8.dedupe_key != c14.dedupe_key  # next week bucket
 
 
-class TestEvaluateOperative:
-    def test_dispatches_to_bound_rules(self):
-        state = _state(5000, {"food": {"allocated": 1000, "spent": 999, "limit": 0}})
-        out = evaluate_operative("mentor", state)
+class TestRuleSummaryNotExported:
+    def test_fires_when_never_exported(self):
+        out = rule_summary_not_exported(None)
         assert len(out) == 1
         assert out[0].operative_id == "mentor"
+        assert out[0].proposed_operator == "egress.prepare_household_summary"
+        assert out[0].proposed_params == {}
+        assert "ever" in out[0].reason
+
+    def test_fires_when_stale(self):
+        out = rule_summary_not_exported(10)
+        assert len(out) == 1
+        assert "10" in out[0].reason
+
+    def test_no_fire_when_recent(self):
+        assert rule_summary_not_exported(1) == []
+        assert rule_summary_not_exported(6.9) == []
+
+    def test_fires_exactly_at_threshold(self):
+        assert len(rule_summary_not_exported(7)) == 1
+
+    def test_never_exported_and_stale_have_different_dedupe_keys(self):
+        never = rule_summary_not_exported(None)[0]
+        stale = rule_summary_not_exported(30)[0]
+        assert never.dedupe_key != stale.dedupe_key
+
+    def test_proposes_no_send_only_prepare(self):
+        # The proposed operator can only ever QUEUE (prepare) — it is not
+        # confirm_egress or anything capable of sending. This is the
+        # structural proof that accepting this suggestion cannot send.
+        out = rule_summary_not_exported(None)
+        assert out[0].proposed_operator == "egress.prepare_household_summary"
+        assert "confirm" not in out[0].proposed_operator
+        assert "send" not in out[0].proposed_operator
+
+
+class TestEvaluateOperative:
+    def test_dispatches_to_bound_rules(self):
+        # Mentor has two bound rules; pin last_sent_days recent enough that
+        # only rule_unallocated_income fires, isolating this test to
+        # "dispatch reaches the bound rule and returns its output" rather
+        # than also asserting how many rules happen to be bound today.
+        state = _state(5000, {"food": {"allocated": 1000, "spent": 999, "limit": 0}})
+        out = evaluate_operative("mentor", state, extra={"last_sent_days": 1})
+        assert len(out) == 1
+        assert out[0].operative_id == "mentor"
+        assert out[0].rule_id == "unallocated_income"
+
+    def test_dispatches_to_all_bound_rules_when_all_fire(self):
+        state = _state(5000, {"food": {"allocated": 1000, "spent": 999, "limit": 0}})
+        out = evaluate_operative("mentor", state, extra={"last_sent_days": None})
+        rule_ids = {s.rule_id for s in out}
+        assert rule_ids == {"unallocated_income", "summary_not_exported"}
 
     def test_unbound_operative_returns_empty(self):
         state = _state(5000, {"food": {"allocated": 1000, "spent": 999, "limit": 0}})
@@ -137,7 +185,7 @@ class TestEvaluateOperative:
 
     def test_attache_dispatches_children_meta(self):
         children = [{"sustain_id": "c1", "member": "A", "days_since_last_event": 30}]
-        out = evaluate_operative("attache", {}, children_meta=children)
+        out = evaluate_operative("attache", {}, extra={"children_meta": children})
         assert len(out) == 1
         assert out[0].rule_id == "child_stale"
 

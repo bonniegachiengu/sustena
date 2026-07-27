@@ -337,6 +337,12 @@
       "description": "Mark all overdue active tasks as carryover. Runs on a polling schedule.",
       "params": [],
       "pawa_cost": 0
+    },
+    {
+      "name": "egress.prepare_household_summary",
+      "description": "Prepare a household finance summary for export. Queued in the outbox as 'prepared' — nothing leaves the system until a human confirms it.",
+      "params": ["label"],
+      "pawa_cost": 0
     }
   ],
   "operatives": {

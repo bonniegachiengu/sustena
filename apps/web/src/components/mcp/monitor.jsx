@@ -208,6 +208,25 @@ function computeNeedsAttention(apiData, stateRows) {
     });
   }
 
+  // Egress outbox (Slice 11): entries awaiting an explicit human
+  // confirm — never itself an outbound effect, just a flag that action
+  // is available. The full list with CONFIRM/CANCEL lives in the OUTBOX
+  // block further down this same panel.
+  const actionableEgress = (apiData?.egress || []).filter(e => e.status === 'prepared' || e.status === 'failed');
+  if (actionableEgress.length > 0) {
+    const failedCount = actionableEgress.filter(e => e.status === 'failed').length;
+    items.push({
+      id: 'egress:actionable',
+      urgency: failedCount > 0 ? 1.03 : 1.0,
+      tone: failedCount > 0 ? 'danger' : 'amber',
+      title: `${actionableEgress.length} outbox item${actionableEgress.length === 1 ? '' : 's'} awaiting confirmation`,
+      why: failedCount > 0
+        ? `${failedCount} failed and retryable · nothing sends until you confirm`
+        : 'prepared, not sent · nothing leaves the system until you confirm',
+      action: null,
+    });
+  }
+
   return items.sort((a, b) => b.urgency - a.urgency);
 }
 
@@ -408,6 +427,112 @@ function SuggestionsBlock({ suggestions, busy, lastResult, onAccept, onDismiss, 
   );
 }
 
+/* ─── Egress / outbox (Slice 11) — a human-gated outbound action path.
+   CORE PRINCIPLE rendered literally, same as Suggestions above: PREPARED
+   entries have done nothing external yet — the honesty marker says so
+   outright. Only clicking CONFIRM can ever trigger the real send, and the
+   lifecycle (prepared → confirmed → sent, or failed) is shown plainly,
+   including an honest failure with a RETRY affordance (re-confirm). ───── */
+const _EGRESS_STATUS_STYLE = {
+  prepared:  { label: 'PREPARED — nothing sent',      color: 'var(--amber)' },
+  confirmed: { label: 'CONFIRMING…',                   color: 'var(--amber)' },
+  sent:      { label: 'SENT',                          color: 'var(--teal)' },
+  failed:    { label: 'FAILED — retryable',             color: 'var(--danger)' },
+  cancelled: { label: 'CANCELLED',                      color: 'var(--text-dim)' },
+};
+
+function OutboxEntryCard({ e, busy, onConfirm, onCancel }) {
+  const isBusy = busy === e.id;
+  const statusStyle = _EGRESS_STATUS_STYLE[e.status] || { label: e.status?.toUpperCase(), color: 'var(--text-muted)' };
+  const canConfirm = e.status === 'prepared' || e.status === 'failed';
+  const canCancel = e.status === 'prepared' || e.status === 'failed';
+  let resultLine = null;
+  if (e.status === 'sent' && e.result_json) {
+    try { resultLine = `→ ${JSON.parse(e.result_json).file_path}`; } catch {}
+  } else if (e.status === 'failed' && e.failure_reason) {
+    resultLine = e.failure_reason;
+  }
+  return (
+    <div className="fade-up" style={{
+      border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
+      padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)' }}>{e.kind}</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: statusStyle.color, letterSpacing: '0.06em' }}>{statusStyle.label}</span>
+      </div>
+      <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{e.idempotency_key} · target: {e.target}</span>
+      {resultLine && (
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 9, padding: '4px 6px', borderRadius: 3,
+          color: e.status === 'sent' ? 'var(--teal)' : 'var(--danger)', background: 'var(--bg-base)',
+          overflowWrap: 'anywhere',
+        }}>{resultLine}</div>
+      )}
+      {(canConfirm || canCancel) && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+          {canConfirm && (
+            <button onClick={() => onConfirm(e.id)} disabled={isBusy} style={{
+              padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
+              color: isBusy ? 'var(--text-dim)' : 'var(--bg-base)',
+              background: isBusy ? 'var(--bg-overlay)' : 'var(--teal, #2dd4bf)',
+              border: `1px solid ${isBusy ? 'var(--border)' : 'var(--teal, #2dd4bf)'}`,
+              borderRadius: 'var(--radius-sm)', cursor: isBusy ? 'not-allowed' : 'pointer',
+            }}>{isBusy ? '⟳' : (e.status === 'failed' ? '↺ RETRY' : '✓ CONFIRM & SEND')}</button>
+          )}
+          {canCancel && (
+            <button onClick={() => onCancel(e.id)} disabled={isBusy} style={{
+              padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
+              color: 'var(--text-muted)', background: 'transparent',
+              border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+              cursor: isBusy ? 'not-allowed' : 'pointer',
+            }}>CANCEL</button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OutboxBlock({ egress, busy, onConfirm, onCancel, onPrepare, preparing, label, onLabelChange }) {
+  const list = egress || [];
+  const inp = {
+    background: 'var(--bg-surface)', border: '1px solid var(--border-mid)', borderRadius: 3,
+    padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-primary)', outline: 'none',
+  };
+  return (
+    <div className="fade-up" style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', overflow: 'hidden',
+    }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <span className="label-11">OUTBOX · EGRESS</span>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            value={label} onChange={e => onLabelChange(e.target.value)}
+            placeholder="optional label" style={{ ...inp, width: 130 }}
+          />
+          <button onClick={onPrepare} disabled={preparing} style={{
+            fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
+            color: preparing ? 'var(--text-dim)' : 'var(--text-muted)',
+            background: 'transparent', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)', padding: '4px 8px',
+            cursor: preparing ? 'not-allowed' : 'pointer',
+          }}>{preparing ? '⟳ PREPARING…' : '+ PREPARE SUMMARY'}</button>
+        </div>
+      </div>
+      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {list.length === 0
+          ? <span className="meta-10" style={{ color: 'var(--text-dim)' }}>outbox is empty · nothing prepared yet</span>
+          : list.map(e => (
+              <OutboxEntryCard key={e.id} e={e} busy={busy} onConfirm={onConfirm} onCancel={onCancel} />
+            ))
+        }
+      </div>
+    </div>
+  );
+}
+
 function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
   const [apiData, setApiData] = dUseState(null);   // last good GET /devui/state result — state, events, operatives, constraints, widgets, proposalsInVoting all from ONE fetch
   const [loading, setLoading] = dUseState(true);
@@ -429,6 +554,7 @@ function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
       ingestAttention: payload.ingest_attention || { messages: [], stale_sources: [] },
       rollup: payload.rollup || null,
       suggestions: payload.suggestions || [],
+      egress: payload.egress || [],
     };
   };
 
@@ -493,6 +619,42 @@ function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
       .then(d => setApiData(normaliseGetResponse(d)))
       .catch(() => {})
       .finally(() => setSuggestionBusy(null));
+  };
+
+  // Egress / outbox (Slice 11) — a human-gated outbound action path. Nothing
+  // here ever sends automatically: prepareSummary only queues a 'prepared'
+  // row (a real gated operator call), and only confirmEgress can trigger the
+  // actual send — always an explicit button click, never triggered by the
+  // 1s heartbeat or by preparing.
+  const [egressBusy, setEgressBusy] = dUseState(null);
+  const [preparingLabel, setPreparingLabel] = dUseState('');
+  const [preparing, setPreparing] = dUseState(false);
+
+  const prepareSummary = () => {
+    setPreparing(true);
+    api.post(`/devui/sustain/${encodeURIComponent(sustain.id)}/egress/prepare-summary`, { label: preparingLabel })
+      .then(() => { setPreparingLabel(''); return fetchState(); })
+      .then(d => setApiData(normaliseGetResponse(d)))
+      .catch(() => {})
+      .finally(() => setPreparing(false));
+  };
+
+  const confirmEgress = (outboxId) => {
+    setEgressBusy(outboxId);
+    api.post(`/devui/sustain/${encodeURIComponent(sustain.id)}/egress/${outboxId}/confirm`, {})
+      .then(() => fetchState())
+      .then(d => setApiData(normaliseGetResponse(d)))
+      .catch(() => {})
+      .finally(() => setEgressBusy(null));
+  };
+
+  const cancelEgress = (outboxId) => {
+    setEgressBusy(outboxId);
+    api.post(`/devui/sustain/${encodeURIComponent(sustain.id)}/egress/${outboxId}/cancel`, {})
+      .then(() => fetchState())
+      .then(d => setApiData(normaliseGetResponse(d)))
+      .catch(() => {})
+      .finally(() => setEgressBusy(null));
   };
 
   const streamHealth = useStreamHealth(offline);
@@ -594,6 +756,18 @@ function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
           onDismiss={dismissSuggestion}
           onRecheck={runEvaluate}
           evaluating={evaluating}
+        />
+      )}
+      {!loading && (
+        <OutboxBlock
+          egress={apiData?.egress}
+          busy={egressBusy}
+          onConfirm={confirmEgress}
+          onCancel={cancelEgress}
+          onPrepare={prepareSummary}
+          preparing={preparing}
+          label={preparingLabel}
+          onLabelChange={setPreparingLabel}
         />
       )}
 
