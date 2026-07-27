@@ -1181,18 +1181,26 @@ class SustainEngine:
         """
         Run a sequence of operators against a forked (deep-copied) state.
 
-        The database is NEVER written to — the original live state is untouched.
-        Useful for forward-simulation before committing to a Council proposal.
+        The database is NEVER written to — the original live state is
+        untouched, no event is ever appended, and nothing published through
+        the in-memory EventBus used here (db_session=None) has anywhere to
+        persist to. Useful for forward-simulation before committing to a
+        Council proposal, and the sandbox core of the Simulator panel's
+        scenario tree (Slice 9).
 
         Each item in operator_sequence:
             {"operator": "<name>", "params": {<kwargs>}}
 
         Returns a list of per-step result dicts:
             {
-                "operator":    str,
-                "params":      dict,
-                "result":      OperatorResult,
-                "state_after": dict,   # state snapshot after this step
+                "operator":      str,
+                "params":        dict,
+                "result":        OperatorResult,
+                "state_after":   dict,        # state snapshot after this step
+                "parent_rollup": dict | None,  # hypothetical roll-up on the
+                                                # parent if sustain_id has one,
+                                                # else None — read-only, never
+                                                # written anywhere (Slice 9)
             }
 
         Steps that fail do NOT advance the forked state — subsequent steps see
@@ -1207,7 +1215,24 @@ class SustainEngine:
         # Fork — deep copy, never touches DB
         forked_dict = copy.deepcopy(self._load_state_dict(sustain_id))
         user_id = self._owners.get(sustain_id, "unknown")
+        parent_link = self.get_parent(sustain_id)
         results: list[dict] = []
+
+        def _parent_rollup_for(state_dict: dict) -> dict | None:
+            """Hypothetical roll-up on the parent (Slice 7's composition
+            machinery) as if state_dict were sustain_id's committed state —
+            purely a read/compute, exactly like the display-only path
+            evaluate_constraints() already uses. None if sustain_id has no
+            parent, or the parent can't be resolved."""
+            if parent_link is None:
+                return None
+            try:
+                return self._hypothetical_rollup(
+                    parent_link["parent_sustain_id"],
+                    override_child_id=sustain_id, override_state=state_dict,
+                )
+            except ValueError:
+                return None
 
         for step in operator_sequence:
             operator_name = step.get("operator", "")
@@ -1224,6 +1249,7 @@ class SustainEngine:
                     "params":      params,
                     "result":      result,
                     "state_after": copy.deepcopy(forked_dict),
+                    "parent_rollup": _parent_rollup_for(forked_dict),
                 })
                 continue
 
@@ -1237,6 +1263,7 @@ class SustainEngine:
                     "params":      params,
                     "result":      result,
                     "state_after": copy.deepcopy(forked_dict),
+                    "parent_rollup": _parent_rollup_for(forked_dict),
                 })
                 continue
 
@@ -1270,6 +1297,16 @@ class SustainEngine:
                 if not gate_ok:
                     result = OperatorResult.fail(reason=gate_reason, constraint_violated="enforcement_gate")
 
+            # Slice 9: the same parent-binding-authority check execute_operator
+            # runs (Slice 7/Option C) — a simulated step that would newly
+            # breach a BINDING parent aggregate invariant is refused in the
+            # sandbox exactly like it would be for real. Purely read-only:
+            # _check_parent_binding_gate never writes anything.
+            if result.succeeded:
+                parent_ok, parent_reason = self._check_parent_binding_gate(sustain_id, state_accessor.snapshot())
+                if not parent_ok:
+                    result = OperatorResult.fail(reason=parent_reason, constraint_violated="parent_binding_gate")
+
             # Advance forked state only on success
             if result.succeeded:
                 forked_dict = state_accessor.snapshot()
@@ -1279,8 +1316,39 @@ class SustainEngine:
                 "params":      params,
                 "result":      result,
                 "state_after": copy.deepcopy(forked_dict),
+                "parent_rollup": _parent_rollup_for(forked_dict),
             })
 
+        return results
+
+    async def promote_simulation(self, sustain_id: str, operator_sequence: list[dict]) -> list[dict]:
+        """
+        Slice 9's "promote this branch to reality" — genuinely replays
+        operator_sequence against LIVE state, in order, through the exact
+        same execute_operator() every real Console/API call uses. Same
+        gate, real events, real fold-append. This is NOT a shortcut that
+        trusts the earlier simulate() result: each step is re-run for real,
+        so if live state has drifted since the simulation was built (another
+        operator ran in between, a linked child changed, anything), a step
+        that passed in simulation can legitimately fail here — that is the
+        honest, correct outcome, not a bug to hide.
+
+        Stops at the FIRST real failure — later steps in the sequence are
+        never attempted once one refuses, since they were only ever
+        validated against a state that's now been proven wrong.
+
+        Returns one entry per step ATTEMPTED (not the full original
+        sequence if it stopped early):
+            {"operator": str, "params": dict, "result": OperatorResult}
+        """
+        results: list[dict] = []
+        for step in operator_sequence:
+            operator_name = step.get("operator", "")
+            params = step.get("params", {})
+            result = await self.execute_operator(sustain_id, operator_name, params)
+            results.append({"operator": operator_name, "params": params, "result": result})
+            if not result.succeeded:
+                break
         return results
 
     # ── Internal helpers ───────────────────────────────────────────────────────
@@ -1918,6 +1986,21 @@ class SustainEngine:
             },
           }
         """
+        return self._hypothetical_rollup(parent_sustain_id)
+
+    def _hypothetical_rollup(
+        self, parent_sustain_id: str,
+        override_child_id: str | None = None, override_state: dict | None = None,
+    ) -> dict:
+        """
+        The shared core of ρ. compute_rollup() is the plain case (every
+        child read fresh from disk). Slice 9's _check_parent_binding_gate()
+        and simulate() are the override case: ONE child's contribution is
+        override_state (a candidate, not-yet-committed state) instead of a
+        disk read — every other child is read normally — to answer "what
+        WOULD the roll-up be if this candidate state were already
+        committed" without writing anything, anywhere.
+        """
         spec = self._get_spec(parent_sustain_id)
         if spec is None:
             raise ValueError(f"Sustain '{parent_sustain_id}' not found.")
@@ -1927,6 +2010,10 @@ class SustainEngine:
         children_report: list[dict] = []
         for link in links:
             cid = link["child_sustain_id"]
+            if cid == override_child_id:
+                child_states[cid] = override_state
+                children_report.append({**link, "status": "ok"})
+                continue
             try:
                 child_states[cid] = self._load_state_dict(cid)
                 children_report.append({**link, "status": "ok"})
@@ -2027,34 +2114,19 @@ class SustainEngine:
         if not binding_invariants:
             return True, ""
 
-        links = self.list_children(parent_id)
-
-        before_states: dict[str, dict] = {}
-        after_states: dict[str, dict] = {}
-        for link in links:
-            cid = link["child_sustain_id"]
-            if cid == child_sustain_id:
-                after_states[cid] = candidate_child_state
-                try:
-                    before_states[cid] = self._load_state_dict(cid)
-                except ValueError:
-                    pass  # child had no prior state (shouldn't happen mid-operator-call) — treated as missing "before" too
-                continue
-            try:
-                state = self._load_state_dict(cid)
-            except ValueError:
-                continue
-            before_states[cid] = state
-            after_states[cid] = state
-
-        before_aggregates = self._aggregate_from_child_states(parent_spec, links, before_states)
-        after_aggregates = self._aggregate_from_child_states(parent_spec, links, after_states)
+        # "before" = every child read normally, including this one at its
+        # actual current state. "after" = this one child's contribution
+        # substituted with the not-yet-committed candidate.
+        before = self._hypothetical_rollup(parent_id)
+        after = self._hypothetical_rollup(
+            parent_id, override_child_id=child_sustain_id, override_state=candidate_child_state,
+        )
 
         parent_state_before = copy.deepcopy(self._load_state_dict(parent_id))
         parent_state_after = copy.deepcopy(parent_state_before)
-        for agg_id, result in before_aggregates.items():
+        for agg_id, result in before["aggregates"].items():
             parent_state_before[agg_id] = result["value"]
-        for agg_id, result in after_aggregates.items():
+        for agg_id, result in after["aggregates"].items():
             parent_state_after[agg_id] = result["value"]
 
         for inv in binding_invariants:

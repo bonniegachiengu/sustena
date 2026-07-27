@@ -728,14 +728,16 @@ async def simulate(
             "sustain_id": body.sustain_id,
             "steps": [
                 {
-                    "operator":    r["operator"],
-                    "params":      r["params"],
-                    "result":      r["result"].to_response(),
-                    "state_after": r["state_after"],
+                    "operator":      r["operator"],
+                    "params":        r["params"],
+                    "result":        r["result"].to_response(),
+                    "state_after":   r["state_after"],
+                    "parent_rollup": r.get("parent_rollup"),
                 }
                 for r in step_results
             ],
             "final_state": step_results[-1]["state_after"] if step_results else {},
+            "final_parent_rollup": step_results[-1].get("parent_rollup") if step_results else None,
         })
     except Exception as exc:
         logger.warning("simulate(%s) failed: %s", body.sustain_id, exc)
@@ -755,6 +757,46 @@ async def simulate(
             "steps": stub_steps,
             "final_state": {"_stub": True, "note": f"Engine not ready: {exc}"},
         })
+
+
+# ── 4b. POST /devui/sustain/{id}/promote-simulation ───────────────────────────
+
+class PromoteSimulationRequest(BaseModel):
+    steps: list[dict] = Field(
+        default_factory=list,
+        description="[{operator, params}, ...] — the exact sequence a branch in the "
+                     "scenario tree represents, replayed for real.",
+    )
+
+
+@router.post("/sustain/{sustain_id}/promote-simulation", summary="Genuinely replay a simulated branch against live state")
+async def promote_simulation_route(
+    sustain_id: str, body: PromoteSimulationRequest, _: dict = Depends(get_current_user),
+) -> dict:
+    """
+    "Promote this branch to reality" — NOT a shortcut that trusts the
+    earlier simulation result. Every step is re-run for real through
+    execute_operator() (same gate, real events, real fold-append) against
+    CURRENT live state. If live state drifted since the simulation was
+    built, a step that passed in simulation can honestly fail here — that
+    outcome is reported plainly, never papered over. Stops at the first
+    real failure; later steps are never attempted.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    step_results = await engine.promote_simulation(sustain_id, body.steps)
+    all_succeeded = bool(step_results) and all(r["result"].succeeded for r in step_results)
+    return ok({
+        "sustain_id": sustain_id,
+        "steps_attempted": len(step_results),
+        "steps_requested": len(body.steps),
+        "all_succeeded": all_succeeded,
+        "steps": [
+            {"operator": r["operator"], "params": r["params"], "result": r["result"].to_response()}
+            for r in step_results
+        ],
+    })
 
 
 # ── 5. WS /devui/state-stream ─────────────────────────────────────────────────
