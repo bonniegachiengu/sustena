@@ -211,14 +211,34 @@ _DIST_DIR = _Path(__file__).resolve().parent.parent.parent.parent / "web" / "dis
 if _DIST_DIR.is_dir():
     app.mount("/assets", StaticFiles(directory=_DIST_DIR / "assets"), name="frontend-assets")
 
+    _DIST_DIR_RESOLVED = _DIST_DIR.resolve()
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_frontend(full_path: str) -> FileResponse:
         """
-        SPA fallback. Any path not matched by an API route above (a
-        client-side react-router path like /profile, or a hard refresh /
-        deep link) serves index.html so the app boots and its own router
-        takes over client-side.
+        Real static files first (manifest.webmanifest, sw.js, offline.html,
+        icons/*, and anything else Vite copied from public/ into dist/ root
+        — NOT just /assets, which is the only path StaticFiles is mounted
+        at above), SPA fallback second.
+
+        Found live while building the PWA slice: this route used to return
+        index.html unconditionally for every unmatched path, which meant
+        GET /manifest.webmanifest and GET /sw.js were silently serving HTML
+        instead of the real files — a browser cannot install a PWA whose
+        manifest is an HTML document, and a service worker script that
+        isn't valid JavaScript fails registration outright. FileResponse
+        infers the correct Content-Type from the extension automatically
+        (application/manifest+json, application/javascript, image/png,
+        ...), so no explicit media_type wiring was needed once the file is
+        actually being served.
+
+        A client-side react-router path (e.g. /profile) or a genuine 404
+        both fall through to index.html exactly as before — that behavior
+        is unchanged; only real on-disk files now win over it.
         """
+        candidate = (_DIST_DIR / full_path).resolve()
+        if candidate.is_file() and candidate.is_relative_to(_DIST_DIR_RESOLVED):
+            return FileResponse(candidate)
         return FileResponse(_DIST_DIR / "index.html")
 
     logger.info("Serving built frontend from %s", _DIST_DIR)
