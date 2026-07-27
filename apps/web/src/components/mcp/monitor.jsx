@@ -175,6 +175,23 @@ function computeNeedsAttention(apiData, stateRows) {
     });
   });
 
+  // Composition roll-up (Slice 8): a linked child this sustain aggregates
+  // from that couldn't be read — never silently folded in as zero. One row
+  // per aggregate with exclusions, not per child, so N missing habitats
+  // reads as one clear line instead of flooding the block.
+  Object.entries(apiData?.rollup?.aggregates || {}).forEach(([aggId, agg]) => {
+    if (!agg.excluded || agg.excluded.length === 0) return;
+    const names = agg.excluded.map(e => e.member || e.slot || e.sustain_id.slice(0, 8)).join(', ');
+    items.push({
+      id: `rollup:${aggId}`,
+      urgency: 1.05,
+      tone: 'amber',
+      title: `${agg.excluded.length} of ${agg.excluded.length + agg.included.length} linked children unavailable`,
+      why: `excluded from ${aggId.replace(/_/g, ' ')}: ${names}`,
+      action: null,
+    });
+  });
+
   return items.sort((a, b) => b.urgency - a.urgency);
 }
 
@@ -231,6 +248,64 @@ function NeedsAttentionBlock({ items, switchPanel }) {
   );
 }
 
+/* ─── Composition roll-up (Slice 8): only rendered when the currently
+   selected sustain declares aggregates — most sustains don't, so this is
+   invisible for them. Generic — reads whatever /devui/state's rollup key
+   contains, no "habitat"/"homestead" vocabulary anywhere in this file. ── */
+function RollupBlock({ rollup }) {
+  if (!rollup || !rollup.aggregates || Object.keys(rollup.aggregates).length === 0) return null;
+  return (
+    <div className="fade-up" style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', overflow: 'hidden',
+    }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)' }}>
+        <span className="label-11">COMPOSITION · ROLL-UP</span>
+      </div>
+      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {Object.entries(rollup.aggregates).map(([aggId, agg]) => {
+          const total = (agg.included?.length || 0) + (agg.excluded?.length || 0);
+          return (
+            <div key={aggId}>
+              <div className="label-10" style={{ color: 'var(--text-muted)' }}>{aggId.replace(/_/g, ' ').toUpperCase()}</div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 26, fontWeight: 600, color: 'var(--text-primary)', marginTop: 2 }}>
+                {typeof agg.value === 'number' ? agg.value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
+              </div>
+              <div className="meta-10" style={{ color: 'var(--text-muted)', marginTop: 2 }}>
+                {agg.op} over {total} linked child{total === 1 ? '' : 'ren'} · {agg.included?.length || 0} included
+                {agg.excluded?.length ? `, ${agg.excluded.length} excluded — why: see NEEDS ATTENTION above` : ''}
+              </div>
+            </div>
+          );
+        })}
+        <div>
+          <div className="label-10" style={{ color: 'var(--text-muted)', marginBottom: 6 }}>LINKED CHILDREN</div>
+          {!rollup.children || rollup.children.length === 0 ? (
+            <span className="meta-10" style={{ color: 'var(--text-dim)' }}>no children linked yet</span>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {rollup.children.map(c => (
+                <div key={c.child_sustain_id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                    background: c.status === 'ok' ? 'var(--ok, #4ade80)' : 'var(--amber)',
+                  }} />
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)', minWidth: 90 }}>
+                    {c.member || c.slot || c.child_sustain_id.slice(0, 8)}
+                  </span>
+                  <span className="meta-10" style={{ color: 'var(--text-muted)' }}>
+                    {c.status === 'ok' ? 'live' : (c.reason || 'unavailable')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
   const [apiData, setApiData] = dUseState(null);   // last good GET /devui/state result — state, events, operatives, constraints, widgets, proposalsInVoting all from ONE fetch
   const [loading, setLoading] = dUseState(true);
@@ -250,6 +325,7 @@ function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
       widgets: payload.widgets || null,
       proposalsInVoting: payload.proposals_in_voting || [],
       ingestAttention: payload.ingest_attention || { messages: [], stale_sources: [] },
+      rollup: payload.rollup || null,
     };
   };
 
@@ -362,6 +438,7 @@ function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
       {/* Needs attention — first thing on the panel, mobile or desktop: the
           system comes to the user before they go hunting through widgets. */}
       {!loading && <NeedsAttentionBlock items={needsAttention} switchPanel={switchPanel} />}
+      {!loading && <RollupBlock rollup={apiData?.rollup} />}
 
       {/* Top region: Active Sustains (count + list) · operatives.
           Desktop: side by side, 3x2 grid. Mobile: stacked, operatives as
