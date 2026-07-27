@@ -106,7 +106,7 @@ function App({ authUser, onLogout }) {
   // Birth a fully-hydrated sustain from a template via the engine, then select it.
   async function createSustain(templateId) {
     try {
-      const d = await api.post('/devui/sustains', { template_id: templateId, user_id: 'bonventure' });
+      const d = await api.post('/devui/sustains', { template_id: templateId, user_id: authUser?.user_id });
       const sid = d?.data?.sustain_id;
       await refreshSustains(sid);
       window.flash?.(`${templateId} sustain created`, 'ok');
