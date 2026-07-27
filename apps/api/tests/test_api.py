@@ -353,6 +353,7 @@ def _mk_engine(
     eng.execute_operator = AsyncMock(return_value=execute_result)
     eng._get_spec.return_value = {}
     eng._persist_state = MagicMock()
+    eng.commit_external_mutation.return_value = (True, "")
     return eng
 
 
@@ -507,6 +508,87 @@ async def test_vote_on_proposal_yes_200():
         assert b["data"]["proposal_id"] == "prop-1"
     finally:
         _cl()
+
+
+@pytest.mark.asyncio
+async def test_vote_on_proposal_routes_through_gate_check():
+    """
+    Slice 8: the vote route must call commit_external_mutation with
+    check_gate=True — the whole point of the fix. The underlying gate
+    LOGIC (real invariant refusal/success) is proven thoroughly against a
+    real engine in test_composition.py::TestCommitExternalMutationGate;
+    this test proves the ROUTE actually wires the parameter, via the same
+    mocked-engine harness every other route test in this file uses.
+    """
+    expires = (_dt.now(_tz.utc) + _td(hours=48)).isoformat()
+    state = {
+        "council_proposals": [{
+            "id": "prop-1", "sustain_id": "sustain-123", "proposed_by": "mentor",
+            "operator_name": "budget.reallocate", "input_json": "{}", "simulation_results_json": "{}",
+            "status": "IN_VOTING", "created_at": _dt.now(_tz.utc).isoformat(),
+            "resolved_at": None, "expires_at": expires,
+        }],
+        "council_votes": [],
+    }
+    eng = _mk_engine(state=state)
+    _ov(eng)
+    try:
+        async with _cli() as c:
+            r = await c.post(
+                "/api/v1/sustains/sustain-123/proposals/prop-1/vote",
+                json={"vote": "YES"}, headers=_hdrs(),
+            )
+        assert r.status_code == 200
+        assert eng.commit_external_mutation.called
+        _, kwargs = eng.commit_external_mutation.call_args
+        assert kwargs.get("check_gate") is True
+    finally:
+        _cl()
+
+
+@pytest.mark.asyncio
+async def test_vote_on_proposal_refused_by_gate_returns_422():
+    """A gate refusal on a vote resolution is a normal, expected outcome —
+    same convention execute_operator's own failure path in this file uses
+    (422 with the refusal detail in the body, not a 5xx)."""
+    expires = (_dt.now(_tz.utc) + _td(hours=48)).isoformat()
+    state = {
+        "council_proposals": [{
+            "id": "prop-1", "sustain_id": "sustain-123", "proposed_by": "mentor",
+            "operator_name": "budget.reallocate", "input_json": "{}", "simulation_results_json": "{}",
+            "status": "IN_VOTING", "created_at": _dt.now(_tz.utc).isoformat(),
+            "resolved_at": None, "expires_at": expires,
+        }],
+        "council_votes": [],
+    }
+    eng = _mk_engine(state=state)
+    eng.commit_external_mutation.return_value = (False, "would violate invariant 'x'")
+    _ov(eng)
+    try:
+        async with _cli() as c:
+            r = await c.post(
+                "/api/v1/sustains/sustain-123/proposals/prop-1/vote",
+                json={"vote": "YES"}, headers=_hdrs(),
+            )
+        assert r.status_code == 422
+        body = r.json()
+        assert body["data"]["status"] == "refused"
+        assert "invariant" in body["data"]["reason"]
+    finally:
+        _cl()
+
+
+def test_sustains_get_engine_returns_the_real_shared_engine():
+    """
+    Slice 8: sustains.py's get_engine() previously constructed its own
+    disconnected SustainEngine() (defaulting to :memory:) — a sustain
+    created through this router vanished on the next request. Confirms
+    it now returns the exact same process-wide singleton every other
+    route file (devui.py, journal.py, ingest.py) uses.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    assert _sm.get_engine() is get_shared_engine()
 
 
 @pytest.mark.asyncio

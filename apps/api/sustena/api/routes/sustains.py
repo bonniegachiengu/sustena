@@ -102,14 +102,23 @@ def get_current_user(
 
 # ── Engine dependency (overridable in tests) ───────────────────────────────────
 
-_shared_engine: SustainEngine | None = None
-
 
 def get_engine() -> SustainEngine:
-    global _shared_engine
-    if _shared_engine is None:
-        _shared_engine = SustainEngine()
-    return _shared_engine
+    """
+    Returns the process-wide, persistent-DB-backed SustainEngine singleton —
+    the exact same one devui.py/journal.py/ingest.py use.
+
+    Previously this constructed its OWN SustainEngine() with no db_path,
+    defaulting to sqlite3's ":memory:" — a disconnected, ephemeral engine
+    invisible to the real sustena.db and to every other route file. Any
+    sustain created through this router vanished on the next request /
+    process restart and never showed up in the Monitor. Fixed as part of
+    Slice 8 (composition/coordination) at Bonnie's explicit request — this
+    router now sees and mutates the same real data as everything else.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    return get_shared_engine()
 
 
 # ── Request bodies ─────────────────────────────────────────────────────────────
@@ -298,11 +307,24 @@ async def vote_on_proposal(
     # operator-registry path (CouncilSession.resolve() mutates state_accessor
     # directly), but state = fold(events) must still hold for every sustain
     # that ever has a proposal voted on, so the vote needs its own event too.
-    engine.commit_external_mutation(
+    #
+    # check_gate=True (Slice 8): a vote resolution now runs through the same
+    # Move 2 enforcing gate as any other transition — today resolve() only
+    # ever touches council_proposals[*].status/resolved_at, so this will
+    # rarely trip anything a real invariant cares about, but the route no
+    # longer has a silent gap where CouncilSession.resolve() could commit a
+    # state change the gate never saw.
+    gate_ok, gate_reason = engine.commit_external_mutation(
         sustain_id, state_accessor,
         "event.council.vote_resolved",
         {"proposal_id": proposal_id, "vote": vote, "status": new_status},
+        check_gate=True,
     )
+    if not gate_ok:
+        return JSONResponse(
+            status_code=422,
+            content=_ok({"proposal_id": proposal_id, "status": "refused", "reason": gate_reason}),
+        )
 
     updated_proposal = session._get_proposal(proposal_id)
     return _ok({"proposal_id": proposal_id, "status": new_status, "proposal": updated_proposal})
