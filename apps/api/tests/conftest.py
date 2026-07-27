@@ -37,6 +37,7 @@ os.environ.setdefault("WHATSAPP_PHONE_ID",    "mock")
 import pytest
 import sustena.db.schema as _schema
 import sustena.core.engine_singleton as _singleton
+import sustena.core.ingest_singleton as _ingest_singleton
 
 
 # ── Engine reset — module scope ───────────────────────────────────────────────
@@ -50,9 +51,11 @@ def _reset_engine_module():
     """
     _schema._engine = None
     _singleton.reset_shared_engine()
+    _ingest_singleton.reset_shared_ingest_engine()
     yield
     _schema._engine = None
     _singleton.reset_shared_engine()
+    _ingest_singleton.reset_shared_ingest_engine()
 
 
 # ── Engine reset — function scope ─────────────────────────────────────────────

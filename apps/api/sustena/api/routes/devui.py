@@ -231,6 +231,25 @@ async def _get_proposals_in_voting(sustain_id: str) -> list[dict]:
         return []
 
 
+async def _get_ingest_attention(sustain_id: str) -> dict:
+    """
+    Ingest pipeline (Slice 4) needs-attention signal for the Monitor: unresolved
+    needs_attention messages (unparsed/parsed-but-unmapped captures) and stale
+    capture sources for this sustain. Same best-effort-empty-on-failure contract
+    as _get_proposals_in_voting -- this must never break /devui/state.
+    """
+    try:
+        from sustena.core.ingest_singleton import get_shared_ingest_engine
+
+        ingest = get_shared_ingest_engine()
+        messages = ingest.needs_attention(sustain_id=sustain_id)
+        sources = [s for s in ingest.get_sources(sustain_id=sustain_id) if s["is_stale"]]
+        return {"messages": messages, "stale_sources": sources}
+    except Exception as exc:
+        logger.debug("_get_ingest_attention(%s) failed: %s", sustain_id, exc)
+        return {"messages": [], "stale_sources": []}
+
+
 async def _compute_monitor_widgets(
     sustain_id: str,
     state_dict: dict,
@@ -320,6 +339,7 @@ async def get_state(
     constraint_exprs = [c["expr"] for c in constraints]
     widgets = await _compute_monitor_widgets(sustain_id, state, constraint_exprs, events)
     proposals_in_voting = await _get_proposals_in_voting(sustain_id)
+    ingest_attention = await _get_ingest_attention(sustain_id)
 
     return ok({
         "sustain_id": sustain_id,
@@ -329,6 +349,7 @@ async def get_state(
         "constraints": constraints,
         "widgets": widgets,
         "proposals_in_voting": proposals_in_voting,
+        "ingest_attention": ingest_attention,
     })
 
 
