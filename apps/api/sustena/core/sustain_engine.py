@@ -21,6 +21,7 @@ Usage:
 """
 
 import copy
+import inspect
 import json
 import logging
 import re
@@ -145,6 +146,15 @@ class SustainEngine:
                 enabled         INTEGER NOT NULL DEFAULT 1,
                 PRIMARY KEY (sustain_id, operative_id)
             );
+
+            CREATE TABLE IF NOT EXISTS sustain_templates (
+                id              TEXT PRIMARY KEY,
+                owner_user_id   TEXT NOT NULL,
+                spec_json       TEXT NOT NULL,
+                version         INTEGER NOT NULL DEFAULT 1,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL
+            );
         """)
         self._db.commit()
         self._migrate_events_schema_sync()
@@ -177,17 +187,37 @@ class SustainEngine:
 
     def _load_spec(self, template_id: str) -> dict:
         """
-        Load the JSON spec from sustena/sustains/{template_id}.json.
-        Raises ValueError if the file is not found.
+        Load a sustain spec. Disk-first, DB-fallback: the built-in specs
+        (homestead, habitat) live at sustena/sustains/{template_id}.json and
+        always take priority (a generated definition template_id can never
+        collide with a fixed built-in filename stem, but this ordering means
+        a DB row could never shadow a built-in even if it somehow did).
+
+        User-created definitions (Slice 6 — create/definition) persist in the
+        sustain_templates table instead of a file, keyed by the same
+        template_id instantiate() takes — everything downstream of this call
+        (instantiate, execute_operator, the enforcement gate, simulate,
+        rebuild_state) reads template_id -> spec through this ONE function, so
+        a user-created sustain runs through literally the same code path as
+        homestead/habitat. No special-casing anywhere else in the engine.
+
+        Raises ValueError if the template_id resolves to neither.
         """
         spec_path = _SUSTAINS_DIR / f"{template_id}.json"
-        if not spec_path.exists():
-            raise ValueError(
-                f"Sustain spec '{template_id}' not found at {spec_path}. "
-                f"Available specs: {[p.stem for p in _SUSTAINS_DIR.glob('*.json')]}"
-            )
-        with spec_path.open(encoding="utf-8") as fh:
-            return json.load(fh)
+        if spec_path.exists():
+            with spec_path.open(encoding="utf-8") as fh:
+                return json.load(fh)
+
+        row = self._db.execute(
+            "SELECT spec_json FROM sustain_templates WHERE id = ?", (template_id,)
+        ).fetchone()
+        if row is not None:
+            return json.loads(row["spec_json"])
+
+        raise ValueError(
+            f"Sustain spec '{template_id}' not found at {spec_path} or in sustain_templates. "
+            f"Available disk specs: {[p.stem for p in _SUSTAINS_DIR.glob('*.json')]}"
+        )
 
     def _compile_spec_invariants(self, spec: dict) -> None:
         """
@@ -737,9 +767,20 @@ class SustainEngine:
             pawa_balance: int = state.get("system", {}).get("pawa_balance", 0)
             active_operatives = list(self._operatives.get(sustain_id, {}).keys())
 
+            # A user-created definition's template_id is a UUID, not a nice
+            # word — "3f2a1b4c..." would be a useless label. Prefer the
+            # spec's own display_name when available (cheap: _get_spec caches
+            # per sustain_id after the first lookup); fall back to the old
+            # template_id-derived label for built-ins with no display_name
+            # mismatch risk.
+            label = template_id.replace("_", " ").title()
+            spec = self._get_spec(sustain_id)
+            if spec and spec.get("display_name"):
+                label = spec["display_name"]
+
             result.append({
                 "id":                sustain_id,
-                "label":             template_id.replace("_", " ").title(),
+                "label":             label,
                 "sub":               row["user_id"],
                 "status":            "live",
                 "template_id":       template_id,
@@ -1213,3 +1254,346 @@ class SustainEngine:
             ok_flag, _ = constraint_engine.evaluate(expr, state)
             results.append({"expr": expr, "status": "ok" if ok_flag else "fail", "value": None})
         return results
+
+    # ── Definitions — user-created sustain templates (Slice 6) ─────────────────
+    #
+    # A "definition" is a template a person builds through the UI instead of
+    # a built-in sustena/sustains/*.json file. It persists in sustain_templates
+    # and is loaded by _load_spec() exactly like homestead/habitat — every
+    # method below either builds/validates a spec dict in the same shape the
+    # built-in JSON files use, or reads/writes sustain_templates directly.
+    # instantiate()/execute_operator()/the enforcement gate/simulate() are
+    # completely unmodified: they only ever call _load_spec(template_id) and
+    # have no idea whether a spec came from disk or the DB.
+
+    _DIMENSION_DEFAULTS: dict[str, Any] = {"number": 0.0, "string": "", "boolean": False}
+
+    def _build_spec_dict(
+        self,
+        template_id: str,
+        display_name: str,
+        description: str,
+        dimensions: list[dict],
+        invariants: list[dict],
+        operator_names: list[str],
+    ) -> dict:
+        """
+        Turn UI-shaped input into a spec dict in the exact shape
+        sustena/sustains/*.json files use. Raises ValueError on the first
+        invalid dimension/invariant/operator name — never silently drops one.
+
+        Deliberately flat, scalar-only dimensions (number/string/boolean) —
+        no nested objects/arrays. A real, disclosed scope cut for this
+        walking skeleton: enough to declare a structurally-unlike sustain
+        (M3) without a recursive schema-builder UI.
+        """
+        state_schema: dict = {}
+        default_state: dict = {}
+        for dim in dimensions:
+            name = (dim.get("name") or "").strip()
+            dtype = dim.get("type")
+            if not name or dtype not in self._DIMENSION_DEFAULTS:
+                raise ValueError(
+                    f"Invalid dimension {dim!r} — name is required and type must be "
+                    f"one of {sorted(self._DIMENSION_DEFAULTS)}."
+                )
+            if name in state_schema:
+                raise ValueError(f"Duplicate dimension name '{name}'.")
+            schema_node: dict = {"type": dtype, "description": dim.get("description", "")}
+            if dtype == "number" and dim.get("minimum") is not None:
+                schema_node["minimum"] = dim["minimum"]
+            state_schema[name] = schema_node
+            default_value = dim.get("default_value")
+            default_state[name] = default_value if default_value is not None else self._DIMENSION_DEFAULTS[dtype]
+
+        resolved_operators: list[dict] = []
+        for op_name in operator_names:
+            meta = OPERATOR_REGISTRY.get(op_name)
+            if meta is None:
+                raise ValueError(f"Unknown operator '{op_name}' — not in OPERATOR_REGISTRY.")
+            try:
+                sig_params = [
+                    p for p in inspect.signature(meta.fn).parameters
+                    if p not in ("ctx", "self")
+                ]
+            except (TypeError, ValueError):  # pragma: no cover - defensive, no known operator hits this
+                sig_params = []
+            resolved_operators.append({
+                "name": meta.name,
+                "description": meta.description,
+                "params": sig_params,
+                "pawa_cost": meta.pawa_cost,
+            })
+
+        clean_invariants: list[dict] = []
+        for inv in invariants:
+            inv_id = (inv.get("id") or "").strip()
+            expr = (inv.get("expression") or "").strip()
+            if not inv_id or not expr:
+                raise ValueError(f"Invalid invariant {inv!r} — both id and expression are required.")
+            clean_invariants.append({"id": inv_id, "expression": expr, "description": inv.get("description", "")})
+
+        return {
+            "id": template_id,
+            "version": "1.0.0",
+            "display_name": display_name or template_id,
+            "description": description or "",
+            "state_schema": state_schema,
+            "operators": resolved_operators,
+            "operatives": {},
+            "invariants": clean_invariants,
+            "enforcement": {"enabled": True},
+            "ui_schema": {"sustain_home": {"widget": "sustain_home"}},
+            "access_policy": {"owner_ids": "{{owner_ids}}"},
+            "default_state": default_state,
+            "parameters": [
+                {
+                    "name": "owner_ids", "type": "array", "items": {"type": "string"},
+                    "description": "List of user IDs who have owner access to this sustain.",
+                    "required": True,
+                },
+            ],
+            "_notes": {"origin": "User-created via the Create/Definition flow (Slice 6)."},
+        }
+
+    def _validate_definition_spec(self, spec: dict) -> None:
+        """
+        Compile-validate every invariant against the candidate state_schema,
+        raising ValueError on the FIRST bad one. Distinct from
+        _compile_spec_invariants' non-fatal warn-and-skip used for built-in
+        specs at instantiate() time — someone actively defining their own
+        sustain needs to know immediately if an invariant doesn't parse or
+        references an undeclared dimension, not have it silently dropped
+        from enforcement.
+        """
+        state_schema = spec.get("state_schema", {})
+        for inv in spec.get("invariants", []):
+            _, errors = compile_invariant(inv.get("expression", ""), state_schema)
+            if errors:
+                raise ValueError(
+                    f"Invariant '{inv.get('id')}' ({inv.get('expression')}) is invalid: {'; '.join(errors)}"
+                )
+
+    def create_definition(
+        self,
+        owner_user_id: str,
+        display_name: str,
+        description: str,
+        dimensions: list[dict],
+        invariants: list[dict],
+        operator_names: list[str],
+    ) -> dict:
+        """
+        Build and persist a brand-new sustain template from UI-shaped input.
+        Enforcement is always on (enforcement.enabled=True) for a
+        user-created definition — there's no reason to offer an opt-out that
+        would let a person accidentally build a sustain with no gate.
+
+        Attaching an operator means selecting an EXISTING registered
+        implementation (e.g. edit.state_patch, budget.allocate) — this slice
+        does not let a user author new operator code, a materially larger
+        feature and out of scope here.
+
+        Raises ValueError on the first invalid dimension/invariant/operator.
+        Returns {"template_id", "spec", "version"}.
+        """
+        template_id = str(uuid.uuid4())
+        spec = self._build_spec_dict(
+            template_id, display_name, description, dimensions, invariants, operator_names,
+        )
+        self._validate_definition_spec(spec)
+
+        now = datetime.utcnow().isoformat()
+        self._db.execute(
+            "INSERT INTO sustain_templates (id, owner_user_id, spec_json, version, created_at, updated_at) "
+            "VALUES (?, ?, ?, 1, ?, ?)",
+            (template_id, owner_user_id, json.dumps(spec), now, now),
+        )
+        self._db.commit()
+        logger.info(
+            "[SustainEngine] created definition template_id=%s owner=%s dims=%d invariants=%d operators=%d",
+            template_id, owner_user_id, len(dimensions), len(invariants), len(operator_names),
+        )
+        return {"template_id": template_id, "spec": spec, "version": 1}
+
+    def get_definition(self, template_id: str) -> dict | None:
+        """A single user-created definition's full record, or None if not found."""
+        row = self._db.execute(
+            "SELECT id, owner_user_id, spec_json, version, created_at, updated_at "
+            "FROM sustain_templates WHERE id = ?",
+            (template_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "template_id": row["id"],
+            "owner_user_id": row["owner_user_id"],
+            "spec": json.loads(row["spec_json"]),
+            "version": row["version"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def list_definitions(self, owner_user_id: str | None = None) -> list[dict]:
+        """Summary list of user-created definitions, optionally scoped to one owner."""
+        if owner_user_id:
+            rows = self._db.execute(
+                "SELECT id, owner_user_id, spec_json, version, created_at, updated_at "
+                "FROM sustain_templates WHERE owner_user_id = ? ORDER BY created_at DESC",
+                (owner_user_id,),
+            ).fetchall()
+        else:
+            rows = self._db.execute(
+                "SELECT id, owner_user_id, spec_json, version, created_at, updated_at "
+                "FROM sustain_templates ORDER BY created_at DESC"
+            ).fetchall()
+        out: list[dict] = []
+        for r in rows:
+            spec = json.loads(r["spec_json"])
+            out.append({
+                "template_id": r["id"],
+                "owner_user_id": r["owner_user_id"],
+                "display_name": spec.get("display_name", r["id"]),
+                "description": spec.get("description", ""),
+                "dimension_count": len(spec.get("state_schema", {})),
+                "invariant_count": len(spec.get("invariants", [])),
+                "operator_count": len(spec.get("operators", [])),
+                "version": r["version"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            })
+        return out
+
+    def check_definition_edit_safety(self, template_id: str, candidate_spec: dict) -> tuple[bool, list[dict]]:
+        """
+        The migration predicate: before an edit to a definition is persisted,
+        every LIVE instance of that template must still satisfy every
+        invariant in the CANDIDATE spec, evaluated against that instance's
+        actual current state. If not, the edit must be refused — silently
+        applying it would strand a real instance outside its own declared
+        viable region with no warning.
+
+        Returns (safe, violations). violations is empty when safe=True.
+        Each violation is {"sustain_id", "invariant_id", "expression",
+        "reason"} — enough for an honest "why am I seeing this" message. A
+        candidate invariant that doesn't even COMPILE against the candidate
+        schema is reported as a violation against every live instance
+        (there's no state to meaningfully evaluate it against), not
+        silently skipped.
+        """
+        state_schema = candidate_spec.get("state_schema", {})
+        compiled: list[dict] = []
+        for inv in candidate_spec.get("invariants", []):
+            node, errors = compile_invariant(inv.get("expression", ""), state_schema)
+            compiled.append({
+                "id": inv.get("id"), "expr": inv.get("expression"),
+                "node": node, "compile_errors": errors,
+            })
+
+        instance_ids = [
+            r["id"] for r in self._db.execute(
+                "SELECT id FROM sustains WHERE template_id = ?", (template_id,)
+            ).fetchall()
+        ]
+
+        violations: list[dict] = []
+        for sustain_id in instance_ids:
+            try:
+                state_dict = self._load_state_dict(sustain_id)
+            except ValueError:
+                continue  # no state row for this instance — nothing to check
+            state = StateAccessor(state_dict)
+            for inv in compiled:
+                if inv["compile_errors"]:
+                    violations.append({
+                        "sustain_id": sustain_id, "invariant_id": inv["id"], "expression": inv["expr"],
+                        "reason": f"does not compile against the new schema: {'; '.join(inv['compile_errors'])}",
+                    })
+                    continue
+                ok, reason = evaluate_predicate(inv["node"], state, {})
+                if not ok:
+                    violations.append({
+                        "sustain_id": sustain_id, "invariant_id": inv["id"],
+                        "expression": inv["expr"], "reason": reason,
+                    })
+
+        return (len(violations) == 0), violations
+
+    def update_definition(self, template_id: str, owner_user_id: str, patch: dict) -> dict:
+        """
+        Edit a user-created definition safely. patch may include any of
+        display_name, description, dimensions, invariants, operator_names
+        (same shapes create_definition() accepts) — fields omitted from
+        patch keep their current value, so a caller can send just the one
+        thing they changed.
+
+        Returns {"status": "ok", "spec", "version"} on success, or
+        {"status": "refused", "reason", "blocked_by": [...]} if the
+        migration predicate finds the edit would strand a live instance.
+        Raises ValueError for a genuine input/ownership/not-found/compile
+        error, matching instantiate()'s and create_definition()'s
+        convention — those are programmer/input errors, not an expected
+        everyday outcome the way a refusal is.
+        """
+        existing = self.get_definition(template_id)
+        if existing is None:
+            raise ValueError(f"Definition '{template_id}' not found.")
+        if existing["owner_user_id"] != owner_user_id:
+            raise ValueError(f"Definition '{template_id}' is not owned by this user.")
+
+        current_spec = existing["spec"]
+        dimensions = patch.get("dimensions")
+        invariants = patch.get("invariants")
+        operator_names = patch.get("operator_names")
+
+        if dimensions is None:
+            dimensions = [
+                {
+                    "name": name, "type": node.get("type"), "description": node.get("description", ""),
+                    "default_value": current_spec.get("default_state", {}).get(name),
+                    "minimum": node.get("minimum"),
+                }
+                for name, node in current_spec.get("state_schema", {}).items()
+            ]
+        if invariants is None:
+            invariants = current_spec.get("invariants", [])
+        if operator_names is None:
+            operator_names = [op["name"] for op in current_spec.get("operators", [])]
+
+        candidate_spec = self._build_spec_dict(
+            template_id,
+            patch.get("display_name", current_spec.get("display_name")),
+            patch.get("description", current_spec.get("description")),
+            dimensions, invariants, operator_names,
+        )
+        self._validate_definition_spec(candidate_spec)
+
+        safe, violations = self.check_definition_edit_safety(template_id, candidate_spec)
+        if not safe:
+            stranded = {v["sustain_id"] for v in violations}
+            return {
+                "status": "refused",
+                "reason": f"This edit would strand {len(stranded)} live sustain(s) outside their viable region.",
+                "blocked_by": violations,
+            }
+
+        now = datetime.utcnow().isoformat()
+        new_version = existing["version"] + 1
+        self._db.execute(
+            "UPDATE sustain_templates SET spec_json = ?, version = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(candidate_spec), new_version, now, template_id),
+        )
+        self._db.commit()
+
+        # Invalidate the per-instance spec cache for every live instance of
+        # this template so the new invariants/operators govern immediately —
+        # execute_operator() reads self._specs[sustain_id], populated once at
+        # instantiate()/first access and never otherwise refreshed. Without
+        # this, an edit would silently not take effect until a process
+        # restart, which is exactly the kind of quiet non-application "no
+        # silent failure" exists to rule out.
+        for row in self._db.execute("SELECT id FROM sustains WHERE template_id = ?", (template_id,)).fetchall():
+            self._specs.pop(row["id"], None)
+
+        logger.info("[SustainEngine] updated definition template_id=%s version=%d", template_id, new_version)
+        return {"status": "ok", "spec": candidate_spec, "version": new_version}
