@@ -365,6 +365,101 @@ async def update_definition_route(
     return ok(result)
 
 
+# ── 1e. Composition ⊕ and roll-up ρ (Slice 8) ─────────────────────────────────
+# Generic parent/child linking + computed aggregation. Nothing here knows the
+# word "habitat" — a parent is any sustain with linked children; homestead is
+# the first caller, not a special case of the machinery.
+
+class LinkChildRequest(BaseModel):
+    child_sustain_id: str
+    slot: str | None = None
+    member: str | None = None
+
+
+class ProvisionChildrenRequest(BaseModel):
+    user_id: str = Field(description="Owner for any newly-instantiated declared children.")
+
+
+@router.get("/sustain/{sustain_id}/children", summary="List a parent's linked children")
+async def list_children_route(sustain_id: str, _: dict = Depends(get_current_user)) -> dict:
+    """
+    Every child currently linked under sustain_id, enriched with each
+    child's spec display_name where resolvable (best-effort — a child
+    whose spec can't be loaded still appears, just without a label).
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    links = engine.list_children(sustain_id)
+    for link in links:
+        spec = engine._get_spec(link["child_sustain_id"])
+        link["display_name"] = spec.get("display_name") if spec else None
+    return ok({"children": links})
+
+
+@router.post("/sustain/{sustain_id}/children", summary="Link an existing sustain as a child (⊕)")
+async def link_child_route(
+    sustain_id: str, body: LinkChildRequest, _: dict = Depends(get_current_user),
+) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    try:
+        link = engine.link_child(sustain_id, body.child_sustain_id, slot=body.slot, member=body.member)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return ok(link)
+
+
+@router.delete("/sustain/{sustain_id}/children/{child_sustain_id}", summary="Unlink a child (disaggregation)")
+async def unlink_child_route(
+    sustain_id: str, child_sustain_id: str, _: dict = Depends(get_current_user),
+) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    unlinked = engine.unlink_child(sustain_id, child_sustain_id)
+    if not unlinked:
+        raise HTTPException(status_code=404, detail="No such link.")
+    return ok({"unlinked": True})
+
+
+@router.post("/sustain/{sustain_id}/provision-children", summary="Instantiate + link every declared child")
+async def provision_children_route(
+    sustain_id: str, body: ProvisionChildrenRequest, _: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Reads sustain_id's spec["declared_children"] (a generic convention, not
+    homestead-specific) and instantiates+links any slot not yet linked.
+    Idempotent — safe to call again once every slot is filled.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    try:
+        links = engine.provision_declared_children(sustain_id, body.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return ok({"children": links})
+
+
+@router.get("/sustain/{sustain_id}/rollup", summary="Computed roll-up of a parent's declared aggregates")
+async def get_rollup_route(sustain_id: str, _: dict = Depends(get_current_user)) -> dict:
+    """
+    Computed fresh on every call from linked children's current state —
+    never stored. A sustain with no spec["aggregates"] declared returns an
+    empty aggregates dict, not an error (most sustains aren't parents).
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    try:
+        rollup = engine.compute_rollup(sustain_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return ok(rollup)
+
+
 # ── Shared: visualize.* widget computation ───────────────────────────────────
 # Used by both GET /devui/state and GET /devui/monitor-widgets so the Monitor
 # panel's pocket ring / event feed / constraint health widgets are computed
@@ -423,6 +518,24 @@ async def _get_ingest_attention(sustain_id: str) -> dict:
     except Exception as exc:
         logger.debug("_get_ingest_attention(%s) failed: %s", sustain_id, exc)
         return {"messages": [], "stale_sources": []}
+
+
+def _get_rollup(engine, sustain_id: str) -> dict | None:
+    """
+    Composition/roll-up (Slice 8) for the Monitor: computed fresh from
+    linked children, best-effort. Returns None (not {}) for a sustain with
+    no spec["aggregates"] declared — the overwhelming majority — so the
+    frontend can cleanly distinguish "not a parent" from "parent, zero
+    children yet." Never raises into /devui/state.
+    """
+    try:
+        spec = engine._get_spec(sustain_id)
+        if not spec or not spec.get("aggregates"):
+            return None
+        return engine.compute_rollup(sustain_id)
+    except Exception as exc:
+        logger.debug("_get_rollup(%s) failed: %s", sustain_id, exc)
+        return None
 
 
 async def _compute_monitor_widgets(
@@ -515,6 +628,7 @@ async def get_state(
     widgets = await _compute_monitor_widgets(sustain_id, state, constraint_exprs, events)
     proposals_in_voting = await _get_proposals_in_voting(sustain_id)
     ingest_attention = await _get_ingest_attention(sustain_id)
+    rollup = _get_rollup(engine, sustain_id)
 
     return ok({
         "sustain_id": sustain_id,
@@ -525,6 +639,7 @@ async def get_state(
         "widgets": widgets,
         "proposals_in_voting": proposals_in_voting,
         "ingest_attention": ingest_attention,
+        "rollup": rollup,
     })
 
 
