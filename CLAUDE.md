@@ -45,7 +45,9 @@ sustena/
                     operator.py, sustain_engine.py, council.py,
                     uiparser.py, widget_registry.py,         ← added Sprint 2
                     operative_graph.py,                      ← added Sprint 5
-                    operative_runtime.py                     ← added Sprint 5
+                    operative_runtime.py,                    ← added Sprint 5
+                    predicates.py,                           ← added Slice 2
+                    event_fold.py                            ← added Slice 4
   operators/      budget.py, procurement.py, calendar.py,
                   ui_render.py,                             ← added Sprint 2
                   api_ops.py, monitor.py, visualize.py,     ← added Sprint 3
@@ -453,6 +455,48 @@ Scope confirmed with Bonnie before starting: do only the "do now" part below —
 
 ---
 
+### Slice 4 ✅ — The substrate: state = fold(events) (27 Jul 2026)
+
+The walking skeleton for event sourcing. Foundational and deliberately invisible — no UI change, every existing screen keeps reading the same `get_state()`/`get_events()` shapes unchanged. What changed is *how the answer gets computed*, not what it looks like.
+
+**Pre-flight:** git confirmed clean and in sync; fresh `apps/api/sustena.db` copy to `backups/sustena_pre_eventfold_<timestamp>.db`; full inventory of live data taken before touching anything — 2 real `sustains` rows (both `homestead`), 31 + 2 pre-existing events (informational only, no state-derivation role), and one **orphaned `sustain_states` row** with no matching `sustains` row (`5d866b0c-...`, a leftover dev-seeded homestead-shaped blob, unreachable via the normal engine API since `_get_spec` requires a `sustains` row) — flagged, deliberately never touched by the migration.
+
+**The model chosen — a state-transition-log fold, not a hand-written domain reducer:** each event carries a `mutations` list, which is exactly what `StateAccessor` recorded (via its already-existing `set()`/`append()`/`remove()` tracking) while the operator that published the event ran. Folding replays those mutations. This can never diverge from what an operator actually did, because it *is* what the operator did — there's no parallel "what event X should mean" logic to keep in sync with 20+ operators across budget/calendar/tasks. The honest tradeoff, stated in `sustena/core/event_fold.py`'s own docstring: this gives correct, provably-reproducible state, not semantic replay — a mutation record is an opaque patch, not domain intent. A richer domain-typed model can be layered on later without changing the storage shape, since the mutations are already there.
+
+**1 — `StateAccessor` mutation records normalised (`sustena/core/state.py`):**
+- Added a consistent `"op"` discriminator to all three mutation shapes (`set` previously had none at all; `append`/`remove` used `"action"`, kept for back-compat alongside the new `"op"`).
+- Fixed a real gap: indexed `.set()` calls (`"roster[0].name"`) previously recorded **no mutation at all** — the non-indexed branch was the only one that appended to `_mutations`. Now both branches record.
+- `.append()` now stores the full item dict (a deep copy, taken at append time so a caller mutating its own reference afterward can't retroactively change what fold will replay) — previously only `item_id` was recorded, which is insufficient to replay an append from scratch.
+- `.mutations()`/`.diff()` had exactly one production consumer before this slice (one test) — safe to extend; sustain_engine.py is now the first real one.
+
+**2 — `sustena/core/event_fold.py` (new):** `fold_events(events, initial_state=None) -> dict`, reusing `StateAccessor`'s own `set()`/`append()`/`remove()` for replay (not a parallel path-walking implementation) plus one new op, `replace_root` — the genesis-snapshot marker every sustain's history starts with. Raises `FoldError` loudly on an unreplayable mutation (unknown op, `remove` of a missing item) rather than silently producing wrong state.
+
+**3 — Schema (`db/schema.py` + `sustain_engine.py`):** added `seq` (per-sustain monotonic fold order) and `mutations_json` to `events`. Both writers needed a migration — the async SQLAlchemy `events` Table (`_migrate_events_schema`, `ALTER TABLE ADD COLUMN`, no rename-dance needed since both are nullable/additive) *and* `SustainEngine`'s own raw sqlite3 `CREATE TABLE IF NOT EXISTS` + a matching sync `_migrate_events_schema_sync()` — `init_db()` always runs first in the real app (confirmed via `main.py`'s lifespan), but `SustainEngine(db_path=":memory:")` in tests never calls it, so both paths need the columns or tests would hit "no such column: seq".
+
+**4 — The write path (`execute_operator`), and the Move 2 gate's exact position, unchanged in spirit:** after a successful operator call and (if enforcement is on) a **passing** Move 2 gate check — same position as Slice 2, still evaluated against the mutated `StateAccessor` before any persistence — the engine appends this call's event(s) via a new `_append_events_and_update_cache()`, then updates `sustain_states` as a cache in the same transaction. A gate **refusal** appends nothing and updates nothing, exactly as before; this was the one property that could not regress and is covered by a dedicated test (`test_gate_refusal_leaves_fold_consistent`).
+- **Multi-event-per-call** (e.g. `mkulima.receive_signal`, which publishes both a "signal received" event and a "biashara evaluation requested" hook from one call): the full mutations list attaches to the **first** published event only; later events in the same call carry an empty list. Attaching the same mutations to every event in a call would double-apply them on fold — this is deliberate, tested (`test_multi_event_call_attaches_mutations_to_first_event_only`), not an oversight.
+- **Completeness safety net:** if an operator mutates state but publishes nothing (a forgetful operator — none of today's operators actually do this, verified by reading budget.py/calendar.py/tasks.py/procurement.py), the engine synthesizes `event.system.unlogged_state_change` so no state change is ever silently unlogged. Built and tested against a real monkeypatched operator (`test_operator_mutating_without_publishing_gets_a_synthesized_event`), not left as a declared-but-unexercised hook.
+
+**5 — Every real state-mutation path now goes through the log, not just `execute_operator`:**
+- `instantiate()` — the initial `default_state` is now written as a genesis `replace_root` event instead of a raw cache write. Every sustain's history, from the moment it exists, is fold-reproducible — no special-casing for "old" vs "new" sustains beyond the one-time migration below.
+- `seed_pocket()`/`seed_event()` (the real, Bonnie-facing Seed panel routes) — rewritten to go through a new `commit_external_mutation()` (for real state changes) or `_append_events_and_update_cache()` directly (for `seed_event`'s purely-informational rows), instead of a raw `_persist_state()`/raw `INSERT`. Found and fixed a related bug while here: the **`POST /seed/event` route itself never called `SustainEngine.seed_event()` at all** — it did its own independent raw async-SQLAlchemy `INSERT INTO events` with none of the new columns, which would have left `seq = NULL` on every seed-injected event, sorting it ahead of the sustain's genesis event on replay. Now bridges through `get_shared_engine().seed_event(...)`, matching the pattern `seed_pocket`'s route already used.
+- `POST /{sustain_id}/proposals/{pid}/vote` (`sustains.py`) — `CouncilSession.resolve()` mutates a `StateAccessor` directly, outside the operator-registry path entirely. Was a raw `_persist_state()` call; now `commit_external_mutation()`. **Deliberately does not add the Move 2 gate here** — this route predates the gate, and retrofitting it is real, separate follow-up work, not something to do as a silent side effect of an event-sourcing migration. Flagged, not fixed.
+- `_persist_state()` itself is kept, but is now explicitly documented as a cache-only, no-event, test-fixture-only utility — every real application code path was moved off it.
+
+**6 — `rebuild_state(sustain_id)`:** folds every event for a sustain from scratch (`ORDER BY seq ASC`), completely independent of the cache. This is the proof, not just a claim — every integration test in `TestEventSourcing` asserts `rebuild_state() == get_state()` after the scenario it covers (a real multi-operator sequence, the multi-event case, the safety net, a gate refusal, `seed_pocket`, `commit_external_mutation`).
+
+**7 — Migration of existing instances — verified byte-for-byte before cutover, as required:**
+- `migrate_to_event_sourcing()` iterates the `sustains` table (the authoritative instance list — *not* `sustain_states`, which is how the orphan above got correctly excluded rather than accidentally migrated). For each sustain without a genesis event already: inserts one `replace_root` genesis event capturing its **exact current cached state**, at `seq=1`, timestamped at the sustain's own `created_at`; renumbers whatever informational events already existed for it to `seq=2, 3, ...` with empty mutations (no history lost, none fabricated — old rows are renumbered, not replaced or deleted). Idempotent — a sustain with a genesis event already is skipped. Returns a report the caller must check (`report["verification"][sid]`), rather than assuming success.
+- **Applied to the live `sustena.db`** after 6 dedicated migration tests passed (fresh sustain with no prior events; a sustain with real pre-existing history preserved and correctly renumbered; idempotency; an already-migrated sustain being skipped; the orphan being reported-not-touched; a `sustains` row with no `sustain_states` row failing gracefully rather than crashing the whole batch).
+- **Live result:** both real sustains migrated, `report["verification"]` **`True` for both**. Independently re-verified outside the engine's own code path too — compared `sustain_states.state_json` byte-for-byte between the pre-migration backup and the live DB after (`True` for both, deep-equal), and confirmed event counts moved by exactly +1 (the genesis event) with zero rows lost.
+- **Live smoke test against the actually-running backend process** (confirmed via `/health` it was live throughout — VOS/tunnel/keepalive untouched, per the standing rule): logged in as Bonnie over the real API, hit `/devui/sustains` and `/devui/state` — pockets, balances, and the event feed (now showing the genesis event as the oldest entry) all rendered correctly with zero restart needed, since nothing beyond compiled specs was ever cached in a way this could disturb.
+
+**8 — `get_events()` ordering fixed as a direct consequence of having `seq`:** previously `ORDER BY timestamp DESC` — harmless when events were spaced out by real user activity, but a real correctness bug once genesis events made near-simultaneous same-millisecond timestamps common (caught by a test, not by inspection: `get_events()[0]` was nondeterministically returning the genesis event instead of the just-seeded one). Now `ORDER BY seq DESC, timestamp DESC` — `seq` is monotonic and never ties, so ordering is always correct going forward; the timestamp tiebreaker only matters for the vanishingly small window of not-yet-migrated data, which no longer exists in production.
+
+**Tests:** `tests/test_event_fold.py` (15 — pure reducer correctness for every op, error handling, and a round-trip check that folding real `StateAccessor.mutations()` output reproduces its own final snapshot) + `tests/test_sustain_engine.py::TestEventSourcing` (14) + `::TestMigrateToEventSourcing` (6) + one existing test in `test_event_persistence.py` updated to reflect that a fresh sustain now has one event, not zero. **1302 tests pass** (1267 + 35). Frontend build unaffected (byte-identical asset hash) — no API response shape changed.
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:
@@ -721,3 +765,9 @@ curl -X POST http://localhost:9000/devui/preview-widget \
   a circular import. Use the lazy import inside `_build_proposal()` that is already there.
 - Do not use `eval()` anywhere in UIParser, OperativeGraph, or placeholder resolution.
   Phase 1 is strictly pattern-matching and dict-walking only.
+- Do not write state via `SustainEngine._persist_state()` from application code (Slice 4 —
+  state = fold(events)). It's a raw cache write with no event, kept only for test fixtures.
+  Real state changes go through `_append_events_and_update_cache()` (inside
+  `execute_operator`/`instantiate`) or the public `commit_external_mutation()` (for state
+  changes that happen outside the operator-registry path, e.g. a council vote) — otherwise
+  `rebuild_state()` silently diverges from `get_state()` for that sustain.
