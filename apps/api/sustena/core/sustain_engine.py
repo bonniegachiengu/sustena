@@ -37,7 +37,18 @@ from sustena.core.event_fold import fold_events
 from sustena.core.events import EventBus
 from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext, OperatorResult
 from sustena.core.pawa import PawaLedger
-from sustena.core.predicates import compile_invariant, evaluate_predicate
+from sustena.core.predicates import (
+    Aggregate as _PredAggregate,
+    Comparison as _PredComparison,
+    LogicalAnd as _PredLogicalAnd,
+    LogicalNot as _PredLogicalNot,
+    LogicalOr as _PredLogicalOr,
+    Membership as _PredMembership,
+    Quantifier as _PredQuantifier,
+    StatePath as _PredStatePath,
+    compile_invariant,
+    evaluate_predicate,
+)
 from sustena.core.state import StateAccessor
 from sustena.operatives import (
     AttacheOperative,
@@ -78,6 +89,47 @@ _SUSTAINS_DIR = Path(__file__).parent.parent.parent / "sustena" / "sustains"
 
 # {{placeholder}} token pattern
 _TOKEN_RE = re.compile(r"\{\{(\w+)\}\}")
+
+
+def _referenced_root_names(node: Any) -> set[str]:
+    """
+    Walk a compiled predicate AST (predicates.py's node types) and collect
+    every top-level state-path root name it touches — e.g. for
+    "household_liquid_total >= 0" this returns {"household_liquid_total"}.
+
+    Used only to detect whether an invariant references a computed roll-up
+    aggregate (spec["aggregates"]); such invariants are excluded from gate
+    enforcement but still evaluated for display. Not a general-purpose
+    predicates.py utility — kept local to this composition-specific use.
+    """
+    names: set[str] = set()
+
+    def walk(n: Any) -> None:
+        if n is None:
+            return
+        if isinstance(n, _PredStatePath):
+            if n.segments and n.segments[0][0] == "name":
+                names.add(n.segments[0][1])
+        elif isinstance(n, _PredAggregate):
+            walk(n.path)
+        elif isinstance(n, _PredComparison):
+            walk(n.left)
+            walk(n.right)
+        elif isinstance(n, _PredMembership):
+            walk(n.left)
+            walk(n.right)
+        elif isinstance(n, (_PredLogicalAnd, _PredLogicalOr)):
+            for part in n.parts:
+                walk(part)
+        elif isinstance(n, _PredLogicalNot):
+            walk(n.operand)
+        elif isinstance(n, _PredQuantifier):
+            walk(n.list_path)
+            walk(n.predicate)
+        # Literal / ParamRef / ListLiteral carry no state path — nothing to add.
+
+    walk(node)
+    return names
 
 
 class SustainEngine:
@@ -155,6 +207,17 @@ class SustainEngine:
                 created_at      TEXT NOT NULL,
                 updated_at      TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS sustain_composition (
+                id                  TEXT PRIMARY KEY,
+                parent_sustain_id   TEXT NOT NULL,
+                child_sustain_id    TEXT NOT NULL,
+                slot                TEXT,
+                member              TEXT,
+                linked_at           TEXT NOT NULL,
+                UNIQUE(parent_sustain_id, child_sustain_id),
+                UNIQUE(parent_sustain_id, slot)
+            );
         """)
         self._db.commit()
         self._migrate_events_schema_sync()
@@ -223,7 +286,7 @@ class SustainEngine:
         """
         Parse + schema-bind every declared invariant into a typed predicate AST
         (Move 1). Mutates spec in place, caching:
-          spec["_compiled_invariants"]      -- [{id, description, expr, node}]
+          spec["_compiled_invariants"]      -- [{id, description, expr, node, enforced}]
           spec["_invariant_compile_errors"] -- [{id, expr, errors}]
 
         A predicate referencing a state dimension the schema doesn't declare
@@ -231,10 +294,24 @@ class SustainEngine:
         non-fatal: an invalid invariant is skipped from enforcement and
         recorded as a compile error, it does not block the sustain from
         loading (existing sustains keep working; see enforcement gate below).
+
+        `enforced` (Slice 8 — composition/roll-up): False for any invariant
+        whose expression references a dimension declared in spec["aggregates"]
+        — a computed roll-up value folded from linked children, never part of
+        this sustain's own persisted state. Per the parent-observes-never-
+        vetoes authority model, an aggregate-referencing invariant is real and
+        displayed (evaluate_constraints still evaluates it against an
+        aggregate-augmented state snapshot) but is never allowed to block a
+        transition — neither a child's own operator call (which never looks
+        at the parent at all) nor even the parent's own operator calls (an
+        aggregate value can't change because of what the parent itself does,
+        so gating on it there would just be a confusing, permanent block
+        unrelated to the operator being run).
         """
         if "_compiled_invariants" in spec:
             return
         state_schema = spec.get("state_schema", {})
+        aggregate_ids = {agg["id"] for agg in spec.get("aggregates", []) if agg.get("id")}
         compiled: list[dict] = []
         errors: list[dict] = []
         for inv in spec.get("invariants", []):
@@ -247,8 +324,10 @@ class SustainEngine:
                     inv.get("id"), expr, inv_errors,
                 )
                 continue
+            enforced = not (aggregate_ids & _referenced_root_names(node))
             compiled.append({
                 "id": inv.get("id"), "description": inv.get("description", ""), "expr": expr, "node": node,
+                "enforced": enforced,
             })
         spec["_compiled_invariants"] = compiled
         spec["_invariant_compile_errors"] = errors
@@ -269,6 +348,8 @@ class SustainEngine:
         skip building this call's args entirely on non-enforced sustains).
         """
         for inv in spec.get("_compiled_invariants", []):
+            if not inv.get("enforced", True):
+                continue  # aggregate-referencing — observational only, never blocks (see _compile_spec_invariants)
             ok, reason = evaluate_predicate(inv["node"], state, params)
             if not ok:
                 return False, f"would violate invariant '{inv['id']}' ({inv['expr']}): {reason}"
@@ -457,28 +538,51 @@ class SustainEngine:
 
     def commit_external_mutation(
         self, sustain_id: str, state: StateAccessor, event_name: str, payload: dict,
-    ) -> None:
+        check_gate: bool = False,
+    ) -> tuple[bool, str]:
         """
         For state changes that happen outside execute_operator's operator-
         registry path — e.g. a council vote resolving a proposal via
         CouncilSession — but still need state = fold(events) to hold. Captures
         whatever `state` has tracked via its set()/append()/remove() calls,
         appends one event carrying those mutations, and updates the cache.
-        No-op if state.mutations() is empty (nothing actually changed).
+        No-op (returns (True, "")) if state.mutations() is empty.
 
-        Deliberately does NOT run the Slice 2 enforcement gate — call sites
-        outside execute_operator predate that gate and adding it here would be
-        a behaviour change beyond this method's job (making the log complete);
-        closing that gap is real, separate follow-up work, not silently done
-        as a side effect of an event-sourcing migration.
+        check_gate=False (the default) preserves every existing caller's
+        exact original behaviour (seed_pocket, seed_event) — the gate is
+        opt-in, not a silent behaviour change for call sites that predate it.
+
+        check_gate=True (used by the council-vote route — Slice 8's second
+        slotted follow-up) additionally evaluates the sustain's own compiled,
+        ENFORCED invariants (skips aggregate-referencing ones — see
+        _compile_spec_invariants) against the mutated state before
+        persisting, exactly like the Move 2 gate inside execute_operator. A
+        violation refuses the whole mutation: nothing is appended, state is
+        untouched, and (False, reason) is returned. There's no operator
+        here, so only the sustain's own invariants are checked — no
+        post_constraints (those belong to a specific operator call).
+
+        Returns (True, "") on success or no-op, (False, reason) on refusal.
         """
         mutations = state.mutations()
         if not mutations:
-            return
+            return True, ""
+
+        if check_gate:
+            spec = self._get_spec(sustain_id)
+            if spec is not None and self._enforcement_enabled(spec):
+                for inv in spec.get("_compiled_invariants", []):
+                    if not inv.get("enforced", True):
+                        continue
+                    ok, reason = evaluate_predicate(inv["node"], state, {})
+                    if not ok:
+                        return False, f"would violate invariant '{inv['id']}' ({inv['expr']}): {reason}"
+
         self._append_events_and_update_cache(
             sustain_id, state.snapshot(),
             [{"event_name": event_name, "payload": payload, "mutations": mutations}],
         )
+        return True, ""
 
     def rebuild_state(self, sustain_id: str) -> dict:
         """
@@ -1237,12 +1341,18 @@ class SustainEngine:
         """
         Evaluate each invariant expression from the spec against the live state.
         Returns [{"expr": ..., "status": "ok"|"fail", "value": None}].
+
+        Uses _state_with_aggregates rather than raw state, so a parent's
+        aggregate-referencing invariants (household_liquid_total, etc.) show
+        a real pass/fail here — display only, never gated (see
+        _check_enforcement_gate's "enforced" skip). Sustains with no
+        declared aggregates get their normal state back unchanged.
         """
         spec = self._get_spec(sustain_id)
         if spec is None:
             return []
         try:
-            state_dict = self._load_state_dict(sustain_id)
+            state_dict = self._state_with_aggregates(sustain_id)
         except ValueError:
             return []
         state = StateAccessor(state_dict)
@@ -1597,3 +1707,253 @@ class SustainEngine:
 
         logger.info("[SustainEngine] updated definition template_id=%s version=%d", template_id, new_version)
         return {"status": "ok", "spec": candidate_spec, "version": new_version}
+
+    # ── Composition ⊕ and roll-up ρ (Slice 8) ───────────────────────────────────
+    #
+    # Generic machinery: nothing below knows the word "habitat" or "homestead".
+    # A parent is any sustain with linked children in sustain_composition; a
+    # child is any sustain so linked. VOS/Homestead is the first caller of
+    # link_child()/provision_declared_children(), not a special case of it — a
+    # structurally-unlike future parent (M3) uses the exact same methods.
+    #
+    # Authority model (confirmed with Bonnie, not guessed): the parent
+    # OBSERVES its children, it never VETOES them. A child's own operator call
+    # is governed only by the child's own gate — nothing here ever reaches
+    # into a different sustain's invariants to block a transaction. The
+    # parent's aggregate values and any invariant that references them are
+    # purely for display/needs-attention (see _compile_spec_invariants'
+    # "enforced" flag and _check_enforcement_gate's skip of it).
+
+    def link_child(
+        self, parent_sustain_id: str, child_sustain_id: str,
+        slot: str | None = None, member: str | None = None,
+    ) -> dict:
+        """
+        The ⊕ primitive: link a live child sustain under a live parent
+        sustain. Both must already exist. Idempotency/uniqueness is enforced
+        at the DB level (a child can only have one parent; a slot can only
+        be filled once per parent) — raises ValueError with a clear reason
+        rather than silently overwriting an existing link.
+        """
+        if parent_sustain_id == child_sustain_id:
+            raise ValueError("a sustain cannot be linked as its own child.")
+        for sid, role in ((parent_sustain_id, "parent"), (child_sustain_id, "child")):
+            row = self._db.execute("SELECT id FROM sustains WHERE id = ?", (sid,)).fetchone()
+            if row is None:
+                raise ValueError(f"{role} sustain '{sid}' not found.")
+
+        existing_parent = self.get_parent(child_sustain_id)
+        if existing_parent is not None:
+            raise ValueError(
+                f"child sustain '{child_sustain_id}' is already linked to parent "
+                f"'{existing_parent['parent_sustain_id']}'."
+            )
+
+        link_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        try:
+            self._db.execute(
+                "INSERT INTO sustain_composition (id, parent_sustain_id, child_sustain_id, slot, member, linked_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (link_id, parent_sustain_id, child_sustain_id, slot, member, now),
+            )
+            self._db.commit()
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"could not link '{child_sustain_id}' under '{parent_sustain_id}': {exc}")
+
+        logger.info(
+            "[SustainEngine] linked child=%s under parent=%s slot=%s member=%s",
+            child_sustain_id, parent_sustain_id, slot, member,
+        )
+        return {
+            "id": link_id, "parent_sustain_id": parent_sustain_id, "child_sustain_id": child_sustain_id,
+            "slot": slot, "member": member, "linked_at": now,
+        }
+
+    def list_children(self, parent_sustain_id: str) -> list[dict]:
+        """Every child currently linked under a parent, in link order."""
+        rows = self._db.execute(
+            "SELECT id, parent_sustain_id, child_sustain_id, slot, member, linked_at "
+            "FROM sustain_composition WHERE parent_sustain_id = ? ORDER BY linked_at ASC",
+            (parent_sustain_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_parent(self, child_sustain_id: str) -> dict | None:
+        """The link record for a child's parent, or None if it has none."""
+        row = self._db.execute(
+            "SELECT id, parent_sustain_id, child_sustain_id, slot, member, linked_at "
+            "FROM sustain_composition WHERE child_sustain_id = ?",
+            (child_sustain_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def unlink_child(self, parent_sustain_id: str, child_sustain_id: str) -> bool:
+        """
+        Disaggregation (§IX of the Multiparty article): dissolve a
+        parent/child link. The child keeps its own state — nothing about it
+        is deleted or mutated, only the link record. Returns False if no
+        such link existed.
+        """
+        cur = self._db.execute(
+            "DELETE FROM sustain_composition WHERE parent_sustain_id = ? AND child_sustain_id = ?",
+            (parent_sustain_id, child_sustain_id),
+        )
+        self._db.commit()
+        return cur.rowcount > 0
+
+    def provision_declared_children(self, parent_sustain_id: str, owner_user_id: str) -> list[dict]:
+        """
+        Reads the parent's spec["declared_children"] — a generic convention
+        (NOT specific to homestead/habitat): a list of
+        {slot, member, template, status} entries any parent-type spec can
+        declare. For each declared slot not yet linked, instantiates a fresh
+        (empty/default-state) instance of the declared template and links it.
+
+        Idempotent: already-linked slots are skipped and returned as-is, so
+        calling this twice (or on a sustain with no unlinked slots left) is
+        safe and does not create duplicates.
+        """
+        spec = self._get_spec(parent_sustain_id)
+        if spec is None:
+            raise ValueError(f"Sustain '{parent_sustain_id}' not found.")
+
+        declared = spec.get("declared_children", [])
+        existing_by_slot = {c["slot"]: c for c in self.list_children(parent_sustain_id) if c.get("slot")}
+
+        results: list[dict] = []
+        for entry in declared:
+            slot = entry.get("slot")
+            if slot in existing_by_slot:
+                results.append(existing_by_slot[slot])
+                continue
+            template_id = entry.get("template")
+            member = entry.get("member", slot)
+            if not template_id:
+                raise ValueError(f"declared_children entry for slot '{slot}' has no template.")
+            child_sustain_id = self.instantiate(
+                template_id, owner_user_id, {"owner_ids": [owner_user_id], "name": member},
+            )
+            link = self.link_child(parent_sustain_id, child_sustain_id, slot=slot, member=member)
+            results.append(link)
+
+        logger.info(
+            "[SustainEngine] provisioned %d declared children for parent=%s",
+            len(results), parent_sustain_id,
+        )
+        return results
+
+    _ROLLUP_OPS: dict[str, Any] = {
+        "sum": sum,
+        "count": len,
+        "avg": lambda vs: (sum(vs) / len(vs)) if vs else 0.0,
+        "min": lambda vs: min(vs) if vs else None,
+        "max": lambda vs: max(vs) if vs else None,
+    }
+
+    def compute_rollup(self, parent_sustain_id: str) -> dict:
+        """
+        The ρ primitive: fold every linked child's CURRENT (already-folded,
+        via get_state()) state into the parent's declared aggregates.
+        Computed fresh on every call — never persisted anywhere, never
+        written into the parent's own state. This IS the recompute path: a
+        second call with no state changes reproduces the identical result,
+        the same discipline as S3's rebuild_state().
+
+        A child that can't be read (no state row — e.g. a stale/orphaned
+        link) or whose declared child_path doesn't resolve to a number on
+        that child is EXCLUDED from the sum and reported by name, not
+        silently treated as contributing zero. The returned value is always
+        the honest sum of what WAS readable, with the exclusions listed
+        alongside it — never presented as if it covered everyone.
+
+        Returns:
+          {
+            "children": [{"sustain_id", "slot", "member", "status": "ok"|"missing"}],
+            "aggregates": {
+              agg_id: {
+                "op", "child_path", "value",
+                "included": [{"sustain_id","slot","member","value"}],
+                "excluded": [{"sustain_id","slot","member","reason"}],
+              }
+            },
+          }
+        """
+        spec = self._get_spec(parent_sustain_id)
+        if spec is None:
+            raise ValueError(f"Sustain '{parent_sustain_id}' not found.")
+
+        links = self.list_children(parent_sustain_id)
+        child_states: dict[str, dict] = {}
+        children_report: list[dict] = []
+        for link in links:
+            cid = link["child_sustain_id"]
+            try:
+                child_states[cid] = self._load_state_dict(cid)
+                children_report.append({**link, "status": "ok"})
+            except ValueError:
+                children_report.append({
+                    **link, "status": "missing",
+                    "reason": "no state found for this child — the link may be stale or the child was removed.",
+                })
+
+        aggregates: dict[str, dict] = {}
+        for agg in spec.get("aggregates", []):
+            agg_id = agg.get("id")
+            child_path = agg.get("child_path", "")
+            op = agg.get("op", "sum")
+            reducer = self._ROLLUP_OPS.get(op)
+            if reducer is None:
+                raise ValueError(f"aggregate '{agg_id}' declares unknown op '{op}'.")
+
+            included: list[dict] = []
+            excluded: list[dict] = []
+            values: list[float] = []
+            for link in links:
+                cid = link["child_sustain_id"]
+                state = child_states.get(cid)
+                if state is None:
+                    excluded.append({
+                        "sustain_id": cid, "slot": link.get("slot"), "member": link.get("member"),
+                        "reason": "child state unavailable",
+                    })
+                    continue
+                try:
+                    val = StateAccessor(state).get(child_path)
+                except Exception:
+                    val = None
+                if not isinstance(val, (int, float)) or isinstance(val, bool):
+                    excluded.append({
+                        "sustain_id": cid, "slot": link.get("slot"), "member": link.get("member"),
+                        "reason": f"path '{child_path}' not present or not numeric on this child",
+                    })
+                    continue
+                values.append(val)
+                included.append({
+                    "sustain_id": cid, "slot": link.get("slot"), "member": link.get("member"), "value": val,
+                })
+
+            aggregates[agg_id] = {
+                "op": op, "child_path": child_path, "value": reducer(values),
+                "included": included, "excluded": excluded,
+            }
+
+        return {"children": children_report, "aggregates": aggregates}
+
+    def _state_with_aggregates(self, sustain_id: str) -> dict:
+        """
+        The parent's real persisted state, with each declared aggregate's
+        CURRENT computed value merged in under its own id — for display and
+        invariant evaluation only. Never written back via _persist_state or
+        any event-append path; a fresh copy is built on every call. Raises
+        ValueError (same as _load_state_dict) if the sustain has no state.
+        """
+        state_dict = self._load_state_dict(sustain_id)
+        spec = self._get_spec(sustain_id)
+        if spec and spec.get("aggregates"):
+            rollup = self.compute_rollup(sustain_id)
+            augmented = copy.deepcopy(state_dict)
+            for agg_id, result in rollup["aggregates"].items():
+                augmented[agg_id] = result["value"]
+            return augmented
+        return state_dict
