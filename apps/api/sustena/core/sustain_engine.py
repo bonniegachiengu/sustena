@@ -32,6 +32,7 @@ from typing import Any
 
 import sustena.operators  # noqa: F401 — triggers OPERATOR_REGISTRY population
 
+from sustena.core.event_fold import fold_events
 from sustena.core.events import EventBus
 from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext, OperatorResult
 from sustena.core.pawa import PawaLedger
@@ -133,7 +134,9 @@ class SustainEngine:
                 event_name      TEXT NOT NULL,
                 payload_json    TEXT NOT NULL,
                 operator_log_id TEXT,
-                timestamp       TEXT NOT NULL
+                timestamp       TEXT NOT NULL,
+                seq             INTEGER,
+                mutations_json  TEXT
             );
 
             CREATE TABLE IF NOT EXISTS operative_overrides (
@@ -144,6 +147,31 @@ class SustainEngine:
             );
         """)
         self._db.commit()
+        self._migrate_events_schema_sync()
+
+    def _migrate_events_schema_sync(self) -> None:
+        """
+        Sync counterpart to db/schema.py's _migrate_events_schema — same
+        additive, nullable-column ALTER TABLE, but through this engine's own
+        sqlite3 connection. Needed because SustainEngine talks to sustena.db
+        directly and doesn't go through the async init_db() migration path;
+        without this, an events table that predates Slice 3 (state =
+        fold(events)) would be missing seq/mutations_json and every event
+        append would fail with "no such column". No-op once both exist.
+        """
+        cols = [row[1] for row in self._db.execute("PRAGMA table_info(events)").fetchall()]
+        if not cols:
+            return  # table doesn't exist yet — the CREATE TABLE above just made it, with both columns
+        added = False
+        if "seq" not in cols:
+            self._db.execute("ALTER TABLE events ADD COLUMN seq INTEGER")
+            added = True
+        if "mutations_json" not in cols:
+            self._db.execute("ALTER TABLE events ADD COLUMN mutations_json TEXT")
+            added = True
+        if added:
+            self._db.commit()
+            logger.info("[SustainEngine] migrated events table — added seq + mutations_json columns.")
 
     # ── Spec loading ───────────────────────────────────────────────────────────
 
@@ -255,8 +283,16 @@ class SustainEngine:
 
     def _persist_state(self, sustain_id: str, state: dict) -> None:
         """
-        Upsert the state for sustain_id in sustain_states.
+        Cache-only write straight to sustain_states — does NOT append an
+        event. Since Slice 3 (state = fold(events)), every real application
+        code path must go through _append_events_and_update_cache() (or
+        commit_external_mutation()) instead, so the log stays the true
+        source of every state change. This method survives only as a raw
+        setup utility for test fixtures that need to seed a precondition
+        state without caring whether it's fold-reproducible — do not call it
+        from a real request/operator path.
 
+        Upsert the state for sustain_id in sustain_states.
         If a row already exists, increments version_number and updates state_json.
         If no row exists, inserts a new one at version 1.
         """
@@ -298,6 +334,242 @@ class SustainEngine:
                 "Has it been instantiated?"
             )
         return json.loads(row["state_json"])
+
+    # ── Event sourcing — state = fold(events) (Slice 3) ────────────────────────
+    #
+    # sustain_states is now a CACHE, not the source of truth: it exists purely
+    # for read performance (the Monitor polls it every second) and is kept in
+    # sync with the event log on every write below. The source of truth is the
+    # events table — specifically each row's mutations_json, which is exactly
+    # what StateAccessor recorded while the operator that produced the event
+    # ran. rebuild_state() proves the cache is always reconstructible by
+    # folding from scratch and comparing.
+
+    def _next_seq(self, sustain_id: str) -> int:
+        """Next per-sustain fold-order sequence number (1-based, gapless)."""
+        row = self._db.execute(
+            "SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq FROM events WHERE sustain_id = ?",
+            (sustain_id,),
+        ).fetchone()
+        return row["next_seq"] if row is not None else 1
+
+    def _append_events_and_update_cache(
+        self, sustain_id: str, new_state: dict, events: list[dict],
+    ) -> None:
+        """
+        The ONLY place state is allowed to change once a sustain exists.
+
+        events: [{"id"?, "event_name", "payload", "operator_log_id"?,
+                   "timestamp"?, "mutations"}, ...], already in the order they
+        should be assigned seq numbers in. Each is inserted into the events
+        table with a fresh per-sustain seq; the sustain_states cache is then
+        overwritten with new_state (the caller's already-computed fold
+        result — recomputing it here via fold_events on every write would be
+        correct but O(n) per write as history grows, so the caller passes the
+        StateAccessor snapshot it already has in hand; rebuild_state() is the
+        from-scratch check that this incremental path never drifts from it).
+
+        Both writes happen in one transaction: if persisting the events fails,
+        the cache must not silently move ahead of the log it's supposed to be
+        a cache OF. No-op (returns without writing anything) if events is empty.
+        """
+        if not events:
+            return
+        now = datetime.utcnow().isoformat()
+        try:
+            seq = self._next_seq(sustain_id)
+            for ev in events:
+                payload = ev.get("payload", {})
+                try:
+                    payload_json = json.dumps(payload, default=str)
+                except (TypeError, ValueError):
+                    payload_json = json.dumps(str(payload))
+                mutations_json = json.dumps(ev.get("mutations") or [], default=str)
+                self._db.execute(
+                    "INSERT INTO events "
+                    "(id, sustain_id, event_name, payload_json, operator_log_id, timestamp, seq, mutations_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        ev.get("id") or str(uuid.uuid4()),
+                        sustain_id,
+                        ev.get("event_name", "event.unknown"),
+                        payload_json,
+                        ev.get("operator_log_id"),
+                        ev.get("timestamp") or now,
+                        seq,
+                        mutations_json,
+                    ),
+                )
+                seq += 1
+
+            state_json = json.dumps(new_state)
+            existing = self._db.execute(
+                "SELECT id, version_number FROM sustain_states WHERE sustain_id = ?",
+                (sustain_id,),
+            ).fetchone()
+            if existing is None:
+                self._db.execute(
+                    "INSERT INTO sustain_states (id, sustain_id, state_json, version_number, updated_at) "
+                    "VALUES (?, ?, ?, 1, ?)",
+                    (str(uuid.uuid4()), sustain_id, state_json, now),
+                )
+            else:
+                self._db.execute(
+                    "UPDATE sustain_states "
+                    "SET state_json = ?, version_number = ?, updated_at = ? "
+                    "WHERE sustain_id = ?",
+                    (state_json, existing["version_number"] + 1, now, sustain_id),
+                )
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
+
+    def commit_external_mutation(
+        self, sustain_id: str, state: StateAccessor, event_name: str, payload: dict,
+    ) -> None:
+        """
+        For state changes that happen outside execute_operator's operator-
+        registry path — e.g. a council vote resolving a proposal via
+        CouncilSession — but still need state = fold(events) to hold. Captures
+        whatever `state` has tracked via its set()/append()/remove() calls,
+        appends one event carrying those mutations, and updates the cache.
+        No-op if state.mutations() is empty (nothing actually changed).
+
+        Deliberately does NOT run the Slice 2 enforcement gate — call sites
+        outside execute_operator predate that gate and adding it here would be
+        a behaviour change beyond this method's job (making the log complete);
+        closing that gap is real, separate follow-up work, not silently done
+        as a side effect of an event-sourcing migration.
+        """
+        mutations = state.mutations()
+        if not mutations:
+            return
+        self._append_events_and_update_cache(
+            sustain_id, state.snapshot(),
+            [{"event_name": event_name, "payload": payload, "mutations": mutations}],
+        )
+
+    def rebuild_state(self, sustain_id: str) -> dict:
+        """
+        Derive state from scratch by folding every event for sustain_id, in
+        seq order — completely independent of the sustain_states cache. This
+        is the proof that the cache is what it claims to be: call this and
+        get_state(sustain_id) back to back and they must be deep-equal.
+        """
+        rows = self._db.execute(
+            "SELECT event_name, payload_json, mutations_json FROM events "
+            "WHERE sustain_id = ? ORDER BY seq ASC",
+            (sustain_id,),
+        ).fetchall()
+        events = []
+        for r in rows:
+            try:
+                mutations = json.loads(r["mutations_json"]) if r["mutations_json"] else []
+            except (json.JSONDecodeError, TypeError):
+                mutations = []
+            events.append({"mutations": mutations})
+        return fold_events(events)
+
+    def migrate_to_event_sourcing(self) -> dict:
+        """
+        One-time backfill for sustains that predate Slice 3: every sustain's
+        history must start with a genesis "replace_root" event, but sustains
+        created before this slice never got one (their initial state was a
+        raw cache write). This generates exactly one genesis event per such
+        sustain, capturing its CURRENT cached state exactly — not fabricating
+        or discarding anything — then renumbers whatever informational events
+        already existed for it (mutations = [], since they carry no fold data)
+        to come after.
+
+        Iterates the sustains table (the authoritative instance list), not
+        sustain_states — a sustain_states row with no matching sustains row
+        is orphaned/pre-existing dead data, not a real instance, and is
+        reported separately rather than silently touched.
+
+        Idempotent: a sustain that already has a genesis event is skipped.
+
+        Returns a report dict — callers (an operational script, or a test)
+        MUST check report["verification"] before trusting the migration; this
+        method does not silently swallow a fold mismatch, it surfaces it:
+          {
+            "migrated": [sustain_id, ...],
+            "skipped_already_migrated": [sustain_id, ...],
+            "skipped_no_state": [sustain_id, ...],
+            "orphaned_state_rows": [sustain_id, ...],  # sustain_states with no sustains row
+            "verification": {sustain_id: bool},         # rebuild_state() == get_state() ?
+          }
+        """
+        report: dict = {
+            "migrated": [], "skipped_already_migrated": [], "skipped_no_state": [],
+            "orphaned_state_rows": [], "verification": {},
+        }
+
+        sustain_rows = self._db.execute("SELECT id, template_id, created_at FROM sustains").fetchall()
+        known_ids = {row["id"] for row in sustain_rows}
+
+        orphans = self._db.execute("SELECT sustain_id FROM sustain_states").fetchall()
+        report["orphaned_state_rows"] = sorted({
+            r["sustain_id"] for r in orphans if r["sustain_id"] not in known_ids
+        })
+
+        for row in sustain_rows:
+            sid = row["id"]
+
+            already = self._db.execute(
+                "SELECT COUNT(*) AS n FROM events "
+                "WHERE sustain_id = ? AND event_name = 'event.system.genesis_snapshot'",
+                (sid,),
+            ).fetchone()["n"]
+            if already > 0:
+                report["skipped_already_migrated"].append(sid)
+                continue
+
+            try:
+                current_state = self._load_state_dict(sid)
+            except ValueError:
+                report["skipped_no_state"].append(sid)
+                continue
+
+            old_events = self._db.execute(
+                "SELECT id FROM events WHERE sustain_id = ? ORDER BY timestamp ASC",
+                (sid,),
+            ).fetchall()
+
+            try:
+                self._db.execute(
+                    "INSERT INTO events "
+                    "(id, sustain_id, event_name, payload_json, operator_log_id, timestamp, seq, mutations_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(uuid.uuid4()), sid, "event.system.genesis_snapshot",
+                        json.dumps({
+                            "template_id": row["template_id"],
+                            "reason": (
+                                "Slice 3 migration — one-time snapshot capturing this "
+                                "sustain's exact state as it stood before event sourcing"
+                            ),
+                        }),
+                        None, row["created_at"], 1,
+                        json.dumps([{"op": "replace_root", "value": current_state}], default=str),
+                    ),
+                )
+                seq = 2
+                for ev in old_events:
+                    self._db.execute(
+                        "UPDATE events SET seq = ?, mutations_json = ? WHERE id = ?",
+                        (seq, json.dumps([]), ev["id"]),
+                    )
+                    seq += 1
+                self._db.commit()
+            except Exception:
+                self._db.rollback()
+                raise
+
+            report["migrated"].append(sid)
+            report["verification"][sid] = (self.rebuild_state(sid) == self.get_state(sid))
+
+        return report
 
     # ── instantiate ────────────────────────────────────────────────────────────
 
@@ -374,8 +646,16 @@ class SustainEngine:
         )
         self._db.commit()
 
-        # 5. Persist initial state
-        self._persist_state(sustain_id, initial_state)
+        # 5. Persist initial state as a genesis event — every sustain's fold
+        # history starts with exactly one "replace_root" event, whether it's
+        # freshly instantiated (here) or a pre-Slice-3 sustain backfilled by
+        # migrate_to_event_sourcing(). No sustain ever gets a cache write that
+        # isn't backed by a corresponding event.
+        self._append_events_and_update_cache(sustain_id, initial_state, [{
+            "event_name": "event.system.genesis_snapshot",
+            "payload": {"template_id": template_id, "reason": "sustain instantiated"},
+            "mutations": [{"op": "replace_root", "value": initial_state}],
+        }])
 
         # 6. Cache spec and owner
         self._specs[sustain_id]  = spec
@@ -489,8 +769,11 @@ class SustainEngine:
           3. Load current state into a StateAccessor
           4. Build OperatorContext (state, events, pawa, ids, timestamp)
           5. Call the operator function with **params
-          6. On success: persist the mutated state snapshot back to DB
-          7. Return the OperatorResult
+          6. Move 2 enforcement gate against the mutated state, if opted in
+          7. On success: append the event(s) this call produced (carrying
+             StateAccessor's mutations) and update the sustain_states cache —
+             state = fold(events); see _append_events_and_update_cache
+          8. Return the OperatorResult
 
         If the operator raises an exception, returns OperatorResult.fail()
         with the exception message — state is NOT persisted.
@@ -568,60 +851,74 @@ class SustainEngine:
                 )
                 return OperatorResult.fail(reason=gate_reason, constraint_violated="enforcement_gate")
 
-        # Persist mutated state + any emitted events only on success
+        # Slice 3 — state = fold(events). Append this call's event(s), each
+        # carrying whatever StateAccessor recorded, and update the cache — the
+        # only place a successful operator call is allowed to change state.
+        #
+        # If the operator mutated state but published nothing (no event to
+        # attach the mutations to), synthesize one — every state change must
+        # land in the log, with no silent exceptions for a forgetful operator.
+        #
+        # If it published MORE THAN ONE event in the same call (e.g.
+        # mkulima.receive_signal fires both a "signal received" event and a
+        # "biashara evaluation requested" hook), the mutations are attached to
+        # the FIRST event only; later events in the same call carry an empty
+        # mutations list. This is deliberate, not an oversight: state.mutations()
+        # reflects everything that changed during the WHOLE operator call, not
+        # per-publish-call — attaching the same list to every event in the call
+        # would double-apply it on fold. The extra events stay fully present
+        # and readable in the log; they just aren't fold contributors.
         if result.succeeded:
-            self._persist_state(sustain_id, state.snapshot())
-            self._persist_events(sustain_id, bus)
+            mutations = state.mutations()
+            published = bus.published_this_context()
+            if mutations and not published:
+                await bus.publish(
+                    "event.system.unlogged_state_change",
+                    {
+                        "operator": operator_name,
+                        "note": (
+                            "operator mutated state without publishing a domain event; "
+                            "synthesized by the engine so the event log stays complete"
+                        ),
+                    },
+                )
+                published = bus.published_this_context()
+            if published:
+                events_norm = [
+                    {
+                        "id": ev.get("id"),
+                        "event_name": ev.get("event_name"),
+                        "payload": ev.get("_payload", {}),
+                        "operator_log_id": ev.get("operator_log_id"),
+                        "timestamp": ev.get("timestamp"),
+                        "mutations": mutations if i == 0 else [],
+                    }
+                    for i, ev in enumerate(published)
+                ]
+                self._append_events_and_update_cache(sustain_id, state.snapshot(), events_norm)
 
         return result
-
-    def _persist_events(self, sustain_id: str, bus) -> None:
-        """
-        Persist events published during an operator run to the events table.
-
-        SustainEngine is synchronous and builds the EventBus without an async
-        DB session, so published events live only in memory (bus._published).
-        We write them here through the engine's own sqlite3 connection so the
-        Monitor event feed and counter reflect real activity. Best-effort —
-        a persistence failure must never invalidate a successful operator.
-        """
-        published = getattr(bus, "_published", None) or []
-        if not published:
-            return
-        try:
-            for ev in published:
-                payload = ev.get("_payload", {})
-                try:
-                    payload_json = json.dumps(payload, default=str)
-                except (TypeError, ValueError):
-                    payload_json = json.dumps(str(payload))
-                self._db.execute(
-                    "INSERT INTO events "
-                    "(id, sustain_id, event_name, payload_json, operator_log_id, timestamp) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        ev.get("id") or str(uuid.uuid4()),
-                        sustain_id,
-                        ev.get("event_name", "event.unknown"),
-                        payload_json,
-                        ev.get("operator_log_id"),
-                        ev.get("timestamp") or datetime.utcnow().isoformat(),
-                    ),
-                )
-            self._db.commit()
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("[SustainEngine] failed to persist events: %s", exc)
 
     def get_events(self, sustain_id: str, limit: int = 20) -> list[dict]:
         """
         Return recent events for a sustain (newest first) from the events table.
         Shape: [{"event_name": str, "payload": dict, "timestamp": str}].
         Used by GET /devui/state and POST /devui/console/execute.
+
+        Ordered by seq (Slice 3), not just timestamp — timestamp alone is not
+        a reliable ordering key: several events from one operator call, or a
+        genesis event immediately followed by a seeded one, can land in the
+        same millisecond, and ORDER BY timestamp DESC then ties arbitrarily.
+        seq is assigned per-sustain and strictly increasing, so it's always
+        correct; timestamp DESC only remains as a tiebreaker for any
+        pre-Slice-3 rows that still have seq = NULL (SQLite sorts NULL last
+        in DESC, so those trail behind everything real, which is the honest
+        answer until migrate_to_event_sourcing() backfills them).
         """
         try:
             rows = self._db.execute(
                 "SELECT event_name, payload_json, timestamp FROM events "
-                "WHERE sustain_id = ? ORDER BY timestamp DESC LIMIT ?",
+                "WHERE sustain_id = ? ORDER BY seq DESC, timestamp DESC LIMIT ?",
                 (sustain_id, limit),
             ).fetchall()
         except Exception as exc:  # pragma: no cover - defensive
@@ -642,37 +939,54 @@ class SustainEngine:
 
     def seed_pocket(self, sustain_id: str, name: str, allocated: float, ceiling: float = 0.0) -> bool:
         """
-        Directly set/replace a budget pocket in a sustain's live engine state so
-        seeded pockets appear in the Monitor (which reads engine state). Used by
+        Set/replace a budget pocket in a sustain's live engine state so seeded
+        pockets appear in the Monitor (which reads engine state). Used by
         POST /seed/pocket. Returns False if the sustain has no engine state
         (e.g. a free-text seed id that was never instantiated).
+
+        Goes through commit_external_mutation (Slice 3) rather than a raw
+        cache write — a pocket seeded via the UI is a real state change a
+        real user made, so it must land in the event log the same as any
+        operator-driven one, or rebuild_state() would silently diverge from
+        get_state() for any sustain that ever used the Seed panel.
         """
         try:
             state_dict = self._load_state_dict(sustain_id)
         except ValueError:
             return False
-        finances = state_dict.setdefault("finances", {})
-        pockets = finances.setdefault("pockets", {})
-        prev = pockets.get(name) if isinstance(pockets.get(name), dict) else {}
-        pockets[name] = {
+        state = StateAccessor(state_dict)
+        prev = state.get(f"finances.pockets.{name}")
+        prev = prev if isinstance(prev, dict) else {}
+        pocket = {
             "allocated": float(allocated),
             "spent": float(prev.get("spent", 0.0)),
             "limit": float(ceiling),
         }
-        self._persist_state(sustain_id, state_dict)
+        state.set(f"finances.pockets.{name}", pocket)
+        self.commit_external_mutation(
+            sustain_id, state,
+            "event.finances.pocket_seeded",
+            {"pocket": name, "allocated": pocket["allocated"], "limit": pocket["limit"]},
+        )
         return True
 
     def seed_event(self, sustain_id: str, event_name: str, payload: dict) -> bool:
-        """Record a seeded event so it shows in the Monitor event feed/log."""
+        """
+        Record a purely informational seeded event (no state change) so it
+        shows in the Monitor event feed/log. Routed through
+        _append_events_and_update_cache so it gets a real seq number in the
+        same per-sustain sequence as every other event — a raw INSERT here
+        would leave seq NULL and sort ahead of the genesis event on replay.
+        Returns False if the sustain has no engine state.
+        """
         try:
-            self._db.execute(
-                "INSERT INTO events "
-                "(id, sustain_id, event_name, payload_json, operator_log_id, timestamp) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (str(uuid.uuid4()), sustain_id, event_name,
-                 json.dumps(payload, default=str), None, datetime.utcnow().isoformat()),
-            )
-            self._db.commit()
+            state_dict = self._load_state_dict(sustain_id)
+        except ValueError:
+            return False
+        try:
+            self._append_events_and_update_cache(sustain_id, state_dict, [{
+                "event_name": event_name, "payload": payload, "mutations": [],
+            }])
             return True
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[SustainEngine] seed_event failed: %s", exc)

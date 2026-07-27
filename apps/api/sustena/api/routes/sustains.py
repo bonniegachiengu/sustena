@@ -293,8 +293,16 @@ async def vote_on_proposal(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
-    # Persist updated state (council_proposals mutated in-place)
-    engine._persist_state(sustain_id, state_accessor.snapshot())
+    # Persist updated state — via commit_external_mutation (Slice 3), not a
+    # raw cache write: this route mutates state outside execute_operator's
+    # operator-registry path (CouncilSession.resolve() mutates state_accessor
+    # directly), but state = fold(events) must still hold for every sustain
+    # that ever has a proposal voted on, so the vote needs its own event too.
+    engine.commit_external_mutation(
+        sustain_id, state_accessor,
+        "event.council.vote_resolved",
+        {"proposal_id": proposal_id, "vote": vote, "status": new_status},
+    )
 
     updated_proposal = session._get_proposal(proposal_id)
     return _ok({"proposal_id": proposal_id, "status": new_status, "proposal": updated_proposal})

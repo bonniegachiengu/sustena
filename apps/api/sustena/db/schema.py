@@ -102,7 +102,8 @@ operators_log = Table(
 )
 
 # ── events ─────────────────────────────────────────────────────────────────────
-# Immutable event log — the ground truth of every state transition.
+# Immutable event log — the ground truth of every state transition (Slice 3:
+# state = fold(events); sustain_states is a derived cache, not the source).
 # Event names follow dot-protocol: event.domain.type
 events = Table(
     "events",
@@ -113,6 +114,8 @@ events = Table(
     Column("payload_json", Text, nullable=False),
     Column("operator_log_id", String(36), nullable=True),      # FK → operators_log.id
     Column("timestamp", DateTime, default=datetime.utcnow, nullable=False),
+    Column("seq", Integer, nullable=True),                     # per-sustain monotonic fold order (Slice 3)
+    Column("mutations_json", Text, nullable=True),             # StateAccessor mutation records for fold() (Slice 3)
 )
 
 # ── pawa_ledger ────────────────────────────────────────────────────────────────
@@ -401,6 +404,34 @@ def _migrate_sustains_schema(sync_conn) -> None:
     logger.info("Migrated sustains table — added template_id, relaxed seed columns.")
 
 
+def _migrate_events_schema(sync_conn) -> None:
+    """
+    Add seq + mutations_json to the events table on existing DBs (Slice 3 —
+    state = fold(events)). Both are new, nullable, purely-additive columns —
+    unlike the users/sustains migrations above, this doesn't need SQLite's
+    rename -> recreate -> copy -> drop dance; ALTER TABLE ADD COLUMN is
+    sufficient and safe for a nullable column with no computed default.
+
+    No-op when both columns already exist (fresh DB or already migrated).
+    This only ensures the columns exist — it does not populate seq/
+    mutations_json on pre-existing rows; that's SustainEngine's one-time
+    migrate_to_event_sourcing(), which needs fold logic this module has no
+    business owning.
+    """
+    old_cols = [row[1] for row in sync_conn.execute(text("PRAGMA table_info(events)"))]
+    if not old_cols:
+        return  # no events table yet — create_all handles it with the new columns
+    added = False
+    if "seq" not in old_cols:
+        sync_conn.execute(text("ALTER TABLE events ADD COLUMN seq INTEGER"))
+        added = True
+    if "mutations_json" not in old_cols:
+        sync_conn.execute(text("ALTER TABLE events ADD COLUMN mutations_json TEXT"))
+        added = True
+    if added:
+        logger.info("Migrated events table — added seq + mutations_json columns.")
+
+
 async def init_db() -> None:
     """Create all tables if they don't exist. Called at startup."""
     engine = get_engine()
@@ -409,6 +440,7 @@ async def init_db() -> None:
         await conn.run_sync(_migrate_users_auth)
         await conn.run_sync(_migrate_users_token_version)
         await conn.run_sync(_migrate_sustains_schema)
+        await conn.run_sync(_migrate_events_schema)
     logger.info("Database initialised — all tables ready.")
 
 

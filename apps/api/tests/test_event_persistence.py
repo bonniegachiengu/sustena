@@ -60,11 +60,20 @@ async def test_event_payload_is_parsed_dict():
 
 
 async def test_failed_operator_persists_no_event():
+    """
+    A fresh sustain has exactly one event now (Slice 3's genesis snapshot,
+    written at instantiate() time) — a failed operator call must add nothing
+    beyond that; the event count must not move.
+    """
     eng = _engine()
     sid = eng.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
+    before = eng.get_events(sid)
+    assert len(before) == 1
+    assert before[0]["event_name"] == "event.system.genesis_snapshot"
+
     res = await eng.execute_operator(sid, "budget.record_income", {"amount": -5, "source": "bad"})
     assert res.failed
-    assert eng.get_events(sid) == []
+    assert eng.get_events(sid) == before
 
 
 def test_get_events_unknown_sustain_is_empty():

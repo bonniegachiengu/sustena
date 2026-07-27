@@ -325,10 +325,15 @@ async def seed_event(
     body: EventBody,
     _current_user: dict = Depends(get_current_user),
 ):
-    """Manually inject an event into a sustain's event log."""
-    event_id = str(uuid.uuid4())
-    now = _now_iso()
+    """
+    Manually inject an event into a sustain's event log.
 
+    Goes through the shared SustainEngine's seed_event() (same bridge pattern
+    seed_pocket already uses) instead of a raw INSERT — since Slice 3 (state =
+    fold(events)), every events-table row needs a real per-sustain seq number
+    assigned by the engine's own sequencing, or it sorts ahead of the sustain's
+    genesis event on replay and rebuild_state() diverges from get_state().
+    """
     # Map UI type names to dot-protocol event names
     event_name_map = {
         "received": "event.finances.income_received",
@@ -346,25 +351,16 @@ async def seed_event(
         **body.metadata,
     }
 
-    engine = get_engine()
-    async with engine.begin() as conn:
-        from sqlalchemy import text
-        await conn.execute(
-            text("""
-                INSERT INTO events (id, sustain_id, event_name, payload_json, operator_log_id, timestamp)
-                VALUES (:id, :sustain_id, :event_name, :payload_json, NULL, :timestamp)
-            """),
-            {
-                "id": event_id,
-                "sustain_id": body.sustain_id,
-                "event_name": event_name,
-                "payload_json": json.dumps(payload),
-                "timestamp": now,
-            },
+    from sustena.core.engine_singleton import get_shared_engine
+    bridged = get_shared_engine().seed_event(body.sustain_id, event_name, payload)
+    if not bridged:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Sustain '{body.sustain_id}' not found or has no engine state.",
         )
 
     logger.info("seed_event: injected %s for sustain=%s amount=%.2f", event_name, body.sustain_id, body.amount)
-    return ok({"event_id": event_id, "event_name": event_name, "sustain_id": body.sustain_id})
+    return ok({"event_name": event_name, "sustain_id": body.sustain_id})
 
 
 # ── GET /seed/status ──────────────────────────────────────────────────────────

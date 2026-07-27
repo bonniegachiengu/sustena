@@ -17,6 +17,7 @@ Run with:
 """
 
 import copy
+import json
 import pytest
 
 from sustena.core.sustain_engine import SustainEngine
@@ -544,3 +545,381 @@ class TestEnforcementGate:
         ids = {inv["id"] for inv in spec["_compiled_invariants"]}
         assert ids == {"liquid_non_negative", "pocket_allocated_non_negative"}
         assert spec["_invariant_compile_errors"] == []
+
+
+# ── 9. Slice 3 — state = fold(events) ──────────────────────────────────────────
+
+class TestEventSourcing:
+    """
+    sustain_states is now a cache; the events table (specifically each row's
+    mutations_json) is the source of truth. get_state() reads the cache;
+    rebuild_state() derives state from scratch by folding every event. The
+    two must always agree — that's the property this class exists to prove.
+    """
+
+    def test_instantiate_writes_exactly_one_genesis_event(self, engine: SustainEngine, homestead_sid: str):
+        events = engine.get_events(homestead_sid, limit=50)
+        assert len(events) == 1
+        assert events[0]["event_name"] == "event.system.genesis_snapshot"
+
+    def test_genesis_seq_is_one(self, engine: SustainEngine, homestead_sid: str):
+        row = engine._db.execute(
+            "SELECT seq FROM events WHERE sustain_id = ?", (homestead_sid,)
+        ).fetchone()
+        assert row["seq"] == 1
+
+    def test_rebuild_state_matches_get_state_immediately_after_instantiate(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        assert engine.rebuild_state(homestead_sid) == engine.get_state(homestead_sid)
+
+    @pytest.mark.asyncio
+    async def test_rebuild_state_matches_get_state_after_operator_sequence(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        await engine.execute_operator(homestead_sid, "budget.record_income", {"amount": 50000.0, "source": "Salary"})
+        await engine.execute_operator(homestead_sid, "budget.allocate", {"pocket_name": "food", "amount": 15000.0})
+        await engine.execute_operator(homestead_sid, "budget.spend", {"pocket_name": "food", "amount": 3000.0, "description": "shop", "category": "groceries"})
+        await engine.execute_operator(homestead_sid, "budget.transfer", {"from_pocket": "food", "to_pocket": "rent", "amount": 2000.0})
+
+        assert engine.rebuild_state(homestead_sid) == engine.get_state(homestead_sid)
+        # sanity: it's not trivially equal because nothing happened
+        assert engine.get_state(homestead_sid)["finances"]["liquid"]["balance"] == 35000.0
+
+    @pytest.mark.asyncio
+    async def test_seq_numbers_are_gapless_and_increasing(self, engine: SustainEngine, homestead_sid: str):
+        await engine.execute_operator(homestead_sid, "budget.record_income", {"amount": 1000.0, "source": "A"})
+        await engine.execute_operator(homestead_sid, "budget.record_income", {"amount": 1000.0, "source": "B"})
+        rows = engine._db.execute(
+            "SELECT seq FROM events WHERE sustain_id = ? ORDER BY seq ASC", (homestead_sid,)
+        ).fetchall()
+        seqs = [r["seq"] for r in rows]
+        assert seqs == list(range(1, len(seqs) + 1))
+
+    @pytest.mark.asyncio
+    async def test_multi_event_call_attaches_mutations_to_first_event_only(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        """
+        Mirrors mkulima.receive_signal, which publishes two events from one
+        call. The mutations list reflects everything StateAccessor recorded
+        for the WHOLE call — attaching it to more than one event would
+        double-apply it on fold.
+        """
+        from sustena.core.operator import OPERATOR_REGISTRY, OperatorResult
+
+        meta = OPERATOR_REGISTRY["budget.record_income"]
+        original_fn = meta.fn
+
+        async def multi_event_fn(ctx, **kwargs):
+            ctx.state.increment("finances.liquid.balance", 777.0)
+            await ctx.events.publish("event.finances.income_received", {"amount": 777.0})
+            await ctx.events.publish("event.system.secondary_hook", {"note": "no new mutation"})
+            return OperatorResult.ok({})
+
+        meta.fn = multi_event_fn
+        try:
+            result = await engine.execute_operator(homestead_sid, "budget.record_income", {"amount": 777.0})
+        finally:
+            meta.fn = original_fn
+
+        assert result.succeeded
+        rows = engine._db.execute(
+            "SELECT event_name, seq, mutations_json FROM events WHERE sustain_id = ? ORDER BY seq ASC",
+            (homestead_sid,),
+        ).fetchall()
+        assert [r["event_name"] for r in rows] == [
+            "event.system.genesis_snapshot",
+            "event.finances.income_received",
+            "event.system.secondary_hook",
+        ]
+        assert len(json.loads(rows[1]["mutations_json"])) > 0   # first event: real mutations
+        assert json.loads(rows[2]["mutations_json"]) == []       # second event: no-op for fold
+        assert engine.rebuild_state(homestead_sid) == engine.get_state(homestead_sid)
+        assert engine.get_state(homestead_sid)["finances"]["liquid"]["balance"] == 777.0
+
+    @pytest.mark.asyncio
+    async def test_operator_mutating_without_publishing_gets_a_synthesized_event(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        """
+        The completeness safety net: no state change is allowed to be
+        unlogged, even if an operator forgets to publish() — this proves
+        the mechanism exists and actually gets exercised, not just declared.
+        """
+        from sustena.core.operator import OPERATOR_REGISTRY, OperatorResult
+
+        meta = OPERATOR_REGISTRY["budget.record_income"]
+        original_fn = meta.fn
+
+        async def silent_mutator(ctx, **kwargs):
+            ctx.state.increment("finances.liquid.balance", 42.0)
+            return OperatorResult.ok({})  # no publish() at all
+
+        meta.fn = silent_mutator
+        try:
+            result = await engine.execute_operator(homestead_sid, "budget.record_income", {"amount": 42.0})
+        finally:
+            meta.fn = original_fn
+
+        assert result.succeeded
+        events = engine.get_events(homestead_sid, limit=50)
+        synthesized = [e for e in events if e["event_name"] == "event.system.unlogged_state_change"]
+        assert len(synthesized) == 1
+        assert synthesized[0]["payload"]["operator"] == "budget.record_income"
+        assert engine.rebuild_state(homestead_sid) == engine.get_state(homestead_sid)
+        assert engine.get_state(homestead_sid)["finances"]["liquid"]["balance"] == 42.0
+
+    @pytest.mark.asyncio
+    async def test_gate_refusal_leaves_fold_consistent(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        """Combines TestEnforcementGate's refusal check with the fold property:
+        a refused transition must change neither the cache nor the log, so the
+        two stay in agreement."""
+        from sustena.core.operator import OPERATOR_REGISTRY, OperatorResult
+
+        meta = OPERATOR_REGISTRY["budget.record_income"]
+        original_fn = meta.fn
+
+        async def violates_invariant(ctx, **kwargs):
+            ctx.state.set("finances.liquid.balance", -500.0)
+            return OperatorResult.ok({"hacked": True})
+
+        meta.fn = violates_invariant
+        before_events = len(engine.get_events(homestead_sid, limit=100))
+        try:
+            result = await engine.execute_operator(homestead_sid, "budget.record_income", {"amount": 1.0})
+        finally:
+            meta.fn = original_fn
+
+        assert result.failed
+        assert len(engine.get_events(homestead_sid, limit=100)) == before_events
+        assert engine.rebuild_state(homestead_sid) == engine.get_state(homestead_sid)
+
+    def test_seed_pocket_appends_event_and_stays_fold_consistent(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        before = len(engine.get_events(homestead_sid, limit=100))
+        assert engine.seed_pocket(homestead_sid, "rent", 20000.0, 25000.0) is True
+        after_events = engine.get_events(homestead_sid, limit=100)
+        assert len(after_events) == before + 1
+        # get_events() is newest-first by seq (Slice 3 fix — see its docstring)
+        # so the just-seeded event, being the latest, is index 0.
+        assert after_events[0]["event_name"] == "event.finances.pocket_seeded"
+        assert engine.rebuild_state(homestead_sid) == engine.get_state(homestead_sid)
+        assert engine.get_state(homestead_sid)["finances"]["pockets"]["rent"]["allocated"] == 20000.0
+
+    def test_seed_pocket_unknown_sustain_returns_false(self, engine: SustainEngine):
+        assert engine.seed_pocket("does-not-exist", "food", 100) is False
+
+    def test_seed_event_appends_with_empty_mutations_and_stays_fold_consistent(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        before_state = engine.get_state(homestead_sid)
+        assert engine.seed_event(homestead_sid, "event.seed.note", {"amount": 5}) is True
+        row = engine._db.execute(
+            "SELECT mutations_json FROM events WHERE sustain_id = ? AND event_name = 'event.seed.note'",
+            (homestead_sid,),
+        ).fetchone()
+        assert json.loads(row["mutations_json"]) == []
+        assert engine.get_state(homestead_sid) == before_state  # purely informational — no state change
+        assert engine.rebuild_state(homestead_sid) == engine.get_state(homestead_sid)
+
+    def test_seed_event_unknown_sustain_returns_false(self, engine: SustainEngine):
+        assert engine.seed_event("does-not-exist", "event.seed.note", {}) is False
+
+    def test_commit_external_mutation_appends_event_and_updates_cache(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        from sustena.core.state import StateAccessor
+
+        state = StateAccessor(engine.get_state(homestead_sid))
+        state.set("finances.liquid.balance", 9999.0)
+        engine.commit_external_mutation(
+            homestead_sid, state, "event.council.vote_resolved", {"proposal_id": "p1", "vote": "YES"}
+        )
+        assert engine.get_state(homestead_sid)["finances"]["liquid"]["balance"] == 9999.0
+        assert engine.rebuild_state(homestead_sid) == engine.get_state(homestead_sid)
+        events = engine.get_events(homestead_sid, limit=50)
+        assert any(e["event_name"] == "event.council.vote_resolved" for e in events)
+
+    def test_commit_external_mutation_is_a_no_op_when_nothing_changed(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        from sustena.core.state import StateAccessor
+
+        before = len(engine.get_events(homestead_sid, limit=100))
+        state = StateAccessor(engine.get_state(homestead_sid))  # no .set()/.append()/.remove() calls
+        engine.commit_external_mutation(homestead_sid, state, "event.council.vote_resolved", {})
+        assert len(engine.get_events(homestead_sid, limit=100)) == before
+
+
+class TestMigrateToEventSourcing:
+    """
+    migrate_to_event_sourcing() backfills sustains created before Slice 3 —
+    a raw cache write at instantiate() time, some old events with no seq/
+    mutations, and critically NO genesis event. These tests build that exact
+    shape by hand via raw SQL (the only way to get it now that instantiate()
+    always writes a genesis event) to mirror the real production DB inventory
+    found before this slice: 2 homestead sustains, one with pre-existing
+    informational events, plus one orphaned sustain_states row with no
+    matching sustains row.
+    """
+
+    def _seed_pre_slice3_sustain(self, engine, sid, template_id, state, old_events=()):
+        """old_events: list of (event_name, payload_dict) in chronological order."""
+        import json as _json
+        import uuid as _uuid
+        from datetime import datetime as _dt
+
+        created_at = "2026-06-01T00:00:00"
+        engine._db.execute(
+            "INSERT INTO sustains (id, user_id, template_id, created_at) VALUES (?, ?, ?, ?)",
+            (sid, "legacy-user", template_id, created_at),
+        )
+        engine._db.execute(
+            "INSERT INTO sustain_states (id, sustain_id, state_json, version_number, updated_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            (str(_uuid.uuid4()), sid, _json.dumps(state), created_at),
+        )
+        for i, (name, payload) in enumerate(old_events):
+            # Old-shape row: no seq, no mutations_json — exactly what a
+            # pre-Slice-3 events table row looked like.
+            engine._db.execute(
+                "INSERT INTO events (id, sustain_id, event_name, payload_json, operator_log_id, timestamp) "
+                "VALUES (?, ?, ?, ?, NULL, ?)",
+                (str(_uuid.uuid4()), sid, name, _json.dumps(payload), f"2026-06-02T00:0{i}:00"),
+            )
+        engine._db.commit()
+        engine._specs.pop(sid, None)  # force _get_spec to reload fresh (not cached from elsewhere)
+
+    def test_migrates_sustain_with_no_prior_events(self, engine: SustainEngine):
+        sid = "legacy-sid-1"
+        state = {
+            "members": [], "finances": {"liquid": {"balance": 7500.0}, "pockets": {}, "income": {"amount": 0.0, "frequency": "monthly", "last_recorded": None}, "goals": []},
+            "calendar": {"events": []}, "tasks": {"items": []}, "alerts": [],
+        }
+        self._seed_pre_slice3_sustain(engine, sid, "homestead", state)
+
+        report = engine.migrate_to_event_sourcing()
+
+        assert sid in report["migrated"]
+        assert report["verification"][sid] is True
+        assert engine.rebuild_state(sid) == engine.get_state(sid)
+        assert engine.get_state(sid)["finances"]["liquid"]["balance"] == 7500.0
+        events = engine.get_events(sid, limit=50)
+        assert len(events) == 1
+        assert events[0]["event_name"] == "event.system.genesis_snapshot"
+
+    def test_migrates_sustain_and_preserves_prior_event_history(self, engine: SustainEngine):
+        sid = "legacy-sid-2"
+        state = {
+            "members": [], "finances": {"liquid": {"balance": 100.0}, "pockets": {"rent": {"allocated": 900.0, "spent": 900.0, "limit": 0.0}}, "income": {"amount": 0.0, "frequency": "monthly", "last_recorded": None}, "goals": []},
+            "calendar": {"events": []}, "tasks": {"items": []}, "alerts": [],
+        }
+        old_events = [
+            ("event.finances.income_received", {"amount": 1000.0}),
+            ("event.finances.pocket_spent", {"pocket": "rent", "amount": 900.0}),
+        ]
+        self._seed_pre_slice3_sustain(engine, sid, "homestead", state, old_events)
+
+        before_count = engine._db.execute(
+            "SELECT COUNT(*) AS n FROM events WHERE sustain_id = ?", (sid,)
+        ).fetchone()["n"]
+        assert before_count == 2  # sanity: the two old events exist pre-migration
+
+        report = engine.migrate_to_event_sourcing()
+
+        assert report["verification"][sid] is True
+        # Old history is renumbered, not deleted — 2 old events + 1 genesis = 3.
+        events = engine.get_events(sid, limit=50)
+        assert len(events) == 3
+        names = {e["event_name"] for e in events}
+        assert "event.finances.income_received" in names
+        assert "event.finances.pocket_spent" in names
+        assert "event.system.genesis_snapshot" in names
+
+        # Genesis must be seq=1 — old events renumbered after it, in original order.
+        rows = engine._db.execute(
+            "SELECT event_name, seq, mutations_json FROM events WHERE sustain_id = ? ORDER BY seq ASC",
+            (sid,),
+        ).fetchall()
+        assert rows[0]["event_name"] == "event.system.genesis_snapshot"
+        assert rows[0]["seq"] == 1
+        assert rows[1]["event_name"] == "event.finances.income_received"
+        assert rows[1]["seq"] == 2
+        assert rows[2]["event_name"] == "event.finances.pocket_spent"
+        assert rows[2]["seq"] == 3
+        # Renumbered old events carry no mutations — they don't re-contribute
+        # to the fold, since the genesis snapshot already captured their effect.
+        import json as _json
+        assert _json.loads(rows[1]["mutations_json"]) == []
+        assert _json.loads(rows[2]["mutations_json"]) == []
+
+        assert engine.rebuild_state(sid) == engine.get_state(sid)
+        assert engine.get_state(sid)["finances"]["liquid"]["balance"] == 100.0
+        assert engine.get_state(sid)["finances"]["pockets"]["rent"]["spent"] == 900.0
+
+    def test_is_idempotent(self, engine: SustainEngine):
+        sid = "legacy-sid-3"
+        state = {"members": [], "finances": {"liquid": {"balance": 1.0}, "pockets": {}, "income": {"amount": 0.0, "frequency": "monthly", "last_recorded": None}, "goals": []}, "calendar": {"events": []}, "tasks": {"items": []}, "alerts": []}
+        self._seed_pre_slice3_sustain(engine, sid, "homestead", state)
+
+        report1 = engine.migrate_to_event_sourcing()
+        assert sid in report1["migrated"]
+        count_after_first = engine._db.execute(
+            "SELECT COUNT(*) AS n FROM events WHERE sustain_id = ?", (sid,)
+        ).fetchone()["n"]
+
+        report2 = engine.migrate_to_event_sourcing()
+        assert sid in report2["skipped_already_migrated"]
+        assert sid not in report2["migrated"]
+        count_after_second = engine._db.execute(
+            "SELECT COUNT(*) AS n FROM events WHERE sustain_id = ?", (sid,)
+        ).fetchone()["n"]
+        assert count_after_first == count_after_second  # no duplicate genesis event
+
+    def test_already_event_sourced_sustain_is_skipped(self, engine: SustainEngine, homestead_sid: str):
+        """A sustain instantiated under the new code (genesis already present) must not be re-migrated."""
+        report = engine.migrate_to_event_sourcing()
+        assert homestead_sid in report["skipped_already_migrated"]
+        assert homestead_sid not in report["migrated"]
+
+    def test_orphaned_sustain_states_row_is_reported_not_touched(self, engine: SustainEngine):
+        """
+        Mirrors the real orphan found in the live DB before this slice: a
+        sustain_states row with no matching sustains row (unreachable via the
+        normal engine API — _get_spec requires a sustains row). Must be
+        reported, not silently migrated or silently ignored.
+        """
+        import json as _json
+        import uuid as _uuid
+
+        orphan_sid = "orphan-sid"
+        engine._db.execute(
+            "INSERT INTO sustain_states (id, sustain_id, state_json, version_number, updated_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            (str(_uuid.uuid4()), orphan_sid, _json.dumps({"finances": {"pockets": {}}}), "2026-06-01T00:00:00"),
+        )
+        engine._db.commit()
+
+        report = engine.migrate_to_event_sourcing()
+
+        assert orphan_sid in report["orphaned_state_rows"]
+        assert orphan_sid not in report["migrated"]
+        # Untouched: still zero events for it, still no genesis.
+        assert engine.get_events(orphan_sid, limit=10) == []
+
+    def test_sustains_row_with_no_state_row_is_skipped_not_crashed(self, engine: SustainEngine):
+        """A sustains row that somehow has no sustain_states row (never fully instantiated) must be reported, not crash the whole migration."""
+        engine._db.execute(
+            "INSERT INTO sustains (id, user_id, template_id, created_at) VALUES (?, ?, ?, ?)",
+            ("no-state-sid", "u1", "homestead", "2026-06-01T00:00:00"),
+        )
+        engine._db.commit()
+
+        report = engine.migrate_to_event_sourcing()
+
+        assert "no-state-sid" in report["skipped_no_state"]
+        assert "no-state-sid" not in report["migrated"]
