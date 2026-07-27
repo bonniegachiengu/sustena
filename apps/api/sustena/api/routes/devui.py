@@ -124,10 +124,19 @@ async def list_sustains(_: dict = Depends(get_current_user)) -> dict:
 # ── 1b. GET /devui/templates ──────────────────────────────────────────────────
 
 @router.get("/templates", summary="Available sustain spec templates for creation")
-async def list_templates(_: dict = Depends(get_current_user)) -> dict:
+async def list_templates(current_user: dict = Depends(get_current_user)) -> dict:
     """
-    List the sustain spec templates that can be instantiated (homestead, vyyb,
-    chama, …). Powers the 'create sustain' control in the UI.
+    List the sustain spec templates that can be instantiated. Powers the
+    'create sustain' control in the UI.
+
+    Merges two sources deliberately, not two separate surfaces: the disk
+    templates (homestead, habitat) and the current user's own Slice 6
+    user-created definitions (sustain_templates). Both instantiate() the
+    exact same way — SustainEngine._load_spec() resolves either
+    transparently — so they belong in one list, not a "built-in vs custom"
+    split. Only the current user's own definitions are included: someone
+    else's custom sustain isn't a template a stranger should be able to
+    instantiate from the picker.
     """
     import json as _json
     from pathlib import Path as _Path
@@ -148,7 +157,24 @@ async def list_templates(_: dict = Depends(get_current_user)) -> dict:
             "description":  spec.get("description", ""),
             "operatives":   operative_names,
             "parameters":   spec.get("parameters", []),
+            "user_created": False,
         })
+
+    try:
+        from sustena.core.engine_singleton import get_shared_engine
+        engine = get_shared_engine()
+        for d in engine.list_definitions(owner_user_id=current_user.get("id")):
+            templates.append({
+                "template_id":  d["template_id"],
+                "display_name": d["display_name"],
+                "description":  d["description"],
+                "operatives":   [],
+                "parameters":   [{"name": "owner_ids", "type": "array", "required": True}],
+                "user_created": True,
+            })
+    except Exception as exc:
+        logger.debug("merging user-created definitions into template list failed: %s", exc)
+
     return ok({"templates": templates})
 
 
@@ -188,6 +214,155 @@ async def create_sustain(body: CreateSustainRequest, _: dict = Depends(get_curre
     )
     logger.info("Created sustain %s from template %s", sustain_id, body.template_id)
     return ok({"sustain_id": sustain_id, "sustain": entry})
+
+
+# ── 1d. Definitions — user-created sustain templates (Slice 6) ───────────────
+# A "definition" is a sustain template a person builds through the DEFINE UI
+# instead of hand-editing a sustena/sustains/*.json file. It persists in
+# SustainEngine's sustain_templates table and instantiates through the exact
+# same POST /devui/sustains + engine.instantiate() path as homestead/habitat
+# — these routes only create/read/edit the DEFINITION itself.
+
+class DimensionSpec(BaseModel):
+    name: str
+    type: str = Field(description="One of: number, string, boolean")
+    description: str = ""
+    default_value: Any = None
+    minimum: float | None = None
+
+
+class InvariantSpec(BaseModel):
+    id: str
+    expression: str
+    description: str = ""
+
+
+class CreateDefinitionRequest(BaseModel):
+    user_id: str = Field(description="Owner user id for the new definition")
+    display_name: str
+    description: str = ""
+    dimensions: list[DimensionSpec] = Field(default_factory=list)
+    invariants: list[InvariantSpec] = Field(default_factory=list)
+    operator_names: list[str] = Field(
+        default_factory=list,
+        description="Names of EXISTING operators (from GET /devui/registry/operators) to attach.",
+    )
+
+
+class UpdateDefinitionRequest(BaseModel):
+    user_id: str = Field(description="Must match the definition's owner.")
+    display_name: str | None = None
+    description: str | None = None
+    dimensions: list[DimensionSpec] | None = None
+    invariants: list[InvariantSpec] | None = None
+    operator_names: list[str] | None = None
+
+
+class ValidateInvariantRequest(BaseModel):
+    expression: str
+    state_schema: dict = Field(default_factory=dict)
+
+
+@router.post("/validate-invariant", summary="Live-compile an invariant expression against a candidate schema")
+async def validate_invariant(body: ValidateInvariantRequest, _: dict = Depends(get_current_user)) -> dict:
+    """
+    Wraps predicates.compile_invariant() so the DEFINE UI's invariant builder
+    can check an expression as the person builds it — a field/operator/value
+    picker generates the expression string, this confirms it actually parses
+    and binds against the dimensions declared so far, before the person is
+    allowed to add it.
+    """
+    from sustena.core.predicates import compile_invariant
+
+    _, errors = compile_invariant(body.expression, body.state_schema)
+    return ok({"valid": not errors, "errors": errors})
+
+
+@router.get("/definitions", summary="List the current user's sustain definitions")
+async def list_definitions_route(user_id: str = Query(...), _: dict = Depends(get_current_user)) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    return ok({"definitions": engine.list_definitions(owner_user_id=user_id)})
+
+
+@router.get("/definitions/{template_id}", summary="Full spec detail for one definition")
+async def get_definition_route(template_id: str, _: dict = Depends(get_current_user)) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    definition = engine.get_definition(template_id)
+    if definition is None:
+        raise HTTPException(status_code=404, detail="Definition not found")
+    return ok(definition)
+
+
+@router.post("/definitions", summary="Create a new user-defined sustain template")
+async def create_definition_route(body: CreateDefinitionRequest, _: dict = Depends(get_current_user)) -> dict:
+    """
+    Builds and persists a brand-new sustain template from schema dimensions +
+    invariants + attached operator names. Never silently drops an invalid
+    dimension/invariant/operator — SustainEngine.create_definition() raises
+    ValueError on the first bad one, surfaced here as 422 with the exact
+    reason (a compile error names the offending invariant and expression).
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    try:
+        result = engine.create_definition(
+            owner_user_id=body.user_id,
+            display_name=body.display_name,
+            description=body.description,
+            dimensions=[d.model_dump() for d in body.dimensions],
+            invariants=[i.model_dump() for i in body.invariants],
+            operator_names=body.operator_names,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    logger.info("Created definition %s owner=%s", result["template_id"], body.user_id)
+    return ok(result)
+
+
+@router.patch("/definitions/{template_id}", summary="Edit a sustain definition safely")
+async def update_definition_route(
+    template_id: str, body: UpdateDefinitionRequest, _: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Edits a definition, gated by the migration predicate: SustainEngine.
+    update_definition() refuses (returns status="refused", not an HTTP
+    error) if any LIVE instance of this template would fail one of the
+    candidate invariants. This is a normal, expected outcome — not an
+    exception — so it comes back as HTTP 200 with the refusal spelled out
+    in the body, the same convention an operator refusal already uses
+    (POST /devui/console/execute never turns a gate refusal into an HTTP
+    error either).
+
+    Only fields present in the body are changed; omitted fields keep their
+    current value.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    patch: dict = {}
+    if body.display_name is not None:
+        patch["display_name"] = body.display_name
+    if body.description is not None:
+        patch["description"] = body.description
+    if body.dimensions is not None:
+        patch["dimensions"] = [d.model_dump() for d in body.dimensions]
+    if body.invariants is not None:
+        patch["invariants"] = [i.model_dump() for i in body.invariants]
+    if body.operator_names is not None:
+        patch["operator_names"] = body.operator_names
+
+    try:
+        result = engine.update_definition(template_id, body.user_id, patch)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    return ok(result)
 
 
 # ── Shared: visualize.* widget computation ───────────────────────────────────
