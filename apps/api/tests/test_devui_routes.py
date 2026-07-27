@@ -844,9 +844,15 @@ class TestCreateSustain:
         assert r.json()["data"]["sustain"]["template_id"] == "homestead"
 
     def test_created_sustain_appears_in_list(self, client):
+        # GET /devui/sustains is owner-scoped (fixed during the Orchie slice
+        # -- it previously returned every account's sustains to anyone
+        # logged in). The created sustain's user_id must match the actual
+        # authenticated caller's own id for it to legitimately appear in
+        # THEIR list, not an arbitrary literal like "owner" would.
+        real_user_id = client.get("/api/v1/users/me", headers=AUTH_HEADER).json()["data"]["user_id"]
         sid = client.post(
             "/devui/sustains",
-            json={"template_id": "homestead", "user_id": "owner"},
+            json={"template_id": "homestead", "user_id": real_user_id},
             headers=AUTH_HEADER,
         ).json()["data"]["sustain_id"]
         listed = client.get("/devui/sustains", headers=AUTH_HEADER).json()["data"]["sustains"]

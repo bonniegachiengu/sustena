@@ -910,23 +910,40 @@ class SustainEngine:
 
     # ── list_all ───────────────────────────────────────────────────────────────
 
-    def list_all(self) -> list[dict]:
+    def list_all(self, owner_user_id: str | None = None) -> list[dict]:
         """
-        Return a summary list of all sustain instances in the DB.
+        Return a summary list of sustain instances in the DB.
 
         Each entry contains enough for the devui selector dropdown and the
         Monitor panel hero tiles — id, template, name (label), status,
         active operative count, and current pawa balance from state if present.
 
-        Used by GET /devui/sustains.
+        owner_user_id=None (the default, used by main.py's startup
+        "is the DB empty?" check) returns every sustain system-wide.
+        GET /devui/sustains passes the real logged-in user's id so a
+        person's picker only ever shows sustains they actually own —
+        this was a real gap until this parameter existed: unfiltered,
+        any authenticated user saw every other account's (and every
+        throwaway test account's) sustains in their own dropdown.
         """
-        rows = self._db.execute(
-            "SELECT s.id, s.user_id, s.template_id, s.created_at, "
-            "       ss.state_json "
-            "FROM sustains s "
-            "LEFT JOIN sustain_states ss ON ss.sustain_id = s.id "
-            "ORDER BY s.created_at DESC"
-        ).fetchall()
+        if owner_user_id:
+            rows = self._db.execute(
+                "SELECT s.id, s.user_id, s.template_id, s.created_at, "
+                "       ss.state_json "
+                "FROM sustains s "
+                "LEFT JOIN sustain_states ss ON ss.sustain_id = s.id "
+                "WHERE s.user_id = ? "
+                "ORDER BY s.created_at DESC",
+                (owner_user_id,),
+            ).fetchall()
+        else:
+            rows = self._db.execute(
+                "SELECT s.id, s.user_id, s.template_id, s.created_at, "
+                "       ss.state_json "
+                "FROM sustains s "
+                "LEFT JOIN sustain_states ss ON ss.sustain_id = s.id "
+                "ORDER BY s.created_at DESC"
+            ).fetchall()
 
         result = []
         for row in rows:

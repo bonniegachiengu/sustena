@@ -105,15 +105,21 @@ class PreviewWidgetRequest(BaseModel):
 # ── 1. GET /devui/sustains ────────────────────────────────────────────────────
 
 @router.get("/sustains", summary="List sustains for the selector dropdown")
-async def list_sustains(_: dict = Depends(get_current_user)) -> dict:
+async def list_sustains(current_user: dict = Depends(get_current_user)) -> dict:
     """
-    Returns all sustains with id, label, status, pockets summary, and
-    active operative count — enough for the TopBar selector and Monitor hero tiles.
+    Returns the CURRENT USER'S OWN sustains with id, label, status, pockets
+    summary, and active operative count — enough for the TopBar selector
+    and Monitor hero tiles.
+
+    Scoped by owner (list_all(owner_user_id=...)) -- previously this
+    returned every sustain in the DB regardless of who was logged in, so
+    any authenticated user's picker showed every other account's (and
+    every throwaway test account's) sustains alongside their own.
     """
     try:
         from sustena.core.engine_singleton import get_shared_engine
         engine = get_shared_engine()
-        raw = engine.list_all()
+        raw = engine.list_all(owner_user_id=current_user.get("id"))
         return ok({"sustains": raw})
     except Exception as exc:
         logger.debug("SustainEngine.list_all failed: %s", exc)

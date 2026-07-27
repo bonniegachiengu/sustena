@@ -72,6 +72,33 @@ class TestDataPersistence:
 
 
 # ---------------------------------------------------------------------------
+# Owner-scoped list_all — fixes the picker showing every account's sustains
+# ---------------------------------------------------------------------------
+
+class TestListAllOwnerScoping:
+    def test_no_filter_returns_sustains_from_every_owner(self):
+        engine = get_shared_engine()
+        sid_a = engine.instantiate("homestead", "owner-a", {"owner_ids": ["owner-a"]})
+        sid_b = engine.instantiate("homestead", "owner-b", {"owner_ids": ["owner-b"]})
+        ids = {s["id"] for s in engine.list_all()}
+        assert sid_a in ids and sid_b in ids
+
+    def test_owner_filter_excludes_other_owners_sustains(self):
+        engine = get_shared_engine()
+        sid_a = engine.instantiate("homestead", "owner-c", {"owner_ids": ["owner-c"]})
+        sid_b = engine.instantiate("homestead", "owner-d", {"owner_ids": ["owner-d"]})
+        scoped = engine.list_all(owner_user_id="owner-c")
+        ids = {s["id"] for s in scoped}
+        assert sid_a in ids
+        assert sid_b not in ids
+
+    def test_owner_filter_with_no_sustains_returns_empty(self):
+        engine = get_shared_engine()
+        engine.instantiate("homestead", "owner-e", {"owner_ids": ["owner-e"]})
+        assert engine.list_all(owner_user_id="owner-with-nothing") == []
+
+
+# ---------------------------------------------------------------------------
 # get_spec
 # ---------------------------------------------------------------------------
 

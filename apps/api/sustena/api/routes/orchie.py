@@ -14,10 +14,11 @@ so mock mode works out of the box in development.
 import logging
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from sustena.core.claude_client import get_claude_client
+from sustena.api.routes.users import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -92,3 +93,56 @@ async def orchie_message(req: OrchieMessageRequest) -> OrchieMessageResponse:
     )
 
     return OrchieMessageResponse(reply=reply_text)
+
+
+# ── GET /orchie/compose — the Curated UI engine's compose(r) ──────────────────
+#
+# The rendering surface of ORCHIE (the phone-first, event-first curated
+# surface — see SUSTENA_UPGRADE_SPEC.md §4H). Deliberately separate from
+# every /devui/* route: those serve MYCELIUM, the orchestrator/dev cockpit,
+# and are left untouched by this endpoint. compose(r) is read-only — it
+# never calls execute_operator and never writes to any table.
+
+
+def _assert_owns_sustain(sustain_id: str, user_id: str) -> None:
+    """Same 404-for-both-cases pattern as ingest.py's _assert_owns_sustain —
+    duplicated rather than imported across route files, matching this
+    codebase's existing convention (each route file is self-contained)."""
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    row = engine._db.execute(
+        "SELECT user_id FROM sustains WHERE id = ?", (sustain_id,)
+    ).fetchone()
+    if row is None or row["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Sustain not found")
+
+
+@router.get("/compose")
+async def orchie_compose(
+    sustain_id: str,
+    query: str | None = None,
+    device: str = "phone",
+    budget: int = 4,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    r = ⟨state, query, device⟩ → a ranked, attention-budgeted widget set.
+
+    Read-only: computes a view fresh from current state + recent events
+    every call. Nothing is stored, nothing is mutated -- proven by the
+    acceptance check comparing state/events byte-for-byte before and after.
+    """
+    _assert_owns_sustain(sustain_id, current_user["id"])
+
+    from sustena.core.engine_singleton import get_shared_engine
+    from sustena.core.curated_ui import compose
+
+    engine = get_shared_engine()
+    try:
+        result = compose(engine, sustain_id, query=query, device=device, budget=budget)
+    except Exception as exc:
+        logger.warning("orchie_compose(%s) failed: %s", sustain_id, exc)
+        raise HTTPException(status_code=500, detail=f"compose failed: {exc}")
+
+    return result

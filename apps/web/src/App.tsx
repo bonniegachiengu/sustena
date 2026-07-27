@@ -48,6 +48,7 @@ import JournalPage from './pages/JournalPage'
 import ArenaPage from './pages/ArenaPage'
 import DocsPage from './pages/DocsPage'
 import OrchePanel from './pages/OrchePanel'
+import OrchieShell from './pages/OrchieShell'
 
 function RootApp() {
   return (
@@ -55,8 +56,10 @@ function RootApp() {
       <Routes>
         <Route path="/" element={<ShellApp />} />
         <Route path="/profile" element={<ProfilePage />} />
-        {/* Orchie Panel — full-page view */}
+        {/* Orchie Panel — the Mycelium-side operative dashboard (unchanged) */}
         <Route path="/orchie-panel" element={<OrchePanel />} />
+        {/* Orchie — the new curated, phone-first, event-first surface (Curated UI engine, §4H) */}
+        <Route path="/orchie" element={<OrchieShell />} />
         {/* Arena — standalone with its own full header */}
         <Route path="/arena" element={<ArenaPage />} />
         {/* Lore section — shared top nav via LoreLayout */}

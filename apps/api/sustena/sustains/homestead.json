@@ -438,6 +438,35 @@
       "widget": "sustain_home"
     }
   },
+  "curated_widgets": [
+    {
+      "id": "pocket_spent_watch",
+      "description": "Surfaces a pocket right after a spend lands against it, so the person sees the consequence at the moment it happens rather than hunting for it later.",
+      "event_class": "event.finances.pocket_spent",
+      "inputs": ["finances.pockets.*.allocated", "finances.pockets.*.spent"],
+      "render": "pocket_watch_card",
+      "emits": ["budget.allocate"],
+      "cost": 1
+    },
+    {
+      "id": "unmapped_capture_classify",
+      "description": "A transaction the transducer captured but couldn't confidently route to a pocket or operator — needs a human decision.",
+      "unit": true,
+      "inputs": [],
+      "render": "classify_card",
+      "emits": ["budget.spend", "budget.allocate"],
+      "cost": 2
+    },
+    {
+      "id": "household_rollup_summary",
+      "description": "The household's baseline liquid position and, when linked children exist, their rolled-up total — the default at-a-glance card.",
+      "unit": true,
+      "inputs": ["finances.liquid.balance"],
+      "render": "rollup_summary_card",
+      "emits": [],
+      "cost": 1
+    }
+  ],
   "access_policy": {
     "owner_ids": "{{owner_ids}}"
   },
