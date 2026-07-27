@@ -145,6 +145,36 @@ function computeNeedsAttention(apiData, stateRows) {
     });
   });
 
+  // Ingest pipeline (Slice 4): captured messages the transducer couldn't
+  // confidently map to an operator — routed to the Console (Controller
+  // panel) since resolving one means running the right operator by hand.
+  (apiData?.ingestAttention?.messages || []).forEach(m => {
+    const isUnparsed = !m.parser_name;
+    items.push({
+      id: `ingest:${m.message_id}`,
+      urgency: 1.1,
+      tone: 'amber',
+      title: isUnparsed ? 'unrecognised capture' : 'capture needs a pocket/operator',
+      why: m.reason || (m.raw_payload ? m.raw_payload.slice(0, 60) : 'unparsed message'),
+      action: 'controller',
+    });
+  });
+
+  // Ingest capture sources that have gone quiet past their own configured
+  // cadence — only ever raised for a source with an explicit expected
+  // interval (never a guessed one), so no dedicated panel exists to route
+  // to yet: informational until source management gets its own surface.
+  (apiData?.ingestAttention?.stale_sources || []).forEach(s => {
+    items.push({
+      id: `source:${s.source_id}`,
+      urgency: 1.0,
+      tone: 'amber',
+      title: `${s.label || s.source_id} has gone quiet`,
+      why: s.last_seen_at ? `last seen ${s.last_seen_at}` : 'never reported in',
+      action: null,
+    });
+  });
+
   return items.sort((a, b) => b.urgency - a.urgency);
 }
 
@@ -219,6 +249,7 @@ function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
       constraints: payload.constraints || [],
       widgets: payload.widgets || null,
       proposalsInVoting: payload.proposals_in_voting || [],
+      ingestAttention: payload.ingest_attention || { messages: [], stale_sources: [] },
     };
   };
 
