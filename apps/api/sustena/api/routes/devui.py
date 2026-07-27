@@ -235,6 +235,14 @@ class InvariantSpec(BaseModel):
     id: str
     expression: str
     description: str = ""
+    authority: str = Field(
+        default="advisory",
+        description="'binding' or 'advisory' (default). Only matters for an invariant that "
+                     "references a roll-up aggregate: 'advisory' invariants are display-only "
+                     "and never block a child's transaction; 'binding' ones can refuse a "
+                     "child action that would newly breach them. Every other invariant is "
+                     "unaffected by this field either way.",
+    )
 
 
 class CreateDefinitionRequest(BaseModel):

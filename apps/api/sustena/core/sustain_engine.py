@@ -286,7 +286,8 @@ class SustainEngine:
         """
         Parse + schema-bind every declared invariant into a typed predicate AST
         (Move 1). Mutates spec in place, caching:
-          spec["_compiled_invariants"]      -- [{id, description, expr, node, enforced}]
+          spec["_compiled_invariants"]      -- [{id, description, expr, node,
+                                                  is_aggregate, authority, enforced}]
           spec["_invariant_compile_errors"] -- [{id, expr, errors}]
 
         A predicate referencing a state dimension the schema doesn't declare
@@ -295,18 +296,28 @@ class SustainEngine:
         recorded as a compile error, it does not block the sustain from
         loading (existing sustains keep working; see enforcement gate below).
 
-        `enforced` (Slice 8 — composition/roll-up): False for any invariant
-        whose expression references a dimension declared in spec["aggregates"]
-        — a computed roll-up value folded from linked children, never part of
-        this sustain's own persisted state. Per the parent-observes-never-
-        vetoes authority model, an aggregate-referencing invariant is real and
-        displayed (evaluate_constraints still evaluates it against an
-        aggregate-augmented state snapshot) but is never allowed to block a
-        transition — neither a child's own operator call (which never looks
-        at the parent at all) nor even the parent's own operator calls (an
-        aggregate value can't change because of what the parent itself does,
-        so gating on it there would just be a confusing, permanent block
-        unrelated to the operator being run).
+        Composition/roll-up authority model (confirmed with Bonnie — Option C,
+        per-rule authority defaulting to advisory, not a blanket "parent never
+        vetoes"): `is_aggregate` is True for any invariant whose expression
+        references a dimension declared in spec["aggregates"] — a computed
+        roll-up value folded from linked children, never part of this
+        sustain's own persisted state. `authority` is read straight from the
+        invariant's own declaration (spec["invariants"][i]["authority"]),
+        defaulting to "advisory" when absent — every existing spec (homestead,
+        habitat, every Slice 6 create_definition() invariant) is unaffected by
+        this default. Only an aggregate invariant explicitly marked
+        `"authority": "binding"` can ever refuse a CHILD's transition (see
+        _check_parent_binding_gate) — every other rule, aggregate or not,
+        behaves exactly as before.
+
+        `enforced` governs THIS sustain's OWN gate (_check_enforcement_gate,
+        used for its own operator calls): always False for an aggregate
+        invariant, regardless of authority — an aggregate can't change from
+        what this sustain itself does, so gating a sustain's own unrelated
+        operator on it would just be a confusing, permanent block. A binding
+        aggregate invariant instead governs CHILDREN's transitions, via a
+        separate, narrower check (_check_parent_binding_gate) that only fires
+        at the moment a child's action would newly breach it.
         """
         if "_compiled_invariants" in spec:
             return
@@ -324,10 +335,17 @@ class SustainEngine:
                     inv.get("id"), expr, inv_errors,
                 )
                 continue
-            enforced = not (aggregate_ids & _referenced_root_names(node))
+            is_aggregate = bool(aggregate_ids & _referenced_root_names(node))
+            authority = inv.get("authority") or "advisory"
+            if authority not in ("binding", "advisory"):
+                logger.warning(
+                    "[SustainEngine] invariant '%s' has unknown authority '%s' — treating as advisory.",
+                    inv.get("id"), authority,
+                )
+                authority = "advisory"
             compiled.append({
                 "id": inv.get("id"), "description": inv.get("description", ""), "expr": expr, "node": node,
-                "enforced": enforced,
+                "is_aggregate": is_aggregate, "authority": authority, "enforced": not is_aggregate,
             })
         spec["_compiled_invariants"] = compiled
         spec["_invariant_compile_errors"] = errors
@@ -996,6 +1014,22 @@ class SustainEngine:
                 )
                 return OperatorResult.fail(reason=gate_reason, constraint_violated="enforcement_gate")
 
+        # Composition/roll-up (Slice 8, revised per Bonnie's Option C): if
+        # this sustain is a CHILD of a parent, and that parent has a binding
+        # aggregate invariant, check whether this call's candidate state
+        # would newly breach it — checked after this sustain's own gate (a
+        # cheaper, more relevant failure surfaces first) but before anything
+        # is persisted. No-op for the overwhelming majority of sustains
+        # (anything with no parent, or a parent with no binding rules).
+        if result.succeeded:
+            parent_ok, parent_reason = self._check_parent_binding_gate(sustain_id, state.snapshot())
+            if not parent_ok:
+                logger.info(
+                    "[SustainEngine] operator '%s' on '%s' refused by parent binding rule: %s",
+                    operator_name, sustain_id, parent_reason,
+                )
+                return OperatorResult.fail(reason=parent_reason, constraint_violated="parent_binding_gate")
+
         # Slice 3 — state = fold(events). Append this call's event(s), each
         # carrying whatever StateAccessor recorded, and update the cache — the
         # only place a successful operator call is allowed to change state.
@@ -1441,7 +1475,12 @@ class SustainEngine:
             expr = (inv.get("expression") or "").strip()
             if not inv_id or not expr:
                 raise ValueError(f"Invalid invariant {inv!r} — both id and expression are required.")
-            clean_invariants.append({"id": inv_id, "expression": expr, "description": inv.get("description", "")})
+            authority = inv.get("authority") or "advisory"
+            if authority not in ("binding", "advisory"):
+                raise ValueError(f"Invariant '{inv_id}' has invalid authority '{authority}' — must be 'binding' or 'advisory'.")
+            clean_invariants.append({
+                "id": inv_id, "expression": expr, "description": inv.get("description", ""), "authority": authority,
+            })
 
         return {
             "id": template_id,
@@ -1897,6 +1936,19 @@ class SustainEngine:
                     "reason": "no state found for this child — the link may be stale or the child was removed.",
                 })
 
+        aggregates = self._aggregate_from_child_states(spec, links, child_states)
+        return {"children": children_report, "aggregates": aggregates}
+
+    def _aggregate_from_child_states(
+        self, spec: dict, links: list[dict], child_states: dict[str, dict],
+    ) -> dict[str, dict]:
+        """
+        The core of ρ, factored out so both compute_rollup() (reads every
+        child's state fresh from the DB) and _check_parent_binding_gate()
+        (substitutes ONE child's not-yet-committed candidate state, reading
+        every other child normally) share the exact same aggregation logic —
+        no second implementation to drift out of sync.
+        """
         aggregates: dict[str, dict] = {}
         for agg in spec.get("aggregates", []):
             agg_id = agg.get("id")
@@ -1937,8 +1989,84 @@ class SustainEngine:
                 "op": op, "child_path": child_path, "value": reducer(values),
                 "included": included, "excluded": excluded,
             }
+        return aggregates
 
-        return {"children": children_report, "aggregates": aggregates}
+    def _check_parent_binding_gate(self, child_sustain_id: str, candidate_child_state: dict) -> tuple[bool, str]:
+        """
+        Option C (confirmed with Bonnie — per-rule authority, defaulting to
+        advisory): if child_sustain_id has a parent, and the parent has any
+        aggregate invariant explicitly declared `"authority": "binding"`,
+        check whether committing candidate_child_state (the child's
+        not-yet-persisted post-operator state) would newly breach it.
+
+        Refuses ONLY on an ok-before -> not-ok-after transition — the literal
+        "would push the parent aggregate out of the parent's viable region."
+        An aggregate that's already in violation for an unrelated reason (or
+        for reasons predating this call) never blocks a later, unconnected
+        child operation, and a child action that IMPROVES a currently-bad
+        aggregate is never refused either — only the specific transition that
+        would newly cause the breach is.
+
+        Returns (True, "") when there's no parent, the parent has no binding
+        aggregate rules, or the invariant was already failing (or already
+        passing and remains passing) before this candidate state. Returns
+        (False, reason) only on a genuine new breach.
+        """
+        parent_link = self.get_parent(child_sustain_id)
+        if parent_link is None:
+            return True, ""
+        parent_id = parent_link["parent_sustain_id"]
+        parent_spec = self._get_spec(parent_id)
+        if parent_spec is None or not self._enforcement_enabled(parent_spec):
+            return True, ""
+
+        binding_invariants = [
+            inv for inv in parent_spec.get("_compiled_invariants", [])
+            if inv.get("is_aggregate") and inv.get("authority") == "binding"
+        ]
+        if not binding_invariants:
+            return True, ""
+
+        links = self.list_children(parent_id)
+
+        before_states: dict[str, dict] = {}
+        after_states: dict[str, dict] = {}
+        for link in links:
+            cid = link["child_sustain_id"]
+            if cid == child_sustain_id:
+                after_states[cid] = candidate_child_state
+                try:
+                    before_states[cid] = self._load_state_dict(cid)
+                except ValueError:
+                    pass  # child had no prior state (shouldn't happen mid-operator-call) — treated as missing "before" too
+                continue
+            try:
+                state = self._load_state_dict(cid)
+            except ValueError:
+                continue
+            before_states[cid] = state
+            after_states[cid] = state
+
+        before_aggregates = self._aggregate_from_child_states(parent_spec, links, before_states)
+        after_aggregates = self._aggregate_from_child_states(parent_spec, links, after_states)
+
+        parent_state_before = copy.deepcopy(self._load_state_dict(parent_id))
+        parent_state_after = copy.deepcopy(parent_state_before)
+        for agg_id, result in before_aggregates.items():
+            parent_state_before[agg_id] = result["value"]
+        for agg_id, result in after_aggregates.items():
+            parent_state_after[agg_id] = result["value"]
+
+        for inv in binding_invariants:
+            ok_before, _ = evaluate_predicate(inv["node"], StateAccessor(parent_state_before), {})
+            ok_after, reason_after = evaluate_predicate(inv["node"], StateAccessor(parent_state_after), {})
+            if ok_before and not ok_after:
+                return False, (
+                    f"would push parent '{parent_id}' outside its binding invariant "
+                    f"'{inv['id']}' ({inv['expr']}): {reason_after}"
+                )
+
+        return True, ""
 
     def _state_with_aggregates(self, sustain_id: str) -> dict:
         """
