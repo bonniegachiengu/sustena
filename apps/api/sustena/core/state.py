@@ -138,11 +138,13 @@ class StateAccessor:
         key, idx = m.group(1), m.group(2)
 
         if idx is not None:
+            old_value = node[key][int(idx)] if isinstance(node.get(key), list) and int(idx) < len(node[key]) else None
             node[key][int(idx)] = value
+            self._mutations.append({"op": "set", "path": path, "old": old_value, "new": value})
         else:
             old_value = node.get(key)
             node[key] = value
-            self._mutations.append({"path": path, "old": old_value, "new": value})
+            self._mutations.append({"op": "set", "path": path, "old": old_value, "new": value})
 
     def exists(self, path: str) -> bool:
         """Return True if path resolves to an existing value (even if None)."""
@@ -189,7 +191,13 @@ class StateAccessor:
         if "id" not in item:
             item["id"] = str(uuid.uuid4())
         lst.append(item)
-        self._mutations.append({"path": path, "action": "append", "item_id": item["id"]})
+        # "item" is stored as a deep copy so a later in-place mutation by the
+        # caller can't retroactively alter what fold(events) will replay —
+        # the mutation record must be exactly what was true at append time.
+        self._mutations.append({
+            "op": "append", "path": path, "action": "append",
+            "item_id": item["id"], "item": copy.deepcopy(item),
+        })
         return item["id"]
 
     def remove(self, path: str, item_id: str) -> None:
@@ -201,7 +209,7 @@ class StateAccessor:
         lst[:] = [item for item in lst if item.get("id") != item_id]
         if len(lst) == before:
             raise StatePathError(f"Item id='{item_id}' not found in list at '{path}'")
-        self._mutations.append({"path": path, "action": "remove", "item_id": item_id})
+        self._mutations.append({"op": "remove", "path": path, "action": "remove", "item_id": item_id})
 
     def snapshot(self) -> dict:
         """Return a deep copy of the current state — read-only reference."""
