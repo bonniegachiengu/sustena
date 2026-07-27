@@ -1785,12 +1785,24 @@ function SmallMetric({ label, value, tone }) {
 /* Parse a shell-style command string into { operator, params }
    e.g. "budget.allocate pocket=food amount=5000" */
 function parseCommand(raw) {
+  // Splits on whitespace first, so a JSON value must be written compact (no
+  // spaces after ':'/',') to survive tokenization intact — a real, disclosed
+  // limitation of this simple parser, not a general JSON-in-console feature.
+  // e.g. edit.state_patch patch=[{"op":"replace","path":"x","value":1}]
   const parts = raw.trim().split(/\s+/);
   const operator = parts[0];
   const params = {};
   parts.slice(1).forEach(p => {
     const [k, ...vs] = p.split('=');
     const v = vs.join('=');
+    if (v.startsWith('[') || v.startsWith('{')) {
+      try {
+        params[k] = JSON.parse(v);
+        return;
+      } catch {
+        // not valid JSON after all -- fall through to scalar coercion
+      }
+    }
     const num = Number(v);
     params[k] = isNaN(num) ? v : num;
   });
