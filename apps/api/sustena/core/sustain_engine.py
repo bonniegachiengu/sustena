@@ -33,6 +33,7 @@ from typing import Any
 
 import sustena.operators  # noqa: F401 — triggers OPERATOR_REGISTRY population
 
+from sustena.core.advisory import Suggestion, evaluate_operative
 from sustena.core.event_fold import fold_events
 from sustena.core.events import EventBus
 from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext, OperatorResult
@@ -217,6 +218,24 @@ class SustainEngine:
                 linked_at           TEXT NOT NULL,
                 UNIQUE(parent_sustain_id, child_sustain_id),
                 UNIQUE(parent_sustain_id, slot)
+            );
+
+            CREATE TABLE IF NOT EXISTS operative_suggestions (
+                id                  TEXT PRIMARY KEY,
+                sustain_id          TEXT NOT NULL,
+                operative_id        TEXT NOT NULL,
+                rule_id             TEXT NOT NULL,
+                title               TEXT NOT NULL,
+                reason              TEXT NOT NULL,
+                severity            TEXT NOT NULL,
+                dedupe_key          TEXT NOT NULL,
+                proposed_operator   TEXT,
+                proposed_params_json TEXT,
+                status              TEXT NOT NULL DEFAULT 'pending',
+                created_at          TEXT NOT NULL,
+                updated_at          TEXT NOT NULL,
+                resolved_at         TEXT,
+                UNIQUE(sustain_id, dedupe_key)
             );
         """)
         self._db.commit()
@@ -1420,6 +1439,210 @@ class SustainEngine:
             for name in names
             if name not in disabled
         ]
+
+    # ── Advisory idle loop (Slice 10) ────────────────────────────────────────
+    #
+    # CORE PRINCIPLE: operatives ADVISE, the human DECIDES. Nothing below can
+    # mutate a sustain's own state — evaluate_operatives() only reads state
+    # and writes rows to operative_suggestions (metadata about advice, not
+    # part of any sustain's fold, exactly like ingest_messages/sustain_
+    # composition are metadata rather than fold-participants). The ONLY path
+    # that can change real state is accept_suggestion(), and it changes
+    # state by calling the real, unmodified execute_operator() — same S2
+    # gate, same S3 fold-append, same Slice 7 parent-binding check. There is
+    # no other write path from a suggestion to live state.
+
+    def _children_staleness(self, sustain_id: str) -> list[dict]:
+        """
+        For each child linked under sustain_id, how many days since its most
+        recent event (genesis included — "no activity since creation" is a
+        legitimate honest reading). Feeds rule_child_stale(); pure DB reads,
+        no mutation. [] for a sustain with no linked children.
+        """
+        out: list[dict] = []
+        for child in self.list_children(sustain_id):
+            events = self.get_events(child["child_sustain_id"], limit=1)
+            days = None
+            if events:
+                try:
+                    ts = datetime.fromisoformat(events[0]["timestamp"])
+                    days = (datetime.utcnow() - ts.replace(tzinfo=None)).total_seconds() / 86400.0
+                except (ValueError, TypeError):
+                    days = None
+            out.append({
+                "sustain_id": child["child_sustain_id"],
+                "slot": child.get("slot"),
+                "member": child.get("member"),
+                "days_since_last_event": days,
+            })
+        return out
+
+    def evaluate_operatives(self, sustain_id: str) -> list[dict]:
+        """
+        The idle loop's triggered pass (Slice 10): run every rule bound to
+        every operative this sustain actually declares (and hasn't disabled),
+        against CURRENT folded state — no mutation of the sustain itself.
+
+        Lifecycle per pass:
+          - compute the current set of fired suggestions (with dedupe_keys)
+          - any EXISTING 'pending' row whose dedupe_key is no longer firing
+            -> 'expired' (the condition resolved itself, or was resolved by
+            something other than accepting this exact suggestion)
+          - a fired dedupe_key already 'dismissed' or 'accepted' -> skip,
+            never resurfaces for that exact bucketed condition
+          - a fired dedupe_key already 'pending' -> refresh its title/reason/
+            proposed_params to the current values (same identity, freshest
+            description) rather than duplicate
+          - a fired dedupe_key with no row at all -> insert new 'pending'
+
+        Returns the current list of pending suggestions for this sustain
+        (same shape get_suggestions() returns).
+        """
+        spec = self._get_spec(sustain_id)
+        if spec is None:
+            raise ValueError(f"Sustain '{sustain_id}' not found.")
+
+        state = self.get_state(sustain_id)
+        statuses = self.get_operative_statuses(sustain_id)
+        active_operative_ids = {s["name"].lower() for s in statuses}
+
+        children_meta: list[dict] | None = None
+        if "attache" in active_operative_ids:
+            children_meta = self._children_staleness(sustain_id)
+
+        fired: list[Suggestion] = []
+        for operative_id in active_operative_ids:
+            fired.extend(evaluate_operative(operative_id, state, children_meta))
+
+        fired_by_key = {s.dedupe_key: s for s in fired}
+        now = datetime.utcnow().isoformat()
+
+        existing_rows = self._db.execute(
+            "SELECT id, dedupe_key, status FROM operative_suggestions WHERE sustain_id = ?",
+            (sustain_id,),
+        ).fetchall()
+        existing_by_key = {r["dedupe_key"]: dict(r) for r in existing_rows}
+
+        for key, row in existing_by_key.items():
+            if row["status"] == "pending" and key not in fired_by_key:
+                self._db.execute(
+                    "UPDATE operative_suggestions SET status = 'expired', updated_at = ?, resolved_at = ? WHERE id = ?",
+                    (now, now, row["id"]),
+                )
+
+        for key, sug in fired_by_key.items():
+            existing = existing_by_key.get(key)
+            if existing is None:
+                self._db.execute(
+                    "INSERT INTO operative_suggestions "
+                    "(id, sustain_id, operative_id, rule_id, title, reason, severity, dedupe_key, "
+                    " proposed_operator, proposed_params_json, status, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+                    (
+                        str(uuid.uuid4()), sustain_id, sug.operative_id, sug.rule_id, sug.title, sug.reason,
+                        sug.severity, sug.dedupe_key, sug.proposed_operator,
+                        json.dumps(sug.proposed_params) if sug.proposed_params else None,
+                        now, now,
+                    ),
+                )
+            elif existing["status"] == "pending":
+                self._db.execute(
+                    "UPDATE operative_suggestions SET title = ?, reason = ?, severity = ?, "
+                    "proposed_operator = ?, proposed_params_json = ?, updated_at = ? WHERE id = ?",
+                    (
+                        sug.title, sug.reason, sug.severity, sug.proposed_operator,
+                        json.dumps(sug.proposed_params) if sug.proposed_params else None,
+                        now, existing["id"],
+                    ),
+                )
+            # 'dismissed' / 'accepted' existing rows: leave untouched, never resurface.
+
+        self._db.commit()
+        return self.get_suggestions(sustain_id, status="pending")
+
+    def get_suggestions(self, sustain_id: str, status: str | None = "pending") -> list[dict]:
+        """
+        Read-only. status=None returns every suggestion ever recorded for
+        this sustain (any lifecycle state); status="pending" (default)
+        returns only what's currently actionable. Never triggers evaluation
+        — this is a plain SELECT, safe to call on every /devui/state tick.
+        """
+        if status is not None:
+            rows = self._db.execute(
+                "SELECT * FROM operative_suggestions WHERE sustain_id = ? AND status = ? ORDER BY created_at DESC",
+                (sustain_id, status),
+            ).fetchall()
+        else:
+            rows = self._db.execute(
+                "SELECT * FROM operative_suggestions WHERE sustain_id = ? ORDER BY created_at DESC",
+                (sustain_id,),
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["proposed_params"] = json.loads(d.pop("proposed_params_json")) if d.get("proposed_params_json") else {}
+            out.append(d)
+        return out
+
+    async def accept_suggestion(self, suggestion_id: str) -> dict:
+        """
+        The ONLY path from a suggestion to real state change, and it is
+        exactly the real path: execute_operator() with the suggestion's
+        frozen proposed_operator/proposed_params. Same S2 gate, same S3
+        fold-append, same Slice 7 parent-binding check as any other call —
+        no bypass exists.
+
+        A gate refusal is an honest, expected outcome, not an error: the
+        suggestion is left 'pending' (state may have drifted since it was
+        generated — the human can dismiss it, or fix the underlying
+        condition and try again) and the refusal reason is returned as-is.
+        Only a genuine success marks the suggestion 'accepted'.
+
+        Raises ValueError if the suggestion doesn't exist, is no longer
+        pending, or has no proposed_operator (purely informational
+        suggestions can only be dismissed, never accepted).
+        """
+        row = self._db.execute(
+            "SELECT * FROM operative_suggestions WHERE id = ?", (suggestion_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Suggestion '{suggestion_id}' not found.")
+        row = dict(row)
+        if row["status"] != "pending":
+            raise ValueError(f"Suggestion '{suggestion_id}' is '{row['status']}', not pending.")
+        if not row["proposed_operator"]:
+            raise ValueError(f"Suggestion '{suggestion_id}' is informational only — nothing to accept.")
+
+        params = json.loads(row["proposed_params_json"]) if row["proposed_params_json"] else {}
+        result = await self.execute_operator(
+            row["sustain_id"], row["proposed_operator"], params, operative_id=row["operative_id"],
+        )
+
+        now = datetime.utcnow().isoformat()
+        if result.succeeded:
+            self._db.execute(
+                "UPDATE operative_suggestions SET status = 'accepted', updated_at = ?, resolved_at = ? WHERE id = ?",
+                (now, now, suggestion_id),
+            )
+            self._db.commit()
+        return {"suggestion": row, "result": result}
+
+    def dismiss_suggestion(self, suggestion_id: str) -> bool:
+        """
+        Records the dismissal — this exact bucketed dedupe_key will not
+        resurface on a future evaluate_operatives() pass unless the
+        underlying condition changes enough to bucket differently (see each
+        rule's own bucketing choice in advisory.py). Returns False if the
+        suggestion doesn't exist or isn't pending.
+        """
+        now = datetime.utcnow().isoformat()
+        cur = self._db.execute(
+            "UPDATE operative_suggestions SET status = 'dismissed', updated_at = ?, resolved_at = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (now, now, suggestion_id),
+        )
+        self._db.commit()
+        return cur.rowcount > 0
 
     def set_operative_enabled(self, sustain_id: str, operative_id: str, enabled: bool) -> bool:
         """

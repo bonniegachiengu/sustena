@@ -468,6 +468,97 @@ async def get_rollup_route(sustain_id: str, _: dict = Depends(get_current_user))
     return ok(rollup)
 
 
+# ── Advisory idle loop (Slice 10) ─────────────────────────────────────────────
+# CORE PRINCIPLE: operatives ADVISE, the human DECIDES. evaluate-operatives
+# only reads state and persists suggestion metadata — it can never mutate a
+# sustain. accept is the ONLY route that changes real state, and it does so
+# by calling the real execute_operator() path (same gate, same fold).
+
+@router.post("/sustain/{sustain_id}/evaluate-operatives", summary="Run the idle-loop advisory pass")
+async def evaluate_operatives_route(sustain_id: str, _: dict = Depends(get_current_user)) -> dict:
+    """
+    Triggered pass (not a background scheduler — see CLAUDE.md's Slice 10
+    notes on why): runs every rule bound to every operative this sustain
+    declares against current state, returns the resulting pending
+    suggestions. Never mutates the sustain's own state or event log.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    try:
+        suggestions = engine.evaluate_operatives(sustain_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return ok({"suggestions": suggestions})
+
+
+@router.get("/sustain/{sustain_id}/suggestions", summary="List suggestions for a sustain")
+async def list_suggestions_route(
+    sustain_id: str,
+    status: str | None = Query(default="pending", description="pending|accepted|dismissed|expired, or omit for all"),
+    _: dict = Depends(get_current_user),
+) -> dict:
+    """Read-only — never triggers evaluation, safe to poll cheaply."""
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    return ok({"suggestions": engine.get_suggestions(sustain_id, status=status)})
+
+
+@router.post("/sustain/{sustain_id}/suggestions/{suggestion_id}/accept", summary="Accept a suggestion — runs the real operator")
+async def accept_suggestion_route(
+    sustain_id: str, suggestion_id: str, _: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Runs the suggestion's proposed operator for real through
+    execute_operator() — same S2 gate, same S3 fold-append, same Slice 7
+    parent-binding check as any other write. A gate refusal is returned as
+    a normal 'failed' OperatorResult, not an HTTP error — the suggestion
+    stays pending so the human can retry after fixing the condition, or
+    dismiss it.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    try:
+        outcome = await engine.accept_suggestion(suggestion_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return ok({
+        "suggestion": outcome["suggestion"],
+        "result": outcome["result"].to_response(),
+    })
+
+
+@router.post("/sustain/{sustain_id}/suggestions/{suggestion_id}/dismiss", summary="Dismiss a suggestion")
+async def dismiss_suggestion_route(
+    sustain_id: str, suggestion_id: str, _: dict = Depends(get_current_user),
+) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    dismissed = engine.dismiss_suggestion(suggestion_id)
+    if not dismissed:
+        raise HTTPException(status_code=404, detail="Suggestion not found or not pending.")
+    return ok({"dismissed": True})
+
+
+async def _get_suggestions(sustain_id: str) -> list[dict]:
+    """
+    Read-only pending suggestions for /devui/state — same best-effort-
+    empty-on-failure contract as the other needs-attention helpers. Never
+    triggers evaluation (that's a separate, explicit POST); this is a plain
+    SELECT so it's cheap to include on every state poll.
+    """
+    try:
+        from sustena.core.engine_singleton import get_shared_engine
+        engine = get_shared_engine()
+        return engine.get_suggestions(sustain_id, status="pending")
+    except Exception as exc:
+        logger.debug("_get_suggestions(%s) failed: %s", sustain_id, exc)
+        return []
+
+
 # ── Shared: visualize.* widget computation ───────────────────────────────────
 # Used by both GET /devui/state and GET /devui/monitor-widgets so the Monitor
 # panel's pocket ring / event feed / constraint health widgets are computed
@@ -637,6 +728,7 @@ async def get_state(
     proposals_in_voting = await _get_proposals_in_voting(sustain_id)
     ingest_attention = await _get_ingest_attention(sustain_id)
     rollup = _get_rollup(engine, sustain_id)
+    suggestions = await _get_suggestions(sustain_id)
 
     return ok({
         "sustain_id": sustain_id,
@@ -648,6 +740,7 @@ async def get_state(
         "proposals_in_voting": proposals_in_voting,
         "ingest_attention": ingest_attention,
         "rollup": rollup,
+        "suggestions": suggestions,
     })
 
 

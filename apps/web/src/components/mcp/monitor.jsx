@@ -192,6 +192,22 @@ function computeNeedsAttention(apiData, stateRows) {
     });
   });
 
+  // Operative suggestions (Slice 10): advisory-only, never auto-applied.
+  // One summary row rather than one per suggestion — the full list with
+  // reasons + accept/dismiss lives in its own OPERATIVE SUGGESTIONS block
+  // further down this same panel, so there's nowhere else to route to.
+  const pendingSuggestions = apiData?.suggestions || [];
+  if (pendingSuggestions.length > 0) {
+    items.push({
+      id: 'suggestions:pending',
+      urgency: 1.02,
+      tone: 'amber',
+      title: `${pendingSuggestions.length} operative suggestion${pendingSuggestions.length === 1 ? '' : 's'} to review`,
+      why: pendingSuggestions.slice(0, 2).map(s => s.title).join(' · ') + (pendingSuggestions.length > 2 ? ' · …' : ''),
+      action: null,
+    });
+  }
+
   return items.sort((a, b) => b.urgency - a.urgency);
 }
 
@@ -306,6 +322,92 @@ function RollupBlock({ rollup }) {
   );
 }
 
+/* ─── Operative suggestions (Slice 10) — the idle loop's only user-facing
+   surface. CORE PRINCIPLE rendered literally: every card here is advice,
+   never a state change — the ONLY way any of it touches live state is the
+   human clicking ACCEPT, which runs the real operator through the real
+   gate and shows the honest result (including a refusal) right here.
+   Purely informational suggestions (no proposed_operator) get no ACCEPT
+   button at all — there's nothing to accept, only dismiss. ────────────── */
+function SuggestionCard({ s, busy, lastResult, onAccept, onDismiss }) {
+  const isBusy = busy === s.id;
+  const showResult = lastResult && lastResult.suggestionId === s.id ? lastResult.result : null;
+  const canAccept = !!s.proposed_operator;
+  return (
+    <div className="fade-up" style={{
+      border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
+      padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)' }}>{s.title}</span>
+        <span className="meta-10" style={{ color: 'var(--text-dim)', flexShrink: 0 }}>{s.operative_id}</span>
+      </div>
+      <span className="meta-10" style={{ color: 'var(--text-muted)' }}>{s.reason}</span>
+      {canAccept && (
+        <span className="meta-10" style={{ color: 'var(--text-dim)' }}>
+          would run: {s.proposed_operator}({Object.entries(s.proposed_params || {}).map(([k, v]) => `${k}=${v}`).join(', ')})
+        </span>
+      )}
+      {showResult && (
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 10, padding: '4px 6px', borderRadius: 3,
+          color: showResult.status === 'ok' ? 'var(--teal)' : 'var(--danger)',
+          background: 'var(--bg-base)',
+        }}>
+          {showResult.status === 'ok' ? '✓ accepted — ' : '✗ gate refused — '}
+          {showResult.status === 'ok' ? 'real operator ran, state updated' : (showResult.reason || 'refused')}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+        {canAccept && (
+          <button onClick={() => onAccept(s.id)} disabled={isBusy} style={{
+            padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
+            color: isBusy ? 'var(--text-dim)' : 'var(--bg-base)',
+            background: isBusy ? 'var(--bg-overlay)' : 'var(--amber)',
+            border: `1px solid ${isBusy ? 'var(--border)' : 'var(--amber)'}`,
+            borderRadius: 'var(--radius-sm)', cursor: isBusy ? 'not-allowed' : 'pointer',
+          }}>{isBusy ? '⟳' : '✓ ACCEPT'}</button>
+        )}
+        <button onClick={() => onDismiss(s.id)} disabled={isBusy} style={{
+          padding: '4px 10px', fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
+          color: 'var(--text-muted)', background: 'transparent',
+          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+          cursor: isBusy ? 'not-allowed' : 'pointer',
+        }}>DISMISS</button>
+      </div>
+    </div>
+  );
+}
+
+function SuggestionsBlock({ suggestions, busy, lastResult, onAccept, onDismiss, onRecheck, evaluating }) {
+  const list = suggestions || [];
+  return (
+    <div className="fade-up" style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', overflow: 'hidden',
+    }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span className="label-11">OPERATIVE SUGGESTIONS · ADVISORY ONLY</span>
+        <button onClick={onRecheck} disabled={evaluating} style={{
+          fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
+          color: evaluating ? 'var(--text-dim)' : 'var(--text-muted)',
+          background: 'transparent', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)', padding: '3px 8px',
+          cursor: evaluating ? 'not-allowed' : 'pointer',
+        }}>{evaluating ? '⟳ CHECKING…' : '↺ RE-CHECK'}</button>
+      </div>
+      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {list.length === 0
+          ? <span className="meta-10" style={{ color: 'var(--text-dim)' }}>no operatives reporting · all thresholds nominal</span>
+          : list.map(s => (
+              <SuggestionCard key={s.id} s={s} busy={busy} lastResult={lastResult} onAccept={onAccept} onDismiss={onDismiss} />
+            ))
+        }
+      </div>
+    </div>
+  );
+}
+
 function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
   const [apiData, setApiData] = dUseState(null);   // last good GET /devui/state result — state, events, operatives, constraints, widgets, proposalsInVoting all from ONE fetch
   const [loading, setLoading] = dUseState(true);
@@ -326,6 +428,7 @@ function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
       proposalsInVoting: payload.proposals_in_voting || [],
       ingestAttention: payload.ingest_attention || { messages: [], stale_sources: [] },
       rollup: payload.rollup || null,
+      suggestions: payload.suggestions || [],
     };
   };
 
@@ -348,6 +451,49 @@ function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
       .then(d => { setApiData(normaliseGetResponse(d)); setOffline(false); })
       .catch(() => setOffline(true));
   }, [tick, sustain.id]);
+
+  // Operative suggestions (Slice 10) — a request-driven idle-loop pass, not
+  // continuous background polling: one evaluate() call when the sustain is
+  // selected, plus a manual RE-CHECK button in the Suggestions block for
+  // "check again right now". The 1s heartbeat above keeps re-fetching
+  // /devui/state (which cheaply reads already-persisted suggestions — no
+  // re-evaluation there), so an accept/dismiss elsewhere is reflected
+  // within a second even without another explicit evaluate() call.
+  const [evaluating, setEvaluating] = dUseState(false);
+  const [suggestionBusy, setSuggestionBusy] = dUseState(null);
+  const [lastSuggestionResult, setLastSuggestionResult] = dUseState(null);
+
+  const runEvaluate = () => {
+    setEvaluating(true);
+    return api.post(`/devui/sustain/${encodeURIComponent(sustain.id)}/evaluate-operatives`, {})
+      .then(() => fetchState())
+      .then(d => setApiData(normaliseGetResponse(d)))
+      .catch(() => {})
+      .finally(() => setEvaluating(false));
+  };
+
+  dUseEffect(() => { runEvaluate(); }, [sustain.id]);
+
+  const acceptSuggestion = (suggestionId) => {
+    setSuggestionBusy(suggestionId);
+    api.post(`/devui/sustain/${encodeURIComponent(sustain.id)}/suggestions/${suggestionId}/accept`, {})
+      .then(d => {
+        setLastSuggestionResult({ suggestionId, result: d?.data?.result });
+        return fetchState();
+      })
+      .then(d => setApiData(normaliseGetResponse(d)))
+      .catch(() => {})
+      .finally(() => setSuggestionBusy(null));
+  };
+
+  const dismissSuggestion = (suggestionId) => {
+    setSuggestionBusy(suggestionId);
+    api.post(`/devui/sustain/${encodeURIComponent(sustain.id)}/suggestions/${suggestionId}/dismiss`, {})
+      .then(() => fetchState())
+      .then(d => setApiData(normaliseGetResponse(d)))
+      .catch(() => {})
+      .finally(() => setSuggestionBusy(null));
+  };
 
   const streamHealth = useStreamHealth(offline);
 
@@ -439,6 +585,17 @@ function MonitorPanel({ tick, sustain, sustains, switchPanel }) {
           system comes to the user before they go hunting through widgets. */}
       {!loading && <NeedsAttentionBlock items={needsAttention} switchPanel={switchPanel} />}
       {!loading && <RollupBlock rollup={apiData?.rollup} />}
+      {!loading && (
+        <SuggestionsBlock
+          suggestions={apiData?.suggestions}
+          busy={suggestionBusy}
+          lastResult={lastSuggestionResult}
+          onAccept={acceptSuggestion}
+          onDismiss={dismissSuggestion}
+          onRecheck={runEvaluate}
+          evaluating={evaluating}
+        />
+      )}
 
       {/* Top region: Active Sustains (count + list) · operatives.
           Desktop: side by side, 3x2 grid. Mobile: stacked, operatives as
