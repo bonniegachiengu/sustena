@@ -5,8 +5,12 @@ Tests for SustainEngine's Slice 8 (Coordination & roll-up) additions:
   - link_child / list_children / get_parent / unlink_child (⊕)
   - provision_declared_children — generic bootstrap from spec["declared_children"]
   - compute_rollup (ρ) — computed-on-read aggregation, honest exclusion
-  - _compile_spec_invariants' "enforced" flag + _check_enforcement_gate's skip
-    of aggregate-referencing invariants (parent observes, never vetoes)
+  - Per-rule authority (Option C, confirmed with Bonnie): each invariant
+    declares authority ("binding"|"advisory", default "advisory"). Advisory
+    aggregate invariants stay display-only, same as the original "parent
+    never vetoes" behaviour (still the default). Binding ones can refuse a
+    CHILD's transition, but ONLY the specific ok-before -> not-ok-after
+    transition — never an already-bad aggregate, never an unrelated action.
   - commit_external_mutation's opt-in check_gate parameter
 
 Every fixture here uses SustainEngine.create_definition() (Slice 6) to build
@@ -492,3 +496,183 @@ class TestCommitExternalMutationGate:
         state.set("own_field", 1)  # unrelated to pod_total; must not be blocked by pod_floor
         ok, reason = engine.commit_external_mutation(sid, state, "event.test", {}, check_gate=True)
         assert ok is True
+
+
+# ── Per-rule authority (Option C) — binding vs advisory ───────────────────────
+
+class TestPerRuleAuthority:
+    def _binding_pod(self, engine: SustainEngine):
+        ptid = _make_parent_definition(
+            engine,
+            aggregates=[{"id": "pod_total", "child_path": "moisture_level", "op": "sum"}],
+            extra_schema={"pod_total": {"type": "number", "description": "computed"}},
+            extra_invariants=[{
+                "id": "pod_floor", "expression": "pod_total >= 0", "description": "",
+                "authority": "binding",
+            }],
+        )
+        ctid = _make_child_definition(engine, minimum=-999)
+        parent = engine.instantiate(ptid, "u1", {"owner_ids": ["u1"]})
+        return ptid, ctid, parent
+
+    def test_binding_invariant_compiles_with_authority_binding(self, engine: SustainEngine):
+        ptid, _, _ = self._binding_pod(engine)
+        spec = engine._load_spec(ptid)
+        engine._compile_spec_invariants(spec)
+        inv = spec["_compiled_invariants"][0]
+        assert inv["authority"] == "binding"
+        assert inv["is_aggregate"] is True
+        assert inv["enforced"] is False  # still never gates the PARENT's own operator calls
+
+    def test_default_authority_is_advisory(self, engine: SustainEngine):
+        ptid = _make_parent_definition(
+            engine,
+            aggregates=[{"id": "pod_total", "child_path": "moisture_level", "op": "sum"}],
+            extra_schema={"pod_total": {"type": "number", "description": "computed"}},
+            extra_invariants=[{"id": "pod_floor", "expression": "pod_total >= 0", "description": ""}],
+        )
+        spec = engine._load_spec(ptid)
+        engine._compile_spec_invariants(spec)
+        assert spec["_compiled_invariants"][0]["authority"] == "advisory"
+
+    def test_create_definition_rejects_invalid_authority(self, engine: SustainEngine):
+        with pytest.raises(ValueError, match="authority"):
+            engine.create_definition(
+                owner_user_id="u1", display_name="Bad", description="",
+                dimensions=[{"name": "x", "type": "number", "default_value": 0}],
+                invariants=[{"id": "r", "expression": "x >= 0", "authority": "mandatory"}],
+                operator_names=[],
+            )
+
+    @pytest.mark.asyncio
+    async def test_binding_refuses_the_transition_that_newly_breaches_it(self, engine: SustainEngine):
+        ptid, ctid, parent = self._binding_pod(engine)
+        child = engine.instantiate(ctid, "u1", {"owner_ids": ["u1"]})
+        engine.link_child(parent, child, slot="c1")
+
+        result = await engine.execute_operator(child, "edit.state_patch", {
+            "patch": [{"op": "replace", "path": "moisture_level", "value": -50}],
+        })
+        assert not result.succeeded
+        assert result.constraint_violated == "parent_binding_gate"
+        assert "pod_floor" in result.reason
+        assert engine.get_state(child)["moisture_level"] == 0  # untouched
+
+    @pytest.mark.asyncio
+    async def test_binding_allows_a_transition_that_stays_compliant(self, engine: SustainEngine):
+        ptid, ctid, parent = self._binding_pod(engine)
+        child = engine.instantiate(ctid, "u1", {"owner_ids": ["u1"]})
+        engine.link_child(parent, child, slot="c1")
+
+        result = await engine.execute_operator(child, "edit.state_patch", {
+            "patch": [{"op": "replace", "path": "moisture_level", "value": 30}],
+        })
+        assert result.succeeded
+
+    @pytest.mark.asyncio
+    async def test_binding_across_two_children_refuses_only_the_breaching_one(self, engine: SustainEngine):
+        ptid, ctid, parent = self._binding_pod(engine)
+        c1 = engine.instantiate(ctid, "u1", {"owner_ids": ["u1"]})
+        c2 = engine.instantiate(ctid, "u1", {"owner_ids": ["u1"]})
+        engine.link_child(parent, c1, slot="c1")
+        engine.link_child(parent, c2, slot="c2")
+
+        # c1 = 30, c2 = -10 -> total 20, still compliant.
+        r1 = await engine.execute_operator(c1, "edit.state_patch", {"patch": [{"op": "replace", "path": "moisture_level", "value": 30}]})
+        r2 = await engine.execute_operator(c2, "edit.state_patch", {"patch": [{"op": "replace", "path": "moisture_level", "value": -10}]})
+        assert r1.succeeded and r2.succeeded
+
+        # Now push c1 down so total would go negative -- refused, c1 untouched.
+        r3 = await engine.execute_operator(c1, "edit.state_patch", {"patch": [{"op": "replace", "path": "moisture_level", "value": -25}]})
+        assert not r3.succeeded
+        assert engine.get_state(c1)["moisture_level"] == 30
+        assert engine.compute_rollup(parent)["aggregates"]["pod_total"]["value"] == 20
+
+    @pytest.mark.asyncio
+    async def test_advisory_never_blocks_even_when_it_would_breach(self, engine: SustainEngine):
+        ptid = _make_parent_definition(
+            engine,
+            aggregates=[{"id": "pod_total", "child_path": "moisture_level", "op": "sum"}],
+            extra_schema={"pod_total": {"type": "number", "description": "computed"}},
+            extra_invariants=[{"id": "pod_floor", "expression": "pod_total >= 0", "description": ""}],  # advisory (default)
+        )
+        ctid = _make_child_definition(engine, minimum=-999)
+        parent = engine.instantiate(ptid, "u1", {"owner_ids": ["u1"]})
+        child = engine.instantiate(ctid, "u1", {"owner_ids": ["u1"]})
+        engine.link_child(parent, child)
+
+        result = await engine.execute_operator(child, "edit.state_patch", {
+            "patch": [{"op": "replace", "path": "moisture_level", "value": -50}],
+        })
+        assert result.succeeded  # advisory: applies unconditionally
+        assert engine.compute_rollup(parent)["aggregates"]["pod_total"]["value"] == -50
+        constraints = engine.evaluate_constraints(parent)
+        assert any(c["expr"] == "pod_total >= 0" and c["status"] == "fail" for c in constraints)
+
+    @pytest.mark.asyncio
+    async def test_binding_does_not_block_an_already_violating_aggregate_from_an_unrelated_action(self, engine: SustainEngine):
+        # Regression guard for the "was_ok before" check: an aggregate that's
+        # ALREADY in breach (for whatever reason) must not turn into a
+        # permanent block on every future, unrelated child operation.
+        ptid, ctid, parent = self._binding_pod(engine)
+        c1 = engine.instantiate(ctid, "u1", {"owner_ids": ["u1"]})
+        c2 = engine.instantiate(ctid, "u1", {"owner_ids": ["u1"]})
+        engine.link_child(parent, c1, slot="c1")
+
+        # Establish the breach directly via commit_external_mutation (bypasses
+        # the binding gate, matching the S2-era test pattern for forcing a bad
+        # state) so we can prove the SEPARATE child's unrelated op is unblocked.
+        from sustena.core.state import StateAccessor as _SA
+        state = _SA(engine.get_state(c1))
+        state.set("moisture_level", -999)
+        engine.commit_external_mutation(c1, state, "event.test.forced", {}, check_gate=False)
+        assert engine.compute_rollup(parent)["aggregates"]["pod_total"]["value"] == -999
+
+        engine.link_child(parent, c2, slot="c2")
+        result = await engine.execute_operator(c2, "edit.state_patch", {
+            "patch": [{"op": "replace", "path": "moisture_level", "value": 0}],
+        })
+        assert result.succeeded  # total stays -999, unchanged -- not a NEW breach
+
+    @pytest.mark.asyncio
+    async def test_binding_allows_improving_an_already_bad_aggregate(self, engine: SustainEngine):
+        ptid, ctid, parent = self._binding_pod(engine)
+        c1 = engine.instantiate(ctid, "u1", {"owner_ids": ["u1"]})
+        engine.link_child(parent, c1, slot="c1")
+
+        from sustena.core.state import StateAccessor as _SA
+        state = _SA(engine.get_state(c1))
+        state.set("moisture_level", -999)
+        engine.commit_external_mutation(c1, state, "event.test.forced", {}, check_gate=False)
+
+        # Still negative afterward, but strictly better -- must not be refused.
+        result = await engine.execute_operator(c1, "edit.state_patch", {
+            "patch": [{"op": "replace", "path": "moisture_level", "value": -10}],
+        })
+        assert result.succeeded
+
+    @pytest.mark.asyncio
+    async def test_binding_has_no_effect_on_an_unlinked_sustain(self, engine: SustainEngine):
+        ctid = _make_child_definition(engine, minimum=-999)
+        standalone = engine.instantiate(ctid, "u1", {"owner_ids": ["u1"]})
+        result = await engine.execute_operator(standalone, "edit.state_patch", {
+            "patch": [{"op": "replace", "path": "moisture_level", "value": -50}],
+        })
+        assert result.succeeded
+
+    @pytest.mark.asyncio
+    async def test_binding_requires_parent_enforcement_enabled(self, engine: SustainEngine):
+        ptid, ctid, parent = self._binding_pod(engine)
+        # Disable enforcement on the parent after the fact.
+        spec = engine.get_definition(ptid)["spec"]
+        spec["enforcement"] = {"enabled": False}
+        engine._db.execute("UPDATE sustain_templates SET spec_json = ? WHERE id = ?", (json.dumps(spec), ptid))
+        engine._db.commit()
+        engine._specs.pop(parent, None)
+
+        child = engine.instantiate(ctid, "u1", {"owner_ids": ["u1"]})
+        engine.link_child(parent, child)
+        result = await engine.execute_operator(child, "edit.state_patch", {
+            "patch": [{"op": "replace", "path": "moisture_level", "value": -50}],
+        })
+        assert result.succeeded  # parent enforcement off -> binding rule doesn't apply
