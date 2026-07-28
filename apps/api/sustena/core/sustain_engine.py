@@ -995,6 +995,68 @@ class SustainEngine:
 
         return result
 
+    # ── reassign_sustain_owner ────────────────────────────────────────────────
+
+    def reassign_sustain_owner(self, sustain_id: str, from_user_id: str, to_user_id: str) -> dict:
+        """
+        One-off ownership correction for a sustain that predates real
+        per-user accounts and is still stamped with a legacy owner string
+        (e.g. "system", the main.py startup-seed sentinel from before
+        Slice 1's login work) or was otherwise mis-attributed.
+
+        Same discipline as migrate_to_event_sourcing(): idempotent, never
+        blind, returns a report the caller must check rather than silently
+        succeeding. The write ONLY happens if the sustain's CURRENT owner
+        is exactly from_user_id -- this is a targeted correction of one
+        known-bad row, not a blind "set owner to X" that could clobber a
+        legitimately different owner if the caller's assumption is stale.
+
+        Generic -- not homestead-specific. Works on any sustain, any two
+        user ids. Checks (best-effort) that to_user_id resolves to a real
+        row in the `users` table, since a typo'd target id would otherwise
+        silently orphan the sustain from every real account.
+
+        Returns:
+          {
+            "status": "reassigned" | "already_owner" | "owner_mismatch"
+                       | "sustain_not_found" | "target_user_not_found",
+            "sustain_id", "old_owner", "new_owner",
+          }
+        """
+        row = self._db.execute(
+            "SELECT user_id FROM sustains WHERE id = ?", (sustain_id,),
+        ).fetchone()
+        if row is None:
+            return {"status": "sustain_not_found", "sustain_id": sustain_id, "old_owner": None, "new_owner": to_user_id}
+
+        current_owner = row["user_id"]
+
+        if current_owner == to_user_id:
+            return {"status": "already_owner", "sustain_id": sustain_id, "old_owner": current_owner, "new_owner": to_user_id}
+
+        if current_owner != from_user_id:
+            return {"status": "owner_mismatch", "sustain_id": sustain_id, "old_owner": current_owner, "new_owner": to_user_id}
+
+        try:
+            target_user = self._db.execute(
+                "SELECT id FROM users WHERE id = ?", (to_user_id,),
+            ).fetchone()
+            if target_user is None:
+                return {"status": "target_user_not_found", "sustain_id": sustain_id, "old_owner": current_owner, "new_owner": to_user_id}
+        except sqlite3.OperationalError:
+            # No `users` table on this connection (e.g. a minimal/test-only
+            # SustainEngine not wired to the app's full schema) -- the
+            # existence check is inapplicable here, not a real failure.
+            pass
+
+        self._db.execute(
+            "UPDATE sustains SET user_id = ? WHERE id = ? AND user_id = ?",
+            (to_user_id, sustain_id, from_user_id),
+        )
+        self._db.commit()
+
+        return {"status": "reassigned", "sustain_id": sustain_id, "old_owner": current_owner, "new_owner": to_user_id}
+
     # ── execute_operator ───────────────────────────────────────────────────────
 
     async def execute_operator(
@@ -1900,6 +1962,44 @@ class SustainEngine:
         )
         self._db.commit()
         return cur.rowcount > 0
+
+    def purge_test_egress_entries(self, sustain_id: str, outbox_ids: list[str]) -> dict:
+        """
+        Operational cleanup, distinct from the normal user-facing egress
+        lifecycle (prepared/confirmed/sent/failed/cancelled). cancel_egress()
+        deliberately never deletes -- it marks a 'prepared'/'failed' row
+        'cancelled' and keeps it for a real user's audit trail. This method
+        exists for a different, narrower case: rows that were never real
+        household activity in the first place (dev-testing acceptance
+        checks run directly against production during an earlier slice),
+        which don't belong in that audit trail at all -- including a
+        genuinely 'sent' row, which cancel_egress() can't touch by design
+        since a real send can't be honestly un-sent.
+
+        Deletes ONLY the exact ids passed in, ONLY if each one belongs to
+        the given sustain_id (a safety check against a stale/wrong id list,
+        not a filter on status -- this is an explicit, targeted purge, not
+        a status-based bulk operation). Idempotent: an id that's already
+        gone or never matched is simply not counted.
+
+        Returns {"sustain_id", "requested": [...], "deleted": [...],
+        "not_found": [...]} -- report-not-silent-success, same discipline
+        as reassign_sustain_owner()/migrate_to_event_sourcing().
+        """
+        deleted: list[str] = []
+        not_found: list[str] = []
+        for outbox_id in outbox_ids:
+            row = self._db.execute(
+                "SELECT id FROM egress_outbox WHERE id = ? AND sustain_id = ?",
+                (outbox_id, sustain_id),
+            ).fetchone()
+            if row is None:
+                not_found.append(outbox_id)
+                continue
+            self._db.execute("DELETE FROM egress_outbox WHERE id = ?", (outbox_id,))
+            deleted.append(outbox_id)
+        self._db.commit()
+        return {"sustain_id": sustain_id, "requested": list(outbox_ids), "deleted": deleted, "not_found": not_found}
 
     def set_operative_enabled(self, sustain_id: str, operative_id: str, enabled: bool) -> bool:
         """

@@ -964,6 +964,12 @@ function ControllerPanel({ tick, sustain, openModal }) {
   const [throttle, setThrottle] = dUseState(0);      // 0-1
   const [opsEnabled, setOpsEnabled] = dUseState({ mentor: true, protege: true, curator: true, navigator: false });
   const [emergency, setEmergency] = dUseState(false);
+  // No device/MQTT API exists yet to populate this from -- stays empty
+  // until one is wired (per the standing "no invented data" rule). Lifted
+  // here (not local to IotList) so the card header's device COUNT and the
+  // list BODY can never disagree with each other again -- they were found
+  // live to have drifted ("5 ONLINE" header vs "No devices online" body).
+  const [devices, setDevices] = dUseState([]);
 
   const sustainId = sustain?.id;
 
@@ -1130,8 +1136,8 @@ function ControllerPanel({ tick, sustain, openModal }) {
         <OperatorConsoleCard tick={tick} sustain={sustain} />
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Card title="IOT · CONNECTED DEVICES" sub="5 ONLINE" padded scroll>
-            <IotList />
+          <Card title="IOT · CONNECTED DEVICES" sub={`${devices.length} ONLINE`} padded scroll>
+            <IotList devices={devices} />
           </Card>
           <Card title="ROLLBACK" sub="control.rollback" padded>
             <RollbackPanel sustain={sustain} />
@@ -2238,8 +2244,7 @@ function ControllerTerminal({ tick, sustain }) {
   );
 }
 
-function IotList() {
-  const devices = [];  // populated from MQTT / device API
+function IotList({ devices }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {devices.length === 0 && (
