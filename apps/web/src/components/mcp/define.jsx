@@ -9,6 +9,16 @@ import { api } from '../../lib/api.js';
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
 
+/* Pawa meter (§4L) — real measured average, once an operator has actually
+   run at least once, instead of the static always-zero declared pawa_cost
+   presented as if it were a real cost. Same helper as other.jsx's Editor
+   panel. */
+function formatPawa(meta) {
+  const m = meta.measured_pawa;
+  if (m && m.run_count > 0) return `~${m.avg_pawa.toFixed(1)} pwa measured (${m.run_count})`;
+  return 'not yet measured';
+}
+
 const DIMENSION_TYPES = ['number', 'string', 'boolean'];
 const COMPARATORS = ['>=', '<=', '>', '<', '==', '!='];
 
@@ -247,7 +257,7 @@ function OperatorPicker({ registry, attached, onToggle }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-primary)' }}>{name}</div>
                 <div className="meta-10" style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {meta.description || '—'} · pawa {meta.pawa_cost ?? 0}
+                  {meta.description || '—'} · {formatPawa(meta)}
                 </div>
               </div>
               <button style={btnStyle(isAttached ? 'danger' : 'amber')} onClick={() => onToggle(name)}>

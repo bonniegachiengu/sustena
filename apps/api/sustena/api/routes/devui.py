@@ -882,11 +882,21 @@ async def console_execute(
             recent_events = engine.get_events(body.sustain_id, limit=10)
         except Exception:
             recent_events = []
+        # Pawa meter (§4L) — the real ⟨compute, storage, pawa⟩ reading for
+        # THIS execution, if it succeeded. None on refusal/failure (zero
+        # real work happened, so nothing was metered) or if unavailable.
+        meter = None
+        if result.succeeded:
+            try:
+                meter = engine.get_last_pawa_meter(body.sustain_id, operator_name)
+            except Exception as exc:
+                logger.debug("get_last_pawa_meter failed: %s", exc)
         return ok({
             "result": result.to_response(),
             "sustain_id": body.sustain_id,
             "operator": operator_name,
             "events": recent_events,
+            "meter": meter,
         })
     except Exception as exc:
         logger.warning("console_execute failed: %s", exc)
@@ -935,11 +945,16 @@ async def simulate(
                     "result":        r["result"].to_response(),
                     "state_after":   r["state_after"],
                     "parent_rollup": r.get("parent_rollup"),
+                    "pawa":            r.get("pawa", 0.0),
+                    "cumulative_pawa": r.get("cumulative_pawa", 0.0),
                 }
                 for r in step_results
             ],
             "final_state": step_results[-1]["state_after"] if step_results else {},
             "final_parent_rollup": step_results[-1].get("parent_rollup") if step_results else None,
+            # §4L — the whole branch's efficiency score: total metered pawa
+            # if every step in this proposal were promoted for real.
+            "total_pawa": step_results[-1].get("cumulative_pawa", 0.0) if step_results else 0.0,
         })
     except Exception as exc:
         logger.warning("simulate(%s) failed: %s", body.sustain_id, exc)
@@ -1111,11 +1126,26 @@ async def get_sustain_proposals(sustain_id: str, _: dict = Depends(get_current_u
 async def get_operator_registry(_: dict = Depends(get_current_user)) -> dict:
     try:
         from sustena.core.operator import OPERATOR_REGISTRY
+
+        # measured_pawa (§4L, the Pawa meter) — the REAL average metered
+        # pawa across every recorded run, alongside (not replacing) the
+        # static author-declared pawa_cost. None when the operator has
+        # never actually run — an honest "not yet measured", never a
+        # fabricated number. Best-effort: this route must not break if
+        # the meter table/engine is unavailable for any reason.
+        measured: dict[str, dict] = {}
+        try:
+            from sustena.core.engine_singleton import get_shared_engine
+            measured = get_shared_engine().get_all_operator_pawa_stats()
+        except Exception as exc:
+            logger.debug("pawa meter stats unavailable for registry: %s", exc)
+
         return ok({
             "operators": {
                 name: {
                     "description":  meta.description,
                     "pawa_cost":    meta.pawa_cost,
+                    "measured_pawa": measured.get(name),
                     "license_tier": meta.license_tier,
                     "author":       meta.author,
                     "constraints":  meta.constraints,
@@ -1526,6 +1556,15 @@ async def get_sustain_operators(
     except Exception:
         registry = {}
 
+    # measured_pawa (§4L Pawa meter) — real average metered pawa per
+    # operator, alongside the static declared pawa_cost. Best-effort.
+    measured: dict[str, dict] = {}
+    try:
+        from sustena.core.engine_singleton import get_shared_engine
+        measured = get_shared_engine().get_all_operator_pawa_stats()
+    except Exception as exc:
+        logger.debug("pawa meter stats unavailable for sustain operators: %s", exc)
+
     result = []
     for op in spec_ops:
         name = op.get("name", "") if isinstance(op, dict) else str(op)
@@ -1537,7 +1576,43 @@ async def get_sustain_operators(
             "description": op.get("description", meta.description if meta else ""),
             "params": op.get("params", []),
             "pawa_cost": op.get("pawa_cost", meta.pawa_cost if meta else 0),
+            "measured_pawa": measured.get(name),
             "protocol": meta.protocol if meta else "rpc",
         })
 
     return ok({"sustain_id": sustain_id, "operators": result})
+
+
+# ── 14. Pawa meter (§4L) — read-only aggregates over real metered runs ───────
+# The odometer's dashboard: per-operator average, per-sustain total,
+# per-principal total. Every number here is a real SUM/AVG over
+# pawa_meter_log rows written by execute_operator — never fabricated,
+# never a static declared cost dressed up as a measurement.
+
+@router.get("/pawa/operators", summary="Real measured pawa stats for every operator that has run")
+async def get_pawa_operator_stats(_: dict = Depends(get_current_user)) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+    engine = get_shared_engine()
+    return ok({"operators": engine.get_all_operator_pawa_stats()})
+
+
+@router.get("/pawa/operators/{operator_name:path}", summary="Real measured pawa stats for one operator")
+async def get_pawa_operator_stat(operator_name: str, _: dict = Depends(get_current_user)) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+    engine = get_shared_engine()
+    stats = engine.get_operator_pawa_stats(operator_name)
+    return ok({"operator_name": operator_name, "stats": stats})
+
+
+@router.get("/pawa/me", summary="Real total metered pawa for the current authenticated principal")
+async def get_pawa_my_total(current_user: dict = Depends(get_current_user)) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+    engine = get_shared_engine()
+    return ok(engine.get_principal_pawa_total(current_user["id"]))
+
+
+@router.get("/sustain/{sustain_id}/pawa", summary="Real total metered pawa for one sustain")
+async def get_sustain_pawa(sustain_id: str, _: dict = Depends(get_current_user)) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+    engine = get_shared_engine()
+    return ok(engine.get_sustain_pawa_total(sustain_id))

@@ -4,6 +4,23 @@ import { api } from '../../lib/api.js';
 
 const { useState: dUseState, useEffect: dUseEffect, useMemo: dUseMemo, useRef: dUseRef } = React;
 
+/* Pawa meter (§4L) display helpers — every operator carries a static,
+   author-DECLARED pawa_cost (currently 0 for every operator in the
+   registry — nobody has ever priced a run) alongside a real MEASURED
+   average from sustena.core.pawa_meter, once it has actually run at
+   least once. Never presents the always-zero declared number as if it
+   were a measurement. */
+function formatPawaShort(op) {
+  const m = op.measured_pawa;
+  if (m && m.run_count > 0) return `~${m.avg_pawa.toFixed(1)} pwa · ${m.run_count} run${m.run_count === 1 ? '' : 's'}`;
+  return 'not yet measured';
+}
+function formatPawaLong(op) {
+  const m = op.measured_pawa;
+  if (m && m.run_count > 0) return `~${m.avg_pawa.toFixed(2)} pwa avg · ${m.run_count} run${m.run_count === 1 ? '' : 's'} measured`;
+  return `not yet measured · declared ${op.pawa_cost ?? 0} pwa`;
+}
+
 /* ───────────────────────────────────────────────────────────
    EDITOR PANEL — Sustena primitives editor
    Sections: SUSTAIN · OPERATORS · OPERATIVES · CONSTRAINTS
@@ -353,7 +370,7 @@ function OperatorsEditorSection({ sustain, operators }) {
                     <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: pc, flexShrink: 0, letterSpacing: '0.06em' }}>{(op.protocol || 'rpc').toUpperCase()}</span>
                   </div>
                   <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{op.description || '—'}</span>
-                  <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)' }}>{op.pawa_cost ?? 0} pwa</span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--text-dim)' }}>{formatPawaShort(op)}</span>
                 </button>
               );
             })
@@ -371,7 +388,7 @@ function OperatorsEditorSection({ sustain, operators }) {
               <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>{selectedOp.name}</span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: PROTOCOL_COLOR[selectedOp.protocol] || 'var(--text-muted)', letterSpacing: '0.06em' }}>{(selectedOp.protocol || 'rpc').toUpperCase()}</span>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--amber)' }}>{selectedOp.pawa_cost ?? 0} pwa</span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--amber)' }}>{formatPawaLong(selectedOp)}</span>
               </div>
             </div>
             <div style={{ flex: 1, overflow: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 520 }}>
@@ -2061,6 +2078,7 @@ function ControllerTerminal({ tick, sustain }) {
       const reason    = payload?.result?.reason || payload?.result?.constraint_violated;
       const delta     = opResult?.delta || {};
       const events    = payload?.events || [];
+      const meter     = payload?.meter || null; // §4L pawa meter — real reading for THIS run, null on refusal
 
       // Outcome line — surface failures/deferrals instead of silently saying "ok"
       if (opStatus === 'failed') {
@@ -2095,9 +2113,11 @@ function ControllerTerminal({ tick, sustain }) {
       else if (opStatus === 'deferred') window.flash?.(`${operator} → council review`, 'amber');
       else window.flash?.(`✓ ${operator} committed`, 'ok');
 
-      const ms   = opResult?.duration_ms ?? '—';
-      const pawa = opResult?.pawa_cost ?? opResult?.pawa ?? '—';
-      addLine('meta', `∴ committed in ${ms}ms · pawa −${pawa}`);
+      const ms   = meter?.elapsed_ms != null ? meter.elapsed_ms.toFixed(1) : (opResult?.duration_ms ?? '—');
+      const pawa = meter?.pawa != null ? meter.pawa.toFixed(2) : '—';
+      addLine('meta', meter
+        ? `∴ committed in ${ms}ms · pawa −${pawa} (compute ${meter.compute} · storage ${meter.storage}B)`
+        : `∴ committed in ${ms}ms · pawa not metered`);
 
       /* ── protocol badge ── */
       const opMeta = opRegistry[operator] || {};

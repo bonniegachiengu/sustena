@@ -26,6 +26,7 @@ import json
 import logging
 import re
 import sqlite3
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,7 @@ from sustena.core.event_fold import fold_events
 from sustena.core.events import EventBus
 from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext, OperatorResult
 from sustena.core.pawa import PawaLedger
+from sustena.core import pawa_meter
 from sustena.core.predicates import (
     Aggregate as _PredAggregate,
     Comparison as _PredComparison,
@@ -261,6 +263,18 @@ class SustainEngine:
                 result_json         TEXT,
                 attempts            INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(sustain_id, idempotency_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS pawa_meter_log (
+                id              TEXT PRIMARY KEY,
+                sustain_id      TEXT NOT NULL,
+                operator_name   TEXT NOT NULL,
+                principal       TEXT NOT NULL,
+                compute         REAL NOT NULL,
+                storage         REAL NOT NULL,
+                pawa            REAL NOT NULL,
+                elapsed_ms      REAL,
+                timestamp       TEXT NOT NULL
             );
         """)
         self._db.commit()
@@ -1087,6 +1101,8 @@ class SustainEngine:
         Returns:
             OperatorResult (check .succeeded / .failed, .data, .reason)
         """
+        t_start = time.monotonic()
+
         # Load and validate spec
         spec = self._get_spec(sustain_id)
         if spec is None:
@@ -1207,6 +1223,7 @@ class SustainEngine:
                     },
                 )
                 published = bus.published_this_context()
+            events_norm: list[dict] = []
             if published:
                 events_norm = [
                     {
@@ -1220,6 +1237,32 @@ class SustainEngine:
                     for i, ev in enumerate(published)
                 ]
                 self._append_events_and_update_cache(sustain_id, state.snapshot(), events_norm)
+
+            # Pawa meter (§4L) — the odometer, not the gas pump: records a
+            # real ⟨compute, storage⟩ reading for this run. compute is a
+            # reproducible proxy (mutations + events + constraint checks
+            # actually performed, NOT wall-clock — see pawa_meter.py's own
+            # docstring for why); storage is the real serialized byte size
+            # of exactly what just got durably written above. Only real,
+            # successful runs are metered — a gate refusal did zero real
+            # work (nothing mutated, nothing persisted), so it honestly
+            # meters as nothing, not as a failed-but-costly attempt.
+            storage_bytes = sum(
+                len(json.dumps(e["payload"], default=str)) + len(json.dumps(e["mutations"], default=str))
+                for e in events_norm
+            )
+            gate_ran = self._enforcement_enabled(spec)
+            compute = pawa_meter.compute_units(
+                mutation_count=len(mutations),
+                event_count=len(published),
+                constraint_eval_count=pawa_meter.constraint_eval_count(meta, spec, gate_ran),
+            )
+            pawa = pawa_meter.compute_pawa(compute, storage_bytes)
+            elapsed_ms = (time.monotonic() - t_start) * 1000
+            self._record_pawa_meter(
+                sustain_id=sustain_id, operator_name=operator_name, principal=user_id,
+                compute=compute, storage=storage_bytes, pawa=pawa, elapsed_ms=elapsed_ms,
+            )
 
         # Slice 11 (Egress) — drain anything the operator queued via
         # ctx.egress into the outbox. This is the ONLY place a queued
@@ -1359,10 +1402,21 @@ class SustainEngine:
                                                 # parent if sustain_id has one,
                                                 # else None — read-only, never
                                                 # written anywhere (Slice 9)
+                "pawa":            float,      # §4L — this step's own metered
+                                                # pawa; 0 for a refused/failed
+                                                # step (zero real work, same
+                                                # convention as execute_operator)
+                "cumulative_pawa": float,      # running total through this step —
+                                                # the last step's value is the
+                                                # whole branch's efficiency score
             }
 
         Steps that fail do NOT advance the forked state — subsequent steps see
-        the state as it was before the failed step.
+        the state as it was before the failed step. Nothing here is ever
+        written to pawa_meter_log — a simulated run isn't a real one, exactly
+        like it never appends a real event; the pawa figures are computed
+        with the identical formula (sustena.core.pawa_meter) so a promoted
+        branch's real meter reading will match what was estimated here.
         """
         spec = self._get_spec(sustain_id)
         allowed_ops = (
@@ -1375,6 +1429,7 @@ class SustainEngine:
         user_id = self._owners.get(sustain_id, "unknown")
         parent_link = self.get_parent(sustain_id)
         results: list[dict] = []
+        cumulative_pawa = 0.0
 
         def _parent_rollup_for(state_dict: dict) -> dict | None:
             """Hypothetical roll-up on the parent (Slice 7's composition
@@ -1408,6 +1463,8 @@ class SustainEngine:
                     "result":      result,
                     "state_after": copy.deepcopy(forked_dict),
                     "parent_rollup": _parent_rollup_for(forked_dict),
+                    "pawa": 0.0,
+                    "cumulative_pawa": cumulative_pawa,
                 })
                 continue
 
@@ -1422,6 +1479,8 @@ class SustainEngine:
                     "result":      result,
                     "state_after": copy.deepcopy(forked_dict),
                     "parent_rollup": _parent_rollup_for(forked_dict),
+                    "pawa": 0.0,
+                    "cumulative_pawa": cumulative_pawa,
                 })
                 continue
 
@@ -1474,8 +1533,24 @@ class SustainEngine:
                     result = OperatorResult.fail(reason=parent_reason, constraint_violated="parent_binding_gate")
 
             # Advance forked state only on success
+            step_pawa = 0.0
             if result.succeeded:
                 forked_dict = state_accessor.snapshot()
+                # Same formula execute_operator uses (sustena.core.pawa_meter),
+                # computed against the sandbox's own mutations/events -- a
+                # refused step never reaches here, so it stays 0.0, matching
+                # "a refusal is zero real work" for real runs.
+                mutations = state_accessor.mutations()
+                published = bus.published_this_context()
+                gate_ran = self._enforcement_enabled(spec)
+                step_compute = pawa_meter.compute_units(
+                    mutation_count=len(mutations),
+                    event_count=len(published),
+                    constraint_eval_count=pawa_meter.constraint_eval_count(meta, spec, gate_ran),
+                )
+                step_storage = sum(len(json.dumps(ev.get("_payload", {}), default=str)) for ev in published)
+                step_pawa = pawa_meter.compute_pawa(step_compute, step_storage)
+                cumulative_pawa += step_pawa
 
             results.append({
                 "operator":    operator_name,
@@ -1483,6 +1558,8 @@ class SustainEngine:
                 "result":      result,
                 "state_after": copy.deepcopy(forked_dict),
                 "parent_rollup": _parent_rollup_for(forked_dict),
+                "pawa": step_pawa,
+                "cumulative_pawa": cumulative_pawa,
             })
 
         return results
@@ -2018,6 +2095,126 @@ class SustainEngine:
         )
         self._db.commit()
         return True
+
+    # ── Pawa meter (§4L) ─────────────────────────────────────────────────────
+
+    def _record_pawa_meter(
+        self, sustain_id: str, operator_name: str, principal: str,
+        compute: float, storage: float, pawa: float, elapsed_ms: float,
+    ) -> dict:
+        """Write one real metering row. Called only from execute_operator,
+        only for a run that actually succeeded — see the call site's own
+        comment for why a gate refusal is honestly metered as nothing."""
+        row = {
+            "id": str(uuid.uuid4()),
+            "sustain_id": sustain_id,
+            "operator_name": operator_name,
+            "principal": principal,
+            "compute": compute,
+            "storage": storage,
+            "pawa": pawa,
+            "elapsed_ms": elapsed_ms,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        self._db.execute(
+            "INSERT INTO pawa_meter_log "
+            "(id, sustain_id, operator_name, principal, compute, storage, pawa, elapsed_ms, timestamp) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (row["id"], sustain_id, operator_name, principal, compute, storage, pawa, elapsed_ms, row["timestamp"]),
+        )
+        self._db.commit()
+        return row
+
+    def get_last_pawa_meter(self, sustain_id: str, operator_name: str) -> dict | None:
+        """The single most recent real metering row for this exact
+        sustain+operator pair — used to show "this run cost you N pawa"
+        immediately after a Console execution. None if never run."""
+        row = self._db.execute(
+            "SELECT compute, storage, pawa, elapsed_ms, timestamp FROM pawa_meter_log "
+            "WHERE sustain_id = ? AND operator_name = ? ORDER BY timestamp DESC LIMIT 1",
+            (sustain_id, operator_name),
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def get_operator_pawa_stats(self, operator_name: str) -> dict | None:
+        """Real average/total pawa for one operator across every metered
+        run, on every sustain. None (not a zero-filled stub) when the
+        operator has never actually run — an honest 'not yet measured',
+        never a fabricated number."""
+        row = self._db.execute(
+            "SELECT COUNT(*) AS n, AVG(compute) AS avg_compute, AVG(storage) AS avg_storage, "
+            "AVG(pawa) AS avg_pawa, SUM(pawa) AS total_pawa "
+            "FROM pawa_meter_log WHERE operator_name = ?",
+            (operator_name,),
+        ).fetchone()
+        if row is None or row["n"] == 0:
+            return None
+        return {
+            "operator_name": operator_name,
+            "run_count": row["n"],
+            "avg_compute": row["avg_compute"],
+            "avg_storage": row["avg_storage"],
+            "avg_pawa": row["avg_pawa"],
+            "total_pawa": row["total_pawa"],
+        }
+
+    def get_all_operator_pawa_stats(self) -> dict[str, dict]:
+        """Same as get_operator_pawa_stats but for every operator that has
+        ever run, in one query — what the DEFINE/Console operator LISTS
+        need (many operators shown at once), rather than N round-trips."""
+        rows = self._db.execute(
+            "SELECT operator_name, COUNT(*) AS n, AVG(compute) AS avg_compute, "
+            "AVG(storage) AS avg_storage, AVG(pawa) AS avg_pawa, SUM(pawa) AS total_pawa "
+            "FROM pawa_meter_log GROUP BY operator_name"
+        ).fetchall()
+        return {
+            r["operator_name"]: {
+                "operator_name": r["operator_name"],
+                "run_count": r["n"],
+                "avg_compute": r["avg_compute"],
+                "avg_storage": r["avg_storage"],
+                "avg_pawa": r["avg_pawa"],
+                "total_pawa": r["total_pawa"],
+            }
+            for r in rows
+        }
+
+    def get_sustain_pawa_total(self, sustain_id: str) -> dict:
+        """Real total metered pawa for one sustain across every operator
+        that has run on it. run_count=0/totals=0 is the honest answer for
+        a sustain with no metered activity yet -- not omitted, not faked."""
+        row = self._db.execute(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(compute), 0) AS total_compute, "
+            "COALESCE(SUM(storage), 0) AS total_storage, COALESCE(SUM(pawa), 0) AS total_pawa "
+            "FROM pawa_meter_log WHERE sustain_id = ?",
+            (sustain_id,),
+        ).fetchone()
+        return {
+            "sustain_id": sustain_id,
+            "run_count": row["n"],
+            "total_compute": row["total_compute"],
+            "total_storage": row["total_storage"],
+            "total_pawa": row["total_pawa"],
+        }
+
+    def get_principal_pawa_total(self, principal: str) -> dict:
+        """Real total metered pawa for one principal (the acting user)
+        across every sustain they've run an operator on."""
+        row = self._db.execute(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(compute), 0) AS total_compute, "
+            "COALESCE(SUM(storage), 0) AS total_storage, COALESCE(SUM(pawa), 0) AS total_pawa "
+            "FROM pawa_meter_log WHERE principal = ?",
+            (principal,),
+        ).fetchone()
+        return {
+            "principal": principal,
+            "run_count": row["n"],
+            "total_compute": row["total_compute"],
+            "total_storage": row["total_storage"],
+            "total_pawa": row["total_pawa"],
+        }
 
     def evaluate_constraints(self, sustain_id: str) -> list[dict]:
         """
