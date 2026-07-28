@@ -146,3 +146,125 @@ async def orchie_compose(
         raise HTTPException(status_code=500, detail=f"compose failed: {exc}")
 
     return result
+
+
+# ── POST /orchie/capture/infer + /confirm — effect-first capture (§7) ─────────
+#
+# Two separate steps, deliberately never collapsed into one:
+#   infer()   — read-only. epsilon -> (o, theta) or a disambiguation question.
+#               Never calls execute_operator, never mutates anything.
+#   confirm() — the only place a capture can ever write. Calls the real,
+#               unmodified execute_operator() -- the same S2 gate + S3 fold
+#               every other operator call in this codebase goes through.
+#               This split IS the article's "approval token" clause in
+#               Sustena's real idiom: a proposal alone can never touch
+#               state; only an explicit, separately authenticated confirm
+#               call (the human tapping CONFIRM) can.
+
+
+class CaptureInferRequest(BaseModel):
+    sustain_id: str
+    widget_id: str = "unmapped_capture_classify"
+    message_id: str | None = None
+    effect_text: str | None = None
+    known: dict = {}
+
+
+@router.post("/capture/infer")
+async def capture_infer(
+    body: CaptureInferRequest, current_user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    epsilon -> (o, theta), or one disambiguating question. Read-only.
+
+    widget_id picks which declared widget's `emits` narrows the candidate
+    operators (beta) -- the same widget schema from compose()'s own slice.
+    message_id (optional) pulls a real, already-ingested-but-unmapped
+    message's parsed_fields as additional signal; effect_text (optional)
+    is a free narration. known carries the accumulated answers from any
+    prior disambiguation round in this same capture session (this route
+    is stateless -- the frontend re-sends known facts each call, same
+    approach compose() itself uses for "nothing is stored between calls").
+    """
+    _assert_owns_sustain(body.sustain_id, current_user["id"])
+
+    from sustena.core.engine_singleton import get_shared_engine
+    from sustena.core.curated_ui import load_widget_schemas
+    from sustena.core.effect_capture import infer
+
+    engine = get_shared_engine()
+    spec = engine.get_spec(body.sustain_id)
+    if spec is None:
+        raise HTTPException(status_code=404, detail="Sustain not found")
+
+    widgets = load_widget_schemas(spec)
+    widget = next((w for w in widgets if w.id == body.widget_id), None)
+    if widget is None:
+        raise HTTPException(status_code=404, detail=f"No widget '{body.widget_id}' declared on this sustain")
+
+    parsed_fields = None
+    if body.message_id:
+        from sustena.core.ingest_singleton import get_shared_ingest_engine
+
+        message = get_shared_ingest_engine().get_message(body.message_id)
+        if message is None or message.get("sustain_id") != body.sustain_id:
+            raise HTTPException(status_code=404, detail="Message not found")
+        parsed_fields = message.get("parsed_fields") or {}
+
+    state = engine.get_state(body.sustain_id)
+    result = infer(
+        widget.emits, state,
+        effect_text=body.effect_text, parsed_fields=parsed_fields, known=body.known,
+    )
+    return result.to_dict()
+
+
+class CaptureConfirmRequest(BaseModel):
+    sustain_id: str
+    operator: str
+    params: dict
+    message_id: str | None = None
+
+
+@router.post("/capture/confirm")
+async def capture_confirm(
+    body: CaptureConfirmRequest, current_user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    The only write path for a capture. Routes the human-confirmed (o, theta)
+    through the real, unmodified execute_operator() -- same S2 enforcing
+    gate, same S3 fold-append as every other write in this codebase. A
+    gate refusal is a normal 200 response with the real reason (same
+    convention devui.py's console_execute already uses) -- never a fake
+    success, never a silently swallowed failure.
+
+    On genuine success, if this capture resolved a real ingest message,
+    that message is marked resolved (acknowledgement only -- the message
+    row itself never mutates state, execute_operator already did that).
+    A gate refusal leaves the message in needs_attention, correctly --
+    nothing was actually handled.
+    """
+    _assert_owns_sustain(body.sustain_id, current_user["id"])
+
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+
+    # Whether body.operator is actually declared on this sustain's spec is
+    # checked INSIDE execute_operator itself (the same allow-list check
+    # every other write goes through) -- not duplicated here.
+    result = await engine.execute_operator(body.sustain_id, body.operator, body.params)
+
+    resolved = False
+    if result.succeeded and body.message_id:
+        from sustena.core.ingest_singleton import get_shared_ingest_engine
+
+        resolved = get_shared_ingest_engine().resolve_message(body.message_id, resolved_by=current_user["id"])
+
+    return {
+        "sustain_id": body.sustain_id,
+        "operator": body.operator,
+        "params": body.params,
+        "result": result.to_response(),
+        "message_resolved": resolved,
+    }

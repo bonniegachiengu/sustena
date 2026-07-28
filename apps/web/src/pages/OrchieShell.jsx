@@ -9,10 +9,11 @@
  * compose(r) — and renders exactly what it returns. No sustain-specific
  * strings live here; whatever compose() selects is what renders.
  *
- * Scope note (disclosed, not hidden): this slice is READ-ONLY composition.
- * Each card's declared `emits` (the operator it could trigger) is shown as
- * plain text, not a live button — effect-first capture (routing a tap or a
- * narrated effect through admit()) is the next slice, not this one.
+ * Effect-first capture (§7): tapping a classify_card, or typing a plain
+ * narration at the top of the page, opens a CaptureFlow — one question at
+ * a time (§6 progressive disclosure), never a form, never a schema. The
+ * engine infers the operator + params; the human only ever confirms or
+ * answers a single tap-question. Nothing mutates until CONFIRM is tapped.
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
@@ -81,8 +82,178 @@ function WhyReveal({ widget }) {
   );
 }
 
-function WidgetCard({ widget }) {
+/* ─── Effect-first capture (§7) — one question at a time, never a form ─── */
+
+const bigTapButton = {
+  fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 500,
+  color: 'var(--text-primary)', background: 'var(--bg-overlay)',
+  border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
+  padding: '12px 16px', cursor: 'pointer', minWidth: 88,
+};
+const confirmButton = {
+  fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
+  color: 'var(--bg-base)', background: 'var(--teal)',
+  border: 'none', borderRadius: 'var(--radius-sm)', padding: '12px 20px', cursor: 'pointer',
+};
+const cancelButton = {
+  fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.06em',
+  color: 'var(--text-muted)', background: 'none',
+  border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)', padding: '12px 18px', cursor: 'pointer',
+};
+const mutedText = { fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-muted)' };
+const questionText = { fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--text-primary)' };
+
+function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messageId, effectText, onClose, onCommitted }) {
+  const [phase, setPhase] = useState('loading');
+  const [payload, setPayload] = useState(null);
+  const [known, setKnown] = useState({});
+
+  const runInfer = useCallback(async (nextKnown) => {
+    setPhase('loading');
+    try {
+      const data = await api.post('/orchie/capture/infer', {
+        sustain_id: sustainId, widget_id: widgetId, message_id: messageId, effect_text: effectText, known: nextKnown,
+      });
+      setKnown(nextKnown);
+      setPayload(data);
+      setPhase(data.status);
+    } catch (e) {
+      setPayload({ why: e.message || 'could not reach orchie' });
+      setPhase('error');
+    }
+  }, [sustainId, widgetId, messageId, effectText]);
+
+  useEffect(() => { runInfer({}); }, [runInfer]);
+
+  const answer = (value) => runInfer({ ...known, [payload.field]: value });
+
+  const confirm = async () => {
+    setPhase('confirming');
+    try {
+      const data = await api.post('/orchie/capture/confirm', {
+        sustain_id: sustainId, operator: payload.operator, params: payload.params, message_id: messageId,
+      });
+      setPayload(data);
+      if (data.result.status === 'ok') {
+        setPhase('committed');
+        onCommitted?.();
+      } else {
+        setPhase('refused');
+      }
+    } catch (e) {
+      setPayload({ why: e.message || 'could not reach orchie' });
+      setPhase('error');
+    }
+  };
+
+  return (
+    <div style={{
+      marginTop: 12, padding: 14, borderRadius: 'var(--radius-md)',
+      background: 'var(--bg-raised)', border: '1px solid var(--border-mid)',
+    }}>
+      {phase === 'loading' && <div style={mutedText}>thinking…</div>}
+
+      {phase === 'needs_disambiguation' && (
+        <div>
+          <div style={questionText}>{payload.question}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+            {payload.options.map(o => (
+              <button key={o.value} onClick={() => answer(o.value)} style={bigTapButton}>{o.label}</button>
+            ))}
+          </div>
+          <div style={{ ...mutedText, marginTop: 10 }}>{payload.why}</div>
+        </div>
+      )}
+
+      {phase === 'ready' && (
+        <div>
+          <div style={questionText}>{payload.why}</div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+            <button onClick={confirm} style={confirmButton}>CONFIRM</button>
+            <button onClick={onClose} style={cancelButton}>CANCEL</button>
+          </div>
+        </div>
+      )}
+
+      {phase === 'confirming' && <div style={mutedText}>applying…</div>}
+
+      {phase === 'committed' && (
+        <div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--teal)' }}>
+            ✓ done — {payload.operator} applied, state updated
+          </div>
+          <button onClick={onClose} style={{ ...cancelButton, marginTop: 10 }}>CLOSE</button>
+        </div>
+      )}
+
+      {phase === 'refused' && (
+        <div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--danger)' }}>
+            ✗ refused — {payload.result?.reason || 'the gate refused this — nothing changed'}
+          </div>
+          <button onClick={onClose} style={{ ...cancelButton, marginTop: 10 }}>CLOSE</button>
+        </div>
+      )}
+
+      {phase === 'cannot_infer' && (
+        <div>
+          <div style={mutedText}>{payload.why}</div>
+          <button onClick={onClose} style={{ ...cancelButton, marginTop: 10 }}>CLOSE</button>
+        </div>
+      )}
+
+      {phase === 'error' && (
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--danger)' }}>{payload.why}</div>
+      )}
+    </div>
+  );
+}
+
+function NarrateBar({ sustainId, onCommitted }) {
+  const [text, setText] = useState('');
+  const [active, setActive] = useState(false);
+
+  if (active) {
+    return (
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ ...mutedText, marginBottom: 4 }}>capturing: “{text}”</div>
+        <CaptureFlow
+          sustainId={sustainId}
+          effectText={text}
+          onClose={() => { setActive(false); setText(''); }}
+          onCommitted={() => { setActive(false); setText(''); onCommitted?.(); }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+      <input
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && text.trim()) setActive(true); }}
+        placeholder="what happened? e.g. spent 500 on WiFi"
+        style={{
+          flex: 1, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--text-primary)',
+          background: 'var(--bg-surface)', border: '1px solid var(--border-mid)',
+          borderRadius: 'var(--radius-sm)', padding: '10px 12px',
+        }}
+      />
+      <button
+        onClick={() => text.trim() && setActive(true)}
+        style={{ ...confirmButton, padding: '10px 16px' }}
+      >
+        GO
+      </button>
+    </div>
+  );
+}
+
+function WidgetCard({ widget, sustainId, onCommitted }) {
   const d = widget.data || {};
+  const [capturing, setCapturing] = useState(false);
+
   return (
     <div style={{
       background: 'var(--bg-surface)', border: '1px solid var(--border-mid)',
@@ -125,12 +296,26 @@ function WidgetCard({ widget }) {
         </div>
       )}
 
-      {widget.emits && widget.emits.length > 0 && (
+      {widget.render === 'classify_card' && !capturing && (
+        <button onClick={() => setCapturing(true)} style={{ ...confirmButton, marginTop: 12 }}>
+          CLASSIFY
+        </button>
+      )}
+      {widget.render === 'classify_card' && capturing && (
+        <CaptureFlow
+          sustainId={sustainId}
+          messageId={d.message_id}
+          onClose={() => setCapturing(false)}
+          onCommitted={() => { setCapturing(false); onCommitted?.(); }}
+        />
+      )}
+
+      {widget.render !== 'classify_card' && widget.emits && widget.emits.length > 0 && (
         <div style={{
           marginTop: 10, fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-dim)',
           letterSpacing: '0.04em',
         }}>
-          action available: {widget.emits.join(', ')} <span style={{ opacity: 0.6 }}>(not wired yet — next slice)</span>
+          action available: {widget.emits.join(', ')}
         </div>
       )}
 
@@ -206,6 +391,8 @@ export default function OrchieShell() {
         </button>
       </div>
 
+      {sustainId && <NarrateBar sustainId={sustainId} onCommitted={load} />}
+
       {(resolving || loading) && <Empty text="composing…" />}
 
       {!resolving && !loading && !sustainId && (
@@ -219,7 +406,7 @@ export default function OrchieShell() {
           {(!view.selected || view.selected.length === 0) ? (
             <Empty text={view.message || 'nothing needs you right now'} />
           ) : (
-            view.selected.map(w => <WidgetCard key={w.id} widget={w} />)
+            view.selected.map(w => <WidgetCard key={w.id} widget={w} sustainId={sustainId} onCommitted={load} />)
           )}
 
           {view.excluded && view.excluded.length > 0 && (
