@@ -995,6 +995,32 @@ Same applicationId preserved across the fix (installs as an update, not a fresh 
 
 ---
 
+### Sustena Studio ✅ — Modeling Studio adopted (Phase B) + native Tauri Windows app (1 Aug 2026)
+
+Two moves in one pass: adopt the Studio shell that had been sitting preserved-but-unwired since 28 Jul, then wrap it in an installable Windows desktop app — same pattern as the Android/Orchie app.
+
+**Studio adoption.** Reinstated from `Projects/IO/_preserved/studio-shell-slice-1/` (a plain file backup with its own `README.md` + a reference `studio-wiring.patch` — nothing had been wired into `main` before this). Bonnie has now formally reached Phase B, so this is sanctioned, not a rediscovery of shelved work. The 8 preserved files (`StudioPage.jsx` + `pages/studio/*` — Monitor/Control/Simulate/Network/Edit zones + the persistent `SustainGraph`) plus the one backend route they depend on (`GET /devui/sustain/{id}/definition`, additive/read-only, a passthrough over `engine.get_spec()`) were re-applied by review against current `main`, not blindly — verified they still compile (68 modules, up from 60) and that the route's 5 tests (`TestSustainDefinition`) still pass against the current engine shape (6 `declared_children` slots, `household_rollup_summary` curated widget) after 4 days of drift. `/studio` route wired into `App.tsx`.
+
+**Sustena Studio, the Tauri desktop app.** `apps/web/src-tauri/` — bundles the built web shell locally into an installable Windows app, pointed at the same hosted engine via an absolute `VITE_API_BASE` baked in at build time (`.env.tauri`, `npm run build:tauri`), identical reasoning to the Android app's `.env.capacitor`. A launch inside Tauri redirects `"/"` straight to `"/studio"` (`App.tsx`'s `HomeRoute`, now checking `isTauri()` alongside the existing Capacitor check — both false in any browser context, zero effect on the hosted web app).
+
+**Auth reused, not reinvented:** `LoginGate` (built for Orchie the same day) extracted from `OrchieShell.jsx` into a shared `apps/web/src/components/LoginGate.jsx` — Studio calls the identical `POST /api/v1/users/login` → `sustena_token` localStorage flow, through the same dedicated `api.login()`. `StudioPage.jsx`'s own token read was converted to reactive state (was a plain `localStorage.getItem()`) so signing in flips straight into the workbench with no reload; its sustain-list fetch was already correctly gated on the token existing (unlike Orchie's had been before that fix), so no equivalent infinite-reload-loop bug existed here to begin with.
+
+**CORS, verified live, not assumed — and a real platform-specific gotcha caught before it could bite:** Tauri's Windows webview origin is `http://tauri.localhost` — genuinely **HTTP, not HTTPS** (confirmed via Tauri's own issue tracker: a real desktop app failing with "Failed to fetch" until that exact origin was added to a server's CORS allowlist — this is NOT the `https://tauri.localhost`/`tauri://localhost` guess it would have been easy to assume). Added to `main.py`'s production-mode CORS list alongside the different `tauri://localhost` scheme macOS/Linux use (harmless to allow with no build for those platforms yet). Live-tested against the real deployed API with a throwaway account: preflight OPTIONS correctly reflected `http://tauri.localhost`, a real login succeeded, the resulting token worked against `/devui/sustains`.
+
+**Toolchain — the heaviest pieces were already there:** MSVC Build Tools 2022 and the WebView2 runtime were both already installed on this machine (`vswhere` confirmed the VC.Tools.x86.x64 component; the EdgeUpdate registry key confirmed WebView2 150.0.4078.105) — neither needed any action. Only Rust was missing; installed via the official `rustup-init.exe` into a scoped `CARGO_HOME`/`RUSTUP_HOME` under `C:\Users\DELL\Rust\`, `--no-modify-path` so the system PATH was never touched — the identical discipline used for the Android SDK install earlier the same day. `rustc 1.97.1`.
+
+**Built successfully, and actually run, not just compiled:** `npx tauri build` compiled the full Rust/WRY/tauri dependency tree from scratch (~7 minutes) and produced two real installers:
+- `apps/web/src-tauri/target/release/bundle/msi/Sustena Studio_0.1.0_x64_en-US.msi` (3.1 MB)
+- `apps/web/src-tauri/target/release/bundle/nsis/Sustena Studio_0.1.0_x64-setup.exe` (2.1 MB)
+
+(`target/` is gitignored by Tauri's own scaffolded `.gitignore` — neither installer nor any build artifact is committed.) Beyond "it compiled": the raw built exe (`target/release/sustena-studio.exe`, 8.51 MB) was actually launched via `Start-Process`, confirmed still running 4 seconds later with `MainWindowTitle: 'Sustena Studio'` (real proof it doesn't crash on startup), then closed cleanly.
+
+**Disclosed, not fixed this pass:** default Tauri-scaffolded icons (matches the Android app's own disclosed icon gap — real Sustena branding via `@tauri-apps/cli icon` from the existing `public/icons/icon-512.png` is a cheap follow-up, not done since it wasn't asked for). Bundling the Python engine as a local sidecar for genuine offline operation is explicitly a later step, not attempted here — this Studio app, like Orchie's Android app, talks to the hosted engine over the network.
+
+**Tests:** 0 new (the CORS origin list and Tauri-detection logic were verified live via direct `curl` + an actual process launch, matching this project's established acceptance-check discipline, same as the Android CORS/login pass). **1744 backend tests pass**, unchanged. Frontend builds clean in three modes now (`npm run build`, `npm run build:capacitor`, `npm run build:tauri`). Live on the public hostname; both Windows installers built and available locally.
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:
