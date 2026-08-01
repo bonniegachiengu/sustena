@@ -112,6 +112,76 @@ class TestRegister:
         assert r.status_code == 422
 
 
+# ── Email case-insensitivity (found live 1 Aug 2026: same account logged in
+# fine on Android via autofill's exact-cased memory, failed on the Studio
+# desktop app typed fresh in lowercase -- a real account, correct password,
+# rejected only on letter case) ─────────────────────────────────────────────
+
+class TestEmailCaseInsensitivity:
+    async def test_register_normalizes_email_to_lowercase(self, client):
+        r = await _register(client, email="Bonnie@Sustena.IO")
+        assert r.json()["data"]["email"] == "bonnie@sustena.io"
+
+    async def test_login_with_lowercase_after_mixedcase_register(self, client):
+        await _register(client, email="Bonnie@Sustena.IO", password="password123")
+        r = await client.post(
+            "/api/v1/users/login",
+            json={"email": "bonnie@sustena.io", "password": "password123"},
+        )
+        assert r.status_code == 200
+        assert "token" in r.json()["data"]
+
+    async def test_login_with_original_mixedcase_still_works(self, client):
+        # Case shouldn't matter in EITHER direction -- registered mixed,
+        # login mixed (identical to registration casing) must still succeed.
+        await _register(client, email="Bonnie@Sustena.IO", password="password123")
+        r = await client.post(
+            "/api/v1/users/login",
+            json={"email": "Bonnie@Sustena.IO", "password": "password123"},
+        )
+        assert r.status_code == 200
+
+    async def test_login_with_different_mixedcase_works(self, client):
+        # A third, different casing than either registration or the two
+        # cases above -- proves this is genuine case-insensitivity, not a
+        # coincidental match against one specific stored/typed form.
+        await _register(client, email="Bonnie@Sustena.IO", password="password123")
+        r = await client.post(
+            "/api/v1/users/login",
+            json={"email": "BONNIE@sustena.io", "password": "password123"},
+        )
+        assert r.status_code == 200
+
+    async def test_login_response_echoes_stored_casing_not_input_casing(self, client):
+        await _register(client, email="Bonnie@Sustena.IO", password="password123")
+        r = await client.post(
+            "/api/v1/users/login",
+            json={"email": "bonnie@sustena.io", "password": "password123"},
+        )
+        # Stored (post-normalization) form, not whatever casing this
+        # particular login attempt happened to type.
+        assert r.json()["data"]["email"] == "bonnie@sustena.io"
+
+    async def test_wrong_password_with_mismatched_case_still_401s(self, client):
+        # Case-insensitivity must not accidentally weaken the password
+        # check itself -- only the email lookup changed.
+        await _register(client, email="Bonnie@Sustena.IO", password="password123")
+        r = await client.post(
+            "/api/v1/users/login",
+            json={"email": "bonnie@sustena.io", "password": "wrongpassword"},
+        )
+        assert r.status_code == 401
+
+    async def test_duplicate_registration_blocked_across_case(self, client):
+        # Registering "BOB@x.com" when "bob@x.com" already exists must be
+        # blocked as a duplicate, not create a second, case-variant row --
+        # if it did, a real login could nondeterministically resolve to
+        # either one depending on which the query happens to return first.
+        await _register(client, email="bob@x.com", password="password123")
+        r = await _register(client, email="BOB@X.com", password="password456")
+        assert r.status_code == 409
+
+
 # ── POST /login ───────────────────────────────────────────────────────────────
 
 class TestLogin:

@@ -173,11 +173,22 @@ def _serialize_dt(val) -> str:
 
 @router.post("/register", summary="Register a new user account")
 async def register(body: RegisterRequest) -> dict:
+    # Email is normalized to lowercase going forward (both the duplicate
+    # check and the stored value) -- see login()'s own comment for why:
+    # an account registered as "Bonnie@X.com" was unreachable by anyone
+    # typing "bonnie@x.com", which is the natural way to type an email on
+    # a fresh device/app with no autofill. Normalizing here also prevents
+    # a NEW case-variant duplicate of an already-registered address (e.g.
+    # registering "BOB@x.com" when "bob@x.com" already exists) --
+    # previously two visually-different-but-effectively-identical rows
+    # could both exist, and a case-insensitive login could only ever
+    # reach whichever one the query happened to return first.
+    email = body.email.lower()
     db_engine = get_engine()
     async with db_engine.connect() as conn:
         existing = (
             await conn.execute(
-                select(users_table.c.id).where(users_table.c.email == body.email)
+                select(users_table.c.id).where(func.lower(users_table.c.email) == email)
             )
         ).first()
         if existing:
@@ -185,11 +196,11 @@ async def register(body: RegisterRequest) -> dict:
 
         user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
-        display_name = body.display_name or body.email.split("@")[0]
+        display_name = body.display_name or email.split("@")[0]
         await conn.execute(
             users_table.insert().values(
                 id=user_id,
-                email=body.email,
+                email=email,
                 password_hash=_hash_password(body.password),
                 display_name=display_name,
                 phone_number=None,
@@ -204,7 +215,7 @@ async def register(body: RegisterRequest) -> dict:
     return _ok(
         {
             "user_id": user_id,
-            "email": body.email,
+            "email": email,
             "display_name": display_name,
             "token": _create_token(user_id, 0),
         }
@@ -215,11 +226,24 @@ async def register(body: RegisterRequest) -> dict:
 
 @router.post("/login", summary="Authenticate and receive a JWT")
 async def login(body: LoginRequest) -> dict:
+    # Found live (1 Aug 2026): email lookup was exact-case, so an account
+    # registered with any uppercase letter (e.g. from an early sign-up, or
+    # an autocapitalizing mobile keyboard at the time) was unreachable by
+    # anyone typing it in lowercase on a fresh device -- which is the
+    # normal way to type an email with no saved autofill to copy the exact
+    # original casing from. Real-world symptom: the same account logged in
+    # fine on Android (autofill remembered the exact original casing) but
+    # failed with "Invalid email or password" from the Studio desktop app
+    # (typed fresh, all-lowercase) -- a genuine account, a correct
+    # password, rejected only because of letter case. Comparing
+    # lower(stored) == lower(input) fixes every existing row regardless of
+    # what case it happens to already be stored in -- no migration/backfill
+    # needed, this is purely a lookup-time normalization.
     db_engine = get_engine()
     async with db_engine.connect() as conn:
         row = (
             await conn.execute(
-                select(users_table).where(users_table.c.email == body.email)
+                select(users_table).where(func.lower(users_table.c.email) == body.email.lower())
             )
         ).first()
 
@@ -242,7 +266,11 @@ async def login(body: LoginRequest) -> dict:
     return _ok(
         {
             "user_id": user["id"],
-            "email": body.email,
+            # The STORED email (whatever case it actually has), not
+            # body.email -- otherwise the response would silently echo
+            # back different casing than what's on the account depending
+            # on how the caller happened to type it this time.
+            "email": user["email"],
             "display_name": user.get("display_name"),
             "token": _create_token(user["id"], user.get("token_version", 0)),
         }
