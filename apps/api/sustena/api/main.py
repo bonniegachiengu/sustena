@@ -18,6 +18,41 @@ from sustena.db.schema import init_db, get_engine
 
 logger = logging.getLogger(__name__)
 
+# -- Deploy identity -----------------------------------------------------------
+# The git commit this running process was actually started from -- resolved
+# ONCE at import time (a process never picks up a later `git commit` without a
+# real restart, so this is honest: it names what code is genuinely loaded into
+# memory right now, not what's on disk this instant). Exists specifically so
+# staleness (a running process silently predating the code on disk) is a
+# one-line diff against `git rev-parse HEAD` instead of a guessing game --
+# this exact class of bug (a stale 0.0.0.0-bound process serving an old
+# commit indefinitely) has recurred multiple times per CLAUDE.md's own slice
+# notes. Best-effort: a packaged deploy with no .git directory, or git not on
+# PATH, must never crash the app over a diagnostic field.
+
+
+def _resolve_running_commit() -> str:
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            cwd=_Path(__file__).resolve().parent,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
+from pathlib import Path as _Path
+
+_RUNNING_COMMIT = _resolve_running_commit()
+
 # -- Lifespan (startup / shutdown) --------------------------------------------
 
 
@@ -155,6 +190,7 @@ async def health():
             "environment": settings.environment,
             "db_status": "ok" if db_ok else "error",
             "claude_status": claude_status,
+            "git_commit": _RUNNING_COMMIT,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )
@@ -200,8 +236,6 @@ if settings.is_development:
 # pytest or a backend-only dev setup. Registered LAST: FastAPI matches routes
 # in registration order, so every API route above still takes precedence over
 # the catch-all below.
-
-from pathlib import Path as _Path
 
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles

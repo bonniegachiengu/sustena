@@ -97,6 +97,24 @@ async def test_health_has_required_keys():
 
 
 @pytest.mark.asyncio
+async def test_health_reports_the_running_git_commit():
+    """
+    git_commit names the commit this process was actually started from --
+    resolved once at import time so staleness (a long-running process
+    silently predating a later commit) is a one-line diff against
+    `git rev-parse HEAD`, not a guess. In this repo (a real git checkout)
+    it must be a real short hash, not the "unknown" fallback reserved for a
+    packaged deploy with no .git directory.
+    """
+    async with _client() as client:
+        response = await client.get("/health")
+    data = response.json()
+    assert "git_commit" in data, "missing key: git_commit"
+    assert data["git_commit"] != "unknown"
+    assert len(data["git_commit"]) == 12
+
+
+@pytest.mark.asyncio
 async def test_health_db_status_ok_when_db_accessible():
     """
     db_status should be 'ok' when the DB is reachable.

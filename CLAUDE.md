@@ -925,6 +925,38 @@ Bonnie approved all three items batched. Pre-flight: git confirmed clean; fresh 
 
 ---
 
+### Node Zero reliability pass ✅ — "node zero" always-on + the real staleness blind spot (1 Aug 2026)
+
+Step 1 of the native-apps sprint: make the hosted engine a reliable "node zero," with the live Orchie/Curated-UI breakage as the immediate proof. **Investigated first, fixed second** — the reported symptom (`/orchie` showing "no curated widgets", `POST /orchie/capture/infer` 404ing) turned out to be **not currently reproducible**: a direct `curl` against the public hostname showed both routes already registered and correctly auth-gated (401, not 404), and a direct read-only `compose()` call against Bonnie's real homestead (`5c5a9c7a-...`) returned real, correctly-ranked pocket-watch widgets (`emergency`/`fees`/`WiFi` at 100% spent, `shopping` at 81%) — proof the Curated UI engine (Slice 13) and effect-first capture (Slice 14) were already functioning end-to-end on the running process. The symptom as reported may have reflected an earlier moment (the watchdog log shows a real backend outage-and-restart at `2026-07-29 07:08`, which happens to postdate every commit through Slice 15) or a stale browser tab — not chased further once disproven live, per "verify, don't assume."
+
+**What WAS real, found by direct investigation, not assumption — the actual staleness root cause:** `Get-NetTCPConnection -LocalPort 9000` showed **two** processes simultaneously bound: Bonnie's own `uvicorn --reload --port 9000` local dev server on `127.0.0.1`, and the tunnel-facing production process on `0.0.0.0` (matches the exact "two processes on port 9000" pattern flagged as a live incident in Slice 9's and Slice 10's own notes, and evidently never structurally fixed — only ever restarted-around each time it recurred). The watchdog (`scripts/keepalive.ps1`) checked `http://localhost:9000/health`. On Windows, a `127.0.0.1`-specific bind always wins over a `0.0.0.0` wildcard bind for a `127.0.0.1` destination — so **the watchdog's health check was silently hitting Bonnie's always-fresh `--reload` dev process**, never the actual public-facing one. A stale public process would report "healthy" to the watchdog forever, because the watchdog was never actually checking it. This is the literal mechanism behind every "stale backend, needed a manual restart" incident in this project's history.
+
+**Fix 1 — `/health` gained a `git_commit` field** (`apps/api/sustena/api/main.py`): resolved once at process import time via `git rev-parse --short=12 HEAD` (best-effort — a packaged deploy with no `.git` returns `"unknown"` rather than crashing). Makes "is this process actually current" a one-line diff instead of a guess. 1 new test (`test_health_reports_the_running_git_commit`).
+
+**Fix 2 — `scripts/keepalive.ps1`'s health-check target is no longer `localhost`.** `Get-BackendCheckUrl` resolves the machine's real non-loopback LAN IPv4 fresh on every run — a connection to that address can only be answered by the `0.0.0.0` wildcard listener, since a `127.0.0.1`-only bind never accepts traffic addressed to a different local IP (verified directly: `wsl curl http://172.23.96.1:9000/health` — the WSL2→Windows gateway address the cloudflared tunnel itself uses — reaches a different process than `curl http://127.0.0.1:9000/health` did before the fix). Falls back to `'localhost'` only if no LAN adapter is found, which is strictly worse but keeps the watchdog from crashing outright on an offline machine. Also added `Test-StalenessAndLog`: compares the running process's `git_commit` against the repo's current `HEAD` and logs a `BACKEND: STALE` warning on mismatch (deduped — logs once per distinct stale commit, not every 5-minute tick). **Visibility only — it does NOT auto-restart on staleness alone**, since the working tree may legitimately hold uncommitted WIP that isn't meant to go live yet (see the Studio-slice handling below); an actual redeploy is always the explicit `scripts/deploy.ps1` step.
+
+**Fix 3 — `scripts/deploy.ps1` (new): the one command that ships a commit to the public site.** `npm run build` → stop only the `0.0.0.0:9000`-bound process (never touches a separate `127.0.0.1`-only dev process) → start a fresh one via the identical command `keepalive.ps1` itself uses → poll `/health` via the same LAN-IP resolution → verify the reported `git_commit` matches `HEAD`. **Refuses to run against a dirty working tree by default** (`git status --porcelain` on tracked files) — a deploy ships a commit, not whatever happens to be sitting in the working tree; `-AllowDirty` overrides for a deliberate one-off and says so loudly. This directly enforces "don't silently ship uncommitted WIP to the public site," which is exactly the failure mode the untracked Studio-slice work (below) could otherwise have caused.
+
+**The pre-existing Windows Task Scheduler registration (`SustenaKeepalive`, from `scripts/register-task.ps1`) was found already correctly registered and firing every 5 minutes** (`Get-ScheduledTask` confirmed `State=Ready`, a real run 5 minutes prior) — this IS the "persistent, auto-restarting service" the brief asked to set up; no `systemd`-equivalent needed to be introduced since Windows has no native systemd and this polling-watchdog-plus-scheduled-task pattern is the established, working equivalent on this machine. What was missing was never the supervision — it was the watchdog checking the wrong process.
+
+**The deploy performed live, done correctly per the brief's non-destructive/backup-first instructions:**
+1. Backed up `sustena.db` to `backups/sustena_pre_node0_reliability_<timestamp>.db` before touching anything (no DB writes were ever actually made — precautionary, matching every prior slice's own discipline).
+2. The uncommitted, unauthorized "Studio shell slice 1" work (`apps/web/src/pages/StudioPage.jsx`, `pages/studio/`, the 3-line `App.tsx` `/studio` route, the `devui.py` `/definition` route + its test) was **`git stash push -u` on exactly those paths** — not discarded, not committed, not adopted. This produced a working tree byte-identical to committed `main` (plus this pass's own reliability fixes) for the build. `npm run build` from that state produced a fresh bundle (`index-CDI2GVPS.js`) that was verified NOT to reference `/studio` (confirmed absent from the live `/openapi.json`'s route list post-deploy). The stash was popped back at the very end, restoring Bonnie's WIP to the working tree untouched, after the deploy was already verified live.
+3. Stopped the stale `0.0.0.0:9000` process (PID 4204, running since the 07-29 07:08 watchdog-triggered restart) and started a fresh one from the clean-main tree.
+4. **Verified end-to-end against Bonnie's real homestead, live:** `/health` over the public hostname reports `git_commit: 0888a6d1c290` — an exact match for `git rev-parse HEAD`. `GET /orchie/compose` (called directly, read-only, engine-level — the same acceptance-check method established in Slice 13) returns 4 real ranked widgets for pockets `emergency`/`fees`/`WiFi`/`shopping`, state and events byte-unchanged before/after, `rebuild_state() == get_state()` holds. `POST /orchie/capture/infer`'s underlying `infer()` correctly resolves a real narrated effect ("spent 300 on WiFi") to `budget.spend(pocket_name=WiFi, amount=300.0, ...)` against real live pocket names. **Not independently verified: the actual authenticated browser session** — this environment has no stored credential for Bonnie's account and one wasn't requested, so the visual `/orchie` page render (as opposed to the API/engine layer underneath it) was not clicked through in a live logged-in browser this pass. Everything the page would call was proven correct directly.
+
+**Multi-node design note (flagged, not built):** this hosted instance is "node zero" of an eventually-decentralized network. Nothing touched in this pass bakes in a single-global-user assumption beyond what already existed — `get_shared_engine()` is already a single-process singleton over one SQLite file, which is the real thing that will need to change for a genuine multi-node architecture (a second node can't share this file). Not a regression introduced here; flagging it because this pass touched the exact "is node zero healthy" surface where a future multi-node health/discovery mechanism would eventually need to plug in.
+
+**Tests:** 1 new (`test_health_reports_the_running_git_commit`). **1743 tests pass** (1742 + 1). Frontend builds clean (`npm run build`, fresh hash `index-CDI2GVPS.js`, confirmed Studio-free). Live on the public hostname.
+
+**Deploy command, going forward:**
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy.ps1
+```
+Builds the frontend, restarts only the public-facing backend process, and refuses to proceed if it can't verify the result is both healthy and running the commit you think it's running. Requires a clean tree (commit first); pass `-AllowDirty` only for a deliberate uncommitted-WIP test.
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:
@@ -1176,6 +1208,17 @@ curl -X POST http://localhost:9000/devui/preview-widget \
   -H "Authorization: Bearer dev-admin-token" \
   -H "Content-Type: application/json" \
   -d '{"spec_json":{"widget_type":"budget_allocation_card","fields":[{"label":"Pocket","source":"inputs.pocket_name"}],"ctas":[]},"mock_state":{"inputs":{"pocket_name":"food"}}}'
+
+# Deploy to the public hostname (sustena.vyybandasky.online) -- the ONE command,
+# builds the frontend + restarts only the public-facing backend + verifies
+# the result is healthy AND running the commit you think it's running.
+# Requires a clean tree; pass -AllowDirty only for a deliberate WIP test.
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy.ps1
+
+# Check whether the live public backend is stale without deploying anything --
+# curl its own reported commit and diff against HEAD yourself:
+curl https://sustena.vyybandasky.online/health   # look at the git_commit field
+git rev-parse --short=12 HEAD
 ```
 
 ---
