@@ -11,13 +11,16 @@ import android.telephony.SmsMessage;
  * registered statically in AndroidManifest.xml so a real financial SMS is
  * captured even if the app isn't currently running.
  *
- * STRICT PRIVACY FILTER: only messages whose sender matches
- * SmsSenderFilter.isKnownFinancialSender() are ever queued. Android
- * delivers the full SMS_RECEIVED broadcast to every registered receiver
- * regardless of sender -- there is no way to filter before receiving it --
- * so every OTHER message (personal texts, OTPs, anything not M-Pesa/KCB)
- * is read from the intent here and then immediately discarded: never
- * queued, never logged, never touched again.
+ * STRICT PRIVACY FILTER, two checks, BOTH must pass: the sender must match
+ * SmsSenderFilter.isKnownFinancialSender() AND the body must NOT match
+ * SmsSecretFilter.containsSensitiveSecret() (CRITICAL -- a real OTP for a
+ * KCB/M-Pesa action arrives from the exact same sender id as a real
+ * transaction confirmation, so the sender check alone cannot catch it).
+ * Android delivers the full SMS_RECEIVED broadcast to every registered
+ * receiver regardless of sender -- there is no way to filter before
+ * receiving it -- so every message that fails either check is read from
+ * the intent here and then immediately discarded: never queued, never
+ * logged, never touched again.
  *
  * Deliberately does NOT talk to the network -- see SmsQueueStore's own
  * header comment for why (a BroadcastReceiver has a short, ~10s execution
@@ -59,6 +62,11 @@ public class SmsReceiver extends BroadcastReceiver {
             return; // not M-Pesa or KCB -- discarded here, never queued
         }
 
-        SmsQueueStore.enqueue(context, sender, body.toString(), System.currentTimeMillis());
+        String bodyText = body.toString();
+        if (SmsSecretFilter.containsSensitiveSecret(bodyText)) {
+            return; // OTP/verification code -- discarded here, NEVER queued, regardless of sender
+        }
+
+        SmsQueueStore.enqueue(context, sender, bodyText, System.currentTimeMillis());
     }
 }

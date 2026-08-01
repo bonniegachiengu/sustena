@@ -36,7 +36,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sustena.core.sustain_engine import SustainEngine
-from sustena.core.transducer import parse_message
+from sustena.core.transducer import contains_sensitive_secret, parse_message
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,12 @@ logger = logging.getLogger(__name__)
 STATUS_APPLIED = "applied"
 STATUS_REFUSED = "refused"
 STATUS_NEEDS_ATTENTION = "needs_attention"
+
+# NOT a stored row status -- a "rejected" capture is never inserted into
+# ingest_messages at all (see capture()'s own docstring for why). Exists as
+# a constant purely so callers/tests compare against the same string
+# capture() actually returns, not a stored-row terminal state.
+STATUS_REJECTED = "rejected"
 
 
 class IngestEngine:
@@ -208,8 +214,38 @@ class IngestEngine:
         (source_id, raw_payload) more than once processes it exactly once —
         every later call returns the first call's recorded outcome with
         is_duplicate=True, doing no new work and producing no new event.
+
+        CRITICAL, checked FIRST, before anything else touches the database:
+        a message containing an OTP/verification code is refused outright —
+        never inserted into ingest_messages, never echoed back in the
+        response, never reaches parse_message(). This is server-side
+        defense in depth; the primary defense is the Android capture
+        client, which should never send one of these at all (see
+        SmsSecretFilter.java). transducer.py's own parse_message() also
+        checks this and would return status="rejected" if somehow called
+        directly with sensitive text, but capture() cannot rely on that
+        alone — by the time parse_message() ran, the raw text would
+        already need to be in hand, and the one thing this guard exists to
+        prevent is that raw text ever touching persistent storage at all.
         """
         now = datetime.utcnow().isoformat()
+
+        if contains_sensitive_secret(raw_payload):
+            logger.warning(
+                "[ingest] refused a capture containing sensitive content (OTP/verification code) "
+                "-- not stored, not parsed. source=%s sustain=%s",
+                source_id, sustain_id,
+            )
+            self._mark_source_seen(source_id, sustain_id, now)
+            return {
+                "message_id": None,
+                "status": STATUS_REJECTED,
+                "is_duplicate": False,
+                "source_id": source_id,
+                "sustain_id": sustain_id,
+                "reason": "Message contains an OTP/verification code or similar secret — refused, never stored.",
+            }
+
         dedup_key = self._dedup_key(sustain_id, source_id, raw_payload)
 
         # A source is "seen" the moment it communicates, regardless of what

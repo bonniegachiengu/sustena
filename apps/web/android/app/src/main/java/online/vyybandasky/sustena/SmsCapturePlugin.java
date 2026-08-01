@@ -28,12 +28,19 @@ import org.json.JSONObject;
  * SmsCapture.checkPermissions()/requestPermissions() and gets back
  * {sms: "granted"|"denied"|"prompt"|"prompt-with-rationale"}.
  *
- * Two read paths, both applying the IDENTICAL privacy filter
- * (SmsSenderFilter.isKnownFinancialSender) so it can never drift:
+ * Two read paths, both applying the IDENTICAL two-part privacy filter so
+ * it can never drift between them: sender must match
+ * SmsSenderFilter.isKnownFinancialSender() AND the body must NOT match
+ * SmsSecretFilter.containsSensitiveSecret() (CRITICAL -- see that class's
+ * own header comment for why an OTP can't be filtered by sender alone).
  *   readInbox()  -- one-time backfill, queries the SMS content provider
  *                    directly for existing messages.
  *   drainQueue() -- returns (and clears) whatever SmsReceiver captured in
- *                    real time since the last drain.
+ *                    real time since the last drain (SmsReceiver applies
+ *                    the identical two-part filter itself before ever
+ *                    queuing, so nothing here needs to re-check the secret
+ *                    filter on drain -- but readInbox() below does, since
+ *                    it reads the raw inbox directly).
  */
 @CapacitorPlugin(
     name = "SmsCapture",
@@ -71,9 +78,13 @@ public class SmsCapturePlugin extends Plugin {
                     if (!SmsSenderFilter.isKnownFinancialSender(sender)) {
                         continue; // not M-Pesa or KCB -- never returned to JS
                     }
+                    String messageBody = cursor.getString(bodyIdx);
+                    if (SmsSecretFilter.containsSensitiveSecret(messageBody)) {
+                        continue; // OTP/verification code -- NEVER returned to JS, regardless of sender
+                    }
                     JSObject item = new JSObject();
                     item.put("sender", sender);
-                    item.put("body", cursor.getString(bodyIdx));
+                    item.put("body", messageBody);
                     item.put("timestampMs", cursor.getLong(dateIdx));
                     results.put(item);
                 }

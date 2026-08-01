@@ -89,6 +89,75 @@ class TestMappedCaptureApplies:
         assert engine.rebuild_state(homestead_sid) == engine.get_state(homestead_sid)
 
 
+# ── CRITICAL: OTP/secret content is refused before it ever touches the DB ──
+# Server-side defense in depth (the primary defense is the Android capture
+# client, which should never send one of these at all). Even if it does,
+# capture() must never persist the raw text -- checked directly against the
+# ingest_messages table, not just the returned status, since the whole
+# point is that the OTP text never lands in storage regardless of what the
+# response says.
+
+OTP_MESSAGE = (
+    "Your card ending with 0319 has initiated an online transaction of USD 113.8 "
+    "at ANTHROPIC. Your OTP is 083345. DO NOT SHARE WITH ANYONE."
+)
+
+
+class TestSensitiveSecretNeverPersisted:
+    @pytest.mark.asyncio
+    async def test_capture_returns_rejected_status(self, ingest, homestead_sid):
+        result = await ingest.capture("device-1", homestead_sid, OTP_MESSAGE)
+        assert result["status"] == "rejected"
+
+    @pytest.mark.asyncio
+    async def test_rejected_response_never_echoes_the_raw_text(self, ingest, homestead_sid):
+        # The response itself must not leak the OTP text back to the
+        # caller -- unlike a normal capture response, which does include
+        # raw_payload.
+        result = await ingest.capture("device-1", homestead_sid, OTP_MESSAGE)
+        assert "raw_payload" not in result
+        assert "083345" not in str(result)
+
+    @pytest.mark.asyncio
+    async def test_no_row_is_ever_inserted_into_ingest_messages(self, ingest, engine, homestead_sid):
+        before = engine._db.execute(
+            "SELECT COUNT(*) FROM ingest_messages WHERE sustain_id = ?", (homestead_sid,)
+        ).fetchone()[0]
+        await ingest.capture("device-1", homestead_sid, OTP_MESSAGE)
+        after = engine._db.execute(
+            "SELECT COUNT(*) FROM ingest_messages WHERE sustain_id = ?", (homestead_sid,)
+        ).fetchone()[0]
+        assert after == before
+
+    @pytest.mark.asyncio
+    async def test_no_state_or_event_side_effects(self, ingest, engine, homestead_sid):
+        state_before = engine.get_state(homestead_sid)
+        events_before = engine.get_events(homestead_sid, limit=50)
+        await ingest.capture("device-1", homestead_sid, OTP_MESSAGE)
+        assert engine.get_state(homestead_sid) == state_before
+        assert engine.get_events(homestead_sid, limit=50) == events_before
+
+    @pytest.mark.asyncio
+    async def test_source_is_still_marked_seen(self, ingest, homestead_sid):
+        # Staleness tracking is about whether the device/app is still
+        # communicating, which is orthogonal to whether any one message's
+        # CONTENT was accepted -- a source that only ever sends OTPs (which
+        # would be unusual, but not impossible if the sender filter on
+        # Android were ever misconfigured) should still not be reported
+        # falsely stale.
+        result = await ingest.capture("device-1", homestead_sid, OTP_MESSAGE)
+        sources = ingest.get_sources(homestead_sid)
+        assert any(s["source_id"] == "device-1" for s in sources)
+
+    @pytest.mark.asyncio
+    async def test_a_real_transaction_from_the_same_source_still_works_after_a_rejection(self, ingest, engine, homestead_sid):
+        # A rejected capture must not corrupt or block subsequent real
+        # captures from the same source.
+        await ingest.capture("device-1", homestead_sid, OTP_MESSAGE)
+        result = await ingest.capture("device-1", homestead_sid, RECEIVED)
+        assert result["status"] == "applied"
+
+
 # ── Idempotent intake: replay lands on the fold exactly once ────────────────
 
 class TestDedupAndReplay:

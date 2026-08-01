@@ -154,6 +154,30 @@ class TestCapture:
         )
         assert r.json()["data"]["status"] == "needs_attention"
 
+    def test_otp_capture_is_rejected_over_the_real_http_route(self, client, user, sustain):
+        # CRITICAL, defense in depth over the actual HTTP path (not just the
+        # engine layer): an OTP/verification-code message must be refused
+        # by the real POST /capture route, must not appear afterward in
+        # GET /messages, and the response must never echo the OTP digits.
+        headers, _ = user
+        otp_text = (
+            "Your card ending with 0319 has initiated an online transaction of USD 113.8 "
+            "at ANTHROPIC. Your OTP is 083345. DO NOT SHARE WITH ANYONE."
+        )
+        r = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "d1", "sustain_id": sustain, "raw_payload": otp_text},
+            headers=headers,
+        )
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert data["status"] == "rejected"
+        assert "083345" not in r.text
+
+        listed = client.get(f"/api/v1/ingest/messages?sustain_id={sustain}", headers=headers)
+        assert "083345" not in listed.text
+        assert all("otp" not in (m.get("raw_payload") or "").lower() for m in listed.json()["data"]["messages"])
+
 
 # ── GET /messages, GET /messages/{id}, POST /messages/{id}/resolve ──────────
 
