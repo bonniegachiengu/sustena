@@ -1039,6 +1039,27 @@ APK rebuilt: `versionCode` 3→4, `versionName` 1.0.2→1.1.0, same `application
 
 ---
 
+### KCB transducer tuned against REAL SMS + critical OTP rejection (1 Aug 2026)
+
+Bonnie sent real (redacted-by-substitution: personal names replaced with placeholder Kenyan names, amounts/dates/refs/masks kept exactly as received) KCB and M-Pesa SMS. **None of the earlier speculative KCB regex set matched any of them** — confirmed directly before replacing, exactly the outcome that set's own "UNVERIFIED" disclosure existed to warn about. Replaced wholesale, not patched around.
+
+**New KCB shapes** (`_parse_kcb`): received-via-KCB (mapped, income), card transactions in KES *or* USD (`parsed_unmapped`, currency-aware reason text — "Avail balance" is always KES even for a USD purchase), KCB Mobile Loan disbursement (mapped, with fee + loan_balance context), KCB and Vooma-wallet loan repayments (`parsed_unmapped`, `sub_source="vooma"` for the latter), a balance snapshot, and four loan-status notices (overdue/arrears/default/due-today) — all four genuinely informational (`direction: "none"`, never mapped) since nothing moved; their figure grows via accruing interest on each occurrence, which the existing dedup_key (hash of the full raw text) already handles correctly with zero special-casing — a changed balance is honestly a new, distinct, worth-resurfacing capture, not something needing bespoke idempotency logic.
+
+**Three "ambiguous" shapes** (Bonnie's own framing: look like Vooma/KCB-app notifications of M-Pesa-network activity) classified under `kcb` as a **disclosed best-judgment call** (`kcb_bridge_*` parser names) — not a verified sender classification. Two other, Bonnie-confirmed M-Pesa→KCB bridge shapes (Ksh sent to a KCB paybill / a named KCB account) added to `_parse_mpesa` per his explicit instruction to keep them under the mpesa source.
+
+**CRITICAL, security — OTP/verification-code rejection, two independent server-side layers plus the real primary defense on Android:** a real OTP for a KCB/M-Pesa action arrives from the *identical* sender id as a real transaction confirmation, so this can never be a sender-based check — it has to be content-based, checked before anything else touches the message.
+- `transducer.py`: `contains_sensitive_secret()` checked FIRST in `parse_message()`, before any parser — the three-tier contract is now four-tier (`rejected` added).
+- `ingest_engine.py`: `capture()` checks the identical guard **before** the raw text is ever inserted into `ingest_messages` — necessary because by the time `parse_message()` would run, the row would already need to exist. A rejected capture's response has no `raw_payload` key at all — verified directly against a `SELECT COUNT(*)` on the table and the response body, not just the returned status string.
+- **Android (primary defense — the OTP should never leave the device at all):** `SmsSecretFilter.java`, applied in *both* `SmsReceiver` (real-time) and `SmsCapturePlugin.readInbox()` (backfill), **in addition to** the existing sender filter — a message must pass both checks.
+
+Verified live against the real deployed API (throwaway account): a real KCB USD card capture parsed correctly end-to-end (`kcb_card`, currency=USD, honest needs-attention reason); the real OTP sample was rejected (`status: "rejected"`, no `message_id`), and the OTP digits were confirmed absent from the subsequent messages listing.
+
+**APK:** `versionCode` 4→5, `versionName` 1.1.0→1.1.1, same `applicationId` (installs as an update). No JS/web changes this pass (backend + native Java only) — verified via `apksigner verify --verbose` (Verifies, v2) and `zipalign -c 4` (clean).
+
+**Tests:** 26 new/replaced (`test_transducer.py`, `test_ingest_engine.py` — including the direct DB-row-count proof — and `test_ingest_routes.py`, the real HTTP route). **1791 backend tests pass**.
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:
