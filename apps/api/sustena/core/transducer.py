@@ -91,6 +91,68 @@ _MPESA_WITHDRAW_RE = re.compile(
 )
 
 
+# ── KCB Kenya SMS alert shapes ──────────────────────────────────────────────
+# UNVERIFIED AGAINST REAL KCB TEXT — this is a best-effort structural guess
+# based on the commonly-documented shape of Kenyan bank SMS alerts (fixed
+# keyword anchors: CREDITED/DEBITED/transferred/charged/balance, a masked
+# account number, "KES <amount>", a date, an optional Ref, an "Available
+# balance is KES <balance>" tail), NOT a real KCB message Bonnie has
+# actually received. Every group is named and each pattern is isolated
+# specifically so this is cheap to retune against 2–3 real (redacted) KCB
+# SMS once he pastes them — expect at least the exact keyword wording, the
+# account-mask format (****1234 vs XXXXXX1234 vs last-4-only), and the
+# date format to need adjustment; the group *names* (amount/account/date/
+# ref/balance/counterparty) are the stable contract the rest of this
+# module and its tests are written against, so retuning should only ever
+# touch the regex bodies below, never parse_message()'s callers.
+#
+# Ordering: CREDIT first (unambiguous, mirrors M-Pesa's own received-first
+# ordering), then DEBIT/TRANSFER/FEE (all "money left the account", order
+# between them doesn't matter since their keyword anchors don't overlap),
+# then BALANCE last (a standalone balance inquiry has no verb like
+# credited/debited/transferred/charged before it, so nothing above it
+# could accidentally shadow it, but it's the least specific shape and
+# reads more naturally last).
+
+_KCB_CREDIT_RE = re.compile(
+    r"A/?C\s*(?P<account>[\dXx*]+)\s+has been credited(?:\s+with)?\s+"
+    r"KES\s*(?P<amount>[\d,]+\.?\d*)\s+on\s+(?P<date>\S+)"
+    r"(?:.*?Ref:?\s*(?P<ref>[A-Za-z0-9]+))?"
+    r".*?(?:Available\s+)?[Bb]al(?:ance)?\s*(?:is\s*)?KES\s*(?P<balance>[\d,]+\.?\d*)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_KCB_DEBIT_RE = re.compile(
+    r"A/?C\s*(?P<account>[\dXx*]+)\s+has been debited(?:\s+with)?\s+"
+    r"KES\s*(?P<amount>[\d,]+\.?\d*)"
+    r"(?:\s+for\s+(?P<counterparty>[A-Za-z0-9 ]+?))?\s+on\s+(?P<date>\S+)"
+    r"(?:.*?Ref:?\s*(?P<ref>[A-Za-z0-9]+))?"
+    r".*?(?:Available\s+)?[Bb]al(?:ance)?\s*(?:is\s*)?KES\s*(?P<balance>[\d,]+\.?\d*)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_KCB_TRANSFER_RE = re.compile(
+    r"KES\s*(?P<amount>[\d,]+\.?\d*)\s+has been transferred\s+from\s+A/?C\s*(?P<account>[\dXx*]+)\s+"
+    r"to\s+(?P<counterparty>[A-Za-z ]+?)\s*-?\s*(?P<phone>2?0?\d{9})?\s+on\s+(?P<date>\S+)"
+    r"(?:.*?Ref:?\s*(?P<ref>[A-Za-z0-9]+))?"
+    r".*?(?:Available\s+)?[Bb]al(?:ance)?\s*(?:is\s*)?KES\s*(?P<balance>[\d,]+\.?\d*)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_KCB_FEE_RE = re.compile(
+    r"A/?C\s*(?P<account>[\dXx*]+)\s+has been charged\s+"
+    r"KES\s*(?P<amount>[\d,]+\.?\d*)\s+as\s+(?P<fee_type>[A-Za-z0-9 /]+?)\s+on\s+(?P<date>\S+)"
+    r".*?(?:Available\s+)?[Bb]al(?:ance)?\s*(?:is\s*)?KES\s*(?P<balance>[\d,]+\.?\d*)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_KCB_BALANCE_RE = re.compile(
+    r"A/?C\s*(?P<account>[\dXx*]+)\s+balance\s+as\s+at\s+(?P<date>\S+[^\n]*?)\s+is\s+"
+    r"KES\s*(?P<balance>[\d,]+\.?\d*)",
+    re.IGNORECASE,
+)
+
+
 def _to_float(amount_str: str) -> float:
     return float(amount_str.replace(",", ""))
 
@@ -184,7 +246,96 @@ def _parse_mpesa(text: str) -> TransductionResult | None:
     return None
 
 
-_PARSERS: list[Callable[[str], "TransductionResult | None"]] = [_parse_mpesa]
+def _parse_kcb(text: str) -> TransductionResult | None:
+    m = _KCB_CREDIT_RE.search(text)
+    if m:
+        amount = _to_float(m.group("amount"))
+        return TransductionResult(
+            status="mapped",
+            operator_name="budget.record_income",
+            operator_params={"amount": amount, "source": "KCB", "frequency": "once"},
+            external_ref=m.group("ref"),
+            parsed_fields={
+                "direction": "received", "amount": amount,
+                "account": m.group("account"),
+                "balance_after": _to_float(m.group("balance")),
+            },
+            reason="Money credited to KCB account — mapped to budget.record_income (unambiguous; income always credits liquid balance).",
+            parser_name="kcb_credit",
+        )
+
+    m = _KCB_DEBIT_RE.search(text)
+    if m:
+        amount = _to_float(m.group("amount"))
+        counterparty = (m.group("counterparty") or "").strip() or "KCB debit"
+        return TransductionResult(
+            status="parsed_unmapped",
+            external_ref=m.group("ref"),
+            parsed_fields={
+                "direction": "sent", "amount": amount, "counterparty": counterparty,
+                "account": m.group("account"),
+                "balance_after": _to_float(m.group("balance")),
+            },
+            reason=_needs_pocket_reason("KCB debit", amount, counterparty),
+            parser_name="kcb_debit",
+        )
+
+    m = _KCB_TRANSFER_RE.search(text)
+    if m:
+        amount = _to_float(m.group("amount"))
+        counterparty = m.group("counterparty").strip()
+        return TransductionResult(
+            status="parsed_unmapped",
+            external_ref=m.group("ref"),
+            parsed_fields={
+                "direction": "sent", "amount": amount, "counterparty": counterparty,
+                "account": m.group("account"),
+                "phone": m.group("phone"),
+                "balance_after": _to_float(m.group("balance")),
+            },
+            reason=_needs_pocket_reason("KCB transfer", amount, counterparty),
+            parser_name="kcb_transfer",
+        )
+
+    m = _KCB_FEE_RE.search(text)
+    if m:
+        amount = _to_float(m.group("amount"))
+        fee_type = m.group("fee_type").strip()
+        return TransductionResult(
+            status="parsed_unmapped",
+            parsed_fields={
+                "direction": "sent", "amount": amount, "counterparty": fee_type,
+                "account": m.group("account"),
+                "balance_after": _to_float(m.group("balance")),
+            },
+            reason=(
+                f"KCB {fee_type} fee of KES {amount:,.0f} recognised, but which pocket "
+                "to charge it against isn't determined automatically — resolve manually."
+            ),
+            parser_name="kcb_fee",
+        )
+
+    m = _KCB_BALANCE_RE.search(text)
+    if m:
+        # Informational only — no money moved, so there is nothing to map
+        # AND nothing that needs a pocket decision either. Still surfaced
+        # as parsed_unmapped (not silently dropped as unparsed) so it's
+        # visible and acknowledgeable in the same needs-attention queue,
+        # honestly labelled as informational rather than actionable.
+        return TransductionResult(
+            status="parsed_unmapped",
+            parsed_fields={
+                "direction": "none", "account": m.group("account"),
+                "balance_after": _to_float(m.group("balance")),
+            },
+            reason=f"KCB balance inquiry — informational only, no pocket decision needed (balance: KES {_to_float(m.group('balance')):,.0f}).",
+            parser_name="kcb_balance",
+        )
+
+    return None
+
+
+_PARSERS: list[Callable[[str], "TransductionResult | None"]] = [_parse_mpesa, _parse_kcb]
 
 
 def parse_message(raw_text: str) -> TransductionResult:

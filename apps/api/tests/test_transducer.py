@@ -47,6 +47,39 @@ WITHDRAW_NO_AGENT_PREFIX = (
     "on 20/7/26 at 7:00 PM. New M-PESA balance is Ksh6,850.00"
 )
 
+# ── KCB samples — CONSTRUCTED, NOT REAL KCB TEXT ────────────────────────────
+# These are the author's best-effort guess at common Kenyan bank SMS
+# structure, built specifically to exercise the kcb_* regex groups in
+# transducer.py — they are NOT verified against an actual KCB message. If
+# real KCB wording differs (exact keywords, account-mask format, date
+# format), these samples AND the regexes both need retuning together; that
+# retuning is expected, disclosed follow-up work, not a defect in this
+# test suite today.
+
+KCB_CREDIT = (
+    "Dear Customer, your A/C ****1234 has been credited with KES 5,000.00 "
+    "on 01-AUG-26. Ref: FT26213ABCDE. Available balance is KES 15,000.00. -KCB"
+)
+
+KCB_DEBIT = (
+    "Dear Customer, your A/C ****1234 has been debited with KES 2,500.00 "
+    "for KPLC PREPAID on 01-AUG-26. Ref: FT26213XYZAB. Available balance is KES 12,500.00. -KCB"
+)
+
+KCB_TRANSFER = (
+    "Dear Customer, KES 1,000.00 has been transferred from A/C ****1234 to "
+    "MARY WANJIRU - 0798765432 on 01-AUG-26. Ref: FT26213QRSTU. Available balance is KES 11,050.00. -KCB"
+)
+
+KCB_FEE = (
+    "Dear Customer, your A/C ****1234 has been charged KES 30.00 as Excise Duty "
+    "on 01-AUG-26. Available balance is KES 11,020.00. -KCB"
+)
+
+KCB_BALANCE = (
+    "Dear Customer, your A/C ****1234 balance as at 01-AUG-26 10:00AM is KES 11,020.00. -KCB"
+)
+
 
 class TestMapped:
     def test_received_maps_to_record_income(self):
@@ -130,6 +163,103 @@ class TestParsedUnmappedNeverGuessesAPocket:
         for text in (PAYBILL, BUYGOODS, SENT, WITHDRAW):
             result = parse_message(text)
             assert "pocket" in result.reason.lower()
+
+
+# ── KCB — exercises the parser logic against CONSTRUCTED samples (see the
+# KCB_* constants' own docstring above) — proves the regex/dedup/three-tier
+# mechanics work, does NOT prove the wording matches a real KCB message. ──
+
+class TestKCBCreditIsMapped:
+    def test_credit_maps_to_record_income(self):
+        result = parse_message(KCB_CREDIT)
+        assert result.status == "mapped"
+        assert result.operator_name == "budget.record_income"
+        assert result.operator_params["amount"] == 5000.0
+        assert result.operator_params["source"] == "KCB"
+        assert result.operator_params["frequency"] == "once"
+
+    def test_credit_external_ref_and_parsed_fields(self):
+        result = parse_message(KCB_CREDIT)
+        assert result.external_ref == "FT26213ABCDE"
+        assert result.parsed_fields["direction"] == "received"
+        assert result.parsed_fields["account"] == "****1234"
+        assert result.parsed_fields["balance_after"] == 15000.0
+
+    def test_credit_parser_name(self):
+        assert parse_message(KCB_CREDIT).parser_name == "kcb_credit"
+
+
+class TestKCBParsedUnmappedNeverGuessesAPocket:
+    def test_debit_is_parsed_unmapped(self):
+        result = parse_message(KCB_DEBIT)
+        assert result.status == "parsed_unmapped"
+        assert result.operator_name is None
+        assert result.operator_params == {}
+        assert result.parsed_fields["amount"] == 2500.0
+        assert result.parsed_fields["counterparty"] == "KPLC PREPAID"
+        assert result.external_ref == "FT26213XYZAB"
+
+    def test_transfer_is_parsed_unmapped(self):
+        result = parse_message(KCB_TRANSFER)
+        assert result.status == "parsed_unmapped"
+        assert result.parsed_fields["amount"] == 1000.0
+        assert result.parsed_fields["counterparty"] == "MARY WANJIRU"
+        assert result.parsed_fields["phone"] == "0798765432"
+        assert result.external_ref == "FT26213QRSTU"
+
+    def test_fee_is_parsed_unmapped(self):
+        result = parse_message(KCB_FEE)
+        assert result.status == "parsed_unmapped"
+        assert result.parsed_fields["amount"] == 30.0
+        assert result.parsed_fields["counterparty"] == "Excise Duty"
+
+    def test_all_parsed_unmapped_reasons_mention_pocket(self):
+        for text in (KCB_DEBIT, KCB_TRANSFER, KCB_FEE):
+            result = parse_message(text)
+            assert "pocket" in result.reason.lower()
+
+    def test_kcb_never_mapped_to_an_operator(self):
+        # Only credit (unambiguous income) is ever mapped -- every KCB
+        # outbound-money shape stays parsed_unmapped, same discipline as
+        # every M-Pesa outbound shape.
+        for text in (KCB_DEBIT, KCB_TRANSFER, KCB_FEE):
+            assert parse_message(text).operator_name is None
+
+
+class TestKCBBalanceIsInformationalOnly:
+    def test_balance_is_parsed_unmapped_not_mapped(self):
+        result = parse_message(KCB_BALANCE)
+        assert result.status == "parsed_unmapped"
+        assert result.operator_name is None
+
+    def test_balance_has_no_direction_or_amount(self):
+        # A standalone balance inquiry represents no money movement --
+        # there is no "amount" to attach to a pocket decision at all,
+        # unlike every other parsed_unmapped KCB/M-Pesa shape.
+        result = parse_message(KCB_BALANCE)
+        assert result.parsed_fields["direction"] == "none"
+        assert "amount" not in result.parsed_fields
+        assert result.parsed_fields["balance_after"] == 11020.0
+
+    def test_balance_reason_says_informational(self):
+        result = parse_message(KCB_BALANCE)
+        assert "informational" in result.reason.lower()
+
+
+class TestKCBDoesNotShadowMpesa:
+    def test_mpesa_messages_still_parse_as_mpesa(self):
+        # Adding _parse_kcb to _PARSERS must never change an M-Pesa
+        # message's outcome -- mpesa is tried first, and kcb's patterns
+        # anchor on "A/C"/"KES"/"-KCB"-style wording that never appears
+        # in an M-Pesa confirmation.
+        for text in (RECEIVED, PAYBILL, BUYGOODS, SENT, WITHDRAW):
+            result = parse_message(text)
+            assert result.parser_name.startswith("mpesa_")
+
+    def test_kcb_determinism(self):
+        a = parse_message(KCB_CREDIT)
+        b = parse_message(KCB_CREDIT)
+        assert a == b
 
 
 class TestUnparsed:
