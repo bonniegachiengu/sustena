@@ -795,6 +795,80 @@ class TestSustainOperators:
 
 
 # ---------------------------------------------------------------------------
+# GET /devui/sustain/{id}/definition  (Modeling Studio — Slice 1)
+# ---------------------------------------------------------------------------
+
+class TestSustainDefinition:
+    def test_requires_auth(self, client):
+        r = client.get("/devui/sustain/homestead.bonnie/definition")
+        assert r.status_code == 401
+
+    def test_unknown_sustain_returns_honest_empty(self, client):
+        r = client.get("/devui/sustain/nonexistent.sustain/definition", headers=AUTH_HEADER)
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert data["found"] is False
+        assert data["state_schema"] == {}
+        assert data["invariants"] == []
+        assert data["declared_children"] == []
+        assert data["curated_widgets"] == []
+
+    def test_real_homestead_definition_has_real_shape(self, client):
+        real_user_id = client.get("/api/v1/users/me", headers=AUTH_HEADER).json()["data"]["user_id"]
+        sid = client.post(
+            "/devui/sustains",
+            json={"template_id": "homestead", "user_id": real_user_id},
+            headers=AUTH_HEADER,
+        ).json()["data"]["sustain_id"]
+
+        r = client.get(f"/devui/sustain/{sid}/definition", headers=AUTH_HEADER)
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert data["found"] is True
+        assert data["sustain_id"] == sid
+        assert data["id"] == "homestead"
+        assert "finances" in data["state_schema"]
+        assert any(inv["id"] == "liquid_non_negative" for inv in data["invariants"])
+        assert isinstance(data["operators"], list) and len(data["operators"]) > 0
+        assert "mentor" in data["operatives"]
+        assert len(data["declared_children"]) == 6  # Bonnie/Cira/Epha/Mum/Kui/Frankie slots
+        assert any(w["id"] == "household_rollup_summary" for w in data["curated_widgets"])
+
+    def test_response_excludes_compiled_predicate_internals(self, client):
+        # _compiled_invariants/_invariant_compile_errors hold live predicate
+        # AST objects (attached by _compile_spec_invariants) and must never
+        # leak through this JSON route.
+        real_user_id = client.get("/api/v1/users/me", headers=AUTH_HEADER).json()["data"]["user_id"]
+        sid = client.post(
+            "/devui/sustains",
+            json={"template_id": "homestead", "user_id": real_user_id},
+            headers=AUTH_HEADER,
+        ).json()["data"]["sustain_id"]
+
+        r = client.get(f"/devui/sustain/{sid}/definition", headers=AUTH_HEADER)
+        data = r.json()["data"]
+        assert "_compiled_invariants" not in data
+        assert "_invariant_compile_errors" not in data
+
+    def test_declared_invariants_are_the_raw_expression_strings(self, client):
+        # Distinct from evaluate_constraints()'s compiled/evaluated results —
+        # this route returns the DECLARED spec list (id/expression/description),
+        # not a runtime pass/fail evaluation.
+        real_user_id = client.get("/api/v1/users/me", headers=AUTH_HEADER).json()["data"]["user_id"]
+        sid = client.post(
+            "/devui/sustains",
+            json={"template_id": "homestead", "user_id": real_user_id},
+            headers=AUTH_HEADER,
+        ).json()["data"]["sustain_id"]
+
+        r = client.get(f"/devui/sustain/{sid}/definition", headers=AUTH_HEADER)
+        invariants = r.json()["data"]["invariants"]
+        for inv in invariants:
+            assert "expression" in inv
+            assert "status" not in inv  # not the evaluated form
+
+
+# ---------------------------------------------------------------------------
 # GET /devui/templates  +  POST /devui/sustains  (engine-backed create)
 # ---------------------------------------------------------------------------
 

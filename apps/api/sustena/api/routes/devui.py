@@ -14,6 +14,7 @@ POST /devui/simulate                  — forward-simulate a proposal
 WS   /devui/state-stream?sustain_id=  — real-time state push
 GET  /devui/sustain/{id}/graph        — operative council graph for a sustain
 GET  /devui/sustain/{id}/operators    — operators allowed by the sustain spec
+GET  /devui/sustain/{id}/definition   — raw structural definition (Studio Edit-inspect + sustain graph)
 
 Legacy path-param routes are kept for backwards compatibility:
 GET  /devui/sustain/{id}/state
@@ -1583,7 +1584,7 @@ async def get_sustain_operators(
     return ok({"sustain_id": sustain_id, "operators": result})
 
 
-# ── 14. Pawa meter (§4L) — read-only aggregates over real metered runs ───────
+# ── 13b. Pawa meter (§4L) — read-only aggregates over real metered runs ───────
 # The odometer's dashboard: per-operator average, per-sustain total,
 # per-principal total. Every number here is a real SUM/AVG over
 # pawa_meter_log rows written by execute_operator — never fabricated,
@@ -1616,3 +1617,81 @@ async def get_sustain_pawa(sustain_id: str, _: dict = Depends(get_current_user))
     from sustena.core.engine_singleton import get_shared_engine
     engine = get_shared_engine()
     return ok(engine.get_sustain_pawa_total(sustain_id))
+
+
+# ── 14. GET /devui/sustain/{id}/definition ────────────────────────────────────
+# The Modeling Studio's Edit-inspect view and visual sustain graph both need
+# the raw STRUCTURAL definition (dimensions, invariants, composition,
+# curated widgets) — something no existing route returns whole. This is a
+# thin passthrough over the already-built engine.get_spec(); it does not
+# duplicate any engine logic, it only whitelists the JSON-safe declared
+# fields out of the cached spec dict (the spec also carries
+# "_compiled_invariants"/"_invariant_compile_errors", which hold live
+# predicate AST objects attached by _compile_spec_invariants() and are not
+# JSON-serializable — those are deliberately excluded here in favour of the
+# raw declared "invariants" list every spec file already has).
+
+@router.get("/sustain/{sustain_id}/definition", summary="Raw structural definition for the Studio's Edit-inspect view + sustain graph")
+async def get_sustain_definition(
+    sustain_id: str,
+    _: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Returns the declared shape of a sustain's definition — state schema,
+    invariants (the viable region V), declared operators/operatives,
+    composition (declared_children + aggregates), and curated widgets —
+    for any sustain, disk-templated (homestead, habitat) or user-defined
+    (Slice 6), since both resolve through the same engine.get_spec().
+
+    Honest empty: an unknown/unseeded sustain_id returns found=false with
+    every list empty, not a 404 — the Studio can render "nothing to show
+    yet" without a special-case error branch.
+    """
+    spec = None
+    try:
+        from sustena.core.engine_singleton import get_shared_engine
+        engine = get_shared_engine()
+        spec = engine.get_spec(sustain_id)
+    except Exception as exc:
+        logger.debug("get_sustain_definition(%s) engine error: %s", sustain_id, exc)
+
+    if spec is None:
+        return ok({
+            "sustain_id": sustain_id,
+            "found": False,
+            "id": None,
+            "display_name": None,
+            "description": None,
+            "version": None,
+            "state_schema": {},
+            "invariants": [],
+            "enforcement": {},
+            "operators": [],
+            "operatives": {},
+            "declared_children": [],
+            "aggregates": [],
+            "curated_widgets": [],
+            "access_policy": {},
+        })
+
+    operatives_cfg = spec.get("operatives", {})
+    if not isinstance(operatives_cfg, dict):
+        operatives_cfg = {name: {} for name in operatives_cfg}
+
+    return ok({
+        "sustain_id": sustain_id,
+        "found": True,
+        "id": spec.get("id"),
+        "display_name": spec.get("display_name"),
+        "description": spec.get("description"),
+        "version": spec.get("version"),
+        "state_schema": spec.get("state_schema", {}),
+        "invariants": spec.get("invariants", []),
+        "enforcement": spec.get("enforcement", {}),
+        "operators": spec.get("operators", []),
+        "operatives": operatives_cfg,
+        "declared_children": spec.get("declared_children", []),
+        "aggregates": spec.get("aggregates", []),
+        "curated_widgets": spec.get("curated_widgets", []),
+        "access_policy": spec.get("access_policy", {}),
+    })

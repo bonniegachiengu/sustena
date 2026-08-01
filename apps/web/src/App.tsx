@@ -50,6 +50,7 @@ import ArenaPage from './pages/ArenaPage'
 import DocsPage from './pages/DocsPage'
 import OrchePanel from './pages/OrchePanel'
 import OrchieShell from './pages/OrchieShell'
+import StudioPage from './pages/StudioPage'
 
 // The native Android wrapper (Capacitor) opens the same routes as the
 // hosted web app, but "/" is Mycelium — the orchestrator/dev cockpit,
@@ -74,6 +75,8 @@ function RootApp() {
         <Route path="/orchie-panel" element={<OrchePanel />} />
         {/* Orchie — the new curated, phone-first, event-first surface (Curated UI engine, §4H) */}
         <Route path="/orchie" element={<OrchieShell />} />
+        {/* Studio — the desktop Modeling Studio: one sustain, five verbs, one coherent frame */}
+        <Route path="/studio" element={<StudioPage />} />
         {/* Arena — standalone with its own full header */}
         <Route path="/arena" element={<ArenaPage />} />
         {/* Lore section — shared top nav via LoreLayout */}
