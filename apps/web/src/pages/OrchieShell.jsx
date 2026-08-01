@@ -19,30 +19,134 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { api } from '../lib/api';
 
-function useSustainId() {
-  const [searchParams] = useSearchParams();
+const LAST_SUSTAIN_KEY = 'sustena_orchie_last_sustain';
+
+/**
+ * Which sustain Orchie composes for, plus the full list for a picker.
+ *
+ * The bug this replaces: the old version defaulted to `list[0]` from
+ * GET /devui/sustains, which orders `created_at DESC` (newest first) --
+ * for an owner whose Homestead predates their habitats (the normal case,
+ * since habitats get provisioned onto an existing Homestead), that put a
+ * just-created, curated-widget-less habitat first and the actual
+ * Homestead (with real widgets) further down. compose() then honestly
+ * returned "no curated widgets declared for this sustain yet" -- correct
+ * for THAT sustain, wrong as a silent default no one could see or change.
+ *
+ * Fix, in priority order:
+ *   1. `?sustain=` in the URL always wins (explicit, shareable, unchanged).
+ *   2. A previously-chosen sustain (localStorage) if it's still in the
+ *      user's list -- fast path for a returning visit, no re-probing.
+ *   3. First-ever visit: probe every owned sustain via the existing,
+ *      read-only GET /orchie/compose (budget=1, cheap) in parallel, and
+ *      default to whichever has the most curated widgets eligible
+ *      (`candidates_considered`) -- generic, no "homestead" string
+ *      anywhere, works for any future sustain type the same way.
+ * The choice is always visible and always changeable via the picker
+ * (`SustainPicker` below), which is the other half of this fix -- a
+ * silently-wrong default with no way to override it is the actual bug,
+ * not just which sustain happened to be picked.
+ */
+function useSustainPicker() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const explicit = searchParams.get('sustain');
-  const [sustainId, setSustainId] = useState(explicit);
-  const [resolving, setResolving] = useState(!explicit);
+  const [sustains, setSustains] = useState([]);
+  const [sustainId, setSustainIdState] = useState(explicit);
+  const [resolving, setResolving] = useState(true);
 
   useEffect(() => {
-    if (explicit) { setSustainId(explicit); setResolving(false); return; }
     let cancelled = false;
     (async () => {
       try {
         const resp = await api.get('/devui/sustains');
         const list = resp?.data?.sustains || [];
-        if (!cancelled) setSustainId(list[0]?.id || null);
+        if (cancelled) return;
+        setSustains(list);
+
+        if (explicit) {
+          setSustainIdState(explicit);
+          setResolving(false);
+          return;
+        }
+
+        const stored = typeof window !== 'undefined' ? window.localStorage.getItem(LAST_SUSTAIN_KEY) : null;
+        if (stored && list.some(s => s.id === stored)) {
+          setSustainIdState(stored);
+          setResolving(false);
+          return;
+        }
+
+        if (list.length === 0) {
+          setSustainIdState(null);
+          setResolving(false);
+          return;
+        }
+        if (list.length === 1) {
+          setSustainIdState(list[0].id);
+          setResolving(false);
+          return;
+        }
+
+        // Multiple sustains, no explicit/stored choice: probe each one's
+        // real widget eligibility rather than guessing from list order.
+        const probes = await Promise.allSettled(
+          list.map(s => api.get(`/orchie/compose?sustain_id=${encodeURIComponent(s.id)}&device=phone&budget=1`))
+        );
+        let best = list[0];
+        let bestScore = -1;
+        probes.forEach((res, i) => {
+          const considered = res.status === 'fulfilled' ? (res.value?.candidates_considered || 0) : -1;
+          if (considered > bestScore) { bestScore = considered; best = list[i]; }
+        });
+        if (!cancelled) {
+          setSustainIdState(best.id);
+          setResolving(false);
+        }
       } catch {
-        if (!cancelled) setSustainId(null);
-      } finally {
-        if (!cancelled) setResolving(false);
+        if (!cancelled) { setSustainIdState(null); setResolving(false); }
       }
     })();
     return () => { cancelled = true; };
-  }, [explicit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  return { sustainId, resolving };
+  const chooseSustain = useCallback((id) => {
+    setSustainIdState(id);
+    if (typeof window !== 'undefined') window.localStorage.setItem(LAST_SUSTAIN_KEY, id);
+    const next = new URLSearchParams(searchParams);
+    next.set('sustain', id);
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  return { sustainId, sustains, resolving, chooseSustain };
+}
+
+function SustainPicker({ sustainId, sustains, onChoose }) {
+  if (!sustains || sustains.length < 2) return null;
+  // Multiple sustains can share the same label (e.g. six "Habitat"
+  // instances) -- a short id suffix keeps every option distinguishable
+  // without needing a per-instance display name the backend doesn't have.
+  const dupeLabels = new Set(
+    sustains.map(s => s.label).filter((l, i, arr) => arr.indexOf(l) !== arr.lastIndexOf(l))
+  );
+  return (
+    <select
+      value={sustainId || ''}
+      onChange={e => onChoose(e.target.value)}
+      style={{
+        fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.04em',
+        color: 'var(--text-muted)', background: 'var(--bg-surface)',
+        border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
+        padding: '4px 8px', maxWidth: 150,
+      }}
+    >
+      {sustains.map(s => (
+        <option key={s.id} value={s.id}>
+          {s.label}{dupeLabels.has(s.label) ? ` · ${s.id.slice(0, 6)}` : ''}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 function WhyReveal({ widget }) {
@@ -336,7 +440,7 @@ function Empty({ text }) {
 }
 
 export default function OrchieShell() {
-  const { sustainId, resolving } = useSustainId();
+  const { sustainId, sustains, resolving, chooseSustain } = useSustainPicker();
   const [view, setView] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -379,16 +483,19 @@ export default function OrchieShell() {
         <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-primary)' }}>
           ORCHIE
         </span>
-        <button
-          onClick={load}
-          style={{
-            background: 'none', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
-            padding: '4px 10px', cursor: 'pointer',
-            fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em', color: 'var(--text-muted)',
-          }}
-        >
-          ↺ REFRESH
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <SustainPicker sustainId={sustainId} sustains={sustains} onChoose={chooseSustain} />
+          <button
+            onClick={load}
+            style={{
+              background: 'none', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
+              padding: '4px 10px', cursor: 'pointer',
+              fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em', color: 'var(--text-muted)',
+            }}
+          >
+            ↺ REFRESH
+          </button>
+        </div>
       </div>
 
       {sustainId && <NarrateBar sustainId={sustainId} onCommitted={load} />}
