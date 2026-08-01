@@ -20,7 +20,10 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { api } from '../lib/api';
 import LoginGate from '../components/LoginGate';
-import { checkSmsPermission, requestSmsPermission, backfillInbox, startLivePolling, stopLivePolling } from '../lib/smsCapture';
+import {
+  checkSmsPermission, requestSmsPermission, backfillInbox, startLivePolling, stopLivePolling,
+  ensureNotificationPermission,
+} from '../lib/smsCapture';
 
 const LAST_SUSTAIN_KEY = 'sustena_orchie_last_sustain';
 
@@ -228,12 +231,15 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
   const [phase, setPhase] = useState('loading');
   const [payload, setPayload] = useState(null);
   const [known, setKnown] = useState({});
+  const [ignoreHistory, setIgnoreHistory] = useState(false);
 
-  const runInfer = useCallback(async (nextKnown) => {
+  const runInfer = useCallback(async (nextKnown, opts = {}) => {
     setPhase('loading');
+    const nextIgnoreHistory = opts.ignoreHistory ?? ignoreHistory;
     try {
       const data = await api.post('/orchie/capture/infer', {
-        sustain_id: sustainId, widget_id: widgetId, message_id: messageId, effect_text: effectText, known: nextKnown,
+        sustain_id: sustainId, widget_id: widgetId, message_id: messageId, effect_text: effectText,
+        known: nextKnown, ignore_history: nextIgnoreHistory,
       });
       setKnown(nextKnown);
       setPayload(data);
@@ -242,17 +248,26 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
       setPayload({ why: e.message || 'could not reach orchie' });
       setPhase('error');
     }
-  }, [sustainId, widgetId, messageId, effectText]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sustainId, widgetId, messageId, effectText, ignoreHistory]);
 
   useEffect(() => { runInfer({}); }, [runInfer]);
 
   const answer = (value) => runInfer({ ...known, [payload.field]: value });
 
+  // CHANGE: the pre-filled ("usual") pocket wasn't right this time -- force
+  // the normal disambiguation question instead of the history pre-fill.
+  const changePocket = () => {
+    setIgnoreHistory(true);
+    runInfer(known, { ignoreHistory: true });
+  };
+
   const confirm = async () => {
     setPhase('confirming');
     try {
       const data = await api.post('/orchie/capture/confirm', {
-        sustain_id: sustainId, operator: payload.operator, params: payload.params, message_id: messageId,
+        sustain_id: sustainId, operator: payload.operator, params: payload.params,
+        message_id: messageId, description: payload.description,
       });
       setPayload(data);
       if (data.result.status === 'ok') {
@@ -289,8 +304,16 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
       {phase === 'ready' && (
         <div>
           <div style={questionText}>{payload.why}</div>
+          {payload.from_history && (
+            <div style={{ ...mutedText, marginTop: 4, color: 'var(--teal)' }}>
+              pre-filled from how you classified this before — tap CONFIRM, or CHANGE if it's different this time
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
             <button onClick={confirm} style={confirmButton}>CONFIRM</button>
+            {payload.from_history && (
+              <button onClick={changePocket} style={cancelButton}>CHANGE</button>
+            )}
             <button onClick={onClose} style={cancelButton}>CANCEL</button>
           </div>
         </div>
@@ -408,6 +431,9 @@ function SmsCaptureCard({ sustainId }) {
       setSyncedCount(count);
       setStatus('active');
       startLivePolling(sustainId);
+      // Best-effort, silent -- a denied/unavailable notification permission
+      // just means no nudge fires; the item still lands in the compose feed.
+      ensureNotificationPermission().catch(() => {});
     }).catch(() => { if (!cancelled) setStatus('active'); });
     return () => { cancelled = true; };
   }, [status, sustainId]);
@@ -453,7 +479,9 @@ function SmsCaptureCard({ sustainId }) {
       <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 12 }}>
         Orchie can automatically pick up M-Pesa and KCB transaction alerts so your pockets
         stay current without typing anything in. It only ever reads messages from those two
-        senders — every other text on your phone is never touched, never sent anywhere.
+        senders — every other text on your phone is never touched, never sent anywhere. When
+        something needs a quick decision, Orchie will send a notification so you can handle
+        it right there in the field.
       </div>
       {status === 'requesting' && <div style={mutedText}>waiting for Android's permission dialog…</div>}
       {status === 'syncing' && <div style={mutedText}>syncing recent messages…</div>}
@@ -474,7 +502,11 @@ function SmsCaptureCard({ sustainId }) {
 
 function WidgetCard({ widget, sustainId, onCommitted }) {
   const d = widget.data || {};
-  const [capturing, setCapturing] = useState(false);
+  // classify_card is the in-field classify/confirm surface -- per Bonnie's
+  // design intent, this belongs on the phone with the least possible
+  // friction, so it opens straight into the capture flow (big-tap options
+  // or a pre-filled CONFIRM) rather than gating behind an extra tap.
+  const [capturing, setCapturing] = useState(widget.render === 'classify_card');
 
   return (
     <div style={{

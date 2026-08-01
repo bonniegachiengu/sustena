@@ -168,6 +168,7 @@ class CaptureInferRequest(BaseModel):
     message_id: str | None = None
     effect_text: str | None = None
     known: dict = {}
+    ignore_history: bool = False
 
 
 @router.post("/capture/infer")
@@ -185,12 +186,20 @@ async def capture_infer(
     prior disambiguation round in this same capture session (this route
     is stateless -- the frontend re-sends known facts each call, same
     approach compose() itself uses for "nothing is stored between calls").
+
+    Classification history ("purchase templates"): looks up this
+    counterparty's most recent confirmed pocket (capture_classification_
+    history, written by capture_confirm on a real success) and passes it to
+    infer() as a pre-fill hint -- see infer()'s own docstring for why this
+    only ever saves a disambiguation tap, never the CONFIRM tap. Pass
+    ignore_history=true (the frontend's CHANGE affordance) to force the
+    normal disambiguation question even when a history match exists.
     """
     _assert_owns_sustain(body.sustain_id, current_user["id"])
 
     from sustena.core.engine_singleton import get_shared_engine
     from sustena.core.curated_ui import load_widget_schemas
-    from sustena.core.effect_capture import infer
+    from sustena.core.effect_capture import infer, resolve_description
 
     engine = get_shared_engine()
     spec = engine.get_spec(body.sustain_id)
@@ -211,10 +220,22 @@ async def capture_infer(
             raise HTTPException(status_code=404, detail="Message not found")
         parsed_fields = message.get("parsed_fields") or {}
 
+    history = None
+    if not body.ignore_history:
+        description = resolve_description(body.effect_text, parsed_fields, body.known)
+        if description:
+            from sustena.core.ingest_singleton import get_shared_ingest_engine
+
+            try:
+                history = get_shared_ingest_engine().get_classification_history(body.sustain_id, description)
+            except Exception as exc:  # pragma: no cover - defensive, never block a real capture on this
+                logger.debug("capture_infer(): classification history lookup failed: %s", exc)
+                history = None
+
     state = engine.get_state(body.sustain_id)
     result = infer(
         widget.emits, state,
-        effect_text=body.effect_text, parsed_fields=parsed_fields, known=body.known,
+        effect_text=body.effect_text, parsed_fields=parsed_fields, known=body.known, history=history,
     )
     return result.to_dict()
 
@@ -224,6 +245,7 @@ class CaptureConfirmRequest(BaseModel):
     operator: str
     params: dict
     message_id: str | None = None
+    description: str | None = None
 
 
 @router.post("/capture/confirm")
@@ -243,6 +265,14 @@ async def capture_confirm(
     row itself never mutates state, execute_operator already did that).
     A gate refusal leaves the message in needs_attention, correctly --
     nothing was actually handled.
+
+    `description` (optional, echoed back from the infer() result the
+    frontend just confirmed -- see InferenceResult.description) is the
+    counterparty/merchant text this classification is remembered against
+    for next time (capture_classification_history). Recorded only on a
+    genuine success and only best-effort -- see record_classification()'s
+    own docstring for why a template-memory write can never be allowed to
+    look like the real transaction failed.
     """
     _assert_owns_sustain(body.sustain_id, current_user["id"])
 
@@ -260,6 +290,16 @@ async def capture_confirm(
         from sustena.core.ingest_singleton import get_shared_ingest_engine
 
         resolved = get_shared_ingest_engine().resolve_message(body.message_id, resolved_by=current_user["id"])
+
+    if result.succeeded and body.description and body.params.get("pocket_name"):
+        from sustena.core.ingest_singleton import get_shared_ingest_engine
+
+        try:
+            get_shared_ingest_engine().record_classification(
+                body.sustain_id, body.description, body.params.get("pocket_name"), body.operator,
+            )
+        except Exception as exc:  # pragma: no cover - defensive, never let this shadow a real success
+            logger.debug("capture_confirm(): record_classification failed: %s", exc)
 
     return {
         "sustain_id": body.sustain_id,

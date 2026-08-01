@@ -262,3 +262,157 @@ class TestConfirm:
         msg = client.get(f"/api/v1/ingest/messages/{message_id}", headers=headers).json()["data"]
         assert msg["resolved_at"] is None
         assert msg["status"] == "needs_attention"
+
+
+class TestClassificationHistoryEndToEnd:
+    """Real, in-the-field friction this exists to remove: a repeat merchant
+    (NAIVAS SUPERMARKET) pre-fills the pocket a human picked last time,
+    saving the disambiguation tap -- confirm write path and the CONFIRM tap
+    itself are completely untouched."""
+
+    def test_first_capture_from_a_merchant_still_asks(self, client, user, sustain):
+        headers, _ = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+        r = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "effect_text": "spent 680 at NAIVAS SUPERMARKET"},
+            headers=headers,
+        )
+        assert r.json()["status"] == "needs_disambiguation"
+
+    def test_second_capture_from_the_same_merchant_pre_fills_via_history(self, client, user, sustain):
+        headers, _ = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+
+        # Round 1: real confirm, human taps "food" once.
+        cap1 = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "d1", "sustain_id": sustain, "raw_payload": BUYGOODS},
+            headers=headers,
+        )
+        msg1 = cap1.json()["data"]["message_id"]
+        infer1 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": msg1, "known": {"pocket_name": "food"}},
+            headers=headers,
+        ).json()
+        assert infer1["status"] == "ready"
+        confirm1 = client.post(
+            "/orchie/capture/confirm",
+            json={
+                "sustain_id": sustain, "operator": infer1["operator"], "params": infer1["params"],
+                "message_id": msg1, "description": infer1["description"],
+            },
+            headers=headers,
+        )
+        assert confirm1.json()["result"]["status"] == "ok"
+
+        # Round 2: a second, distinct NAIVAS SUPERMARKET message -- must NOT
+        # need a tap this time, and must say so honestly (from_history=True).
+        second_naivas = BUYGOODS.replace("QGH7XJ4P2Q", "QGH7XJ9Z2W").replace("450.00", "680.00")
+        cap2 = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "d1", "sustain_id": sustain, "raw_payload": second_naivas},
+            headers=headers,
+        )
+        msg2 = cap2.json()["data"]["message_id"]
+        infer2 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": msg2},
+            headers=headers,
+        ).json()
+        assert infer2["status"] == "ready"
+        assert infer2["params"]["pocket_name"] == "food"
+        assert infer2["from_history"] is True
+        assert infer2["history_use_count"] == 1
+
+    def test_ignore_history_forces_the_normal_disambiguation(self, client, user, sustain):
+        headers, _ = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+        _seed_pocket(client, headers, sustain, "shopping", 9000)
+
+        cap1 = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "d1", "sustain_id": sustain, "raw_payload": BUYGOODS},
+            headers=headers,
+        )
+        msg1 = cap1.json()["data"]["message_id"]
+        infer1 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": msg1, "known": {"pocket_name": "food"}},
+            headers=headers,
+        ).json()
+        client.post(
+            "/orchie/capture/confirm",
+            json={
+                "sustain_id": sustain, "operator": infer1["operator"], "params": infer1["params"],
+                "message_id": msg1, "description": infer1["description"],
+            },
+            headers=headers,
+        )
+
+        second_naivas = BUYGOODS.replace("QGH7XJ4P2Q", "QGH7XJ9Z2W")
+        cap2 = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "d1", "sustain_id": sustain, "raw_payload": second_naivas},
+            headers=headers,
+        )
+        msg2 = cap2.json()["data"]["message_id"]
+
+        # Without ignore_history: pre-filled, no tap needed.
+        r = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": msg2},
+            headers=headers,
+        )
+        assert r.json()["from_history"] is True
+
+        # With ignore_history=true: the CHANGE affordance -- forces the
+        # normal ask so the human can pick a different pocket this time.
+        r2 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": msg2, "ignore_history": True},
+            headers=headers,
+        )
+        data2 = r2.json()
+        assert data2["status"] == "needs_disambiguation"
+        assert {o["value"] for o in data2["options"]} == {"food", "shopping"}
+
+    def test_history_is_scoped_to_the_owning_sustain(self, client, user, sustain):
+        headers, user_id = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+        cap1 = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "d1", "sustain_id": sustain, "raw_payload": BUYGOODS},
+            headers=headers,
+        )
+        msg1 = cap1.json()["data"]["message_id"]
+        infer1 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": msg1, "known": {"pocket_name": "food"}},
+            headers=headers,
+        ).json()
+        client.post(
+            "/orchie/capture/confirm",
+            json={
+                "sustain_id": sustain, "operator": infer1["operator"], "params": infer1["params"],
+                "message_id": msg1, "description": infer1["description"],
+            },
+            headers=headers,
+        )
+
+        other_sustain = client.post(
+            "/devui/sustains",
+            json={"template_id": "homestead", "user_id": user_id, "parameters": {}},
+            headers=headers,
+        ).json()["data"]["sustain_id"]
+        _seed_pocket(client, headers, other_sustain, "food", 9000)
+
+        r = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": other_sustain, "effect_text": "paid to NAIVAS SUPERMARKET"},
+            headers=headers,
+        )
+        # A different sustain never inherits another sustain's classification
+        # history, even for an identical merchant name.
+        assert r.json().get("from_history") in (False, None)

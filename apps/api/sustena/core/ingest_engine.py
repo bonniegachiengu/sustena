@@ -90,7 +90,79 @@ class IngestEngine:
                 resolved_at            TEXT,
                 resolved_by            TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS capture_classification_history (
+                sustain_id           TEXT NOT NULL,
+                counterparty_key     TEXT NOT NULL,
+                counterparty_label   TEXT,
+                pocket_name          TEXT NOT NULL,
+                operator_name        TEXT NOT NULL,
+                use_count            INTEGER NOT NULL DEFAULT 1,
+                last_used_at         TEXT NOT NULL,
+                PRIMARY KEY (sustain_id, counterparty_key)
+            );
         """)
+        self._db.commit()
+
+    # ── Classification history ("purchase templates") ──────────────────────────
+    # A human classifying a capture from the same merchant/counterparty twice
+    # is real, recurring friction -- the field surface (Orchie) exists so this
+    # is handled the moment it happens, not deferred to later, and remembering
+    # "last time NAIVAS was 'food'" is exactly the kind of least-friction
+    # pre-fill that matters in that moment. Keyed by a normalised counterparty
+    # string per sustain (never globally -- one household's "NAIVAS" mapping
+    # to 'food' says nothing about another's pockets). This is advisory only:
+    # effect_capture.infer() treats a history match as a strong pre-fill, not
+    # a bypass of the human tap -- the CONFIRM step is untouched, and the
+    # frontend always offers a CHANGE affordance so a stale mapping is never
+    # sticky. Recency-only model (most recent confirm wins outright, not a
+    # weighted vote across history) -- honest and simple; a merchant that
+    # genuinely spans two pockets will just need re-confirming each time it
+    # switches, which is a real, disclosed limitation, not hidden complexity.
+
+    @staticmethod
+    def _classification_key(counterparty: str | None) -> str:
+        return (counterparty or "").strip().upper()
+
+    def get_classification_history(self, sustain_id: str, counterparty: str | None) -> dict | None:
+        key = self._classification_key(counterparty)
+        if not key:
+            return None
+        row = self._db.execute(
+            "SELECT pocket_name, operator_name, use_count, last_used_at "
+            "FROM capture_classification_history WHERE sustain_id = ? AND counterparty_key = ?",
+            (sustain_id, key),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "pocket_name": row["pocket_name"],
+            "operator_name": row["operator_name"],
+            "use_count": row["use_count"],
+            "last_used_at": row["last_used_at"],
+        }
+
+    def record_classification(
+        self, sustain_id: str, counterparty: str | None, pocket_name: str | None, operator_name: str | None,
+    ) -> None:
+        """Best-effort: called after a real, successful capture confirm so the
+        NEXT capture from this counterparty can pre-fill. Never raises -- a
+        template-memory write failing must never be mistaken for the actual
+        transaction (already committed by execute_operator before this is
+        ever called) having failed."""
+        key = self._classification_key(counterparty)
+        if not key or not pocket_name or not operator_name:
+            return
+        now = datetime.utcnow().isoformat()
+        self._db.execute(
+            "INSERT INTO capture_classification_history "
+            "(sustain_id, counterparty_key, counterparty_label, pocket_name, operator_name, use_count, last_used_at) "
+            "VALUES (?, ?, ?, ?, ?, 1, ?) "
+            "ON CONFLICT(sustain_id, counterparty_key) DO UPDATE SET "
+            "counterparty_label = excluded.counterparty_label, pocket_name = excluded.pocket_name, "
+            "operator_name = excluded.operator_name, use_count = use_count + 1, last_used_at = excluded.last_used_at",
+            (sustain_id, key, counterparty, pocket_name, operator_name, now),
+        )
         self._db.commit()
 
     # ── Dedup ──────────────────────────────────────────────────────────────────

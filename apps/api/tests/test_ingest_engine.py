@@ -417,3 +417,59 @@ class TestStaleness:
         sources = ingest.get_sources(sustain_id=homestead_sid)
         assert sources[0]["label"] == "Bonnie's phone"
         assert sources[0]["expected_interval_minutes"] == 30
+
+
+# ── Classification history ("purchase templates") ───────────────────────────
+
+class TestClassificationHistory:
+    def test_no_history_returns_none(self, ingest, homestead_sid):
+        assert ingest.get_classification_history(homestead_sid, "NAIVAS SUPERMARKET") is None
+
+    def test_record_then_retrieve(self, ingest, homestead_sid):
+        ingest.record_classification(homestead_sid, "NAIVAS SUPERMARKET", "food", "budget.spend")
+        hist = ingest.get_classification_history(homestead_sid, "NAIVAS SUPERMARKET")
+        assert hist == {
+            "pocket_name": "food", "operator_name": "budget.spend",
+            "use_count": 1, "last_used_at": hist["last_used_at"],
+        }
+        assert hist["last_used_at"]  # a real timestamp was recorded
+
+    def test_key_is_case_and_whitespace_normalised(self, ingest, homestead_sid):
+        ingest.record_classification(homestead_sid, "  Naivas Supermarket  ", "food", "budget.spend")
+        hist = ingest.get_classification_history(homestead_sid, "NAIVAS SUPERMARKET")
+        assert hist is not None
+        assert hist["pocket_name"] == "food"
+
+    def test_repeat_classification_increments_use_count(self, ingest, homestead_sid):
+        ingest.record_classification(homestead_sid, "NAIVAS SUPERMARKET", "food", "budget.spend")
+        ingest.record_classification(homestead_sid, "NAIVAS SUPERMARKET", "food", "budget.spend")
+        ingest.record_classification(homestead_sid, "NAIVAS SUPERMARKET", "food", "budget.spend")
+        hist = ingest.get_classification_history(homestead_sid, "NAIVAS SUPERMARKET")
+        assert hist["use_count"] == 3
+
+    def test_a_different_pocket_next_time_overwrites_not_accumulates(self, ingest, homestead_sid):
+        # Recency-only model, disclosed in record_classification()'s own
+        # docstring: the MOST RECENT confirm wins outright.
+        ingest.record_classification(homestead_sid, "NAIVAS SUPERMARKET", "food", "budget.spend")
+        ingest.record_classification(homestead_sid, "NAIVAS SUPERMARKET", "shopping", "budget.spend")
+        hist = ingest.get_classification_history(homestead_sid, "NAIVAS SUPERMARKET")
+        assert hist["pocket_name"] == "shopping"
+        assert hist["use_count"] == 2  # still counted -- a real repeat classification, just changed pockets
+
+    def test_history_is_scoped_per_sustain(self, engine, ingest):
+        other_sid = engine.instantiate(
+            template_id="homestead", user_id="user-test-2", parameters={"owner_ids": ["user-test-2"]},
+        )
+        ingest.record_classification(other_sid, "NAIVAS SUPERMARKET", "rent", "budget.spend")
+        # A different sustain's history must never leak into this one's lookup.
+        assert ingest.get_classification_history("some-other-sustain-id", "NAIVAS SUPERMARKET") is None
+
+    def test_missing_pocket_name_or_operator_is_a_safe_no_op(self, ingest, homestead_sid):
+        ingest.record_classification(homestead_sid, "NAIVAS SUPERMARKET", None, "budget.spend")
+        ingest.record_classification(homestead_sid, "NAIVAS SUPERMARKET", "food", None)
+        assert ingest.get_classification_history(homestead_sid, "NAIVAS SUPERMARKET") is None
+
+    def test_empty_counterparty_returns_none_and_records_nothing(self, ingest, homestead_sid):
+        ingest.record_classification(homestead_sid, "", "food", "budget.spend")
+        ingest.record_classification(homestead_sid, None, "food", "budget.spend")
+        assert ingest.get_classification_history(homestead_sid, "") is None

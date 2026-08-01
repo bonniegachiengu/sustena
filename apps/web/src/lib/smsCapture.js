@@ -30,11 +30,59 @@
  * privacy filter (SmsSenderFilter.isKnownFinancialSender, applied
  * identically to both the backfill and the live-queue path) -- nothing
  * else is ever readable from here.
+ *
+ * IN-FIELD CLASSIFY NOTIFICATION: when a forwarded capture comes back
+ * needing a human decision (status="needs_attention" -- unmapped or
+ * ambiguous, not a source-lookup problem), this module fires a LOCAL
+ * notification (@capacitor/local-notifications -- never leaves the device,
+ * a different trust class from the SMS-forwarding decision that needed a
+ * custom plugin) so the classification happens in the field, in the
+ * moment, per Bonnie's explicit design intent -- never deferred to the
+ * laptop. Best-effort: a missing/denied notification permission just means
+ * no notification fires; the item still lands in Orchie's compose feed
+ * exactly as before, so nothing is ever lost, only the nudge is skipped.
  */
 import { registerPlugin } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { api } from './api';
 
 const SmsCapture = registerPlugin('SmsCapture');
+
+/** Best-effort -- silently requests the (non-sensitive, on-device-only)
+ *  notification permission. Call once, after SMS capture is enabled. */
+export async function ensureNotificationPermission() {
+  try {
+    const status = await LocalNotifications.checkPermissions();
+    if (status.display === 'granted') return true;
+    const req = await LocalNotifications.requestPermissions();
+    return req.display === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+let notificationId = 1;
+
+async function notifyNeedsClassification(captureResult) {
+  try {
+    const status = await LocalNotifications.checkPermissions();
+    if (status.display !== 'granted') return; // never force-prompt from here
+    const fields = captureResult?.parsed_fields || {};
+    const body = (fields.amount != null && fields.counterparty)
+      ? `Ksh ${fields.amount} to ${fields.counterparty} — tap to classify`
+      : 'a captured transaction needs a quick decision';
+    await LocalNotifications.schedule({
+      notifications: [{
+        id: notificationId++,
+        title: 'Orchie needs a decision',
+        body,
+        schedule: { at: new Date(Date.now() + 300) },
+      }],
+    });
+  } catch (e) {
+    console.error('[smsCapture] failed to fire classify notification:', e.message || e);
+  }
+}
 
 function classifySource(sender) {
   // Purely SENDER-based, never inspects msg.body -- confirmed correct by
@@ -56,13 +104,26 @@ async function forwardMessages(sustainId, messages) {
     const sourceId = classifySource(msg.sender);
     if (!sourceId) continue;
     try {
-      await api.post('/api/v1/ingest/capture', {
+      // POST /api/v1/ingest/capture wraps its real result in the shared
+      // {status,data,error,timestamp} envelope (_ok() in ingest.py) --
+      // the actual capture outcome (status/is_duplicate/parsed_fields)
+      // lives at resp.data, not on resp itself.
+      const resp = await api.post('/api/v1/ingest/capture', {
         source_id: sourceId,
         sustain_id: sustainId,
         raw_payload: msg.body,
         captured_at: new Date(msg.timestampMs).toISOString(),
       });
       forwarded += 1;
+      const result = resp?.data;
+      // Only a genuinely NEW needs_attention capture is worth a nudge --
+      // is_duplicate=true means this exact message was already seen
+      // (e.g. re-forwarded during a backfill), so notifying again would
+      // just spam for something the person has already had a chance to
+      // classify (or already did).
+      if (result && result.is_duplicate !== true && result.status === 'needs_attention') {
+        notifyNeedsClassification(result).catch(() => {});
+      }
     } catch (e) {
       // Deliberately don't rethrow -- one failed/malformed message must
       // never block the rest of the batch. Capture is idempotent

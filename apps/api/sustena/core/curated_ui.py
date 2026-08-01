@@ -285,13 +285,28 @@ def _render_pocket_spent_watch(state: dict, ctx: dict) -> dict:
 
 def _render_unmapped_capture_classify(state: dict, ctx: dict) -> dict:
     message = ctx.get("message") or {}
+    parsed_fields = message.get("parsed_fields") or {}
+    amount = parsed_fields.get("amount")
+    counterparty = parsed_fields.get("counterparty")
+    # Event-first, in-the-moment framing per the field-classify design: state
+    # the real amount/merchant already extracted by the transducer right in
+    # the headline, so the person doesn't have to open the raw SMS to know
+    # what they're being asked about. Falls back to the generic line only
+    # when the transducer genuinely didn't recover either field (e.g. a
+    # shape it half-recognised but couldn't extract from).
+    if amount is not None and counterparty:
+        headline = f"Ksh {amount:,.0f} to {counterparty} — which pocket?"
+    elif amount is not None:
+        headline = f"Ksh {amount:,.0f} needs a pocket"
+    else:
+        headline = "a capture couldn't be routed automatically — where does this go?"
     return {
         "message_id": message.get("message_id"),
         "source_id": message.get("source_id"),
-        "parsed_fields": message.get("parsed_fields", {}),
+        "parsed_fields": parsed_fields,
         "reason": message.get("reason"),
         "raw_payload": message.get("raw_payload"),
-        "headline": "a capture couldn't be routed automatically — where does this go?",
+        "headline": headline,
     }
 
 

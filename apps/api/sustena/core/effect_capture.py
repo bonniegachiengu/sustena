@@ -75,6 +75,21 @@ def extract_amount(text: str) -> float | None:
         return None
 
 
+def resolve_description(effect_text: str | None, parsed_fields: dict | None, known: dict | None) -> str | None:
+    """The same 'what is this' resolution infer() uses internally --
+    extracted so a caller (the /orchie/capture/infer route) can compute the
+    identical description BEFORE calling infer(), to look up classification
+    history (a merchant/counterparty key) without duplicating this logic."""
+    known = known or {}
+    if "description" in known:
+        return known["description"]
+    parsed_fields = parsed_fields or {}
+    desc = parsed_fields.get("counterparty") or parsed_fields.get("external_ref")
+    if not desc and effect_text:
+        desc = effect_text
+    return desc
+
+
 def match_pocket_names(text: str, state: dict) -> list[str]:
     """Which of the sustain's OWN real, currently-declared pockets are
     named in this text. This is the concrete mechanism behind 'theta is
@@ -163,6 +178,9 @@ class InferenceResult:
     field: str | None = None
     options: list[dict] | None = None
     why: str = ""
+    description: str | None = None
+    from_history: bool = False
+    history_use_count: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -173,6 +191,9 @@ class InferenceResult:
             "field": self.field,
             "options": self.options,
             "why": self.why,
+            "description": self.description,
+            "from_history": self.from_history,
+            "history_use_count": self.history_use_count,
         }
 
 
@@ -182,6 +203,7 @@ def infer(
     effect_text: str | None = None,
     parsed_fields: dict | None = None,
     known: dict | None = None,
+    history: dict | None = None,
 ) -> InferenceResult:
     """
     epsilon -> (o, theta). One deterministic pass:
@@ -193,9 +215,13 @@ def infer(
          internal 'allocate' move) -- only when it narrows to >=1, a hint
          that eliminates every candidate is treated as no hint at all.
       4. pocket_name: known -> exactly one live-state match in the text ->
+         else, if `history` names a pocket that still exists in this
+         sustain's live state, pre-fill it (classification history / a
+         "purchase template" -- the caller looked this up by the resolved
+         description before calling infer(); see resolve_description()) ->
          else ask (needs_disambiguation), offering the sustain's own real
-         pocket names, or (zero matches) the same list with an honest
-         'couldn't find one' reason.
+         pocket names, or (zero matches, no history) the same list with an
+         honest 'couldn't find one' reason.
       5. amount still missing -> cannot_infer (a numeric amount is not a
          good disambiguation-by-tapping question, so this is reported as
          missing information rather than a forced UI choice).
@@ -203,6 +229,14 @@ def infer(
          law: at most as many options as remain, typically 2).
       7. build theta from the operator's real signature; if a required
          field still isn't satisfiable -> cannot_infer naming it.
+
+    A history-based pre-fill is never silent: the returned InferenceResult
+    carries from_history=True + history_use_count, so the caller can label
+    it ("usual: food, 3x before") and offer a CHANGE affordance -- it still
+    stops at 'ready', requiring the same explicit CONFIRM tap every other
+    capture requires. Nothing about the write path changes; this only ever
+    saves the disambiguation TAP for a repeat counterparty, never the
+    confirm.
     """
     facts: dict[str, Any] = dict(known or {})
     parsed_fields = parsed_fields or {}
@@ -215,11 +249,12 @@ def infer(
             facts["amount"] = amt
 
     if "description" not in facts:
-        desc = parsed_fields.get("counterparty") or parsed_fields.get("external_ref")
-        if not desc and effect_text:
-            desc = effect_text
+        desc = resolve_description(effect_text, parsed_fields, known)
         if desc:
             facts["description"] = desc
+
+    from_history = False
+    history_use_count: int | None = None
 
     ops = list(candidate_operators)
     chosen_operator = facts.pop("operator", None)
@@ -239,17 +274,24 @@ def infer(
     if "pocket_name" not in facts:
         search_text = " ".join(filter(None, [effect_text, facts.get("description")]))
         matches = match_pocket_names(search_text, state)
+        live_pockets = ((state.get("finances") or {}).get("pockets")) or {}
         if len(matches) == 1:
             facts["pocket_name"] = matches[0]
         elif len(matches) == 0:
-            options = sorted(((state.get("finances") or {}).get("pockets") or {}).keys())
-            if not options:
-                return InferenceResult(status="cannot_infer", why="this sustain has no pockets declared yet to classify against")
-            return InferenceResult(
-                status="needs_disambiguation", field="pocket_name",
-                question="which pocket does this belong to?", options=[_option(o) for o in options],
-                why="couldn't find a pocket name in what you described",
-            )
+            hist_pocket = (history or {}).get("pocket_name")
+            if hist_pocket and hist_pocket in live_pockets:
+                facts["pocket_name"] = hist_pocket
+                from_history = True
+                history_use_count = (history or {}).get("use_count")
+            else:
+                options = sorted(live_pockets.keys())
+                if not options:
+                    return InferenceResult(status="cannot_infer", why="this sustain has no pockets declared yet to classify against")
+                return InferenceResult(
+                    status="needs_disambiguation", field="pocket_name",
+                    question="which pocket does this belong to?", options=[_option(o) for o in options],
+                    why="couldn't find a pocket name in what you described",
+                )
         else:
             return InferenceResult(
                 status="needs_disambiguation", field="pocket_name",
@@ -283,7 +325,13 @@ def infer(
 
     params = build_params(operator_name, facts)
     described = ", ".join(f"{k}={v}" for k, v in params.items())
+    if from_history:
+        count_phrase = f"{history_use_count}x before" if history_use_count else "before"
+        why = f"usual pocket ({count_phrase}) — inferred {operator_name}({described})"
+    else:
+        why = f"inferred {operator_name}({described}) from what you described"
     return InferenceResult(
-        status="ready", operator=operator_name, params=params,
-        why=f"inferred {operator_name}({described}) from what you described",
+        status="ready", operator=operator_name, params=params, why=why,
+        description=facts.get("description"),
+        from_history=from_history, history_use_count=history_use_count if from_history else None,
     )
