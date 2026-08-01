@@ -1118,6 +1118,44 @@ Two refinements to the in-field classify/confirm work above, both requested expl
 
 ---
 
+### Real-device bug: the "no amount could be recovered" dead end, fixed (1 Aug 2026)
+
+Bonnie's first real-device test of v1.3.0 surfaced a genuine core-scope failure: a captured KCB/M-Pesa message that no registered transducer parser recognised showed `source: mpesa` / "No registered parser recognised this message's shape", and picking a pocket dead-ended at "no amount could be recovered — try including a number" — no transaction was ever recorded. Two things were asked for: fix the dead end now, and investigate (don't yet fix) why an apparently-KCB message got tagged `mpesa`.
+
+**FIX 1 — the dead end, fixed (`effect_capture.py`):**
+- New `extract_currency_amount()` — a currency-PREFIXED regex (`Ksh`/`KES` + figure), deliberately narrower than the existing bare-digit `extract_amount()` (which is fine for a short human narration like "spent 500 on WiFi" but unsafe against a full raw SMS body, which is full of digits from dates/reference codes/phone fragments that aren't the transaction amount).
+- `infer()` gained a `raw_text` parameter (the message's full raw SMS body, threaded through from `/orchie/capture/infer`'s `message_id` lookup) — used as a THIRD amount-recovery fallback (known → parsed_fields.amount → `extract_amount(effect_text)` → **`extract_currency_amount(raw_text)`**). For the overwhelming majority of real bank SMS (which always state the amount somewhere, even when the shape as a whole doesn't match any registered parser), this alone resolves the amount with zero extra taps.
+- Genuine last resort — no currency figure recoverable anywhere: `infer()` no longer returns `cannot_infer` (the dead end). It now returns `needs_disambiguation, field="amount", options=None` — a real, answerable question. The frontend (`AmountEntry`, new in `OrchieShell.jsx`) renders a numeric text input for this specific field instead of tap buttons (every other disambiguation field renders enumerable tap options; amount is the one free-form exception, using the same generic `answer(value)` → re-`infer()` contract as everything else). A human-typed value arrives as a string; `infer()` now coerces `known.amount` to float defensively before use (an unparseable typed value is treated as not-yet-provided, re-asking, never crashing downstream inside the real operator call).
+- Raw message text now shown on the classify card itself (`WidgetCard`, `OrchieShell.jsx`) — `curated_ui.py`'s `_render_unmapped_capture_classify` already included `raw_payload` in its widget data (Slice 14), it just wasn't rendered; now it is, in a small monospace block, so Bonnie has the actual SMS text as context while classifying, not just the transducer's own (possibly-wrong-for-an-unparsed-message) `reason` line.
+- "Direction in/out if ambiguous" — deliberately NOT built as a new received/sent toggle: `unmapped_capture_classify`'s declared `emits` are `budget.spend`/`budget.allocate` only (no `budget.record_income`), so there is no "received" operator this widget can route to in the first place; the existing operator disambiguation (`field="operator"`, "spend it" vs "set it aside") already covers the only real in-scope ambiguity. Expanding the widget's emits to cover money received is a separate, larger design change (a materially different param shape) and wasn't part of what broke — disclosed, not silently expanded.
+
+**FIX 2 — investigation, NOT a fix (per explicit instruction — waiting on Bonnie's exact raw text + sender label):**
+
+Confirmed, definitively: there is **no server-side default or fallback** that ever produces `source: mpesa`. `CaptureBody.source_id` (`routes/ingest.py`) is a required field with no default; `ingest_engine.capture()`/`_process()` never invents or substitutes a source_id — whatever the client sends is stored and echoed back verbatim. The tag is decided **entirely client-side**.
+
+There are three client call sites, and all three currently share **byte-identical** sender-classification logic (deliberately kept in sync by hand, no shared code path across the two runtimes):
+- `smsCapture.js`'s `classifySource()` (JS, used by backfill + the JS-side real-time fallback)
+- `IngestWorker.java`'s `classifySource()` (Java, the new native real-time path)
+- Both check `sender.toUpperCase().includes('MPESA')` **first**, then `.includes('KCB')`, returning `null` (message discarded, never even forwarded) if neither matches.
+
+`SmsSenderFilter.isKnownFinancialSender()` — the earlier, native pre-filter that runs before ANY of the above (real-time and backfill both) — applies the identical `contains('MPESA') || contains('KCB')` check and its own header comment already discloses: *"KCB's real sender id is UNVERIFIED here... If the real sender id is something else entirely (e.g. a numeric shortcode with no 'KCB' substring), this filter needs updating."*
+
+**What this proves about the specific report:** for the message to have been captured AND tagged `mpesa` at all, it must have PASSED `isKnownFinancialSender` (sender contains "MPESA" or "KCB") and then `classifySource` must have matched `.includes('MPESA')` specifically — meaning the RAW, programmatic sender value Android's SMS API reported for this message (`SmsMessage.getOriginatingAddress()` / `Telephony.Sms.ADDRESS` — what our code actually reads) contained the literal substring "MPESA", **regardless of what Bonnie's phone UI displayed as the sender**. Android/carrier sender-ID display and the raw technical address are not always the same string (contact-name resolution, carrier "smart" sender branding, or — plausible in Kenya specifically — a bank's transactional SMS routed through Safaricom's own bulk/enterprise SMS gateway can report a Safaricom-associated sender ID at the protocol level even for a bank-initiated message).
+
+**Two real, undistinguished hypotheses, deliberately not resolved by guessing:**
+1. **Genuine misclassification** — this really is a KCB-originated message whose raw technical sender field differs from what `SmsSenderFilter`/`classifySource` expect (an aggregator/gateway ID exposure, or a KCB sender ID this codebase hasn't seen the exact string of yet) — would need the real raw sender field's exact value to confirm and correct the matching logic.
+2. **Not a classification bug at all** — this genuinely IS a Safaricom M-Pesa-sender message (e.g. M-Pesa's own notification of a transaction touching a KCB-linked paybill/account, a shape already established to exist — see the `kcb_mpesa_*` reclassification two sessions ago) whose SHAPE simply isn't covered by any of `transducer.py`'s 5 existing `mpesa_*` parser patterns — meaning `source: mpesa` would be **correct**, and the real gap is M-Pesa parser coverage, not sender classification.
+
+Also flagged, not yet actionable: the check ORDER (MPESA before KCB) in all three call sites means a sender string that happened to contain both substrings would always resolve to `mpesa` — worth knowing once the real raw sender string is in hand.
+
+**Deliberately not touched:** `SmsSenderFilter.java`, `classifySource()` (both copies), and `transducer.py`'s parser set are all untouched this pass — changing sender-matching or writing a new parser against a guessed format, before Bonnie's real raw text confirms which of the two hypotheses above is true, would risk the exact "shipped with false confidence, never matched anything real" mistake this project's own history (the original speculative KCB pattern set) already learned from once.
+
+**Tests:** 18 new (`test_effect_capture.py`: `TestExtractCurrencyAmount` — 7, `TestInferRawTextAmountFallback` — 5, plus 1 existing test updated for the new needs_disambiguation-not-cannot_infer behavior; `test_orchie_capture_routes.py`: `TestUnparsedMessageNoLongerDeadEnds` — 3, reproducing Bonnie's exact real-device scenario end-to-end over HTTP, including a genuinely unparsed message with no recoverable amount anywhere, typed amount arriving as a string, through to a real committed `budget.spend` event). **1832 backend tests pass.** Frontend builds clean in both modes.
+
+**APK:** `versionCode` 8→9, `versionName` 1.3.0→1.3.1, same `applicationId` (installs as an update) — no native Java changes this pass beyond what v1.3.0 already shipped, purely a Python + JS/JSX fix, but rebuilt to ship the frontend fix to the native app too. `apksigner verify --verbose` → Verifies (v2); `zipalign -c 4` → clean.
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:

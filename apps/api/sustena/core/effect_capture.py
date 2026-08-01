@@ -48,6 +48,17 @@ _VERB_TO_SUFFIX: dict[str, str] = {
 
 _AMOUNT_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)")
 
+# Currency-prefixed amount -- deliberately NARROWER than _AMOUNT_RE above.
+# Used specifically as a fallback against a message's RAW SMS text (not a
+# short human narration), where a bare "any digit sequence" match is a real
+# risk: a raw bank SMS routinely contains dates, reference codes, and phone
+# number fragments that also contain digits, and _AMOUNT_RE would happily
+# (and wrongly) match the first one of those it finds. Every real M-Pesa/
+# KCB SMS this codebase has seen prefixes the actual transaction amount
+# with "Ksh" or "KES" (see transducer.py's own regexes) -- anchoring on
+# that prefix is what makes this safe to run against a full raw message.
+_CURRENCY_AMOUNT_RE = re.compile(r"(?:Ksh|KES)\.?\s*([\d,]+(?:\.\d+)?)", re.IGNORECASE)
+
 # Humanized labels for the small set of operators this slice's widgets can
 # emit -- used only when asking "which action?" during disambiguation.
 # Falls back to the operator's own OPERATOR_REGISTRY description when an
@@ -67,6 +78,24 @@ def extract_amount(text: str) -> float | None:
     if not text:
         return None
     m = _AMOUNT_RE.search(text)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ""))
+    except ValueError:  # pragma: no cover - regex already constrains this
+        return None
+
+
+def extract_currency_amount(text: str) -> float | None:
+    """Recover a KES amount from a currency-PREFIXED figure in raw,
+    unstructured text (a full SMS body a registered transducer parser
+    couldn't recognise the shape of) -- the fallback that lets an otherwise
+    'unparsed' capture still classify with a real amount instead of
+    dead-ending at 'no amount could be recovered'. See _CURRENCY_AMOUNT_RE's
+    own comment for why this is intentionally stricter than extract_amount()."""
+    if not text:
+        return None
+    m = _CURRENCY_AMOUNT_RE.search(text)
     if not m:
         return None
     try:
@@ -204,10 +233,17 @@ def infer(
     parsed_fields: dict | None = None,
     known: dict | None = None,
     history: dict | None = None,
+    raw_text: str | None = None,
 ) -> InferenceResult:
     """
     epsilon -> (o, theta). One deterministic pass:
-      1. amount: known -> parsed_fields.amount -> regex on effect_text
+      1. amount: known -> parsed_fields.amount -> regex on effect_text ->
+         currency-prefixed regex on raw_text (the full, un-parsed SMS body,
+         when this capture came from a message no registered transducer
+         parser recognised -- see extract_currency_amount()'s own comment
+         for why this is a separate, narrower regex than the effect_text
+         one). This is what lets an "unparsed" capture (parsed_fields={})
+         still recover a real amount instead of dead-ending.
       2. description: best-effort, never blocks inference
       3. narrow candidate operators by a verb hint in effect_text, or by
          parsed_fields.direction=='sent' (a real ingest signal: money has
@@ -222,9 +258,14 @@ def infer(
          else ask (needs_disambiguation), offering the sustain's own real
          pocket names, or (zero matches, no history) the same list with an
          honest 'couldn't find one' reason.
-      5. amount still missing -> cannot_infer (a numeric amount is not a
-         good disambiguation-by-tapping question, so this is reported as
-         missing information rather than a forced UI choice).
+      5. amount still missing -> ask for it directly (needs_disambiguation,
+         field="amount", no options -- the caller renders a free-text/
+         numeric input rather than tap buttons, same generic answer(value)
+         contract as every other field). Genuinely last-resort: the raw-text
+         fallback in step 1 already resolves this for the overwhelming
+         majority of real bank SMS, which always state the amount somewhere
+         in the text. NEVER a dead end -- a capture with no auto-recoverable
+         amount is still fully classifiable, just with one more real tap.
       6. more than one operator still viable -> ask which action (Hick's
          law: at most as many options as remain, typically 2).
       7. build theta from the operator's real signature; if a required
@@ -241,10 +282,24 @@ def infer(
     facts: dict[str, Any] = dict(known or {})
     parsed_fields = parsed_fields or {}
 
+    # A human-typed amount (the field="amount" disambiguation this function
+    # itself can now ask for) arrives from a text input, so `known["amount"]`
+    # may be a string -- normalise it here rather than trusting the wire
+    # shape, same discipline transducer.py's own _to_float applies. An
+    # unparseable typed value is treated as not-provided (re-asks) rather
+    # than crashing later inside the real operator call.
+    if isinstance(facts.get("amount"), str):
+        try:
+            facts["amount"] = float(facts["amount"].replace(",", ""))
+        except ValueError:
+            del facts["amount"]
+
     if "amount" not in facts:
         amt = parsed_fields.get("amount")
         if amt is None:
             amt = extract_amount(effect_text or "")
+        if amt is None:
+            amt = extract_currency_amount(raw_text or "")
         if amt is not None:
             facts["amount"] = amt
 
@@ -300,7 +355,17 @@ def infer(
             )
 
     if "amount" not in facts:
-        return InferenceResult(status="cannot_infer", why="no amount could be recovered — try including a number")
+        # Genuinely last-resort -- both the effect_text and the raw-message
+        # currency-prefixed fallback already ran (step 1) and found nothing.
+        # This is never a dead end: field="amount" with no options tells the
+        # caller to render a real numeric input, not tap buttons -- the
+        # human types the amount once, then the flow continues exactly like
+        # any other resolved fact (same answer(value) -> re-infer contract).
+        return InferenceResult(
+            status="needs_disambiguation", field="amount",
+            question="how much was this for?", options=None,
+            why="couldn't find an amount in the message — enter it to continue",
+        )
 
     if len(ops) > 1:
         satisfiable = [op for op in ops if required_params_satisfiable(op, facts)]

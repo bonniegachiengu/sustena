@@ -14,6 +14,7 @@ import sustena.operators  # noqa: F401 - registers OPERATOR_REGISTRY
 from sustena.core.effect_capture import (
     build_params,
     extract_amount,
+    extract_currency_amount,
     infer,
     match_pocket_names,
     missing_required_params,
@@ -179,9 +180,14 @@ class TestInferNeedsDisambiguation:
 
 
 class TestInferCannotInfer:
-    def test_no_amount_recoverable(self):
+    def test_no_amount_recoverable_asks_instead_of_dead_ending(self):
+        # Was status="cannot_infer" (a real dead end reported live by
+        # Bonnie: pick a pocket, then hit "no amount could be recovered"
+        # with nowhere to go). Now asks for it directly instead.
         r = infer(CANDIDATES, STATE, effect_text="spent something on WiFi")
-        assert r.status == "cannot_infer"
+        assert r.status == "needs_disambiguation"
+        assert r.field == "amount"
+        assert r.options is None
         assert "amount" in r.why
 
     def test_no_candidate_operators_at_all(self):
@@ -283,3 +289,106 @@ class TestInferClassificationHistory:
             known={"pocket_name": "food"},
         )
         assert r.description == "NAIVAS SUPERMARKET"
+
+
+class TestExtractCurrencyAmount:
+    def test_ksh_prefixed_amount(self):
+        assert extract_currency_amount("Ksh450.00 paid to SOMEWHERE on 20/7/26") == 450.0
+
+    def test_kes_prefixed_amount_with_space(self):
+        assert extract_currency_amount("KES 1,350.00 transaction made on card 4243") == 1350.0
+
+    def test_case_insensitive(self):
+        assert extract_currency_amount("ksh 99.50 spent") == 99.5
+
+    def test_ignores_bare_digits_with_no_currency_prefix(self):
+        # The whole reason this exists instead of reusing extract_amount():
+        # a raw SMS body is full of digits (dates, refs, phone fragments)
+        # that are NOT the transaction amount.
+        assert extract_currency_amount("Ref 254712345678 dated 20/07/2026") is None
+
+    def test_picks_the_currency_prefixed_figure_not_an_earlier_bare_number(self):
+        # A reference code with embedded digits appears BEFORE the real,
+        # currency-prefixed amount -- must not be picked up instead.
+        text = "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIVAS SUPERMARKET on 20/7/26 at 4:30 PM."
+        assert extract_currency_amount(text) == 450.0
+
+    def test_no_currency_marker_anywhere_returns_none(self):
+        assert extract_currency_amount("hey are we still on for lunch tomorrow?") is None
+
+    def test_empty_text_returns_none(self):
+        assert extract_currency_amount("") is None
+        assert extract_currency_amount(None) is None
+
+
+class TestInferRawTextAmountFallback:
+    """The actual bug Bonnie hit live: a message no registered transducer
+    parser recognised (parsed_fields={}, effect_text=None) previously had
+    NO way to recover an amount at all. raw_text is the fix -- the full SMS
+    body, searched with the safer currency-prefixed regex."""
+
+    UNPARSED_KCB_LIKE_SMS = "Dear customer, Ksh680.00 has been debited from your account XYZ on 21/07/2026."
+
+    def test_amount_recovered_from_raw_text_when_nothing_else_has_it(self):
+        # operator explicit so this isolates amount-recovery from the
+        # separate spend-vs-allocate disambiguation (both are otherwise
+        # equally satisfiable with no verb/direction hint present).
+        r = infer(
+            CANDIDATES, STATE,
+            known={"pocket_name": "food", "operator": "budget.spend"},  # pocket+operator resolved -- only amount is missing
+            raw_text=self.UNPARSED_KCB_LIKE_SMS,
+        )
+        assert r.status == "ready"
+        assert r.params["amount"] == 680.0
+
+    def test_effect_text_and_parsed_fields_still_win_over_raw_text(self):
+        r = infer(
+            CANDIDATES, STATE,
+            known={"pocket_name": "food", "operator": "budget.spend"},
+            parsed_fields={"amount": 100.0},
+            raw_text=self.UNPARSED_KCB_LIKE_SMS,  # would give 680.0 if consulted
+        )
+        assert r.params["amount"] == 100.0
+
+    def test_raw_text_with_no_currency_marker_falls_through_to_asking(self):
+        r = infer(
+            CANDIDATES, STATE,
+            known={"pocket_name": "food"},
+            raw_text="Your account was accessed from a new device.",
+        )
+        assert r.status == "needs_disambiguation"
+        assert r.field == "amount"
+
+    def test_full_flow_pocket_then_typed_amount_reaches_ready(self):
+        # Simulates the frontend's CaptureFlow: pocket disambiguation first
+        # (no text/history match), then the human types an amount as a
+        # string (as a text input naturally would send), then ready.
+        r1 = infer(CANDIDATES, STATE, raw_text="a message with no recognisable shape at all")
+        assert r1.status == "needs_disambiguation"
+        assert r1.field == "pocket_name"
+
+        r2 = infer(
+            CANDIDATES, STATE, known={"pocket_name": "food"},
+            raw_text="a message with no recognisable shape at all",
+        )
+        assert r2.status == "needs_disambiguation"
+        assert r2.field == "amount"
+
+        # Explicit operator choice isolates the amount-typing behaviour from
+        # the separate spend-vs-allocate disambiguation (both are otherwise
+        # equally satisfiable once pocket+amount are known, with no verb/
+        # direction hint to narrow between them -- a real, expected step,
+        # not part of what this test is verifying).
+        r3 = infer(
+            CANDIDATES, STATE,
+            known={"pocket_name": "food", "amount": "500", "operator": "budget.spend"},  # typed, arrives as a string
+            raw_text="a message with no recognisable shape at all",
+        )
+        assert r3.status == "ready"
+        assert r3.params["amount"] == 500.0
+        assert isinstance(r3.params["amount"], float)  # coerced, never left as a string
+
+    def test_unparseable_typed_amount_is_treated_as_not_provided(self):
+        r = infer(CANDIDATES, STATE, known={"pocket_name": "food", "amount": "not a number"})
+        assert r.status == "needs_disambiguation"
+        assert r.field == "amount"

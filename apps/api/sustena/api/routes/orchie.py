@@ -212,6 +212,7 @@ async def capture_infer(
         raise HTTPException(status_code=404, detail=f"No widget '{body.widget_id}' declared on this sustain")
 
     parsed_fields = None
+    raw_text = None
     if body.message_id:
         from sustena.core.ingest_singleton import get_shared_ingest_engine
 
@@ -219,6 +220,10 @@ async def capture_infer(
         if message is None or message.get("sustain_id") != body.sustain_id:
             raise HTTPException(status_code=404, detail="Message not found")
         parsed_fields = message.get("parsed_fields") or {}
+        # The raw SMS body, only ever used as an amount-recovery FALLBACK
+        # (infer()'s own currency-prefixed regex) for a capture no registered
+        # transducer parser recognised -- see infer()'s docstring, step 1.
+        raw_text = message.get("raw_payload")
 
     history = None
     if not body.ignore_history:
@@ -236,6 +241,7 @@ async def capture_infer(
     result = infer(
         widget.emits, state,
         effect_text=body.effect_text, parsed_fields=parsed_fields, known=body.known, history=history,
+        raw_text=raw_text,
     )
     return result.to_dict()
 

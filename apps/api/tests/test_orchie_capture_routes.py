@@ -416,3 +416,142 @@ class TestClassificationHistoryEndToEnd:
         # A different sustain never inherits another sustain's classification
         # history, even for an identical merchant name.
         assert r.json().get("from_history") in (False, None)
+
+
+class TestUnparsedMessageNoLongerDeadEnds:
+    """Reproduces the exact real-device bug Bonnie reported: a captured SMS
+    no registered transducer parser recognised (source: mpesa, "No
+    registered parser recognised this message's shape") landed as truly
+    unparsed -- parsed_fields={}, no amount, no counterparty. Classifying
+    the pocket used to dead-end at "no amount could be recovered", with
+    nothing the person could do about it and no transaction ever recorded."""
+
+    UNPARSED_SMS = "Dear Customer, your account XYZ456 has been credited with Ksh2,500.00 today. Thank you."
+
+    def test_the_raw_message_really_is_unparsed(self, client, user, sustain):
+        # Sanity-check the test fixture itself: this must genuinely be a
+        # shape none of the real transducer parsers recognise, or this
+        # whole test proves nothing. A genuinely unparsed capture's STORED
+        # status is still "needs_attention" (same as parsed_unmapped --
+        # ingest_engine._process() only distinguishes "mapped" at the top
+        # level); the transducer's own "unparsed" verdict shows up in
+        # reason/parser_name instead, exactly what Bonnie's real device saw.
+        headers, _ = user
+        cap = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "mpesa", "sustain_id": sustain, "raw_payload": self.UNPARSED_SMS},
+            headers=headers,
+        )
+        data = cap.json()["data"]
+        assert data["status"] == "needs_attention"
+        assert data["parsed_fields"] == {}
+        assert data["parser_name"] in (None, "")
+        assert "no registered parser" in (data["reason"] or "").lower()
+
+    def test_pocket_then_typed_amount_reaches_a_real_committed_transaction(self, client, user, sustain):
+        headers, _ = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+        cap = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "mpesa", "sustain_id": sustain, "raw_payload": self.UNPARSED_SMS},
+            headers=headers,
+        )
+        message_id = cap.json()["data"]["message_id"]
+
+        # Round 1: no known facts at all -- must ask for a pocket, not
+        # dead-end, and must NOT yet be able to reach amount (untested here)
+        # since raw_text-based recovery only kicks in once pocket is settled
+        # in this widget's field order.
+        r1 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": message_id},
+            headers=headers,
+        )
+        data1 = r1.json()
+        assert data1["status"] == "needs_disambiguation"
+        assert data1["field"] == "pocket_name"
+
+        # Round 2: pocket picked. This message's raw text has NO literal
+        # "Ksh" figure matched by the safe currency regex at the exact spot
+        # a human would expect -- it DOES have one ("Ksh2,500.00"), so this
+        # should resolve straight through via the raw-text fallback rather
+        # than asking for the amount at all.
+        r2 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": message_id, "known": {"pocket_name": "food"}},
+            headers=headers,
+        )
+        data2 = r2.json()
+        # Two candidate operators (spend/allocate) are both satisfiable
+        # once pocket+amount are known with no verb/direction hint -- a
+        # real, expected disambiguation, not the bug being tested here.
+        if data2["status"] == "needs_disambiguation" and data2["field"] == "operator":
+            r2b = client.post(
+                "/orchie/capture/infer",
+                json={
+                    "sustain_id": sustain, "message_id": message_id,
+                    "known": {"pocket_name": "food", "operator": "budget.spend"},
+                },
+                headers=headers,
+            )
+            data2 = r2b.json()
+
+        assert data2["status"] == "ready"
+        assert data2["params"]["amount"] == 2500.0  # recovered from raw SMS text, never asked
+
+        confirm = client.post(
+            "/orchie/capture/confirm",
+            json={
+                "sustain_id": sustain, "operator": data2["operator"], "params": data2["params"],
+                "message_id": message_id, "description": data2["description"],
+            },
+            headers=headers,
+        )
+        assert confirm.json()["result"]["status"] == "ok"
+        assert confirm.json()["message_resolved"] is True
+
+    def test_a_truly_unrecoverable_amount_asks_and_then_commits_the_typed_value(self, client, user, sustain):
+        headers, _ = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+        no_amount_at_all = "Your account was accessed from a new device. If this wasn't you, contact us."
+        cap = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "mpesa", "sustain_id": sustain, "raw_payload": no_amount_at_all},
+            headers=headers,
+        )
+        message_id = cap.json()["data"]["message_id"]
+
+        infer1 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": message_id, "known": {"pocket_name": "food", "operator": "budget.spend"}},
+            headers=headers,
+        ).json()
+        # No dead end -- a real, answerable question with no tap options
+        # (the frontend renders a text input for field="amount").
+        assert infer1["status"] == "needs_disambiguation"
+        assert infer1["field"] == "amount"
+        assert infer1["options"] is None
+
+        # Human types "500" -- arrives as a string, exactly like a text
+        # input naturally sends.
+        infer2 = client.post(
+            "/orchie/capture/infer",
+            json={
+                "sustain_id": sustain, "message_id": message_id,
+                "known": {"pocket_name": "food", "operator": "budget.spend", "amount": "500"},
+            },
+            headers=headers,
+        ).json()
+        assert infer2["status"] == "ready"
+        assert infer2["params"]["amount"] == 500.0
+
+        confirm = client.post(
+            "/orchie/capture/confirm",
+            json={
+                "sustain_id": sustain, "operator": infer2["operator"], "params": infer2["params"],
+                "message_id": message_id, "description": infer2["description"],
+            },
+            headers=headers,
+        )
+        assert confirm.json()["result"]["status"] == "ok"
+        assert confirm.json()["result"]["data"]["amount_spent"] == 500.0

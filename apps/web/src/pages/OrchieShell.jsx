@@ -247,6 +247,42 @@ function DirectionBadge({ direction }) {
   return null;
 }
 
+/**
+ * field="amount" is the one disambiguation kind with no enumerable
+ * options -- an amount is typed, not tapped. Never a dead end: this
+ * renders whenever infer() couldn't recover a figure from the message
+ * itself (or a narration), which is now a genuine last resort (see
+ * effect_capture.infer()'s own docstring) rather than the "no amount
+ * could be recovered" wall Bonnie hit live.
+ */
+function AmountEntry({ question, why, onSubmit }) {
+  const [value, setValue] = useState('');
+  const submit = () => { if (value.trim()) onSubmit(value.trim()); };
+  return (
+    <div>
+      <div style={questionText}>{question}</div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <input
+          type="number"
+          inputMode="decimal"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+          placeholder="e.g. 500"
+          autoFocus
+          style={{
+            flex: 1, fontFamily: 'var(--mono)', fontSize: 15, color: 'var(--text-primary)',
+            background: 'var(--bg-surface)', border: '1px solid var(--border-mid)',
+            borderRadius: 'var(--radius-sm)', padding: '10px 12px',
+          }}
+        />
+        <button onClick={submit} style={confirmButton}>OK</button>
+      </div>
+      <div style={{ ...mutedText, marginTop: 10 }}>{why}</div>
+    </div>
+  );
+}
+
 function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messageId, effectText, onClose, onCommitted }) {
   const [phase, setPhase] = useState('loading');
   const [payload, setPayload] = useState(null);
@@ -309,7 +345,11 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
     }}>
       {phase === 'loading' && <div style={mutedText}>thinking…</div>}
 
-      {phase === 'needs_disambiguation' && (
+      {phase === 'needs_disambiguation' && payload.field === 'amount' && (
+        <AmountEntry question={payload.question} why={payload.why} onSubmit={answer} />
+      )}
+
+      {phase === 'needs_disambiguation' && payload.field !== 'amount' && (
         <div>
           <div style={questionText}>{payload.question}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
@@ -562,6 +602,16 @@ function WidgetCard({ widget, sustainId, onCommitted }) {
         <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-secondary)' }}>
           <div>source: {d.source_id || 'unknown'}</div>
           {d.reason && <div style={{ marginTop: 4, color: 'var(--text-muted)' }}>{d.reason}</div>}
+          {d.raw_payload && (
+            <div style={{
+              marginTop: 8, padding: '8px 10px', borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-base)', border: '1px solid var(--border)',
+              color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.5,
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            }}>
+              {d.raw_payload}
+            </div>
+          )}
         </div>
       )}
 
