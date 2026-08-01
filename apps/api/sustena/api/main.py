@@ -269,10 +269,26 @@ if _DIST_DIR.is_dir():
         A client-side react-router path (e.g. /profile) or a genuine 404
         both fall through to index.html exactly as before — that behavior
         is unchanged; only real on-disk files now win over it.
+
+        sw.js gets an explicit no-cache header — found live (1 Aug 2026)
+        while chasing a real "installed PWA stuck on old code" report:
+        Cloudflare's default edge cache matches on file extension, and
+        /sw.js (unlike /assets/*.js) has no content hash in its URL, so it
+        was being served from cache for its full 4-hour Cache-Control
+        max-age regardless of how many times the origin was redeployed
+        (confirmed via response headers: cf-cache-status: HIT, Age: 918,
+        last-modified from FIVE DAYS before the check). A service worker
+        script that never appears to change to the browser never triggers
+        a re-install, so an installed client's cached shell (old JS, old
+        API routes) could persist indefinitely. This header is the
+        standard, spec-recommended mitigation for exactly this failure
+        mode — it tells both the browser and any CDN in front of it to
+        never serve a cached copy without revalidating against the origin.
         """
         candidate = (_DIST_DIR / full_path).resolve()
         if candidate.is_file() and candidate.is_relative_to(_DIST_DIR_RESOLVED):
-            return FileResponse(candidate)
+            headers = {"Cache-Control": "no-cache, no-store, must-revalidate"} if full_path == "sw.js" else None
+            return FileResponse(candidate, headers=headers)
         return FileResponse(_DIST_DIR / "index.html")
 
     logger.info("Serving built frontend from %s", _DIST_DIR)

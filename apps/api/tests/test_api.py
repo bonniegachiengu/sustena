@@ -115,6 +115,34 @@ async def test_health_reports_the_running_git_commit():
 
 
 @pytest.mark.asyncio
+async def test_service_worker_is_served_with_no_cache_header():
+    """
+    GET /sw.js must carry an explicit no-cache Cache-Control header.
+
+    Found live (1 Aug 2026): Cloudflare's default edge cache matches by
+    file extension, and /sw.js -- unlike the content-hashed /assets/*.js
+    bundle -- has no cache-busting URL of its own, so it was being served
+    stale from the CDN for its full max-age regardless of how many times
+    the origin redeployed a fresh one. Without this header, an installed
+    PWA's service worker can never detect a real deploy happened.
+
+    Skipped if apps/web/dist hasn't been built in this environment (e.g.
+    CI, or a backend-only checkout) -- the frontend-serving route only
+    registers at all when _DIST_DIR exists, matching main.py's own guard.
+    """
+    from sustena.api.main import _DIST_DIR
+    if not (_DIST_DIR / "sw.js").is_file():
+        pytest.skip("apps/web/dist/sw.js not built in this environment")
+
+    async with _client() as client:
+        response = await client.get("/sw.js")
+    assert response.status_code == 200
+    cache_control = response.headers.get("cache-control", "")
+    assert "no-cache" in cache_control
+    assert "no-store" in cache_control
+
+
+@pytest.mark.asyncio
 async def test_health_db_status_ok_when_db_accessible():
     """
     db_status should be 'ok' when the DB is reachable.
