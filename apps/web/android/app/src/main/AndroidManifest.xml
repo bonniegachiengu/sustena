@@ -33,9 +33,39 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- SMS auto-reader (M-Pesa + KCB ingest, 1 Aug 2026). Registered
+             statically (not just dynamically inside the plugin's lifecycle)
+             so a real financial SMS is never missed even if the app isn't
+             currently running: SMS_RECEIVED is one of the telephony
+             broadcasts still exempt from Android 8+'s implicit-broadcast
+             background-execution limits. android:permission restricts
+             delivery to senders holding BROADCAST_SMS (the system itself),
+             so no other app can spoof a fake SMS_RECEIVED into this
+             receiver. The receiver's OWN code (SmsReceiver.java) applies
+             the real privacy filter: everything not from a recognised
+             M-Pesa/KCB sender is read from the intent (unavoidable, Android
+             delivers the whole batch to every registered receiver) and then
+             immediately discarded, never queued, never logged. -->
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- SMS auto-reader: see the SmsCapturePlugin/SmsReceiver Java sources
+         for the strict M-Pesa/KCB-only privacy filter applied to everything
+         these permissions make readable. Requested at runtime with an
+         in-app rationale screen first (OrchieShell.jsx's SmsCaptureCard),
+         never on cold launch. -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
 </manifest>

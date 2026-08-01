@@ -17,8 +17,10 @@
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { api } from '../lib/api';
 import LoginGate from '../components/LoginGate';
+import { checkSmsPermission, requestSmsPermission, backfillInbox, startLivePolling, stopLivePolling } from '../lib/smsCapture';
 
 const LAST_SUSTAIN_KEY = 'sustena_orchie_last_sustain';
 
@@ -369,6 +371,107 @@ function NarrateBar({ sustainId, onCommitted }) {
   );
 }
 
+/**
+ * The in-app rationale + control surface for the native SMS auto-reader
+ * (Android/Capacitor only — Tauri desktop has no SMS to read). Shows a
+ * plain-language explanation BEFORE ever triggering Android's real
+ * permission dialog (never on cold launch, per the standing rule for
+ * "dangerous" runtime permissions) — see smsCapture.js's own header
+ * comment for the full architecture (native captures + queues, this
+ * module is the only thing that ever calls the ingest API).
+ */
+function SmsCaptureCard({ sustainId }) {
+  const [status, setStatus] = useState('checking'); // checking | prompt | requesting | syncing | active | denied | unavailable
+  const [syncedCount, setSyncedCount] = useState(null);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) { setStatus('unavailable'); return; }
+    let cancelled = false;
+    checkSmsPermission().then(perm => {
+      if (cancelled) return;
+      if (perm === 'granted') {
+        setStatus('syncing');
+      } else if (perm === 'denied') {
+        setStatus('denied');
+      } else {
+        setStatus('prompt'); // 'prompt' or 'prompt-with-rationale'
+      }
+    }).catch(() => { if (!cancelled) setStatus('unavailable'); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (status !== 'syncing' || !sustainId) return;
+    let cancelled = false;
+    backfillInbox(sustainId).then(count => {
+      if (cancelled) return;
+      setSyncedCount(count);
+      setStatus('active');
+      startLivePolling(sustainId);
+    }).catch(() => { if (!cancelled) setStatus('active'); });
+    return () => { cancelled = true; };
+  }, [status, sustainId]);
+
+  useEffect(() => {
+    // Stop the poll if the component unmounts or the selected sustain
+    // changes (a new mount will restart it against the new sustainId).
+    return () => stopLivePolling();
+  }, []);
+
+  const enable = async () => {
+    setStatus('requesting');
+    try {
+      const perm = await requestSmsPermission();
+      setStatus(perm === 'granted' ? 'syncing' : 'denied');
+    } catch {
+      setStatus('denied');
+    }
+  };
+
+  if (status === 'unavailable' || status === 'checking') return null;
+
+  if (status === 'active') {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14,
+        fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--text-dim)',
+      }}>
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--teal)' }} />
+        auto-capture active — M-Pesa &amp; KCB{syncedCount != null ? ` · ${syncedCount} synced` : ''}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      marginBottom: 14, padding: '14px 16px', borderRadius: 'var(--radius-md)',
+      background: 'var(--bg-raised)', border: '1px solid var(--border-mid)',
+    }}>
+      <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--text-primary)', marginBottom: 6 }}>
+        Let Orchie read your M-Pesa &amp; KCB texts
+      </div>
+      <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 12 }}>
+        Orchie can automatically pick up M-Pesa and KCB transaction alerts so your pockets
+        stay current without typing anything in. It only ever reads messages from those two
+        senders — every other text on your phone is never touched, never sent anywhere.
+      </div>
+      {status === 'requesting' && <div style={mutedText}>waiting for Android's permission dialog…</div>}
+      {status === 'syncing' && <div style={mutedText}>syncing recent messages…</div>}
+      {(status === 'prompt' || status === 'denied') && (
+        <>
+          <button onClick={enable} style={confirmButton}>ENABLE AUTOMATIC CAPTURE</button>
+          {status === 'denied' && (
+            <div style={{ ...mutedText, marginTop: 8 }}>
+              Permission was declined — you can turn it on later from Android's app settings
+              (Settings → Apps → Sustena Orchie → Permissions → SMS).
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function WidgetCard({ widget, sustainId, onCommitted }) {
   const d = widget.data || {};
   const [capturing, setCapturing] = useState(false);
@@ -521,6 +624,8 @@ export default function OrchieShell() {
           </button>
         </div>
       </div>
+
+      {sustainId && <SmsCaptureCard key={sustainId} sustainId={sustainId} />}
 
       {sustainId && <NarrateBar sustainId={sustainId} onCommitted={load} />}
 
