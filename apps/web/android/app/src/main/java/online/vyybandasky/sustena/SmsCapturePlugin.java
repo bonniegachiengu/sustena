@@ -119,4 +119,43 @@ public class SmsCapturePlugin extends Plugin {
         ret.put("messages", results);
         call.resolve(ret);
     }
+
+    /**
+     * Pushes the real, current auth session + active sustain into
+     * SmsAuthStore so IngestWorker (triggered directly by SmsReceiver, with
+     * no guarantee any JS is alive) can make a real authenticated capture
+     * POST for a real-time SMS. Called from OrchieShell.jsx whenever the
+     * token or the selected sustain changes -- see that file's own effect.
+     * No permission gate needed here (this never reads SMS content, only
+     * caches what JS already has); real, standard @PluginMethod auth is
+     * still whatever Capacitor's own bridge already enforces per call.
+     */
+    @PluginMethod
+    public void setAuthContext(PluginCall call) {
+        String token = call.getString("token");
+        String sustainId = call.getString("sustainId");
+        String apiBase = call.getString("apiBase");
+        SmsAuthStore.set(getContext(), token, sustainId, apiBase);
+        call.resolve();
+    }
+
+    /**
+     * A tap on the native "Orchie needs a decision" notification
+     * (IngestWorker.showClassifyNotification) deposits its target sustain +
+     * message via MainActivity.capturePendingClassifyIntent -> SmsAuthStore.
+     * JS calls this once on mount (and on resume) to pick it up and jump
+     * straight to that item's classify/confirm card -- returns an empty
+     * object (no sustainId/messageId keys) when there's nothing pending,
+     * never null, so the JS side has one uniform shape to check.
+     */
+    @PluginMethod
+    public void consumePendingClassifyTarget(PluginCall call) {
+        String[] target = SmsAuthStore.consumePendingClassifyTarget(getContext());
+        JSObject ret = new JSObject();
+        if (target != null) {
+            ret.put("sustainId", target[0]);
+            ret.put("messageId", target[1]);
+        }
+        call.resolve(ret);
+    }
 }

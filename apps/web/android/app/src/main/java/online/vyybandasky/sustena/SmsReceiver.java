@@ -6,6 +6,11 @@ import android.content.Intent;
 import android.provider.Telephony;
 import android.telephony.SmsMessage;
 
+import androidx.work.Data;
+import androidx.work.OneTimeWorkRequest;
+import androidx.work.OutOfQuotaPolicy;
+import androidx.work.WorkManager;
+
 /**
  * Fires on every incoming SMS (android.provider.Telephony.SMS_RECEIVED_ACTION),
  * registered statically in AndroidManifest.xml so a real financial SMS is
@@ -22,15 +27,24 @@ import android.telephony.SmsMessage;
  * the intent here and then immediately discarded: never queued, never
  * logged, never touched again.
  *
- * Deliberately does NOT talk to the network -- see SmsQueueStore's own
- * header comment for why (a BroadcastReceiver has a short, ~10s execution
- * window before Android may treat it as non-responsive; a single
- * SharedPreferences write comfortably fits that, a real-world mobile HTTP
- * POST is a genuine risk of exceeding it). smsCapture.js (the JS side)
- * drains the queue on a short poll while the app is foregrounded and once
- * on resume -- see that module's own header comment for the honest
- * "near-real-time, not always-instant-regardless-of-app-state" scope this
- * implies.
+ * This receiver ITSELF still never talks to the network (a BroadcastReceiver
+ * has a short, ~10s execution window before Android may treat it as
+ * non-responsive -- a single SharedPreferences write and a WorkManager
+ * enqueue both comfortably fit that, a real-world mobile HTTP POST made
+ * directly here would not). Two things happen for a message that passes
+ * both filters:
+ *   1. SmsQueueStore.enqueue() -- unchanged, the JS-side fallback path
+ *      (smsCapture.js polls this while the app is foregrounded / on resume).
+ *   2. A WorkManager job (IngestWorker) is enqueued to do the REAL capture
+ *      POST + classify notification natively, near-immediately, regardless
+ *      of whether the app process is even running -- see IngestWorker's own
+ *      header comment for why this exists as a second path rather than
+ *      relying on (1) alone: "immediate, detect-on-arrival" cannot honestly
+ *      be delivered by a webview JS timer Android is free to suspend.
+ *      OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST means "run as
+ *      soon as possible, and if there's no expedited-job quota available
+ *      right now, just run as normal background work instead of failing" --
+ *      no extra foreground-service permission needed.
  */
 public class SmsReceiver extends BroadcastReceiver {
 
@@ -67,6 +81,18 @@ public class SmsReceiver extends BroadcastReceiver {
             return; // OTP/verification code -- discarded here, NEVER queued, regardless of sender
         }
 
-        SmsQueueStore.enqueue(context, sender, bodyText, System.currentTimeMillis());
+        long timestampMs = System.currentTimeMillis();
+        SmsQueueStore.enqueue(context, sender, bodyText, timestampMs);
+
+        Data inputData = new Data.Builder()
+            .putString(IngestWorker.KEY_SENDER, sender)
+            .putString(IngestWorker.KEY_BODY, bodyText)
+            .putLong(IngestWorker.KEY_TIMESTAMP_MS, timestampMs)
+            .build();
+        OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(IngestWorker.class)
+            .setInputData(inputData)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .build();
+        WorkManager.getInstance(context).enqueue(request);
     }
 }

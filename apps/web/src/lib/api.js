@@ -126,3 +126,11 @@ function ws(sustainId, onMessage, onClose) {
 }
 
 export const api = { get, post, patch, ws, login };
+
+/** The resolved absolute API base (native builds bake in a real hostname
+ *  via VITE_API_BASE; '' on the hosted web app means "same origin"). Used
+ *  by smsCapture.js to give native code the same backend the JS layer
+ *  itself talks to, for the native-side ingest capture path. */
+export function apiBase() {
+  return BASE;
+}

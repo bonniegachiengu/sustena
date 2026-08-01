@@ -22,7 +22,7 @@ import { api } from '../lib/api';
 import LoginGate from '../components/LoginGate';
 import {
   checkSmsPermission, requestSmsPermission, backfillInbox, startLivePolling, stopLivePolling,
-  ensureNotificationPermission,
+  ensureNotificationPermission, setNativeAuthContext, consumePendingClassifyTarget,
 } from '../lib/smsCapture';
 
 const LAST_SUSTAIN_KEY = 'sustena_orchie_last_sustain';
@@ -226,6 +226,26 @@ const cancelButton = {
 };
 const mutedText = { fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-muted)' };
 const questionText = { fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--text-primary)' };
+
+/**
+ * A plain +/- money-direction cue, styled entirely in Sustena's OWN palette
+ * (globals.css's --teal/--amber) -- explicitly NOT VOS's safety-orange
+ * (outgoing) / magenta (incoming) convention, which does not belong in
+ * Sustena. Reuses --teal for "+" (received) the same way this file already
+ * uses it for CONFIRM/committed-success, and --amber for "-" (sent) the
+ * same way it's already Sustena's default/primary accent everywhere else
+ * (message bubbles, active nav, the cursor) -- both are colors this app
+ * already assigns real meaning to, not new ones invented for this cue.
+ */
+function DirectionBadge({ direction }) {
+  if (direction === 'received') {
+    return <span style={{ fontFamily: 'var(--mono)', fontWeight: 700, color: 'var(--teal)' }}>+</span>;
+  }
+  if (direction === 'sent') {
+    return <span style={{ fontFamily: 'var(--mono)', fontWeight: 700, color: 'var(--amber)' }}>−</span>;
+  }
+  return null;
+}
 
 function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messageId, effectText, onClose, onCommitted }) {
   const [phase, setPhase] = useState('loading');
@@ -520,8 +540,12 @@ function WidgetCard({ widget, sustainId, onCommitted }) {
         {widget.id.replace(/_/g, ' ')}
       </div>
 
-      <div style={{ fontFamily: 'var(--ui)', fontSize: 15, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 10 }}>
-        {d.headline || widget.id}
+      <div style={{
+        display: 'flex', alignItems: 'baseline', gap: 8,
+        fontFamily: 'var(--ui)', fontSize: 15, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 10,
+      }}>
+        {widget.render === 'classify_card' && <DirectionBadge direction={d.parsed_fields?.direction} />}
+        <span>{d.headline || widget.id}</span>
       </div>
 
       {widget.render === 'pocket_watch_card' && (
@@ -603,6 +627,10 @@ export default function OrchieShell() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showExcluded, setShowExcluded] = useState(false);
+  // A tap on the native real-time "Orchie needs a decision" notification --
+  // jump straight to THAT item's classify/confirm card, independent of
+  // whatever compose() would otherwise rank first.
+  const [pendingTarget, setPendingTarget] = useState(null);
 
   const load = useCallback(async () => {
     if (!sustainId) return;
@@ -619,6 +647,36 @@ export default function OrchieShell() {
   }, [sustainId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Native code (IngestWorker.java, triggered directly by SmsReceiver on
+  // real-time SMS arrival) can't read the WebView's localStorage -- push
+  // the real token + active sustain into native storage whenever either
+  // changes, so a real-time capture can be authenticated with no JS/app
+  // process involved. Best-effort, silent; the JS poll/backfill path is
+  // unaffected either way.
+  useEffect(() => {
+    setNativeAuthContext(token, sustainId).catch(() => {});
+  }, [token, sustainId]);
+
+  // Pick up a pending classify target: once on mount, and again whenever
+  // the app becomes visible (a notification tap while already running
+  // routes through Android's onNewIntent, not a fresh mount -- checking on
+  // visibilitychange catches that case too).
+  const checkPendingTarget = useCallback(async () => {
+    const target = await consumePendingClassifyTarget();
+    if (!target) return;
+    if (target.sustainId !== sustainId) chooseSustain(target.sustainId);
+    setPendingTarget(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sustainId]);
+
+  useEffect(() => { checkPendingTarget(); }, [checkPendingTarget]);
+
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') checkPendingTarget(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [checkPendingTarget]);
 
   if (!token) {
     return (
@@ -656,6 +714,23 @@ export default function OrchieShell() {
           </button>
         </div>
       </div>
+
+      {pendingTarget && pendingTarget.sustainId === sustainId && (
+        <div style={{
+          marginBottom: 14, padding: 14, borderRadius: 'var(--radius-md)',
+          background: 'var(--bg-raised)', border: '1px solid var(--teal-border)',
+        }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.08em', color: 'var(--teal)', marginBottom: 4, textTransform: 'uppercase' }}>
+            from notification
+          </div>
+          <CaptureFlow
+            sustainId={sustainId}
+            messageId={pendingTarget.messageId}
+            onClose={() => setPendingTarget(null)}
+            onCommitted={() => { setPendingTarget(null); load(); }}
+          />
+        </div>
+      )}
 
       {sustainId && <SmsCaptureCard key={sustainId} sustainId={sustainId} />}
 

@@ -17,36 +17,77 @@
  * real auth header, the real error handling, everything the rest of the
  * app already gets for free.
  *
- * HONEST SCOPE: "real time" here means captured instantly (nothing is
- * ever missed, regardless of whether the app is running when the SMS
- * arrives) but DELIVERED to the backend on the next short poll while the
- * app is foregrounded, or on resume if it wasn't. This is not always-
- * instant-regardless-of-app-state -- a genuinely instant background push
- * would need a reliable background-work scheduler (WorkManager) doing the
- * networking from native code, which is real, disclosed, later work, not
- * built in this first cut.
+ * REAL-TIME PATH (native, no JS required): SmsReceiver ALSO enqueues a
+ * WorkManager job (IngestWorker.java) directly on SMS arrival, which POSTs
+ * the real capture and fires a native "Orchie needs a decision" notification
+ * itself, near-immediately, regardless of whether this JS/webview context
+ * is even running. This module's own poll/backfill path below is the
+ * FALLBACK for whatever the native path couldn't deliver (e.g. no auth
+ * context cached natively yet) -- both paths are safe to overlap because
+ * capture() is idempotent (dedup_key), so a message the native path already
+ * handled just comes back is_duplicate=true here and is correctly skipped
+ * (see forwardMessages()'s own notify guard below).
+ *
+ * setAuthContext()/consumePendingClassifyTarget() are the JS<->native bridge
+ * that path needs: OrchieShell.jsx pushes the real token + active sustain
+ * whenever either changes (native can't read the WebView's localStorage),
+ * and reads back whichever specific item a notification tap was for (native
+ * can't itself update React state -- MainActivity just stashes the target,
+ * this reads and clears it once).
  *
  * Every message this module ever sees has ALREADY passed the native
  * privacy filter (SmsSenderFilter.isKnownFinancialSender, applied
  * identically to both the backfill and the live-queue path) -- nothing
  * else is ever readable from here.
  *
- * IN-FIELD CLASSIFY NOTIFICATION: when a forwarded capture comes back
- * needing a human decision (status="needs_attention" -- unmapped or
- * ambiguous, not a source-lookup problem), this module fires a LOCAL
- * notification (@capacitor/local-notifications -- never leaves the device,
- * a different trust class from the SMS-forwarding decision that needed a
- * custom plugin) so the classification happens in the field, in the
- * moment, per Bonnie's explicit design intent -- never deferred to the
+ * IN-FIELD CLASSIFY NOTIFICATION (JS-side fallback): when a forwarded
+ * capture comes back needing a human decision (status="needs_attention" --
+ * unmapped or ambiguous, not a source-lookup problem), this module fires a
+ * LOCAL notification (@capacitor/local-notifications -- never leaves the
+ * device, a different trust class from the SMS-forwarding decision that
+ * needed a custom plugin) so the classification happens in the field, in
+ * the moment, per Bonnie's explicit design intent -- never deferred to the
  * laptop. Best-effort: a missing/denied notification permission just means
  * no notification fires; the item still lands in Orchie's compose feed
  * exactly as before, so nothing is ever lost, only the nudge is skipped.
  */
 import { registerPlugin } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import { api } from './api';
+import { api, apiBase } from './api';
 
 const SmsCapture = registerPlugin('SmsCapture');
+
+/** Pushes the real, current auth session + active sustain into native
+ *  storage so IngestWorker can make a real authenticated capture POST for
+ *  a real-time SMS with no JS/webview involved. Best-effort, silent --
+ *  call from OrchieShell.jsx whenever the token or selected sustain
+ *  changes. A failure here just means the native real-time path stays
+ *  inactive until the next successful push; the JS poll/backfill fallback
+ *  is unaffected either way. */
+export async function setNativeAuthContext(token, sustainId) {
+  try {
+    await SmsCapture.setAuthContext({ token: token || null, sustainId: sustainId || null, apiBase: apiBase() });
+  } catch {
+    // native plugin unavailable (web/Tauri) or call failed -- fine, silent.
+  }
+}
+
+/** Reads (and clears) whatever sustain+message a tap on the native
+ *  "Orchie needs a decision" notification deposited, or null if nothing is
+ *  pending. Call once on mount and again whenever the app becomes visible
+ *  (a notification tap while the app was already running routes through
+ *  Android's onNewIntent, not a fresh mount). */
+export async function consumePendingClassifyTarget() {
+  try {
+    const data = await SmsCapture.consumePendingClassifyTarget();
+    if (data && data.sustainId && data.messageId) {
+      return { sustainId: data.sustainId, messageId: data.messageId };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 /** Best-effort -- silently requests the (non-sensitive, on-device-only)
  *  notification permission. Call once, after SMS capture is enabled. */
