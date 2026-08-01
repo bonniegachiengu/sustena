@@ -7,6 +7,7 @@
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Capacitor } from '@capacitor/core'
+import { isTauri } from './lib/platform'
 
 // 1. Core primitives
 import './components/core/index.jsx'
@@ -52,15 +53,18 @@ import OrchePanel from './pages/OrchePanel'
 import OrchieShell from './pages/OrchieShell'
 import StudioPage from './pages/StudioPage'
 
-// The native Android wrapper (Capacitor) opens the same routes as the
-// hosted web app, but "/" is Mycelium — the orchestrator/dev cockpit,
-// laptop-first per its own design (see CLAUDE.md's Mycelium/Orchie split).
-// The phone-first, event-first Orchie surface at "/orchie" is what the
-// native app is actually FOR, so a native launch redirects there instead
-// of landing on a desktop-oriented panel. Capacitor.isNativePlatform() is
-// false in every browser context (dev, hosted PWA, any tab), so this has
-// no effect on the web app at all.
+// Every packaged native wrapper opens the same routes as the hosted web
+// app, but "/" is Mycelium — the orchestrator/dev cockpit (see CLAUDE.md's
+// Mycelium/Orchie/Studio split). Each wrapper exists to BE one specific
+// surface, not to be a generic window onto Mycelium, so a native launch
+// redirects straight there instead of landing on a screen the wrapper
+// wasn't built for:
+//   - Capacitor (Android, "Sustena Orchie")  -> /orchie  (phone-first)
+//   - Tauri (Windows desktop, "Sustena Studio") -> /studio (desktop-first)
+// Both checks are false in every browser context (dev, hosted PWA, any
+// tab), so neither has any effect on the web app itself.
 function HomeRoute() {
+  if (isTauri()) return <Navigate to="/studio" replace />
   if (Capacitor.isNativePlatform()) return <Navigate to="/orchie" replace />
   return <ShellApp />
 }

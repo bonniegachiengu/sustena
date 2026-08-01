@@ -21,6 +21,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
+import LoginGate from '../components/LoginGate';
 import SustainGraph from './studio/SustainGraph.jsx';
 import MonitorZone from './studio/MonitorZone.jsx';
 import ControlZone from './studio/ControlZone.jsx';
@@ -38,7 +39,14 @@ const VERBS = [
 ];
 
 export default function StudioPage() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('sustena_token') : null;
+  // Reactive (not a plain read) so LoginGate's onSignedIn can flip straight
+  // into the workbench without a page reload -- the Tauri desktop app
+  // starts every cold launch with no token at all, unlike the hosted web
+  // app which usually already has a browser session by the time this
+  // screen renders.
+  const [token, setToken] = useState(() => (
+    typeof window !== 'undefined' ? window.localStorage.getItem('sustena_token') : null
+  ));
 
   const [sustains, setSustains] = useState([]);
   const [sustainId, setSustainId] = useState(null);
@@ -89,10 +97,12 @@ export default function StudioPage() {
   if (!token) {
     return (
       <div style={pageStyle}>
-        <Empty text="sign in required" />
-        <div style={{ textAlign: 'center' }}>
-          <Link to="/" style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--amber)' }}>go to sustena →</Link>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px 28px', borderBottom: '1px solid var(--border)' }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700, letterSpacing: '0.14em', color: 'var(--text-primary)' }}>
+            STUDIO
+          </span>
         </div>
+        <LoginGate onSignedIn={() => setToken(window.localStorage.getItem('sustena_token'))} />
       </div>
     );
   }

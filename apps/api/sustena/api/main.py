@@ -118,6 +118,16 @@ ALLOWED_ORIGINS = (
         "https://sustena.vyybandasky.online",
         "https://localhost",      # Capacitor Android's default webview origin
         "capacitor://localhost",  # Capacitor iOS's default webview origin (no iOS platform yet, harmless to allow)
+        # Tauri desktop (Sustena Studio, 1 Aug 2026): the webview origin is
+        # PLATFORM-SPECIFIC and genuinely HTTP, not HTTPS, on Windows --
+        # confirmed via Tauri's own issue tracker (a real Windows desktop
+        # app failing to reach a self-hosted server with "Failed to fetch"
+        # until http://tauri.localhost was added to that server's CORS
+        # allowlist), not assumed. macOS/Linux use a different tauri://
+        # custom-scheme origin instead; both are harmless to allow even
+        # with no Tauri build for those platforms yet.
+        "http://tauri.localhost",
+        "tauri://localhost",
     ]
 )
 

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build && node scripts/stamp-sw-version.js",
     "build:capacitor": "tsc && vite build --mode capacitor",
+    "build:tauri": "tsc && vite build --mode tauri",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx,jsx,js"
   },
@@ -21,6 +22,8 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",

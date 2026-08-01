@@ -17,8 +17,8 @@
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { Capacitor } from '@capacitor/core';
 import { api } from '../lib/api';
+import LoginGate from '../components/LoginGate';
 
 const LAST_SUSTAIN_KEY = 'sustena_orchie_last_sustain';
 
@@ -450,84 +450,6 @@ function Empty({ text }) {
       fontSize: 13, color: 'var(--text-muted)',
     }}>
       {text}
-    </div>
-  );
-}
-
-/**
- * A real sign-in gate, not just a "sign in required" dead end. The native
- * Android app (Capacitor) has no browser session to inherit -- the hosted
- * web app relies on whatever's already in this same origin's localStorage,
- * which the packaged app never has, so it needs its own real login form
- * to ever get past this screen at all.
- *
- * Deliberately sign-in only, no register mode -- unlike ProfilePage's
- * SignInPanel (which offers both), anyone opening this app already has a
- * Sustena account from the web app; adding registration here wasn't asked
- * for and isn't needed.
- */
-function LoginGate({ onSignedIn }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const inputStyle = {
-    fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--text-primary)',
-    background: 'var(--bg-raised)', border: '1px solid var(--border-mid)',
-    borderRadius: 'var(--radius-sm)', padding: '10px 14px', outline: 'none', width: '100%',
-    boxSizing: 'border-box',
-  };
-
-  const canSubmit = email.trim() && password && !loading;
-
-  const submit = async () => {
-    if (!canSubmit) return;
-    setLoading(true);
-    setError('');
-    try {
-      await api.login(email.trim(), password);
-      onSignedIn();
-    } catch (e) {
-      // api.login() throws the real FastAPI error detail ("Invalid email
-      // or password" on bad creds) or a network-reachability message --
-      // shown inline, never a page reload (see api.js's login() docstring
-      // for why post()'s shared 401 handling is wrong for this case).
-      setError(e.message || 'could not reach sustena');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div style={{ padding: '60px 4px', display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 320, margin: '0 auto' }}>
-      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 10 }}>
-        sign in to sustena
-      </div>
-      <input
-        type="email" inputMode="email" autoCapitalize="none" autoCorrect="off"
-        value={email} onChange={e => setEmail(e.target.value)}
-        placeholder="email address" style={inputStyle}
-      />
-      <input
-        type="password" value={password} onChange={e => setPassword(e.target.value)}
-        placeholder="password" style={inputStyle}
-        onKeyDown={e => { if (e.key === 'Enter') submit(); }}
-      />
-      {error && <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--danger)' }}>{error}</span>}
-      <button
-        onClick={submit} disabled={!canSubmit}
-        style={{ ...confirmButton, textAlign: 'center', opacity: canSubmit ? 1 : 0.4 }}
-      >
-        {loading ? 'SIGNING IN…' : 'SIGN IN →'}
-      </button>
-      {/* Inside the native app "/" just redirects back to "/orchie" (App.tsx's
-          HomeRoute) -- this link only means anything in a real browser. */}
-      {!Capacitor.isNativePlatform() && (
-        <div style={{ textAlign: 'center', marginTop: 10 }}>
-          <Link to="/" style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--amber)' }}>go to sustena →</Link>
-        </div>
-      )}
     </div>
   );
 }
