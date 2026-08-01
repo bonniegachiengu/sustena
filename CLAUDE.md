@@ -1060,6 +1060,22 @@ Verified live against the real deployed API (throwaway account): a real KCB USD 
 
 ---
 
+### KCB/M-Pesa reclassification — source is SENDER, never wording (1 Aug 2026)
+
+Bonnie checked his real device directly and confirmed: **every** sample SMS he'd sent — including the two "Ksh X sent to KCB Pay Bill/account ... M-PESA ref Z" shapes previously kept under `mpesa`, and the three previously-"ambiguous" `kcb_bridge_*` shapes — genuinely arrives from the **KCB sender id**, not MPESA, even though all five mention "M-PESA" in their own wording. This resolves the two open questions the prior session's notes above left disclosed as unverified guesses.
+
+**Reclassified in `transducer.py`:** all five shapes now live under `_parse_kcb`, sharing a consistent `kcb_mpesa_*` parser-name prefix (`kcb_mpesa_paybill`, `kcb_mpesa_account` — moved out of `_parse_mpesa`; `kcb_mpesa_received`, `kcb_mpesa_sent`, `kcb_mpesa_transferred` — renamed in place from `kcb_bridge_*`). Regex logic itself is unchanged, byte-for-byte — this was a reorganization + relabeling, not a re-derivation. Genuine Safaricom MPESA-sender SMS (`mpesa_received`/`paybill`/`buygoods`/`sent`/`withdraw`) are untouched and still parse under `mpesa` — confirmed via the existing `TestKCBDoesNotShadowMpesa` (unmodified, still passes). Confidence on all five `kcb_mpesa_*` shapes is now **CONFIRMED**, not a guess — Bonnie verified this against his real device, not inferred from wording.
+
+**`smsCapture.js`'s `classifySource()` needed no logic change** — it was already purely sender-based (checks the SMS sender string, never `msg.body`), so it was already doing the right thing; only its comment was updated to record that this behavior is now confirmed correct rather than assumed.
+
+**Double-count risk — flagged, deliberately not fixed:** if the same real-world transaction ever produces both a KCB-sender notification and a genuine Safaricom MPESA-sender SMS about the identical transfer, `ingest_engine.py`'s `dedup_key` (sha256 of `sustain_id + source_id + raw_payload`) will **not** catch it as a duplicate — `source_id` (`"kcb"` vs `"mpesa"`) and `raw_payload` (different sender/wording template) both differ, so the two notifications hash to different keys and both get captured and processed as separate income/spend events. Documented as a code comment beside `_dedup_key()` and beside `_PARSERS` in `transducer.py` — a real fix would need cross-source correlation (e.g. matching amount + the shared M-PESA ref several `kcb_mpesa_*` shapes already expose in `parsed_fields`), which doesn't exist yet. Left for a deliberate future decision.
+
+**APK:** `versionCode` 5→6, `versionName` 1.1.1→1.1.2, same `applicationId` (installs as an update). Verified: `aapt dump badging` confirms the new version; `aapt dump permissions` confirms `READ_SMS`/`RECEIVE_SMS` still declared (no manifest changes this pass — Java/manifest untouched); `apksigner verify --verbose` → Verifies (v2); `zipalign -c 4` → clean.
+
+**Tests:** `test_transducer.py` updated in place (renamed classes/fixtures, added a cross-check asserting all five `kcb_mpesa_*` shapes parse under `kcb_*` never `mpesa_*`) — 54 transducer tests, no new fixture text (regex/sample text unchanged, only labels/organization). **1793 backend tests pass** (full suite, zero regressions).
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:

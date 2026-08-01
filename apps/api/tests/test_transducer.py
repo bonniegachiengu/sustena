@@ -47,17 +47,20 @@ WITHDRAW_NO_AGENT_PREFIX = (
     "on 20/7/26 at 7:00 PM. New M-PESA balance is Ksh6,850.00"
 )
 
-# ── M-Pesa -> KCB bridge samples — REAL text Bonnie pasted (1 Aug 2026) ─────
+# ── KCB<->M-Pesa samples — REAL text Bonnie pasted (1 Aug 2026) ─────────────
 # Personal names replaced with placeholder Kenyan names matching this
 # file's existing convention (JOHN KAMAU / MARY WANJIRU) -- amounts, dates,
-# references, and all other wording are exactly as received.
+# references, and all other wording are exactly as received. These two
+# formats read like a Safaricom M-Pesa confirmation but Bonnie confirmed
+# (1 Aug 2026) they arrive from the KCB sender id on his real device --
+# source is decided by sender, never by wording. See TestKcbMpesaShapes below.
 
-MPESA_TO_KCB_PAYBILL = (
+KCB_MPESA_PAYBILL = (
     "Ksh 15452.00 sent to KCB Pay Bill 522522 for account 121***2684 "
     "MARY WANJIRU has been received on 29/05/2026 at 10:01 AM. M-PESA ref UETB9611ZB"
 )
 
-MPESA_TO_KCB_ACCOUNT = (
+KCB_MPESA_ACCOUNT = (
     "Ksh 700.00 sent to KCB account GRACE NJERI OTIENO 7757675 has been "
     "received on 31/03/2026 at 09:00 AM. M-PESA Ref UCVB9B85C2"
 )
@@ -133,22 +136,23 @@ KCB_LOAN_DUE_TODAY = (
     "penalties."
 )
 
-# ── "AMBIGUOUS" samples — Bonnie's own framing: look like Vooma/KCB-app ─────
-# notifications of M-Pesa-network activity. Classified under kcb as a
-# disclosed best-judgment call (see kcb_bridge_* parser_names) rather than a
-# verified classification -- real names replaced as above.
+# ── KCB<->M-Pesa-network samples — CONFIRMED KCB sender (1 Aug 2026) ────────
+# Previously flagged as "AMBIGUOUS" -- Bonnie's own best-guess framing that
+# these might be Vooma/KCB-app relays of M-Pesa activity, origin sender
+# unconfirmed. Bonnie has since checked his real device directly: all three
+# arrive from the KCB sender id. Real names replaced as above.
 
-KCB_BRIDGE_RECEIVED = (
+KCB_MPESA_RECEIVED = (
     "You have received KES 1050.0 from MARY WANJIRU. M-PESA Ref TF2987NE4D. "
     "Transaction Ref No CF259N9TRN"
 )
 
-KCB_BRIDGE_SENT_TO_MPESA = (
+KCB_MPESA_SENT = (
     "CHT4C7F3H0 completed.KES 500.00 sent to M-PESA 254727916967 on 29/08/2025 "
     "at 12:26 PM.Transaction cost KES 11.90 New M-PESA balance is KES 500.00"
 )
 
-KCB_BRIDGE_TRANSFERRED = (
+KCB_MPESA_TRANSFERRED = (
     "Dear MARY WANJIRU you have successfully transferred KES 14,100.00 to "
     "25472****143-GRACE NJERI OTIENO on 28/05/2026 at 09:00 AM. M-PESA Ref UESB95XFAB"
 )
@@ -269,24 +273,35 @@ class TestSensitiveSecretRejection:
             assert parse_message(text).status != "rejected"
 
 
-# ── M-Pesa -> KCB bridge — real text, kept under the mpesa parser ──────────
+# ── KCB<->M-Pesa-network shapes — real text, source CONFIRMED as kcb ───────
+# (1 Aug 2026) These read like a Safaricom M-Pesa "sent to" confirmation but
+# arrive from the KCB sender id on Bonnie's real device -- classification is
+# by sender, never by wording, so they're parsed by _parse_kcb, not
+# _parse_mpesa. See TestKcbMpesaShapes below for the other three confirmed
+# KCB<->M-Pesa-network shapes.
 
-class TestMpesaToKcbBridge:
+class TestKcbMpesaPaybillAndAccount:
     def test_paybill_to_kcb_is_parsed_unmapped(self):
-        result = parse_message(MPESA_TO_KCB_PAYBILL)
+        result = parse_message(KCB_MPESA_PAYBILL)
         assert result.status == "parsed_unmapped"
-        assert result.parser_name == "mpesa_to_kcb_paybill"
+        assert result.parser_name == "kcb_mpesa_paybill"
         assert result.parsed_fields["amount"] == 15452.00
         assert result.parsed_fields["account"] == "121***2684"
         assert result.external_ref == "UETB9611ZB"
 
     def test_kcb_account_is_parsed_unmapped(self):
-        result = parse_message(MPESA_TO_KCB_ACCOUNT)
+        result = parse_message(KCB_MPESA_ACCOUNT)
         assert result.status == "parsed_unmapped"
-        assert result.parser_name == "mpesa_to_kcb_account"
+        assert result.parser_name == "kcb_mpesa_account"
         assert result.parsed_fields["amount"] == 700.00
         assert result.parsed_fields["counterparty"] == "GRACE NJERI OTIENO"
         assert result.external_ref == "UCVB9B85C2"
+
+    def test_both_shapes_are_parsed_by_the_kcb_parser_not_mpesa(self):
+        # The whole point of this reclassification: source is sender-based,
+        # not wording-based, even though both shapes say "M-PESA" in the text.
+        for text in (KCB_MPESA_PAYBILL, KCB_MPESA_ACCOUNT):
+            assert parse_message(text).parser_name.startswith("kcb_")
 
 
 # ── KCB — real text Bonnie pasted, replacing the earlier speculative set ───
@@ -371,35 +386,47 @@ class TestKCBLoanRepayment:
             assert parse_message(text).operator_name is None
 
 
-class TestKCBAmbiguousBridgeShapes:
-    """Bonnie's own framing: these look like Vooma/KCB-app notifications of
-    M-Pesa-network activity. Classified under kcb (kcb_bridge_* parser
-    names) as a disclosed best-judgment call -- not a verified
-    classification of which real sender id these actually arrive from."""
+class TestKcbMpesaShapes:
+    """Formerly 'ambiguous' -- Bonnie's own earlier framing was that these
+    might be Vooma/KCB-app relays of M-Pesa activity, origin sender
+    unconfirmed. Bonnie has since checked his real device directly (1 Aug
+    2026): all three genuinely arrive from the KCB sender id. Confirmed,
+    not guessed -- kcb_mpesa_* parser names reflect that."""
 
-    def test_bridge_received_is_mapped(self):
-        result = parse_message(KCB_BRIDGE_RECEIVED)
+    def test_received_is_mapped(self):
+        result = parse_message(KCB_MPESA_RECEIVED)
         assert result.status == "mapped"
         assert result.operator_name == "budget.record_income"
         assert result.operator_params["amount"] == 1050.0
-        assert result.parser_name == "kcb_bridge_received"
+        assert result.parser_name == "kcb_mpesa_received"
         assert result.external_ref == "TF2987NE4D"
 
-    def test_bridge_sent_to_mpesa_is_parsed_unmapped(self):
-        result = parse_message(KCB_BRIDGE_SENT_TO_MPESA)
+    def test_sent_to_mpesa_is_parsed_unmapped(self):
+        result = parse_message(KCB_MPESA_SENT)
         assert result.status == "parsed_unmapped"
         assert result.parsed_fields["amount"] == 500.00
         assert result.parsed_fields["transaction_cost"] == 11.90
         assert result.external_ref == "CHT4C7F3H0"
-        assert result.parser_name == "kcb_bridge_sent_to_mpesa"
+        assert result.parser_name == "kcb_mpesa_sent"
 
-    def test_bridge_transferred_is_parsed_unmapped(self):
-        result = parse_message(KCB_BRIDGE_TRANSFERRED)
+    def test_transferred_is_parsed_unmapped(self):
+        result = parse_message(KCB_MPESA_TRANSFERRED)
         assert result.status == "parsed_unmapped"
         assert result.parsed_fields["amount"] == 14100.00
         assert result.parsed_fields["counterparty"] == "GRACE NJERI OTIENO"
         assert result.external_ref == "UESB95XFAB"
-        assert result.parser_name == "kcb_bridge_transferred"
+        assert result.parser_name == "kcb_mpesa_transferred"
+
+    def test_all_five_kcb_mpesa_shapes_confirmed_by_sender_not_wording(self):
+        # The reclassification's core property: every shape that mentions
+        # "M-PESA" in its own text but is confirmed to arrive from the KCB
+        # sender id parses under kcb_*, never mpesa_* -- classification is
+        # by sender, never by content.
+        for text in (
+            KCB_MPESA_PAYBILL, KCB_MPESA_ACCOUNT,
+            KCB_MPESA_RECEIVED, KCB_MPESA_SENT, KCB_MPESA_TRANSFERRED,
+        ):
+            assert parse_message(text).parser_name.startswith("kcb_mpesa_")
 
 
 class TestKCBBalanceIsInformationalOnly:

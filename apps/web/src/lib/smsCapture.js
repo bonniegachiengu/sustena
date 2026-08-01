@@ -37,6 +37,13 @@ import { api } from './api';
 const SmsCapture = registerPlugin('SmsCapture');
 
 function classifySource(sender) {
+  // Purely SENDER-based, never inspects msg.body -- confirmed correct by
+  // Bonnie against his real device (1 Aug 2026): every KCB<->M-Pesa-network
+  // notification he receives (including ones whose text says "M-PESA")
+  // genuinely arrives from the KCB sender id, not MPESA. Classifying by
+  // wording instead of sender would have misrouted all of those. The
+  // matching server-side split lives in transducer.py's _parse_kcb vs
+  // _parse_mpesa (see that module's own header note on the KCB section).
   const s = (sender || '').toUpperCase();
   if (s.includes('MPESA')) return 'mpesa';
   if (s.includes('KCB')) return 'kcb';

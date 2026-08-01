@@ -142,27 +142,12 @@ _MPESA_WITHDRAW_RE = re.compile(
     r"New M-PESA balance is Ksh(?P<balance>[\d,]+\.?\d*)",
 )
 
-# ── M-Pesa <-> KCB bridge shapes — REAL, Bonnie-provided samples (1 Aug 2026) ──
-# Two confirmed-real M-Pesa notification templates for money moving FROM
-# M-Pesa INTO a KCB destination (a paybill, or a named KCB account) — kept
-# under the mpesa parser per Bonnie's own instruction ("keep under the
-# mpesa source"), since these are M-Pesa's own "Ksh X sent to Y ... M-PESA
-# ref Z" notifications, just for a KCB-addressed recipient rather than a
-# phone number.
-
-_MPESA_TO_KCB_PAYBILL_RE = re.compile(
-    r"Ksh\s*(?P<amount>[\d,]+\.?\d*)\s+sent to\s+KCB Pay Bill\s+(?P<paybill>\d+)\s+for account\s+(?P<account>\S+)\s+"
-    r"(?P<name>[A-Za-z ]+?)\s+has been received on\s+(?P<date>\S+)\s+at\s+(?P<time>\S+\s*[APap][Mm])"
-    r".*?M-PESA ref\s+(?P<ref>[A-Za-z0-9]+)",
-    re.IGNORECASE | re.DOTALL,
-)
-
-_MPESA_TO_KCB_ACCOUNT_RE = re.compile(
-    r"Ksh\s*(?P<amount>[\d,]+\.?\d*)\s+sent to\s+KCB account\s+(?P<name>[A-Za-z ]+?)\s+(?P<account>\d+)\s+"
-    r"has been received on\s+(?P<date>\S+)"
-    r".*?M-PESA Ref\s+(?P<ref>[A-Za-z0-9]+)",
-    re.IGNORECASE | re.DOTALL,
-)
+# NOTE: two "Ksh X sent to KCB Pay Bill/account ... M-PESA ref Z" shapes used
+# to live here, kept under the mpesa parser on the assumption they were genuine
+# Safaricom M-Pesa notifications. Bonnie confirmed (1 Aug 2026) that on his
+# real device EVERY sample of this shape actually arrives from the KCB sender
+# id, not MPESA — source is decided by SENDER, never by wording. Moved to
+# _parse_kcb() below as _KCB_MPESA_PAYBILL_RE / _KCB_MPESA_ACCOUNT_RE.
 
 
 def _to_float(amount_str: str) -> float:
@@ -255,37 +240,6 @@ def _parse_mpesa(text: str) -> TransductionResult | None:
             parser_name="mpesa_withdraw",
         )
 
-    m = _MPESA_TO_KCB_PAYBILL_RE.search(text)
-    if m:
-        amount = _to_float(m.group("amount"))
-        name = m.group("name").strip()
-        counterparty = f"KCB Pay Bill {m.group('paybill')} - {name}"
-        return TransductionResult(
-            status="parsed_unmapped",
-            external_ref=m.group("ref"),
-            parsed_fields={
-                "direction": "sent", "amount": amount, "counterparty": counterparty,
-                "account": m.group("account"), "paybill": m.group("paybill"),
-            },
-            reason=_needs_pocket_reason("M-Pesa to KCB paybill", amount, counterparty),
-            parser_name="mpesa_to_kcb_paybill",
-        )
-
-    m = _MPESA_TO_KCB_ACCOUNT_RE.search(text)
-    if m:
-        amount = _to_float(m.group("amount"))
-        name = m.group("name").strip()
-        return TransductionResult(
-            status="parsed_unmapped",
-            external_ref=m.group("ref"),
-            parsed_fields={
-                "direction": "sent", "amount": amount, "counterparty": name,
-                "account": m.group("account"),
-            },
-            reason=_needs_pocket_reason("M-Pesa to KCB account", amount, name),
-            parser_name="mpesa_to_kcb_account",
-        )
-
     return None
 
 
@@ -303,12 +257,21 @@ def _parse_mpesa(text: str) -> TransductionResult | None:
 # replaced with placeholder Kenyan names matching this file's existing
 # convention -- JOHN KAMAU / MARY WANJIRU etc. -- the amounts, dates,
 # references, masked account/card numbers, and all wording are otherwise
-# exactly as received) pasted samples. Three further shapes (the
-# "AMBIGUOUS" block, kcb_bridge_*) are Bonnie's own best guess at their
-# origin (Vooma/KCB-app notifications relaying M-Pesa-network activity,
-# distinct from the two confirmed M-Pesa<->KCB bridge shapes above) —
-# flagged in their own parser_name and this module's docstring as a
-# judgment call, not a verified classification.
+# exactly as received) pasted samples.
+#
+# Five of the shapes below (_KCB_MPESA_*) explicitly mention "M-PESA" in
+# their own wording -- money moving between a KCB account/card and the
+# M-Pesa network, or notifications shaped like Safaricom's own confirmation
+# template. These were ORIGINALLY split across two buckets: two were kept
+# under the mpesa parser (assumed to be genuine Safaricom notifications just
+# addressed to a KCB destination) and three were placed here as a disclosed
+# "best guess" (Bonnie's own framing at the time: possibly Vooma/KCB-app
+# relays of M-Pesa activity, origin sender unconfirmed). Bonnie has since
+# checked his real device directly (1 Aug 2026): ALL FIVE of these shapes
+# arrive from the KCB sender id, not MPESA. Classification is by SENDER,
+# never by wording -- a message that talks about M-PESA can still be a KCB
+# notification if that's who actually sent it. All five now live here,
+# confirmed (not guessed), sharing the _KCB_MPESA_* naming convention below.
 
 _KCB_RECEIVE_RE = re.compile(
     r"(?P<ref>[A-Z0-9]{8,})\s+Confirmed!\s+You have received\s+KES\s*(?P<amount>[\d,]+\.?\d*)\s+"
@@ -341,22 +304,38 @@ _KCB_VOOMA_LOAN_REPAY_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# Three "look like Vooma/KCB-app notifications of M-Pesa activity" shapes --
-# genuinely ambiguous origin (Bonnie's own framing), grouped under kcb here
-# as a disclosed best judgment call. All three explicitly reference
-# "M-PESA" in their own text, unlike every other KCB pattern above.
-_KCB_BRIDGE_RECEIVED_RE = re.compile(
+# Two shapes formatted exactly like a Safaricom M-Pesa "sent to" confirmation,
+# but for a KCB-addressed recipient (a paybill or a named KCB account) --
+# CONFIRMED to arrive from the KCB sender id (see this section's header note).
+_KCB_MPESA_PAYBILL_RE = re.compile(
+    r"Ksh\s*(?P<amount>[\d,]+\.?\d*)\s+sent to\s+KCB Pay Bill\s+(?P<paybill>\d+)\s+for account\s+(?P<account>\S+)\s+"
+    r"(?P<name>[A-Za-z ]+?)\s+has been received on\s+(?P<date>\S+)\s+at\s+(?P<time>\S+\s*[APap][Mm])"
+    r".*?M-PESA ref\s+(?P<ref>[A-Za-z0-9]+)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_KCB_MPESA_ACCOUNT_RE = re.compile(
+    r"Ksh\s*(?P<amount>[\d,]+\.?\d*)\s+sent to\s+KCB account\s+(?P<name>[A-Za-z ]+?)\s+(?P<account>\d+)\s+"
+    r"has been received on\s+(?P<date>\S+)"
+    r".*?M-PESA Ref\s+(?P<ref>[A-Za-z0-9]+)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Three shapes describing money moving between a KCB/Vooma wallet and the
+# M-Pesa network directly -- CONFIRMED to arrive from the KCB sender id (see
+# this section's header note; formerly flagged as an unverified best guess).
+_KCB_MPESA_RECEIVED_RE = re.compile(
     r"You have received\s+KES\s*(?P<amount>[\d,.]+)\s+from\s+(?P<name>[A-Za-z ]+?)\.\s*M-PESA Ref\s+(?P<ref>[A-Za-z0-9]+)",
     re.IGNORECASE,
 )
 
-_KCB_BRIDGE_SENT_TO_MPESA_RE = re.compile(
+_KCB_MPESA_SENT_RE = re.compile(
     r"(?P<ref>[A-Z0-9]{8,})\s+completed\.\s*KES\s*(?P<amount>[\d,]+\.?\d*)\s+sent to\s+M-PESA\s+(?P<phone>2\d{9,11})\s+on\s+(?P<date>\S+)\s+at\s+(?P<time>\d{1,2}:\d{2}\s*[APap][Mm])\.?\s*"
     r"Transaction cost\s+KES\s*(?P<cost>[\d,]+\.?\d*)",
     re.IGNORECASE,
 )
 
-_KCB_BRIDGE_TRANSFERRED_RE = re.compile(
+_KCB_MPESA_TRANSFERRED_RE = re.compile(
     r"you have successfully transferred\s+KES\s*(?P<amount>[\d,]+\.?\d*)\s+to\s+(?P<phone>[\d*]+)-(?P<name>[A-Za-z ]+?)\s+on\s+(?P<date>\S+)"
     r".*?M-PESA Ref\s+(?P<ref>[A-Za-z0-9]+)",
     re.IGNORECASE | re.DOTALL,
@@ -479,24 +458,52 @@ def _parse_kcb(text: str) -> TransductionResult | None:
             parser_name="kcb_vooma_loan_repay",
         )
 
-    m = _KCB_BRIDGE_RECEIVED_RE.search(text)
+    m = _KCB_MPESA_PAYBILL_RE.search(text)
+    if m:
+        amount = _to_float(m.group("amount"))
+        name = m.group("name").strip()
+        counterparty = f"KCB Pay Bill {m.group('paybill')} - {name}"
+        return TransductionResult(
+            status="parsed_unmapped",
+            external_ref=m.group("ref"),
+            parsed_fields={
+                "direction": "sent", "amount": amount, "counterparty": counterparty,
+                "account": m.group("account"), "paybill": m.group("paybill"),
+            },
+            reason=_needs_pocket_reason("Sent via M-Pesa to a KCB paybill", amount, counterparty),
+            parser_name="kcb_mpesa_paybill",
+        )
+
+    m = _KCB_MPESA_ACCOUNT_RE.search(text)
+    if m:
+        amount = _to_float(m.group("amount"))
+        name = m.group("name").strip()
+        return TransductionResult(
+            status="parsed_unmapped",
+            external_ref=m.group("ref"),
+            parsed_fields={
+                "direction": "sent", "amount": amount, "counterparty": name,
+                "account": m.group("account"),
+            },
+            reason=_needs_pocket_reason("Sent via M-Pesa to a KCB account", amount, name),
+            parser_name="kcb_mpesa_account",
+        )
+
+    m = _KCB_MPESA_RECEIVED_RE.search(text)
     if m:
         amount = _to_float(m.group("amount"))
         name = m.group("name").strip()
         return TransductionResult(
             status="mapped",
             operator_name="budget.record_income",
-            operator_params={"amount": amount, "source": f"M-Pesa via KCB/Vooma: {name}", "frequency": "once"},
+            operator_params={"amount": amount, "source": f"M-Pesa via KCB: {name}", "frequency": "once"},
             external_ref=m.group("ref"),
             parsed_fields={"direction": "received", "amount": amount, "counterparty": name},
-            reason=(
-                "Money received — mapped to budget.record_income. Origin app (KCB/Vooma vs "
-                "Safaricom M-Pesa directly) is a best-guess classification, not confirmed."
-            ),
-            parser_name="kcb_bridge_received",
+            reason="Money received via KCB (M-Pesa-network transfer) — mapped to budget.record_income (unambiguous; income always credits liquid balance).",
+            parser_name="kcb_mpesa_received",
         )
 
-    m = _KCB_BRIDGE_SENT_TO_MPESA_RE.search(text)
+    m = _KCB_MPESA_SENT_RE.search(text)
     if m:
         amount = _to_float(m.group("amount"))
         counterparty = f"M-PESA {m.group('phone')}"
@@ -507,11 +514,11 @@ def _parse_kcb(text: str) -> TransductionResult | None:
                 "direction": "sent", "amount": amount, "counterparty": counterparty,
                 "phone": m.group("phone"), "transaction_cost": _to_float(m.group("cost")),
             },
-            reason=_needs_pocket_reason("Sent to M-PESA via KCB/Vooma", amount, counterparty),
-            parser_name="kcb_bridge_sent_to_mpesa",
+            reason=_needs_pocket_reason("Sent to M-PESA via KCB", amount, counterparty),
+            parser_name="kcb_mpesa_sent",
         )
 
-    m = _KCB_BRIDGE_TRANSFERRED_RE.search(text)
+    m = _KCB_MPESA_TRANSFERRED_RE.search(text)
     if m:
         amount = _to_float(m.group("amount"))
         name = m.group("name").strip()
@@ -522,8 +529,8 @@ def _parse_kcb(text: str) -> TransductionResult | None:
                 "direction": "sent", "amount": amount, "counterparty": name,
                 "phone": m.group("phone"),
             },
-            reason=_needs_pocket_reason("Transferred via KCB/Vooma", amount, name),
-            parser_name="kcb_bridge_transferred",
+            reason=_needs_pocket_reason("Transferred via KCB (M-Pesa network)", amount, name),
+            parser_name="kcb_mpesa_transferred",
         )
 
     m = _KCB_BALANCE_RE.search(text)
@@ -588,6 +595,22 @@ def _parse_kcb(text: str) -> TransductionResult | None:
     return None
 
 
+# KNOWN, DISCLOSED, NOT FIXED (flagged 1 Aug 2026): source is now purely
+# sender-based (KCB sender -> _parse_kcb, MPESA sender -> _parse_mpesa; see
+# the Android side's classifySource() and this module's own KCB-section
+# header note above). If the SAME real-world transaction ever produces BOTH
+# a KCB-sender notification (e.g. one of the _KCB_MPESA_* shapes above) AND
+# a genuine Safaricom MPESA-sender SMS about that same transfer, ingest_engine
+# .capture()'s dedup_key (sha256 of sustain_id + source_id + raw_payload) will
+# NOT catch it as a duplicate -- source_id ("kcb" vs "mpesa") and raw_payload
+# (different wording/sender) both differ between the two notifications, so
+# they hash to two distinct keys and both get captured/processed as separate
+# transactions. A real double-count risk for any transaction that genuinely
+# triggers both a bank-side and a telco-side SMS. No fix attempted here --
+# a real fix needs cross-source correlation (e.g. matching amount + a shared
+# M-PESA ref extracted from both messages' parsed_fields, which several
+# _KCB_MPESA_* shapes above already expose via their own "ref" group) that
+# doesn't exist yet. Flagged for a deliberate decision, not silently patched.
 _PARSERS: list[Callable[[str], "TransductionResult | None"]] = [_parse_mpesa, _parse_kcb]
 
 

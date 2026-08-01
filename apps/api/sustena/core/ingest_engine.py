@@ -116,6 +116,19 @@ class IngestEngine:
         digest = hashlib.sha256(f"{sustain_id}\x00{source_id}\x00{raw_payload}".encode("utf-8")).hexdigest()
         return digest
 
+    # KNOWN, DISCLOSED, NOT FIXED (flagged 1 Aug 2026): this key does NOT
+    # catch the same real-world transaction arriving twice from two DIFFERENT
+    # sources -- e.g. a KCB-sender notification AND a genuine Safaricom
+    # MPESA-sender SMS about the identical transfer. source_id ("kcb" vs
+    # "mpesa") and raw_payload (different wording/sender template) both
+    # differ between the two notifications, so they hash to two distinct
+    # dedup_keys and both get captured and processed as separate income/spend
+    # events -- a real double-count risk for any transaction that genuinely
+    # triggers both a bank-side and a telco-side SMS. See transducer.py's own
+    # note beside _PARSERS for the fuller writeup and a sketch of what a real
+    # fix (cross-source correlation on amount + shared M-PESA ref) would need.
+    # Not fixed here -- flagged for a deliberate decision, not silently patched.
+
     # ── Sources / staleness ─────────────────────────────────────────────────────
 
     def register_source(
