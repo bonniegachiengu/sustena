@@ -17,6 +17,7 @@
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { api } from '../lib/api';
 
 const LAST_SUSTAIN_KEY = 'sustena_orchie_last_sustain';
@@ -47,7 +48,7 @@ const LAST_SUSTAIN_KEY = 'sustena_orchie_last_sustain';
  * silently-wrong default with no way to override it is the actual bug,
  * not just which sustain happened to be picked.
  */
-function useSustainPicker() {
+function useSustainPicker(token) {
   const [searchParams, setSearchParams] = useSearchParams();
   const explicit = searchParams.get('sustain');
   const [sustains, setSustains] = useState([]);
@@ -55,6 +56,20 @@ function useSustainPicker() {
   const [resolving, setResolving] = useState(true);
 
   useEffect(() => {
+    // Without this guard, a not-yet-signed-in mount fires GET
+    // /devui/sustains with no Authorization header -> a real 401 -> api.js's
+    // handleUnauthorized() clears the (already-absent) token and reloads
+    // the page -> the same thing happens again on the fresh load ->
+    // infinite reload loop, before LoginGate ever gets a chance to render.
+    // Re-runs (token in the dep array) the moment LoginGate's onSignedIn
+    // sets a real token, so sustains actually load right after signing in
+    // rather than needing a manual refresh.
+    if (!token) {
+      setSustains([]);
+      setSustainIdState(explicit || null);
+      setResolving(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -108,7 +123,7 @@ function useSustainPicker() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [token]);
 
   const chooseSustain = useCallback((id) => {
     setSustainIdState(id);
@@ -439,13 +454,98 @@ function Empty({ text }) {
   );
 }
 
+/**
+ * A real sign-in gate, not just a "sign in required" dead end. The native
+ * Android app (Capacitor) has no browser session to inherit -- the hosted
+ * web app relies on whatever's already in this same origin's localStorage,
+ * which the packaged app never has, so it needs its own real login form
+ * to ever get past this screen at all.
+ *
+ * Deliberately sign-in only, no register mode -- unlike ProfilePage's
+ * SignInPanel (which offers both), anyone opening this app already has a
+ * Sustena account from the web app; adding registration here wasn't asked
+ * for and isn't needed.
+ */
+function LoginGate({ onSignedIn }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const inputStyle = {
+    fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--text-primary)',
+    background: 'var(--bg-raised)', border: '1px solid var(--border-mid)',
+    borderRadius: 'var(--radius-sm)', padding: '10px 14px', outline: 'none', width: '100%',
+    boxSizing: 'border-box',
+  };
+
+  const canSubmit = email.trim() && password && !loading;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setLoading(true);
+    setError('');
+    try {
+      await api.login(email.trim(), password);
+      onSignedIn();
+    } catch (e) {
+      // api.login() throws the real FastAPI error detail ("Invalid email
+      // or password" on bad creds) or a network-reachability message --
+      // shown inline, never a page reload (see api.js's login() docstring
+      // for why post()'s shared 401 handling is wrong for this case).
+      setError(e.message || 'could not reach sustena');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: '60px 4px', display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 320, margin: '0 auto' }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 10 }}>
+        sign in to sustena
+      </div>
+      <input
+        type="email" inputMode="email" autoCapitalize="none" autoCorrect="off"
+        value={email} onChange={e => setEmail(e.target.value)}
+        placeholder="email address" style={inputStyle}
+      />
+      <input
+        type="password" value={password} onChange={e => setPassword(e.target.value)}
+        placeholder="password" style={inputStyle}
+        onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+      />
+      {error && <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--danger)' }}>{error}</span>}
+      <button
+        onClick={submit} disabled={!canSubmit}
+        style={{ ...confirmButton, textAlign: 'center', opacity: canSubmit ? 1 : 0.4 }}
+      >
+        {loading ? 'SIGNING IN…' : 'SIGN IN →'}
+      </button>
+      {/* Inside the native app "/" just redirects back to "/orchie" (App.tsx's
+          HomeRoute) -- this link only means anything in a real browser. */}
+      {!Capacitor.isNativePlatform() && (
+        <div style={{ textAlign: 'center', marginTop: 10 }}>
+          <Link to="/" style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--amber)' }}>go to sustena →</Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function OrchieShell() {
-  const { sustainId, sustains, resolving, chooseSustain } = useSustainPicker();
+  // Reactive (not a plain read) so LoginGate's onSignedIn can flip the app
+  // straight into the compose view without a page reload -- the native app
+  // starts every cold launch with no token at all, unlike the hosted web
+  // app which usually already has a browser session by the time this
+  // screen renders.
+  const [token, setToken] = useState(() => (
+    typeof window !== 'undefined' ? window.localStorage.getItem('sustena_token') : null
+  ));
+  const { sustainId, sustains, resolving, chooseSustain } = useSustainPicker(token);
   const [view, setView] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showExcluded, setShowExcluded] = useState(false);
-  const token = typeof window !== 'undefined' ? localStorage.getItem('sustena_token') : null;
 
   const load = useCallback(async () => {
     if (!sustainId) return;
@@ -466,10 +566,12 @@ export default function OrchieShell() {
   if (!token) {
     return (
       <div style={pageStyle}>
-        <Empty text="sign in required" />
-        <div style={{ textAlign: 'center' }}>
-          <Link to="/" style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--amber)' }}>go to sustena →</Link>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '18px 4px 20px' }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-primary)' }}>
+            ORCHIE
+          </span>
         </div>
+        <LoginGate onSignedIn={() => setToken(window.localStorage.getItem('sustena_token'))} />
       </div>
     );
   }

@@ -58,6 +58,35 @@ async function post(path, body) {
   return res.json();
 }
 
+/**
+ * POST /api/v1/users/login — deliberately NOT built on post() above.
+ * post()'s 401 handling assumes a session already existed and was revoked
+ * (clears the token and reloads the page) -- correct for a call made
+ * DURING a session, wrong for a login attempt that never had one: a wrong
+ * password would otherwise silently reload the page instead of showing an
+ * inline error. On success, stores the token the exact same way every
+ * other sign-in path in this app does (SignInPanel in ProfilePage.jsx)
+ * and returns {user_id, email, display_name} for the caller to use.
+ */
+async function login(email, password) {
+  const res = await fetch(`${BASE}/api/v1/users/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  let data;
+  try { data = await res.json(); } catch { data = {}; }
+  if (!res.ok) {
+    const detail = typeof data?.detail === 'string' ? data.detail
+      : Array.isArray(data?.detail) ? data.detail[0]?.msg : null;
+    throw new Error(detail || `sign-in failed (${res.status})`);
+  }
+  const token = data?.data?.token;
+  if (!token) throw new Error('sign-in succeeded but no token was returned');
+  localStorage.setItem('sustena_token', token);
+  return data.data;
+}
+
 async function patch(path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'PATCH',
@@ -96,4 +125,4 @@ function ws(sustainId, onMessage, onClose) {
   return socket;
 }
 
-export const api = { get, post, patch, ws };
+export const api = { get, post, patch, ws, login };

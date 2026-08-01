@@ -97,13 +97,27 @@ app = FastAPI(
 )
 
 # -- CORS ---------------------------------------------------------------------
-
+# Found stale while wiring up the native Capacitor app's login (1 Aug 2026):
+# the production branch listed "https://sustena.io"/"https://app.sustena.io"
+# -- neither is the real deployed domain (sustena.vyybandasky.online). It
+# only ever worked because the live deployment runs with
+# settings.is_development=True, which takes the ["*"] branch instead --
+# verified directly against the real API (an OPTIONS preflight with
+# Origin: https://localhost, the Capacitor Android webview's default origin
+# per capacitor.config.ts having no server.hostname/androidScheme override,
+# came back with access-control-allow-origin reflecting that exact origin).
+# Fixed so the production branch is also correct, not just dev's wildcard --
+# the real hosted domain, plus the native app's origin so a future
+# environment=production switch doesn't silently break the Android app's
+# login (a cross-origin request; the hosted WEB app never needed this,
+# since it's served same-origin by this same FastAPI process).
 ALLOWED_ORIGINS = (
     ["*"]
     if settings.is_development
     else [
-        "https://sustena.io",
-        "https://app.sustena.io",
+        "https://sustena.vyybandasky.online",
+        "https://localhost",      # Capacitor Android's default webview origin
+        "capacitor://localhost",  # Capacitor iOS's default webview origin (no iOS platform yet, harmless to allow)
     ]
 )
 
