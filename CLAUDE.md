@@ -981,6 +981,20 @@ Bonnie reported `/orchie` still showing "no curated widgets" on his phone after 
 
 ---
 
+### Android APK follow-ups ✅ — "App not installed" on MIUI, then a real in-app login (1 Aug 2026)
+
+Two fast follow-ups once Bonnie actually tried the APK on his Redmi Note 11 (HyperOS/Android 13).
+
+**"App not installed" on tap-to-install.** Diagnosed by inspecting the built APK directly (`aapt dump badging`, `apksigner verify --verbose`, `zipalign -c`) rather than guessing — signature verified (v2 scheme; v1/JAR is intentionally skipped by AGP 8.13 whenever `minSdk>=24`, not a defect), zip-alignment verified, manifest had nothing unusual. The one real, actionable finding: the retry used the **identical `applicationId`** as the first failed attempt, a known trigger for leftover partial-install state on Android. Fixed by changing `applicationId` to `online.vyybandasky.sustena.orchie` (was the bare `cap init` default), bumping `versionCode`/`versionName`, and lowering `targetSdk` to 34 (a long-stable target; `compileSdk` had to stay 36 — Capacitor 8.5.0's pinned AndroidX deps hard-require it to even build, confirmed by trying 34 and having Gradle refuse). Rebuilt clean — installed successfully on the real device.
+
+**No auth session in the native app.** The packaged app opened straight to a dead-end "sign in required" screen — the hosted web app's gate assumed a browser session already existed in the same `localStorage`, which a locally-bundled Capacitor app never has. Added a real `LoginGate` in `OrchieShell.jsx` (email + password → `POST /api/v1/users/login` → same `sustena_token` localStorage convention every other sign-in path uses). `api.js` gained a dedicated `login()` rather than reusing the shared `post()` helper — `post()`'s 401 handling assumes an existing session was revoked and force-reloads the page, which would have turned a wrong password into a silent reload instead of an inline error. A real bug caught in the same pass: `useSustainPicker()` fired its `GET /devui/sustains` call unconditionally on mount — pre-login, with no token, that 401s, and `handleUnauthorized()`'s reload-the-page response would have looped forever before the login form ever rendered. Fixed by gating the fetch on a reactive `token` and re-running it the moment login succeeds.
+
+**CORS**, verified live rather than assumed: a real login (throwaway test account, `orchie-android-test@example.com`, zero effect on Bonnie's data) with `Origin: https://localhost` (Capacitor Android's default webview origin) succeeded end-to-end, and the resulting token worked against an authenticated endpoint — confirmed via direct `curl`. It already worked, but only because the live deployment runs `environment=development` (the `["*"]` CORS branch); the `production` branch was independently broken regardless — it listed `sustena.io`/`app.sustena.io`, neither the real deployed domain (`sustena.vyybandasky.online`). Fixed to the real domain plus the native app's origin, so a future `environment=production` switch doesn't silently break login for either the web app's real domain or the Android app.
+
+Same applicationId preserved across the fix (installs as an update, not a fresh sideload); `apps/api/tests/` full suite re-run clean after the CORS change (1744 passing with Studio's own in-progress test additions present in the tree).
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:
