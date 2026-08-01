@@ -6,15 +6,19 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && node scripts/stamp-sw-version.js",
+    "build:capacitor": "tsc && vite build --mode capacitor",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx,jsx,js"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@tanstack/react-query": "^5.62.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.1.1",
-    "zustand": "^5.0.2",
-    "@tanstack/react-query": "^5.62.0"
+    "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.17",

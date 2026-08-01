@@ -5,7 +5,8 @@
  * that the next file in the chain references. Shell is last and exports App.
  */
 
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { Capacitor } from '@capacitor/core'
 
 // 1. Core primitives
 import './components/core/index.jsx'
@@ -50,11 +51,24 @@ import DocsPage from './pages/DocsPage'
 import OrchePanel from './pages/OrchePanel'
 import OrchieShell from './pages/OrchieShell'
 
+// The native Android wrapper (Capacitor) opens the same routes as the
+// hosted web app, but "/" is Mycelium — the orchestrator/dev cockpit,
+// laptop-first per its own design (see CLAUDE.md's Mycelium/Orchie split).
+// The phone-first, event-first Orchie surface at "/orchie" is what the
+// native app is actually FOR, so a native launch redirects there instead
+// of landing on a desktop-oriented panel. Capacitor.isNativePlatform() is
+// false in every browser context (dev, hosted PWA, any tab), so this has
+// no effect on the web app at all.
+function HomeRoute() {
+  if (Capacitor.isNativePlatform()) return <Navigate to="/orchie" replace />
+  return <ShellApp />
+}
+
 function RootApp() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<ShellApp />} />
+        <Route path="/" element={<HomeRoute />} />
         <Route path="/profile" element={<ProfilePage />} />
         {/* Orchie Panel — the Mycelium-side operative dashboard (unchanged) */}
         <Route path="/orchie-panel" element={<OrchePanel />} />
