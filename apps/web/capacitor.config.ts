@@ -8,7 +8,10 @@ import type { CapacitorConfig } from '@capacitor/cli';
 // build` output is for the hosted web app and assumes a same-origin API,
 // which the local-bundle app doesn't have.
 const config: CapacitorConfig = {
-  appId: 'online.vyybandasky.sustena',
+  // Matches android/app/build.gradle's applicationId (kept in sync by hand
+  // — `cap sync` doesn't rewrite an already-generated build.gradle's
+  // applicationId from this value, only `cap add`/`cap init` do).
+  appId: 'online.vyybandasky.sustena.orchie',
   appName: 'Sustena Orchie',
   webDir: 'dist',
   backgroundColor: '#0f0f0f', // matches --bg-base / manifest.webmanifest's theme_color

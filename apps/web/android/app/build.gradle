@@ -1,14 +1,22 @@
 apply plugin: 'com.android.application'
 
 android {
+    // namespace is the Java/Kotlin source package (must match the actual
+    // online/vyybandasky/sustena/ source folder) -- it does NOT need to
+    // match applicationId, the Play-Store-facing unique app ID, below.
     namespace = "online.vyybandasky.sustena"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "online.vyybandasky.sustena"
+        // Was "online.vyybandasky.sustena" -- changed to rule out any
+        // leftover partial-install state from the first ("App not
+        // installed") attempt colliding with a retry, and to be the real,
+        // specific app ID rather than the bare domain-reversed default
+        // `cap init` generated.
+        applicationId "online.vyybandasky.sustena.orchie"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.0.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,7 +24,30 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Explicit debug signing config -- the FIRST build relied on AGP's
+    // implicit default debug config, which (verified via `apksigner verify
+    // --verbose` on that APK) signed with v2 ONLY (v1/JAR signing: false).
+    // v2-only is spec-legitimate for minSdk>=24 and apksigner reported the
+    // APK as valid, so this probably wasn't the actual install failure --
+    // but MIUI's own security/install scanner is known to be stricter and
+    // less standards-faithful than stock AOSP's verifier, so forcing BOTH
+    // v1 and v2 here is a real, no-cost belt-and-suspenders fix against
+    // exactly that class of OEM quirk, using the same auto-generated
+    // ~/.android/debug.keystore Gradle already created for the first build.
+    signingConfigs {
+        debug {
+            storeFile file(System.getProperty("user.home") + "/.android/debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

@@ -1,7 +1,20 @@
 ext {
     minSdkVersion = 24
+    // compileSdk CANNOT be lowered -- tried 34, Gradle refused: Capacitor
+    // 8.5.0 pins AndroidX artifacts (activity 1.11.0, core/core-ktx 1.17.0)
+    // that hard-require compileSdk>=36 to even build against. compileSdk is
+    // a BUILD-TIME-ONLY knob though (which APIs are available to compile
+    // against) -- it has no runtime effect and doesn't gate which devices
+    // can install the app; that's what minSdk (below, unchanged at 24) is
+    // for. targetSdk is the separate, independent knob that actually
+    // communicates expected runtime behavior to the OS, and only has to be
+    // <=compileSdk -- keeping it at a long-stable 34 (Android 14) instead
+    // of the bleeding-edge default of 36 (Android 16) is a real, low-cost
+    // way to reduce how much brand-new OS behavior an OEM's ROM (like
+    // MIUI) has to correctly emulate for this app, without touching what
+    // it can be compiled against or which devices it can install on.
     compileSdkVersion = 36
-    targetSdkVersion = 36
+    targetSdkVersion = 34
     androidxActivityVersion = '1.11.0'
     androidxAppCompatVersion = '1.7.1'
     androidxCoordinatorLayoutVersion = '1.3.0'
