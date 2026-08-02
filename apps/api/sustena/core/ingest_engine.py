@@ -358,7 +358,11 @@ class IngestEngine:
 
     async def _process(self, message_id: str) -> dict:
         row = self._db.execute("SELECT * FROM ingest_messages WHERE id = ?", (message_id,)).fetchone()
-        result = parse_message(row["raw_payload"])
+        # source_id (whatever the capture client tagged this with, decided
+        # strictly by SMS sender -- see transducer.py's own _PARSERS_BY_SOURCE
+        # comment) is passed through so parsing stays scoped to that source's
+        # own parser set -- body content can never override it.
+        result = parse_message(row["raw_payload"], source_id=row["source_id"])
 
         status = STATUS_NEEDS_ATTENTION
         operator_name: str | None = None

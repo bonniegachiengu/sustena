@@ -73,6 +73,14 @@ OTP_MESSAGE = (
     "at ANTHROPIC. Your OTP is 083345. DO NOT SHARE WITH ANYONE."
 )
 
+# Three more real secret shapes Bonnie's actual KCB thread showed (2 Aug
+# 2026) that the original 5-pattern filter missed entirely -- CODE DIGITS
+# REPLACED WITH PLACEHOLDERS, same discipline already used for real names
+# elsewhere in this file, since these are live-ish secrets.
+TAN_CODE_MESSAGE = "Your tan code is 000000. It will be active for the next 02:00 minutes"
+ACTIVATION_CODE_MESSAGE = "Please use Activation code: 0000. This code is valid for only 90s"
+CARD_SECRET_PIN_MESSAGE = "Your KCB card secret PIN is 0000."
+
 # ── KCB samples — REAL text Bonnie pasted (1 Aug 2026) ──────────────────────
 # Replaces an earlier, wholly speculative KCB pattern set that never
 # matched any of these real formats. Personal names replaced with
@@ -85,14 +93,40 @@ KCB_RECEIVE = (
     "MARY WANJIRU - 121****684 at 2026-06-10 06:00:17 PM via KCB."
 )
 
+# Replaced 2 Aug 2026 with the AUTHORITATIVE real texts from Bonnie's actual
+# KCB screenshots -- the earlier versions here ("...as at 01/08/2026
+# 12:25pm") were a speculative guess at the trailing text (never verified
+# against a real message) that happened to still parse only because the
+# regex doesn't anchor to end-of-string; the real trailer is completely
+# different ("Enquiries call ...Pata extra cash with a flexible Mobile
+# Loan..."). Confirmed against every real sample directly before replacing,
+# same discipline the original KCB pattern-set replacement used.
 KCB_CARD_KES = (
     "KES 429.00 transaction made on KCB card 4243***0319 at GOOGLE *Spotify Music "
-    "on 01/08/2026 12:25pm, Avail balance KES 59,055.00 as at 01/08/2026 12:25pm"
+    "on 01/08/2026 12:25pm, Avail balance KES 59,055.00 Enquiries call "
+    "+254711087000.Pata extra cash with a flexible Mobile Loan. Dial *522# or use "
+    "the KCB App to check limit."
 )
 
+# A second real card sample -- a merchant string containing "#" and a URL-
+# shaped counterparty, confirming the merchant capture group handles both
+# without special-casing.
+KCB_CARD_HELPPAY = (
+    "KES 1,500.00 transaction made on KCB card 4243***0319 at g.co/helppay# "
+    "on 01/08/2026 12:38pm, Avail balance KES 57,555.00 Enquiries call "
+    "+254711087000. Pata extra cash with a flexible Mobile Loan. Dial *522# or use "
+    "the KCB App to check limit."
+)
+
+# The USD sample was given truncated ("...") in the real screenshot excerpt
+# -- reconstructed here following the exact same real trailer template the
+# two KES samples above confirmed, not invented from scratch. Disclosed,
+# not silently presented as independently verified word-for-word.
 KCB_CARD_USD = (
     "USD 113.80 transaction made on KCB card 4243***0319 at ANTHROPIC* CLAUDE SUB "
-    "on 01/08/2026 12:48pm, Avail balance KES 42,381.65 as at 01/08/2026 12:48pm"
+    "on 01/08/2026 12:48pm, Avail balance KES 42,381.65 Enquiries call "
+    "+254711087000. Pata extra cash with a flexible Mobile Loan. Dial *522# or use "
+    "the KCB App to check limit."
 )
 
 KCB_LOAN_DISBURSED = (
@@ -273,6 +307,45 @@ class TestSensitiveSecretRejection:
             assert parse_message(text).status != "rejected"
 
 
+class TestExpandedSecretPatterns:
+    """Three real secret shapes Bonnie's actual KCB thread showed that the
+    original 5-pattern filter missed entirely -- must never be parsed,
+    stored, or forwarded, exactly like the original OTP case."""
+
+    def test_tan_code_is_rejected(self):
+        assert parse_message(TAN_CODE_MESSAGE).status == "rejected"
+
+    def test_activation_code_is_rejected(self):
+        assert parse_message(ACTIVATION_CODE_MESSAGE).status == "rejected"
+
+    def test_card_secret_pin_is_rejected(self):
+        assert parse_message(CARD_SECRET_PIN_MESSAGE).status == "rejected"
+
+    def test_none_of_the_three_leak_parsed_fields(self):
+        for text in (TAN_CODE_MESSAGE, ACTIVATION_CODE_MESSAGE, CARD_SECRET_PIN_MESSAGE):
+            result = parse_message(text)
+            assert result.parsed_fields == {}
+            assert result.operator_name is None
+
+    def test_false_positive_check_against_every_real_transaction_fixture(self):
+        # None of the five NEW patterns (tan code / activation code / secret
+        # pin / "PIN is" / "code is valid") may ever fire on genuine
+        # transaction vocabulary -- checked against every real fixture in
+        # this module, not just a couple of samples.
+        real_transaction_texts = (
+            RECEIVED, PAYBILL, BUYGOODS, SENT, WITHDRAW,
+            KCB_RECEIVE, KCB_CARD_KES, KCB_CARD_USD, KCB_CARD_HELPPAY,
+            KCB_LOAN_DISBURSED, KCB_LOAN_REPAY, KCB_VOOMA_LOAN_REPAY,
+            KCB_MPESA_PAYBILL, KCB_MPESA_ACCOUNT,
+            KCB_MPESA_RECEIVED, KCB_MPESA_SENT, KCB_MPESA_TRANSFERRED,
+            KCB_BALANCE, KCB_LOAN_OVERDUE, KCB_LOAN_ARREARS,
+            KCB_LOAN_DEFAULT, KCB_LOAN_DUE_TODAY,
+        )
+        for text in real_transaction_texts:
+            result = parse_message(text)
+            assert result.status != "rejected", f"false positive on: {text!r}"
+
+
 # ── KCB<->M-Pesa-network shapes — real text, source CONFIRMED as kcb ───────
 # (1 Aug 2026) These read like a Safaricom M-Pesa "sent to" confirmation but
 # arrive from the KCB sender id on Bonnie's real device -- classification is
@@ -281,18 +354,27 @@ class TestSensitiveSecretRejection:
 # KCB<->M-Pesa-network shapes.
 
 class TestKcbMpesaPaybillAndAccount:
-    def test_paybill_to_kcb_is_parsed_unmapped(self):
+    def test_paybill_to_kcb_is_mapped_as_received_income(self):
+        # Real bug found + fixed against Bonnie's own paybill sample (2 Aug
+        # 2026): despite "sent to KCB Pay Bill... has been received", this
+        # is money credited INTO the account this SMS is about -- direction
+        # is "received", not "sent", and it's unambiguous the same way
+        # kcb_mpesa_received is, so it's mapped to budget.record_income too.
         result = parse_message(KCB_MPESA_PAYBILL)
-        assert result.status == "parsed_unmapped"
+        assert result.status == "mapped"
+        assert result.operator_name == "budget.record_income"
         assert result.parser_name == "kcb_mpesa_paybill"
+        assert result.parsed_fields["direction"] == "received"
         assert result.parsed_fields["amount"] == 15452.00
         assert result.parsed_fields["account"] == "121***2684"
         assert result.external_ref == "UETB9611ZB"
 
-    def test_kcb_account_is_parsed_unmapped(self):
+    def test_kcb_account_is_mapped_as_received_income(self):
         result = parse_message(KCB_MPESA_ACCOUNT)
-        assert result.status == "parsed_unmapped"
+        assert result.status == "mapped"
+        assert result.operator_name == "budget.record_income"
         assert result.parser_name == "kcb_mpesa_account"
+        assert result.parsed_fields["direction"] == "received"
         assert result.parsed_fields["amount"] == 700.00
         assert result.parsed_fields["counterparty"] == "GRACE NJERI OTIENO"
         assert result.external_ref == "UCVB9B85C2"
@@ -349,6 +431,17 @@ class TestKCBCardIsParsedUnmapped:
         result = parse_message(KCB_CARD_USD)
         assert "USD" in result.reason
         assert "pocket" in result.reason.lower()
+
+    def test_helppay_card_transaction_merchant_with_hash_and_url_shape(self):
+        # A second real sample -- confirms the merchant capture handles a
+        # URL-shaped counterparty containing "#" with no special-casing.
+        result = parse_message(KCB_CARD_HELPPAY)
+        assert result.status == "parsed_unmapped"
+        assert result.operator_name is None
+        assert result.parsed_fields["amount"] == 1500.00
+        assert result.parsed_fields["currency"] == "KES"
+        assert result.parsed_fields["counterparty"] == "g.co/helppay#"
+        assert result.parsed_fields["balance_after"] == 57555.00
 
 
 class TestKCBLoanDisbursement:
@@ -546,3 +639,54 @@ class TestDeterminism:
         a = parse_message("garbled nonsense")
         b = parse_message("garbled nonsense")
         assert a == b
+
+
+class TestSourceStrictParsing:
+    """FIX (2 Aug 2026): source_id, decided strictly by SMS sender on the
+    Android capture client, now GATES which parser set even runs -- body
+    content can never again promote a message out of its own sender's
+    parser set. Before this, parse_message() always tried every mpesa_*
+    regex first for every message regardless of source_id (source_id was
+    pure display metadata, never actually used to scope parsing)."""
+
+    def test_kcb_sourced_kcb_shaped_message_still_parses_as_kcb(self):
+        result = parse_message(KCB_RECEIVE, source_id="kcb")
+        assert result.status == "mapped"
+        assert result.parser_name == "kcb_receive"
+
+    def test_mpesa_sourced_mpesa_shaped_message_still_parses_as_mpesa(self):
+        result = parse_message(RECEIVED, source_id="mpesa")
+        assert result.status == "mapped"
+        assert result.parser_name == "mpesa_received"
+
+    def test_a_kcb_sourced_message_saying_mpesa_still_uses_only_kcb_parsers(self):
+        # The exact real shape this fix targets: a KCB-sender message whose
+        # own body says "M-PESA ref ..." must never be tried against the
+        # mpesa_* parser set at all -- only kcb_* ever gets a look at it.
+        result = parse_message(KCB_MPESA_PAYBILL, source_id="kcb")
+        assert result.parser_name.startswith("kcb_")
+
+    def test_mpesa_sourced_message_is_never_tried_against_kcb_parsers(self):
+        # Symmetric protection -- a genuine Safaricom mpesa-sender message
+        # must never be tried against kcb_* parsers either, even if it
+        # somehow structurally resembled one.
+        result = parse_message(RECEIVED, source_id="mpesa")
+        assert not result.parser_name.startswith("kcb_")
+
+    def test_unknown_source_falls_back_to_trying_everything(self):
+        # An honest degrade, not a refusal -- a source this codebase
+        # doesn't know about yet still gets a real attempt at every parser.
+        result = parse_message(RECEIVED, source_id="some-future-bank")
+        assert result.status == "mapped"
+        assert result.parser_name == "mpesa_received"
+
+    def test_no_source_id_falls_back_to_trying_everything(self):
+        # Backward compatible -- every existing call site/test that omits
+        # source_id keeps the original "try every parser" behaviour.
+        result = parse_message(KCB_RECEIVE)
+        assert result.status == "mapped"
+        assert result.parser_name == "kcb_receive"
+
+    def test_source_id_is_case_insensitive(self):
+        result = parse_message(KCB_RECEIVE, source_id="KCB")
+        assert result.parser_name == "kcb_receive"

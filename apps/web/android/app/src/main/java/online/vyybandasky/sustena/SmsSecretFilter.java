@@ -29,6 +29,15 @@ final class SmsSecretFilter {
         Pattern.compile("verification\\s+code", Pattern.CASE_INSENSITIVE),
         Pattern.compile("one[\\s-]?time\\s+(?:pin|password|code)", Pattern.CASE_INSENSITIVE),
         Pattern.compile("security\\s+code", Pattern.CASE_INSENSITIVE),
+        // Expanded 2 Aug 2026 against real KCB thread content -- kept in
+        // exact sync with transducer.py's own _SENSITIVE_SECRET_PATTERNS
+        // (see that module's own comment for what real message shapes
+        // each of these five new patterns was verified against).
+        Pattern.compile("tan\\s+code", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("activation\\s+code", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("secret\\s+pin", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("\\bpin\\s+is\\b", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("code\\s+is\\s+valid", Pattern.CASE_INSENSITIVE),
     };
 
     static boolean containsSensitiveSecret(String text) {

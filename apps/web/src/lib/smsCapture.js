@@ -133,9 +133,21 @@ function classifySource(sender) {
   // wording instead of sender would have misrouted all of those. The
   // matching server-side split lives in transducer.py's _parse_kcb vs
   // _parse_mpesa (see that module's own header note on the KCB section).
+  //
+  // Audited again 2 Aug 2026 against a real "source: mpesa" mis-tag Bonnie
+  // hit live, on a message his screenshots confirm genuinely arrived from
+  // the "KCB" sender: no body-content inference exists anywhere in this
+  // function (it never even receives the message body) -- if a real
+  // KCB-sender string ever also happened to contain "MPESA" as a raw
+  // substring, checking KCB FIRST (reordered here, was MPESA-first) is a
+  // harmless, defense-in-depth hardening so that ambiguity can never
+  // silently favor "mpesa". The real structural fix for the underlying
+  // symptom (a mis-tagged message never being tried against the right
+  // parser set) lives server-side: transducer.py's parse_message() is now
+  // source-strict -- see its own _PARSERS_BY_SOURCE comment.
   const s = (sender || '').toUpperCase();
-  if (s.includes('MPESA')) return 'mpesa';
   if (s.includes('KCB')) return 'kcb';
+  if (s.includes('MPESA')) return 'mpesa';
   return null; // shouldn't happen -- native side already filtered; defense in depth only
 }
 

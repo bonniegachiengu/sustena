@@ -92,6 +92,19 @@ _SENSITIVE_SECRET_PATTERNS = [
     re.compile(r"verification\s+code", re.IGNORECASE),
     re.compile(r"one[\s-]?time\s+(?:pin|password|code)", re.IGNORECASE),
     re.compile(r"security\s+code", re.IGNORECASE),
+    # Expanded 2 Aug 2026 against real KCB thread content Bonnie's screen-
+    # shots surfaced -- his real KCB thread carries several genuine secret
+    # shapes the original 5 patterns above missed entirely: TAN codes, a
+    # generic "activation code"/"this code is valid" framing, and a card's
+    # "secret PIN". None of these overlap with real transaction-confirmation
+    # vocabulary (Confirmed/credited/debited/received/balance/transaction
+    # made) -- verified against every real fixture already in this codebase
+    # before shipping, same false-positive discipline the original 5 used.
+    re.compile(r"tan\s+code", re.IGNORECASE),
+    re.compile(r"activation\s+code", re.IGNORECASE),
+    re.compile(r"secret\s+pin", re.IGNORECASE),
+    re.compile(r"\bpin\s+is\b", re.IGNORECASE),
+    re.compile(r"code\s+is\s+valid", re.IGNORECASE),
 ]
 
 
@@ -307,6 +320,19 @@ _KCB_VOOMA_LOAN_REPAY_RE = re.compile(
 # Two shapes formatted exactly like a Safaricom M-Pesa "sent to" confirmation,
 # but for a KCB-addressed recipient (a paybill or a named KCB account) --
 # CONFIRMED to arrive from the KCB sender id (see this section's header note).
+#
+# Real bug found and fixed against Bonnie's actual paybill sample (2 Aug
+# 2026): despite the "sent to KCB Pay Bill/account..." wording, this is
+# money being CREDITED INTO the KCB account the SMS is about (paybill 522522
+# is KCB's own deposit paybill; "for account ... NAME has been received"
+# names the RECIPIENT, i.e. the account holder this message was sent to) --
+# the party who *sent* the money is a third party, not the message's
+# recipient. The direction is "received", not "sent" -- these two handlers
+# originally got this backwards (parsed_unmapped, direction="sent"),
+# unnoticed until tested against a real message. Same certainty class as
+# _KCB_MPESA_RECEIVED_RE below (an unambiguous credit to liquid balance),
+# so both are mapped to budget.record_income too, not left needing a
+# pocket decision that was never actually ambiguous.
 _KCB_MPESA_PAYBILL_RE = re.compile(
     r"Ksh\s*(?P<amount>[\d,]+\.?\d*)\s+sent to\s+KCB Pay Bill\s+(?P<paybill>\d+)\s+for account\s+(?P<account>\S+)\s+"
     r"(?P<name>[A-Za-z ]+?)\s+has been received on\s+(?P<date>\S+)\s+at\s+(?P<time>\S+\s*[APap][Mm])"
@@ -464,13 +490,15 @@ def _parse_kcb(text: str) -> TransductionResult | None:
         name = m.group("name").strip()
         counterparty = f"KCB Pay Bill {m.group('paybill')} - {name}"
         return TransductionResult(
-            status="parsed_unmapped",
+            status="mapped",
+            operator_name="budget.record_income",
+            operator_params={"amount": amount, "source": f"M-Pesa via KCB Pay Bill: {name}", "frequency": "once"},
             external_ref=m.group("ref"),
             parsed_fields={
-                "direction": "sent", "amount": amount, "counterparty": counterparty,
+                "direction": "received", "amount": amount, "counterparty": counterparty,
                 "account": m.group("account"), "paybill": m.group("paybill"),
             },
-            reason=_needs_pocket_reason("Sent via M-Pesa to a KCB paybill", amount, counterparty),
+            reason="Money received into KCB via M-Pesa paybill — mapped to budget.record_income (unambiguous; income always credits liquid balance).",
             parser_name="kcb_mpesa_paybill",
         )
 
@@ -479,13 +507,15 @@ def _parse_kcb(text: str) -> TransductionResult | None:
         amount = _to_float(m.group("amount"))
         name = m.group("name").strip()
         return TransductionResult(
-            status="parsed_unmapped",
+            status="mapped",
+            operator_name="budget.record_income",
+            operator_params={"amount": amount, "source": f"M-Pesa via KCB account: {name}", "frequency": "once"},
             external_ref=m.group("ref"),
             parsed_fields={
-                "direction": "sent", "amount": amount, "counterparty": name,
+                "direction": "received", "amount": amount, "counterparty": name,
                 "account": m.group("account"),
             },
-            reason=_needs_pocket_reason("Sent via M-Pesa to a KCB account", amount, name),
+            reason="Money received into KCB via M-Pesa account transfer — mapped to budget.record_income (unambiguous; income always credits liquid balance).",
             parser_name="kcb_mpesa_account",
         )
 
@@ -613,13 +643,45 @@ def _parse_kcb(text: str) -> TransductionResult | None:
 # doesn't exist yet. Flagged for a deliberate decision, not silently patched.
 _PARSERS: list[Callable[[str], "TransductionResult | None"]] = [_parse_mpesa, _parse_kcb]
 
+# SOURCE IS STRICT (fixed 2 Aug 2026, real bug found via Bonnie's actual
+# device): a message's SENDER (source_id, decided entirely by the Android
+# capture client's classifySource() -- see smsCapture.js/IngestWorker.java's
+# own comments, both purely sender-string-based) determines which parser
+# SET is even eligible to run, full stop. Before this, parse_message()
+# always tried _parse_mpesa first for EVERY message regardless of source_id
+# -- source_id was pure display metadata, never actually gating parsing.
+# That's a structural risk, not just a specific-incident one: several real
+# KCB-sender messages legitimately contain the substring "M-PESA" in their
+# own wording (the kcb_mpesa_* shapes above), and nothing stopped a FUTURE
+# mpesa_* regex from being written broadly enough to accidentally match
+# KCB-worded text, silently overriding what the sender already told us this
+# was. This dict is what parse_message() actually uses when a known
+# source_id is supplied -- text content can never again promote a message
+# out of its own sender's parser set.
+_PARSERS_BY_SOURCE: dict[str, list[Callable[[str], "TransductionResult | None"]]] = {
+    "mpesa": [_parse_mpesa],
+    "kcb": [_parse_kcb],
+}
 
-def parse_message(raw_text: str) -> TransductionResult:
+
+def parse_message(raw_text: str, source_id: str | None = None) -> TransductionResult:
     """
-    Try every registered parser in order; the first one that recognises the
-    message wins. No parser recognising it is an honest, visible "unparsed" —
-    never a silent drop. The sensitive-secret check runs first, unconditionally,
-    before any parser gets a look at the text — see contains_sensitive_secret().
+    source_id (optional) makes parsing STRICT when it names a known source:
+    only that source's own parser set (_PARSERS_BY_SOURCE) is ever tried,
+    regardless of what the message body itself says -- see this module's
+    own comment above _PARSERS_BY_SOURCE for the real bug this closes.
+    Every real caller supplies source_id (ingest_engine.capture() passes
+    the exact source_id it was given straight through); source_id=None/
+    unknown falls back to trying every registered parser in order (used by
+    direct unit tests exercising the parser set on its own, and as an
+    honest degrade for a genuinely unrecognised source rather than refusing
+    outright).
+
+    Within whichever set applies, the first parser that recognises the
+    message wins. No parser recognising it is an honest, visible
+    "unparsed" — never a silent drop. The sensitive-secret check runs
+    first, unconditionally, before any parser gets a look at the text —
+    see contains_sensitive_secret().
     """
     text = (raw_text or "").strip()
     if not text:
@@ -629,7 +691,8 @@ def parse_message(raw_text: str) -> TransductionResult:
             status="rejected",
             reason="Message contains an OTP/verification code or similar secret — refused, never parsed or stored.",
         )
-    for parser in _PARSERS:
+    parsers = _PARSERS_BY_SOURCE.get((source_id or "").lower(), _PARSERS)
+    for parser in parsers:
         result = parser(text)
         if result is not None:
             return result

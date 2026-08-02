@@ -112,11 +112,12 @@ public class IngestWorker extends Worker {
      *  never inspects message content. Kept in sync by hand (two different
      *  runtimes, no shared code path between native Java and the webview's
      *  JS), same discipline SmsSecretFilter's own header comment documents
-     *  for its own JS-side counterpart. */
+     *  for its own JS-side counterpart. KCB checked before MPESA (reordered
+     *  2 Aug 2026, defense-in-depth -- see smsCapture.js's own comment). */
     private static String classifySource(String sender) {
         String s = sender == null ? "" : sender.toUpperCase();
-        if (s.contains("MPESA")) return "mpesa";
         if (s.contains("KCB")) return "kcb";
+        if (s.contains("MPESA")) return "mpesa";
         return null;
     }
 
