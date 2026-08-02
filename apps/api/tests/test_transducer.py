@@ -823,3 +823,107 @@ class TestInformationalSystemMessages:
             source_id="mpesa",
         )
         assert result.status == "rejected"
+
+
+# Bonnie's exact real sample (2 Aug 2026, round 2) -- a genuine M-Pesa
+# failure notice that reached the classify card asking "which pocket does
+# this belong to?" because the round-1 informational filter didn't yet
+# recognise failure/rejection wording (only busy/retry/timeout).
+MPESA_TILL_FAILURE = (
+    "Failed. The till number entered is incorrect. Kindly enter the correct "
+    "Till Number and try again."
+)
+
+
+class TestInformationalFailureAndErrorNotices:
+    """Round 2 of the informational filter (2 Aug 2026): failure/rejection
+    notices, not just busy/retry ones. Same fallback-only discipline --
+    checked LAST, after every real transaction-shape regex has already had
+    its chance, so these can never shadow a genuine transaction."""
+
+    def test_the_exact_reported_till_failure_is_informational(self):
+        result = parse_message(MPESA_TILL_FAILURE, source_id="mpesa")
+        assert result.status == "informational"
+        assert result.operator_name is None
+        assert result.parsed_fields["direction"] == "none"
+        assert result.parser_name == "mpesa_system_notice"
+
+    def test_the_same_failure_is_informational_under_kcb_source_too(self):
+        result = parse_message(MPESA_TILL_FAILURE, source_id="kcb")
+        assert result.status == "informational"
+        assert result.parser_name == "kcb_system_notice"
+
+    def test_common_failure_and_rejection_phrasings_are_all_caught(self):
+        samples = [
+            "Failed. The paybill number entered is incorrect. Please try again.",
+            "Your transaction has failed. Please try again.",
+            "Wrong PIN entered. Please try again.",
+            "The PIN you entered is incorrect.",
+            "Invalid account number. Please check and try again.",
+            "This number is not registered on M-PESA.",
+            "Your transaction was not successful.",
+            "Your payment has been declined.",
+            "Your transaction has been cancelled.",
+            "Sorry, your request could not be completed at this time.",
+            "Sorry, you do not have enough money to complete this transaction.",
+            "Insufficient funds to complete this transaction.",
+            "This transaction exceeds your daily limit.",
+        ]
+        for text in samples:
+            result = parse_message(text, source_id="mpesa")
+            assert result.status == "informational", f"expected informational for: {text!r} (got {result.status})"
+
+    def test_reversal_wording_is_deliberately_NOT_caught(self):
+        # Explicitly excluded per the research that informed this pattern
+        # set: a genuine reversal credits money BACK into the account (a
+        # real state change), so guessing at reversal wording risks
+        # silently swallowing a real credit. This must fall through to
+        # unparsed (visible, needing a human), never informational.
+        result = parse_message("Ksh500.00 has been reversed to your account. New M-PESA balance is Ksh2,000.00.", source_id="mpesa")
+        assert result.status != "informational"
+
+    def test_a_real_completed_transaction_is_never_caught_by_failure_wording(self):
+        # None of the new patterns can shadow a real "Confirmed" message --
+        # they only run as the last fallback after every transaction-shape
+        # regex has already failed to match.
+        received = parse_message(RECEIVED, source_id="mpesa")
+        assert received.status == "mapped"
+        buygoods = parse_message(BUYGOODS, source_id="mpesa")
+        assert buygoods.status == "parsed_unmapped"
+
+
+class TestMoneyStillMovedOverride:
+    """Adversarial verify (2 Aug 2026) live-confirmed two real messages where
+    a Round 2 failure/rejection pattern would otherwise swallow a genuine
+    money-movement event into 'informational' instead of the safe
+    'unparsed' fallback. Both must now fall through to unparsed -- surfaced
+    to a human, never silently dropped -- regardless of which pattern would
+    otherwise have matched."""
+
+    def test_fuliza_overdraft_topup_is_not_swallowed_by_insufficient_funds(self):
+        text = (
+            "Fuliza M-PESA amount is Ksh500.00. Interest charged Ksh6.00. "
+            "You had insufficient funds; Fuliza M-PESA has topped up your "
+            "transaction. Available Fuliza limit is Ksh4,494.00."
+        )
+        result = parse_message(text, source_id="mpesa")
+        assert result.status != "informational"
+
+    def test_failure_plus_reversal_hybrid_is_not_swallowed_by_failed_pattern(self):
+        text = (
+            "Your transaction of Ksh2,000.00 failed. The amount has been "
+            "reversed to your M-PESA account. New balance is Ksh5,000.00."
+        )
+        result = parse_message(text, source_id="mpesa")
+        assert result.status != "informational"
+
+    def test_refunded_wording_also_overrides(self):
+        text = "Your payment has been declined. The amount has been refunded to your account."
+        result = parse_message(text, source_id="mpesa")
+        assert result.status != "informational"
+
+    def test_override_does_not_affect_genuine_failure_notices_with_no_money_words(self):
+        # Sanity check the override is scoped -- it must not blanket-disable
+        # the whole informational filter, only the specific hybrid case.
+        result = parse_message(MPESA_TILL_FAILURE, source_id="mpesa")
+        assert result.status == "informational"

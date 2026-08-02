@@ -244,10 +244,75 @@ _INFORMATIONAL_SYSTEM_PATTERNS = [
     re.compile(r"service (?:is )?temporarily unavailable", re.IGNORECASE),
     re.compile(r"please try again (?:later|after)", re.IGNORECASE),
     re.compile(r"request (?:has )?timed? out", re.IGNORECASE),
+
+    # Round 2 (2 Aug 2026) -- FAILURE/ERROR/REJECTION notices. The real bug
+    # that surfaced these: "Failed. The till number entered is incorrect.
+    # Kindly enter the correct Till Number and try again." (a genuine
+    # M-Pesa failure -- zero money moved) fell all the way through to
+    # "unparsed" and surfaced as a classify card asking "which pocket does
+    # this belong to?" for a message with no transaction to classify.
+    #
+    # Each pattern below pairs a failure/negation VERB with an explicit
+    # transaction-related NOUN ("transaction", "payment", "PIN", a named
+    # field like "till number") rather than matching the bare verb alone --
+    # a completed "Confirmed..."/"...has been received..." message never
+    # pairs those nouns with a negation, so none of these can shadow a real
+    # transaction, on top of only ever running as the LAST fallback after
+    # every transaction-shape regex has already failed to match.
+    #
+    # Sourced from a 3-way independent research pass (Safaricom-specific,
+    # KCB-specific, generic cross-bank wording) cross-checked against each
+    # other for convergence, not a single unverified guess -- but still
+    # genuinely unconfirmed against a real corpus beyond the one sample
+    # above, same disclosed-confidence discipline as round 1.
+    #
+    # Deliberately did NOT add "reversed"/"reversal" wording -- all three
+    # research passes independently flagged it as unsafe: a genuine
+    # reversal credits money BACK into the account, a real state change,
+    # not a non-event. Guessing at reversal wording risks silently
+    # swallowing a real credit as if nothing happened. A real reversal SMS
+    # needs its own dedicated mapped/parsed_unmapped parser (a future,
+    # separate addition against a real sample), not this fallback.
+    re.compile(r"\bfailed\.\s", re.IGNORECASE),
+    re.compile(r"\btransaction\s+(?:has\s+)?fail(?:ed)?\b", re.IGNORECASE),
+    re.compile(r"(?:till|paybill|account|business|phone)\s+number\s+(?:entered\s+)?is\s+incorrect", re.IGNORECASE),
+    re.compile(r"\bincorrect\s+(?:pin|till\s+number|paybill\s+number|account\s+number|password)\b", re.IGNORECASE),
+    re.compile(r"\bwrong\s+pin\b", re.IGNORECASE),
+    re.compile(r"\bpin\s+(?:you\s+)?entered\s+is\s+incorrect\b", re.IGNORECASE),
+    re.compile(r"\binvalid\s+(?:pin|till|paybill|account)\s*(?:number)?\b", re.IGNORECASE),
+    re.compile(r"\b(?:is|was)\s+not\s+(?:a\s+)?registered\b", re.IGNORECASE),
+    re.compile(r"\b(?:was|is)\s+not\s+successful\b", re.IGNORECASE),
+    re.compile(r"\b(?:payment|transaction|request)\s+(?:was\s+|has\s+been\s+)?declined\b", re.IGNORECASE),
+    re.compile(r"\btransaction\s+(?:has\s+been\s+|was\s+)?(?:cancelled|canceled)\b", re.IGNORECASE),
+    re.compile(r"\b(?:could\s+not|was\s+not|has\s+not\s+been)\s+(?:be\s+)?completed\b", re.IGNORECASE),
+    re.compile(r"\byou\s+do\s+not\s+have\s+enough\s+money\b", re.IGNORECASE),
+    re.compile(r"\binsufficient\s+(?:funds|balance)\b", re.IGNORECASE),
+    re.compile(r"\bexceeds\s+(?:your\s+)?(?:daily\s+)?(?:transaction\s+)?limit\b", re.IGNORECASE),
 ]
+
+# Adversarial verify (2 Aug 2026) live-confirmed two real messages where a
+# Round 2 pattern above would silently swallow a genuine money-movement
+# event instead of the safe "unparsed" fallback:
+#   1. A Fuliza overdraft top-up notice ("...You had insufficient funds;
+#      Fuliza M-PESA has topped up your transaction...") -- a real credit
+#      extension, caught by the bare "insufficient funds" pattern.
+#   2. A hybrid failure+reversal message ("Your transaction... failed. The
+#      amount has been reversed to your M-PESA account...") -- a real
+#      credit (the reversal), caught by the "failed." pattern even though
+#      "reversed" wording was deliberately never added as a positive
+#      trigger for exactly this reason.
+# This is a hard override, not another pattern to balance against the rest:
+# if any of these appear ANYWHERE in the text, the message can never be
+# classified informational, regardless of which pattern above matched --
+# it falls through to "unparsed" (surfaced, not silently dropped) instead.
+_MONEY_STILL_MOVED_OVERRIDE = re.compile(
+    r"\b(?:reversed|reversal|refunded|refund|topped\s+up|top-up|fuliza)\b", re.IGNORECASE
+)
 
 
 def _is_informational_system_message(text: str) -> bool:
+    if _MONEY_STILL_MOVED_OVERRIDE.search(text):
+        return False
     return any(p.search(text) for p in _INFORMATIONAL_SYSTEM_PATTERNS)
 
 

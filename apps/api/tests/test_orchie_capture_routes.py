@@ -263,6 +263,50 @@ class TestConfirm:
         assert msg["resolved_at"] is None
         assert msg["status"] == "needs_attention"
 
+    def test_confirm_refuses_a_message_already_marked_not_a_transaction(self, client, user, sustain):
+        # Adversarial verify (2 Aug 2026): a race between mark_not_a_transaction
+        # and a stale UI still offering CONFIRM on the same message must not
+        # let a real operator book against a message a human just told the
+        # system "isn't a transaction". Checked fresh in capture_confirm
+        # right before the real write.
+        headers, _ = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+        cap = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "d1", "sustain_id": sustain, "raw_payload": "some genuinely unrecognisable race-test text"},
+            headers=headers,
+        )
+        message_id = cap.json()["data"]["message_id"]
+
+        marked = client.post(
+            f"/orchie/capture/messages/{message_id}/not-a-transaction",
+            json={"sustain_id": sustain}, headers=headers,
+        )
+        assert marked.json()["marked"] is True
+
+        state_before = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]
+
+        r = client.post(
+            "/orchie/capture/confirm",
+            json={
+                "sustain_id": sustain, "operator": "budget.spend",
+                "params": {"pocket_name": "food", "amount": 500, "description": "should not book"},
+                "message_id": message_id,
+            },
+            headers=headers,
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["result"]["status"] == "failed"
+        assert "already resolved" in data["result"]["reason"].lower()
+        assert data["message_resolved"] is False
+
+        state_after = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]
+        assert state_before == state_after  # no money moved
+
+        msg = client.get(f"/api/v1/ingest/messages/{message_id}", headers=headers).json()["data"]
+        assert msg["status"] == "informational"  # untouched -- still marked not-a-transaction
+
 
 class TestClassificationHistoryEndToEnd:
     """Real, in-the-field friction this exists to remove: a repeat merchant
@@ -1211,3 +1255,148 @@ class TestActivityList:
 
         r = client.get(f"/orchie/activity?sustain_id={sustain_a}", headers=headers_b)
         assert r.status_code == 404
+
+
+class TestMarkNotATransaction:
+    """POST /orchie/capture/messages/{id}/not-a-transaction -- the human
+    escape hatch for a captured message that reaches the classify card but
+    isn't a transaction (Bonnie, 2 Aug 2026: a real M-Pesa failure notice
+    the informational filter didn't yet recognise)."""
+
+    def test_no_auth_returns_401(self, client, sustain):
+        r = client.post(
+            "/orchie/capture/messages/does-not-exist/not-a-transaction",
+            json={"sustain_id": sustain},
+        )
+        assert r.status_code == 401
+
+    def test_unowned_sustain_returns_404(self, client, user):
+        headers, _ = user
+        r = client.post(
+            "/orchie/capture/messages/does-not-exist/not-a-transaction",
+            json={"sustain_id": "does-not-exist"},
+            headers=headers,
+        )
+        assert r.status_code == 404
+
+    def test_marks_a_real_unmapped_capture_and_clears_the_classify_queue(self, client, user, sustain):
+        headers, _ = user
+        r = client.post(
+            "/api/v1/ingest/capture",
+            json={
+                "source_id": "mpesa", "sustain_id": sustain,
+                "raw_payload": "Failed. The till number entered is incorrect. Kindly enter the correct Till Number and try again.",
+            },
+            headers=headers,
+        )
+        # This exact text is now caught by the extended informational
+        # filter, so it never even reaches needs_attention -- use a
+        # genuinely unrecognised message instead to exercise the manual
+        # override path this route exists for.
+        assert r.json()["data"]["status"] == "informational"
+
+        r2 = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "mpesa", "sustain_id": sustain, "raw_payload": "some genuinely unrecognisable text xyz123"},
+            headers=headers,
+        )
+        assert r2.json()["data"]["status"] == "needs_attention"
+        message_id = r2.json()["data"]["message_id"]
+
+        compose_before = client.get(f"/orchie/compose?sustain_id={sustain}&budget=10", headers=headers).json()
+        assert any(w["id"] == "unmapped_capture_classify" for w in compose_before["selected"])
+
+        r3 = client.post(
+            f"/orchie/capture/messages/{message_id}/not-a-transaction",
+            json={"sustain_id": sustain},
+            headers=headers,
+        )
+        assert r3.status_code == 200, r3.text
+        assert r3.json() == {"message_id": message_id, "marked": True}
+
+        compose_after = client.get(f"/orchie/compose?sustain_id={sustain}&budget=10", headers=headers).json()
+        assert not any(w["id"] == "unmapped_capture_classify" for w in compose_after["selected"])
+
+        # still retrievable -- real audit trail, never deleted
+        msg = client.get(f"/api/v1/ingest/messages/{message_id}", headers=headers).json()["data"]
+        assert msg["status"] == "informational"
+        assert msg["raw_payload"] == "some genuinely unrecognisable text xyz123"
+
+    def test_already_resolved_message_returns_marked_false_not_an_error(self, client, user, sustain):
+        headers, _ = user
+        r = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "mpesa", "sustain_id": sustain, "raw_payload": "another unrecognisable text abc789"},
+            headers=headers,
+        )
+        message_id = r.json()["data"]["message_id"]
+        first = client.post(
+            f"/orchie/capture/messages/{message_id}/not-a-transaction",
+            json={"sustain_id": sustain}, headers=headers,
+        )
+        assert first.json()["marked"] is True
+        second = client.post(
+            f"/orchie/capture/messages/{message_id}/not-a-transaction",
+            json={"sustain_id": sustain}, headers=headers,
+        )
+        assert second.status_code == 200
+        assert second.json()["marked"] is False
+
+    def test_scoped_to_the_owning_users_own_sustain_only(self, client, user):
+        headers_a, user_id_a = user
+        email_b = f"orchie-not-a-transaction-other-{uuid.uuid4().hex[:10]}@example.com"
+        r = client.post("/api/v1/users/register", json={"email": email_b, "password": "test-password-123"})
+        headers_b = {"Authorization": f"Bearer {r.json()['data']['token']}"}
+
+        r = client.post("/devui/sustains", json={"template_id": "homestead", "user_id": user_id_a, "parameters": {}}, headers=headers_a)
+        sustain_a = r.json()["data"]["sustain_id"]
+        r = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "mpesa", "sustain_id": sustain_a, "raw_payload": "yet another unrecognisable text def456"},
+            headers=headers_a,
+        )
+        message_id = r.json()["data"]["message_id"]
+
+        r2 = client.post(
+            f"/orchie/capture/messages/{message_id}/not-a-transaction",
+            json={"sustain_id": sustain_a}, headers=headers_b,
+        )
+        assert r2.status_code == 404  # user B doesn't own sustain A -- same 404-for-both-cases pattern
+
+    def test_attacker_cannot_use_their_own_owned_sustain_to_mark_a_foreign_message(self, client, user):
+        # Adversarial verify (2 Aug 2026) flagged this as an untested but
+        # important case: user B supplies THEIR OWN owned sustain_id (so
+        # _assert_owns_sustain passes) while guessing a message_id that
+        # actually belongs to user A's sustain. The 200-vs-404 test above
+        # only covers user B naming user A's sustain (blocked by ownership
+        # alone); this covers the SQL-level scope guard doing the real work.
+        headers_a, user_id_a = user
+        email_b = f"orchie-not-a-transaction-attacker-{uuid.uuid4().hex[:10]}@example.com"
+        r = client.post("/api/v1/users/register", json={"email": email_b, "password": "test-password-123"})
+        headers_b = {"Authorization": f"Bearer {r.json()['data']['token']}"}
+        user_id_b = r.json()["data"]["user_id"]
+
+        r = client.post("/devui/sustains", json={"template_id": "homestead", "user_id": user_id_a, "parameters": {}}, headers=headers_a)
+        sustain_a = r.json()["data"]["sustain_id"]
+        r = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "mpesa", "sustain_id": sustain_a, "raw_payload": "attacker probe text ghi999"},
+            headers=headers_a,
+        )
+        message_id = r.json()["data"]["message_id"]
+
+        r_b = client.post("/devui/sustains", json={"template_id": "homestead", "user_id": user_id_b, "parameters": {}}, headers=headers_b)
+        sustain_b = r_b.json()["data"]["sustain_id"]
+
+        # User B owns sustain_b, so ownership passes -- but the message_id
+        # belongs to sustain_a, not sustain_b.
+        r2 = client.post(
+            f"/orchie/capture/messages/{message_id}/not-a-transaction",
+            json={"sustain_id": sustain_b}, headers=headers_b,
+        )
+        assert r2.status_code == 200
+        assert r2.json()["marked"] is False
+
+        # Untouched -- still a real needs_attention item under user A's sustain.
+        msg = client.get(f"/api/v1/ingest/messages/{message_id}", headers=headers_a).json()["data"]
+        assert msg["status"] == "needs_attention"

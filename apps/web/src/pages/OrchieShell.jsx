@@ -396,6 +396,99 @@ function PocketPicker({ question, why, options, sustainId, onPick }) {
   );
 }
 
+/**
+ * The human escape hatch a classify card needs when it's asking a question
+ * (which pocket / what amount / anything else) about a captured message
+ * that turns out not to be a transaction at all (Bonnie, 2 Aug 2026: a
+ * real M-Pesa failure notice -- "Failed. The till number entered is
+ * incorrect..." -- reached this exact screen because the informational
+ * filter didn't yet recognise its wording). Rendered under EVERY
+ * needs_disambiguation branch in CaptureFlow (amount / pocket_name /
+ * generic), never inside 'ready' -- once amount+pocket are both resolved
+ * the person has already effectively confirmed it IS a transaction.
+ *
+ * Only shown when a real messageId exists (a free-text narration has no
+ * underlying message to mark). Calls the real, gated
+ * POST /orchie/capture/messages/{id}/not-a-transaction -- never a raw
+ * write, never calls execute_operator (there's nothing to book).
+ */
+function NotATransactionControl({ sustainId, messageId, onMarked }) {
+  const [status, setStatus] = useState('idle'); // idle | marking | done | error
+  const [error, setError] = useState(null);
+
+  // Same discipline as CaptureFlow's own committed-phase auto-dismiss: the
+  // "done -> tell the parent" transition lives in an effect with its own
+  // cleanup, not a bare setTimeout in the click handler, so a fast unmount
+  // (navigate away / switch sustain / list refresh) inside the 1.2s window
+  // can never fire a stale onMarked() against an already-gone widget.
+  useEffect(() => {
+    if (status !== 'done') return undefined;
+    const t = setTimeout(() => onMarked?.(), 1200);
+    return () => clearTimeout(t);
+  }, [status, onMarked]);
+
+  const mark = async () => {
+    setStatus('marking');
+    setError(null);
+    try {
+      const data = await api.post(`/orchie/capture/messages/${encodeURIComponent(messageId)}/not-a-transaction`, {
+        sustain_id: sustainId,
+      });
+      if (data.marked) {
+        setStatus('done');
+      } else {
+        setStatus('error');
+        setError('could not mark it — it may already be resolved');
+      }
+    } catch (e) {
+      setStatus('error');
+      setError(e.message || 'could not reach orchie');
+    }
+  };
+
+  if (status === 'marking') {
+    return (
+      <div className="pulse" style={{
+        marginTop: 10, display: 'flex', alignItems: 'center', gap: 8,
+        fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-muted)',
+      }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--amber)' }} />
+        marking…
+      </div>
+    );
+  }
+
+  if (status === 'done') {
+    return (
+      <div style={{
+        marginTop: 10, display: 'flex', alignItems: 'center', gap: 8,
+        fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, color: 'var(--teal)',
+      }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--teal)' }} />
+        ✓ not a transaction — cleared
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button
+        onClick={mark}
+        style={{
+          background: 'none', border: '1px solid var(--border-mid)', borderRadius: 'var(--radius-sm)',
+          padding: '8px 14px', cursor: 'pointer',
+          fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '0.03em', color: 'var(--text-muted)',
+        }}
+      >
+        not a transaction — ignore
+      </button>
+      {status === 'error' && (
+        <div style={{ marginTop: 6, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--danger)' }}>{error}</div>
+      )}
+    </div>
+  );
+}
+
 const fieldLabel = {
   // Reclassified from --text-dim to --text-muted (2 Aug 2026 legibility
   // pass): a field label ("AMOUNT", "DESCRIPTION / MERCHANT") is content
@@ -716,14 +809,30 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
       {phase === 'loading' && <div style={mutedText}>thinking…</div>}
 
       {phase === 'needs_disambiguation' && payload.field === 'amount' && (
-        <AmountEntry question={payload.question} why={payload.why} onSubmit={answer} />
+        <>
+          <AmountEntry question={payload.question} why={payload.why} onSubmit={answer} />
+          {messageId && (
+            <NotATransactionControl
+              sustainId={sustainId} messageId={messageId}
+              onMarked={() => { onCommitted?.(); onClose?.(); }}
+            />
+          )}
+        </>
       )}
 
       {phase === 'needs_disambiguation' && payload.field === 'pocket_name' && (
-        <PocketPicker
-          question={payload.question} why={payload.why} options={payload.options}
-          sustainId={sustainId} onPick={answer}
-        />
+        <>
+          <PocketPicker
+            question={payload.question} why={payload.why} options={payload.options}
+            sustainId={sustainId} onPick={answer}
+          />
+          {messageId && (
+            <NotATransactionControl
+              sustainId={sustainId} messageId={messageId}
+              onMarked={() => { onCommitted?.(); onClose?.(); }}
+            />
+          )}
+        </>
       )}
 
       {phase === 'needs_disambiguation' && payload.field !== 'amount' && payload.field !== 'pocket_name' && (
@@ -735,6 +844,12 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
             ))}
           </div>
           <div style={{ ...mutedText, marginTop: 10 }}>{payload.why}</div>
+          {messageId && (
+            <NotATransactionControl
+              sustainId={sustainId} messageId={messageId}
+              onMarked={() => { onCommitted?.(); onClose?.(); }}
+            />
+          )}
         </div>
       )}
 

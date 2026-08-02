@@ -408,6 +408,100 @@ class TestInformationalNeverSurfacesAsNeedsAttention:
         assert queue[0]["parsed_fields"]["counterparty"] == "NAIVAS SUPERMARKET"
 
 
+# ── mark_not_a_transaction: the human escape hatch ───────────────────────────
+# Bonnie, 2 Aug 2026: a real M-Pesa failure notice reached the classify
+# queue before the informational filter was extended to recognise it. This
+# is the manual override -- reuses STATUS_INFORMATIONAL directly (never a
+# new status), kept in the message store for audit, permanently removed
+# from needs_attention(), never booked as a spend/income.
+
+class TestMarkNotATransaction:
+    @pytest.mark.asyncio
+    async def test_marks_a_needs_attention_message_as_informational(self, ingest, homestead_sid):
+        from sustena.core.ingest_engine import STATUS_INFORMATIONAL
+
+        result = await ingest.capture("device-1", homestead_sid, BUYGOODS)
+        marked = ingest.mark_not_a_transaction(result["message_id"], homestead_sid, marked_by="user-test-1")
+        assert marked is True
+
+        msg = ingest.get_message(result["message_id"])
+        assert msg["status"] == STATUS_INFORMATIONAL
+        assert msg["resolved_by"] == "user-test-1"
+        assert msg["resolved_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_removed_from_needs_attention_after_marking(self, ingest, homestead_sid):
+        result = await ingest.capture("device-1", homestead_sid, BUYGOODS)
+        assert len(ingest.needs_attention(sustain_id=homestead_sid)) == 1
+        ingest.mark_not_a_transaction(result["message_id"], homestead_sid, marked_by="user-test-1")
+        assert ingest.needs_attention(sustain_id=homestead_sid) == []
+
+    @pytest.mark.asyncio
+    async def test_still_retrievable_never_deleted(self, ingest, homestead_sid):
+        result = await ingest.capture("device-1", homestead_sid, BUYGOODS)
+        ingest.mark_not_a_transaction(result["message_id"], homestead_sid, marked_by="user-test-1")
+        rows = ingest.list_messages(sustain_id=homestead_sid)
+        assert any(r["message_id"] == result["message_id"] for r in rows)
+        assert ingest.get_message(result["message_id"]) is not None
+
+    @pytest.mark.asyncio
+    async def test_never_mutates_state(self, ingest, engine, homestead_sid):
+        result = await ingest.capture("device-1", homestead_sid, BUYGOODS)
+        before = engine.get_state(homestead_sid)
+        ingest.mark_not_a_transaction(result["message_id"], homestead_sid, marked_by="user-test-1")
+        assert engine.get_state(homestead_sid) == before
+
+    @pytest.mark.asyncio
+    async def test_second_mark_is_a_no_op_not_a_crash(self, ingest, homestead_sid):
+        result = await ingest.capture("device-1", homestead_sid, BUYGOODS)
+        first = ingest.mark_not_a_transaction(result["message_id"], homestead_sid, marked_by="user-test-1")
+        second = ingest.mark_not_a_transaction(result["message_id"], homestead_sid, marked_by="user-test-1")
+        assert first is True
+        assert second is False  # already resolved -- same discipline as resolve_message()
+
+    @pytest.mark.asyncio
+    async def test_cannot_mark_a_message_already_applied(self, ingest, homestead_sid):
+        # A genuinely mapped+applied transaction (real money moved) must
+        # never be silently reclassified as "not a transaction" through
+        # this path -- it's not in needs_attention in the first place.
+        result = await ingest.capture("device-1", homestead_sid, RECEIVED)
+        assert result["status"] == "applied"
+        marked = ingest.mark_not_a_transaction(result["message_id"], homestead_sid, marked_by="user-test-1")
+        assert marked is False
+
+    def test_unknown_message_id_returns_false(self, ingest, homestead_sid):
+        assert ingest.mark_not_a_transaction("does-not-exist", homestead_sid, marked_by="user-test-1") is False
+
+    @pytest.mark.asyncio
+    async def test_wrong_sustain_id_scope_refuses(self, ingest, engine, homestead_sid):
+        # Defense in depth: even if a caller somehow named the wrong
+        # sustain_id for a real message_id, the WHERE clause's sustain_id
+        # match means it's refused, not silently applied to a mismatched
+        # sustain's message.
+        other_sid = engine.instantiate("homestead", "user-test-2", {"owner_ids": ["user-test-2"]})
+        result = await ingest.capture("device-1", homestead_sid, BUYGOODS)
+        marked = ingest.mark_not_a_transaction(result["message_id"], other_sid, marked_by="user-test-2")
+        assert marked is False
+        # untouched -- still needs_attention under its real sustain
+        assert len(ingest.needs_attention(sustain_id=homestead_sid)) == 1
+
+    @pytest.mark.asyncio
+    async def test_original_transducer_reason_is_preserved_not_overwritten(self, ingest, homestead_sid):
+        # Adversarial verify (2 Aug 2026): the original UPDATE replaced the
+        # transducer's own diagnostic reason wholesale, weakening the audit
+        # trail for future pattern-tuning. Fixed to append the human
+        # override onto the original reason instead of discarding it.
+        result = await ingest.capture("device-1", homestead_sid, BUYGOODS)
+        before = ingest.get_message(result["message_id"])
+        original_reason = before["reason"]
+        assert original_reason  # the transducer always sets a real reason for parsed_unmapped
+
+        ingest.mark_not_a_transaction(result["message_id"], homestead_sid, marked_by="user-test-1")
+        after = ingest.get_message(result["message_id"])
+        assert original_reason in after["reason"]
+        assert "not a transaction" in after["reason"].lower()
+
+
 # ── Staleness: never fabricated ──────────────────────────────────────────────
 
 class TestStaleness:

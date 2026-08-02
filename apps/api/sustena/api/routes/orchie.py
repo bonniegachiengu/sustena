@@ -286,6 +286,31 @@ async def capture_confirm(
 
     engine = get_shared_engine()
 
+    # Race guard (adversarial verify, 2 Aug 2026): a human can mark a
+    # message "not a transaction" (mark_not_a_transaction) at roughly the
+    # same moment a stale UI still lets them tap CONFIRM on the same
+    # message's disambiguation flow. execute_operator() itself has no
+    # concept of ingest_messages.status -- without this check, a message a
+    # human just told the system "isn't a transaction" could still get
+    # booked for real. Checked fresh here, right before the real write,
+    # not cached from whatever state the frontend last saw.
+    if body.message_id:
+        from sustena.core.ingest_singleton import get_shared_ingest_engine as _get_ingest
+
+        existing = _get_ingest().get_message(body.message_id)
+        if existing is not None and existing.get("sustain_id") == body.sustain_id and existing.get("status") != "needs_attention":
+            return {
+                "sustain_id": body.sustain_id,
+                "operator": body.operator,
+                "params": body.params,
+                "result": {
+                    "status": "failed",
+                    "data": None,
+                    "reason": f"This message was already resolved (status: {existing.get('status')}) — nothing was booked.",
+                },
+                "message_resolved": False,
+            }
+
     # Whether body.operator is actually declared on this sustain's spec is
     # checked INSIDE execute_operator itself (the same allow-list check
     # every other write goes through) -- not duplicated here.
@@ -323,6 +348,49 @@ async def capture_confirm(
         "result": result.to_response(),
         "message_resolved": resolved,
     }
+
+
+# ── POST /orchie/capture/messages/{id}/not-a-transaction ───────────────────
+#
+# Bonnie, 2 Aug 2026: a real M-Pesa failure notice ("Failed. The till
+# number entered is incorrect...") reached the classify card asking "which
+# pocket does this belong to?" -- the informational-system-message filter
+# didn't (yet) recognise it. This is the human escape hatch: a real, typed,
+# gated action (not a raw DB write from the frontend) that marks a captured
+# message as genuinely not a transaction. Never calls execute_operator --
+# there's nothing to book, only a status change, the same category as
+# resolve_message().
+
+
+class MarkNotATransactionRequest(BaseModel):
+    sustain_id: str
+
+
+@router.post("/capture/messages/{message_id}/not-a-transaction")
+async def capture_mark_not_a_transaction(
+    message_id: str, body: MarkNotATransactionRequest, current_user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Marks a captured message STATUS_INFORMATIONAL -- kept in the message
+    store for audit (never deleted), permanently removed from the classify
+    queue (needs_attention()'s own status filter), never booked as a
+    spend/income. See IngestEngine.mark_not_a_transaction()'s own
+    docstring for why this reuses the informational status rather than
+    inventing a new one.
+
+    Ownership-checked like every other Orchie route. Returns
+    {"message_id", "marked": bool} -- marked=False (not an error) means
+    the message was already resolved/informational/applied/refused, or
+    never existed for this sustain; the frontend treats that as "nothing
+    left to do here" rather than a failure.
+    """
+    _assert_owns_sustain(body.sustain_id, current_user["id"])
+
+    from sustena.core.ingest_singleton import get_shared_ingest_engine
+
+    ingest = get_shared_ingest_engine()
+    marked = ingest.mark_not_a_transaction(message_id, body.sustain_id, marked_by=current_user["id"])
+    return {"message_id": message_id, "marked": marked}
 
 
 # ── GET /orchie/capture/sources — allocate-recovery source picker data ────────

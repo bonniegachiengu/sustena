@@ -504,6 +504,55 @@ class IngestEngine:
         self._db.commit()
         return cur.rowcount > 0
 
+    def mark_not_a_transaction(self, message_id: str, sustain_id: str, marked_by: str) -> bool:
+        """
+        Human-in-the-loop override (2 Aug 2026, Bonnie): a captured message
+        reached the classify queue asking "which pocket does this belong
+        to?" but isn't a transaction at all -- e.g. a real M-Pesa failure
+        notice ("Failed. The till number entered is incorrect...") that
+        the transducer's own informational-system-message filter didn't
+        (yet) recognise. Rather than invent a THIRD "human-informational"
+        status, this reuses STATUS_INFORMATIONAL directly -- a message a
+        human just told us isn't a transaction is exactly as informational
+        as one the transducer itself recognised as such, and gets the
+        exact same treatment: kept in the message store (never deleted --
+        real audit trail), permanently excluded from needs_attention()'s
+        query (same status filter), never booked as a spend/income.
+
+        Distinguishable from an auto-recognised informational message in
+        the stored row itself: resolved_at/resolved_by are set here (a
+        human acted, recorded who and when) but left NULL for the
+        transducer's own automatic classification -- _process() never
+        touches those columns for its own STATUS_INFORMATIONAL rows.
+
+        Only acts on a message currently in needs_attention (mirrors
+        resolve_message()'s own guard exactly) -- returns False if it's
+        already resolved/informational/applied/refused, doesn't exist, or
+        belongs to a different sustain than claimed (sustain_id is part of
+        the WHERE clause as a defense-in-depth scope check, on top of
+        whatever ownership check the calling route already did).
+        """
+        now = datetime.utcnow().isoformat()
+        row = self._db.execute(
+            "SELECT reason FROM ingest_messages WHERE id = ? AND sustain_id = ? AND status = ? AND resolved_at IS NULL",
+            (message_id, sustain_id, STATUS_NEEDS_ATTENTION),
+        ).fetchone()
+        if row is None:
+            return False
+        original_reason = row["reason"] if row["reason"] else ""
+        override_note = "Marked 'not a transaction' by a human — never booked."
+        new_reason = f"{original_reason} — {override_note}" if original_reason else override_note
+        cur = self._db.execute(
+            "UPDATE ingest_messages SET status = ?, resolved_at = ?, resolved_by = ?, reason = ? "
+            "WHERE id = ? AND sustain_id = ? AND status = ? AND resolved_at IS NULL",
+            (
+                STATUS_INFORMATIONAL, now, marked_by, new_reason,
+                message_id, sustain_id, STATUS_NEEDS_ATTENTION,
+            ),
+        )
+        self._db.commit()
+        return cur.rowcount > 0
+
     def needs_attention(self, sustain_id: str | None = None) -> list[dict]:
         """Unresolved needs_attention rows — the queue a human must clear."""
         conditions = ["status = ?", "resolved_at IS NULL"]
