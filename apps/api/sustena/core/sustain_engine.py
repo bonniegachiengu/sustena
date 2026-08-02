@@ -141,6 +141,26 @@ def _referenced_root_names(node: Any) -> set[str]:
     return names
 
 
+def _parse_rule_to_dict(rule) -> dict:
+    """Serialise a ParseRule (a frozen dataclass, possibly nesting FieldSpec dataclasses) to a plain JSON-able dict."""
+    from dataclasses import asdict
+    return asdict(rule)
+
+
+def _parse_rule_from_dict(d: dict):
+    """The inverse of _parse_rule_to_dict — reconstructs a real ParseRule (with real FieldSpec instances) from its stored JSON dict."""
+    from sustena.core.parse_rule import FieldSpec, ParseRule
+    extract = {k: FieldSpec(**v) for k, v in (d.get("extract") or {}).items()}
+    return ParseRule(
+        id=d["id"], source=d["source"], version=d.get("version", 1), pattern=d["pattern"],
+        extract=extract, status=d.get("status", "parsed_unmapped"),
+        operator=d.get("operator"), params=d.get("params") or {},
+        flags=tuple(d.get("flags") or ()), reason_template=d.get("reason_template"),
+        trust=d.get("trust", "shipped"), provenance=d.get("provenance", "sustena_core"),
+        examples=tuple(d.get("examples") or ()),
+    )
+
+
 class SustainEngine:
     """
     Runtime for instantiating and operating sustains.
@@ -285,6 +305,19 @@ class SustainEngine:
                 idempotency_key     TEXT NOT NULL,
                 created_at          TEXT NOT NULL,
                 UNIQUE(idempotency_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS parse_rule_edits (
+                id              TEXT PRIMARY KEY,
+                rule_id         TEXT NOT NULL,
+                source          TEXT NOT NULL,
+                version         INTEGER NOT NULL,
+                rule_json       TEXT NOT NULL,
+                edit_name       TEXT NOT NULL,
+                status          TEXT NOT NULL,
+                author_user_id  TEXT NOT NULL,
+                parent_version  INTEGER,
+                created_at      TEXT NOT NULL
             );
         """)
         self._db.commit()
@@ -721,6 +754,152 @@ class SustainEngine:
             "FROM holon_transfers WHERE from_sustain_id = ? OR to_sustain_id = ? "
             "ORDER BY created_at DESC LIMIT ?",
             (sustain_id, sustain_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Parse rules as gated edits (Phase 3C, 2 Aug 2026) ───────────────────────
+    # Canon: SPEC-parser-primitive-lift.addendum §4I.6 — "D includes the
+    # sensing boundary... a correction is an ordinary gated edit — no
+    # parallel machinery." Rules are a per-SOURCE (mpesa/kcb), not
+    # per-sustain, asset — the same M-Pesa SMS format applies to every
+    # user — so this is deliberately its own small versioned store rather
+    # than routed through execute_operator()'s single-sustain machinery,
+    # which would be the wrong scope entirely. The SAME discipline still
+    # applies: type-checked at author time (Gamma |- r), append-only
+    # versioned history, declared inverses (AddRule <-> RetireRule), and —
+    # for ModifyRule/RetireRule — a real migration-safety check before the
+    # edit can land.
+
+    def _get_active_parse_rule_row(self, rule_id: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM parse_rule_edits WHERE rule_id = ? AND status = 'active'", (rule_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def add_parse_rule(self, source: str, rule, author_user_id: str) -> dict:
+        """
+        AddRule: introduce a new ParseRule. Auto-safe by construction — a
+        genuinely new rule_id strictly widens what tau recognises (the
+        boundary analog of LoosenInv's V_D subset V_D'), so no migration
+        check is needed. Refuses if rule_id already has an active version
+        (use modify_parse_rule) or the rule fails Gamma |- r.
+        """
+        from sustena.core.parse_rule import typecheck_rule
+
+        errors = typecheck_rule(rule)
+        if errors:
+            return {"status": "failed", "reason": "rule failed to typecheck (Gamma |- r)", "errors": errors}
+        if self._get_active_parse_rule_row(rule.id) is not None:
+            return {"status": "failed", "reason": f"rule '{rule.id}' already has an active version — use modify_parse_rule instead."}
+
+        now = datetime.utcnow().isoformat()
+        self._db.execute(
+            "INSERT INTO parse_rule_edits (id, rule_id, source, version, rule_json, edit_name, status, author_user_id, parent_version, created_at) "
+            "VALUES (?, ?, ?, 1, ?, 'AddRule', 'active', ?, NULL, ?)",
+            (str(uuid.uuid4()), rule.id, source, json.dumps(_parse_rule_to_dict(rule)), author_user_id, now),
+        )
+        self._db.commit()
+        return {"status": "ok", "rule_id": rule.id, "version": 1, "edit_name": "AddRule"}
+
+    def modify_parse_rule(self, rule_id: str, new_rule, author_user_id: str) -> dict:
+        """
+        ModifyRule: change an existing rule's pattern/extract/maps_to —
+        whether "existing" means a prior user correction (an active DB
+        row) or a shipped seed rule that has never been corrected before
+        (baseline = the seed data itself, first correction becomes DB
+        version 1). Always runs the migration check: re-parses the
+        baseline rule's own declared examples[] under the CANDIDATE rule
+        and refuses if any previously-handled example would now regress
+        (mis-parse, or stop matching outright) — narrower than a full
+        cross-sustain stored-message corpus scan (a larger, separate
+        follow-up, disclosed rather than silently narrowed), but a real,
+        non-rubber-stamp safety net.
+        """
+        from sustena.core.parse_rule import apply_rule, typecheck_rule
+        from sustena.core.parse_rules_seed import SEED_RULES_BY_SOURCE
+
+        if new_rule.id != rule_id:
+            return {"status": "failed", "reason": "new_rule.id must match the rule_id being modified."}
+        errors = typecheck_rule(new_rule)
+        if errors:
+            return {"status": "failed", "reason": "rule failed to typecheck (Gamma |- r)", "errors": errors}
+
+        existing = self._get_active_parse_rule_row(rule_id)
+        if existing is not None:
+            old_rule = _parse_rule_from_dict(json.loads(existing["rule_json"]))
+            parent_version = existing["version"]
+            source = existing["source"]
+        else:
+            old_rule = None
+            for rules in SEED_RULES_BY_SOURCE.values():
+                for r in rules:
+                    if r.id == rule_id:
+                        old_rule = r
+                        break
+                if old_rule:
+                    break
+            if old_rule is None:
+                return {"status": "failed", "reason": f"rule '{rule_id}' has no active version and no shipped seed rule to modify."}
+            parent_version = 0
+            source = old_rule.source
+
+        regressions = []
+        for example in old_rule.examples:
+            old_result = apply_rule(old_rule, example)
+            new_result = apply_rule(new_rule, example)
+            old_shape = (old_result.status, old_result.operator_name, old_result.operator_params) if old_result else None
+            new_shape = (new_result.status, new_result.operator_name, new_result.operator_params) if new_result else None
+            if old_shape != new_shape:
+                regressions.append({"example": example, "was": old_shape, "now": new_shape})
+        if regressions:
+            return {
+                "status": "failed",
+                "reason": "modification would change behaviour for previously-handled examples — refused.",
+                "regressions": regressions,
+            }
+
+        new_version = parent_version + 1
+        now = datetime.utcnow().isoformat()
+        if existing is not None:
+            self._db.execute("UPDATE parse_rule_edits SET status = 'superseded' WHERE id = ?", (existing["id"],))
+        self._db.execute(
+            "INSERT INTO parse_rule_edits (id, rule_id, source, version, rule_json, edit_name, status, author_user_id, parent_version, created_at) "
+            "VALUES (?, ?, ?, ?, ?, 'ModifyRule', 'active', ?, ?, ?)",
+            (str(uuid.uuid4()), rule_id, source, new_version, json.dumps(_parse_rule_to_dict(new_rule)), author_user_id, parent_version, now),
+        )
+        self._db.commit()
+        return {"status": "ok", "rule_id": rule_id, "version": new_version, "edit_name": "ModifyRule"}
+
+    def retire_parse_rule(self, rule_id: str, author_user_id: str) -> dict:
+        """RetireRule: remove a rule from its connector's active set. Its declared inverse is add_parse_rule (crystallised as a fresh AddRule row, not a raw un-delete)."""
+        existing = self._get_active_parse_rule_row(rule_id)
+        if existing is None:
+            return {"status": "failed", "reason": f"rule '{rule_id}' has no active version to retire."}
+        self._db.execute("UPDATE parse_rule_edits SET status = 'retired' WHERE id = ?", (existing["id"],))
+        self._db.commit()
+        return {"status": "ok", "rule_id": rule_id, "version": existing["version"], "edit_name": "RetireRule"}
+
+    def list_active_parse_rule_overrides(self, source: str) -> list:
+        rows = self._db.execute(
+            "SELECT rule_json FROM parse_rule_edits WHERE source = ? AND status = 'active'", (source,),
+        ).fetchall()
+        return [_parse_rule_from_dict(json.loads(r["rule_json"])) for r in rows]
+
+    def get_effective_parse_rules(self, source: str) -> list:
+        """Overrides first (a correction supersedes its shipped default for the same rule_id), then any seed rules not overridden, in the seed's own declared order."""
+        from sustena.core.parse_rules_seed import SEED_RULES_BY_SOURCE
+
+        overrides = self.list_active_parse_rule_overrides(source)
+        override_ids = {r.id for r in overrides}
+        seed = SEED_RULES_BY_SOURCE.get(source, [])
+        return overrides + [r for r in seed if r.id not in override_ids]
+
+    def list_parse_rule_history(self, rule_id: str) -> list[dict]:
+        """The full append-only edit history for one rule_id, oldest first — §4I.4's `<D, parent_version, edit_name, author, timestamp>` record."""
+        rows = self._db.execute(
+            "SELECT id, rule_id, source, version, edit_name, status, author_user_id, parent_version, created_at "
+            "FROM parse_rule_edits WHERE rule_id = ? ORDER BY version ASC",
+            (rule_id,),
         ).fetchall()
         return [dict(r) for r in rows]
 

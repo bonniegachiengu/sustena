@@ -409,7 +409,13 @@ class IngestEngine:
         # strictly by SMS sender -- see transducer.py's own _PARSERS_BY_SOURCE
         # comment) is passed through so parsing stays scoped to that source's
         # own parser set -- body content can never override it.
-        result = parse_message(row["raw_payload"], source_id=row["source_id"])
+        #
+        # declared_rules (Phase 3C, 2 Aug 2026): the real, engine-aware
+        # effective rule set (seed + any active user corrections) --
+        # transducer.py itself stays pure/stateless (no DB access), so this
+        # is the one real call site threading engine state into it.
+        declared_rules = self._sustain_engine.get_effective_parse_rules((row["source_id"] or "").lower())
+        result = parse_message(row["raw_payload"], source_id=row["source_id"], declared_rules=declared_rules)
 
         status = STATUS_NEEDS_ATTENTION
         operator_name: str | None = None

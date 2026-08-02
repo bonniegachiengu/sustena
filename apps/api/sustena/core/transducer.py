@@ -858,8 +858,19 @@ _PARSERS_BY_SOURCE: dict[str, list[Callable[[str], "TransductionResult | None"]]
 }
 
 
-def parse_message(raw_text: str, source_id: str | None = None) -> TransductionResult:
+def parse_message(
+    raw_text: str, source_id: str | None = None, declared_rules: list | None = None,
+) -> TransductionResult:
     """
+    declared_rules (optional, Phase 3C, 2 Aug 2026): the EFFECTIVE declared
+    rule set for this source — seed rules plus any active user corrections
+    — normally supplied by the real caller (ingest_engine._process(), via
+    SustainEngine.get_effective_parse_rules(source_id)) which has the
+    engine access this pure, stateless module deliberately does not. Left
+    as None (the default) falls back to the built-in seed-only list
+    (parse_rules_seed.SEED_RULES_BY_SOURCE) — every existing caller/test
+    that never passed this gets byte-identical behaviour.
+
     source_id (optional) makes parsing STRICT when it names a known source:
     only that source's own parser set (_PARSERS_BY_SOURCE) is ever tried,
     regardless of what the message body itself says -- see this module's
@@ -885,6 +896,26 @@ def parse_message(raw_text: str, source_id: str | None = None) -> TransductionRe
             status="rejected",
             reason="Message contains an OTP/verification code or similar secret — refused, never parsed or stored.",
         )
+
+    # Phase 3B (Parser primitive-lift, 2 Aug 2026) -- declared ParseRule
+    # data is tried FIRST, same source-strict scoping as the Python
+    # fallback tier below. A declared rule set is currently a proper
+    # subset of the hand-wired parsers (see parse_rules_seed.py's own
+    # disclosure of what's migrated vs not) -- this can never diverge from
+    # or shadow the fallback tier for a shape that isn't yet declared,
+    # since run_rules() returns None (not a wrong answer) when nothing in
+    # the declared set matches, and the loop below then tries the
+    # Python parsers exactly as it always has.
+    from sustena.core.parse_rule import run_rules
+
+    if declared_rules is None:
+        from sustena.core.parse_rules_seed import SEED_RULES_BY_SOURCE
+        declared_rules = SEED_RULES_BY_SOURCE.get((source_id or "").lower(), [])
+    if declared_rules:
+        declared_result = run_rules(declared_rules, text)
+        if declared_result is not None:
+            return declared_result
+
     parsers = _PARSERS_BY_SOURCE.get((source_id or "").lower(), _PARSERS)
     for parser in parsers:
         result = parser(text)

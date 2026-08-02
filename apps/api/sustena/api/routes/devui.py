@@ -1716,3 +1716,120 @@ async def get_sustain_definition(
         "curated_widgets": spec.get("curated_widgets", []),
         "access_policy": spec.get("access_policy", {}),
     })
+
+
+# ── Parse rules as gated edits (Phase 3C, 2 Aug 2026) ─────────────────────────
+# Canon: SPEC-parser-primitive-lift.addendum §4I.6. Rules are a per-SOURCE
+# (mpesa/kcb), not per-sustain, asset -- these routes are auth-gated
+# (any signed-in user) rather than sustain-ownership-scoped, matching this
+# file's own existing precedent for global/shared resources (the
+# composition routes above have the identical auth-only shape). A
+# correction to "how M-Pesa airtime purchases parse" is shared connector
+# infrastructure, not owned by any one sustain.
+
+class ParseRuleBody(BaseModel):
+    id: str
+    source: str
+    pattern: str
+    extract: dict = Field(default_factory=dict)   # {field_name: {"type": ..., "group": ..., "value": ...}}
+    status: str = "parsed_unmapped"
+    operator: str | None = None
+    params: dict = Field(default_factory=dict)
+    flags: list[str] = Field(default_factory=list)
+    reason_template: str | None = None
+    examples: list[str] = Field(default_factory=list)
+
+
+def _rule_body_to_parse_rule(body: "ParseRuleBody"):
+    from sustena.core.parse_rule import FieldSpec, ParseRule
+    extract = {k: FieldSpec(**v) for k, v in body.extract.items()}
+    return ParseRule(
+        id=body.id, source=body.source, version=1, pattern=body.pattern, extract=extract,
+        status=body.status, operator=body.operator, params=body.params,
+        flags=tuple(body.flags), reason_template=body.reason_template,
+        trust="user_corrected", provenance="user", examples=tuple(body.examples),
+    )
+
+
+@router.get("/parse-rules", summary="Active parse-rule corrections + seed library for a source")
+async def list_parse_rules_route(source: str, current_user: dict = Depends(get_current_user)) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    effective = engine.get_effective_parse_rules(source)
+    overrides = {r.id for r in engine.list_active_parse_rule_overrides(source)}
+    return ok({
+        "source": source,
+        "rules": [
+            {"id": r.id, "status": r.status, "operator": r.operator, "trust": r.trust, "is_correction": r.id in overrides}
+            for r in effective
+        ],
+    })
+
+
+@router.get("/parse-rules/{rule_id}/history", summary="Full append-only edit history for one rule")
+async def parse_rule_history_route(rule_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    return ok({"rule_id": rule_id, "history": engine.list_parse_rule_history(rule_id)})
+
+
+@router.post("/parse-rules", summary="AddRule — introduce a new declared ParseRule")
+async def add_parse_rule_route(body: ParseRuleBody, current_user: dict = Depends(get_current_user)) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    rule = _rule_body_to_parse_rule(body)
+    result = engine.add_parse_rule(body.source, rule, author_user_id=current_user["id"])
+    return ok(result)
+
+
+@router.post("/parse-rules/{rule_id}/modify", summary="ModifyRule — change an existing rule, gated by a regression check")
+async def modify_parse_rule_route(rule_id: str, body: ParseRuleBody, current_user: dict = Depends(get_current_user)) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    rule = _rule_body_to_parse_rule(body)
+    result = engine.modify_parse_rule(rule_id, rule, author_user_id=current_user["id"])
+    return ok(result)
+
+
+@router.post("/parse-rules/{rule_id}/retire", summary="RetireRule — remove a rule from its connector's active set")
+async def retire_parse_rule_route(rule_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    result = engine.retire_parse_rule(rule_id, author_user_id=current_user["id"])
+    return ok(result)
+
+
+class ProposeParseRuleRequest(BaseModel):
+    source: str
+    raw_text: str
+
+
+@router.post("/parse-rules/propose", summary="Phase 3D — propose+verify a candidate rule for an unparsed message")
+async def propose_parse_rule_route(body: ProposeParseRuleRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    """
+    Honest scope (see parse_rule_proposer.py's own docstring in full): the
+    verify-and-crystallise MACHINERY here is real and complete, but no
+    generator is wired by default — this always reports
+    "no_proposer_configured" today rather than fabricate a candidate.
+    Wiring a genuine LLM-based generator (respecting this project's
+    zero-real-API-spend-in-dev discipline) is disclosed follow-up work.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+    from sustena.core.parse_rule_proposer import propose_and_verify
+
+    engine = get_shared_engine()
+    existing = engine.get_effective_parse_rules(body.source)
+    proposal = propose_and_verify(body.raw_text, existing, generator=None)
+    if proposal is None:
+        return ok({"proposed": False, "reason": "no_proposer_configured"})
+    return ok({
+        "proposed": True,
+        "status": proposal.status,
+        "reasons": proposal.reasons,
+        "candidate_id": proposal.candidate.id,
+    })
