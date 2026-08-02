@@ -137,3 +137,70 @@ class TestHappyPath:
         client.get(f"/orchie/compose?sustain_id={sustain}&query=pocket&budget=2", headers=headers)
         state_after = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]
         assert state_before == state_after
+
+
+class TestClassifyQueueChronologicalOrder:
+    """Bonnie, 2 Aug 2026: reconstructing a budget from message history means
+    recording transactions and pocket-to-pocket transfers in the order they
+    actually happened -- you can't transfer out of a pocket before it was
+    funded. The classify worklist must replay oldest-first, even though
+    IngestEngine.needs_attention() itself is newest-first (correct for OTHER
+    consumers, e.g. devui.py's Monitor panel). Exercised over real HTTP
+    against the real shared engine -- compose()'s classify_card branch reads
+    get_shared_ingest_engine() directly, not the sustain_id-scoped engine
+    passed into compose(), so this can only be proven at the route layer."""
+
+    def _capture(self, client, headers, sustain, text, captured_at):
+        r = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "mpesa", "sustain_id": sustain, "raw_payload": text, "captured_at": captured_at},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        return r.json()["data"]
+
+    def test_classify_cards_are_ordered_oldest_first(self, client, user, sustain):
+        headers, _ = user
+        # Captured out of chronological order (as a wide re-sync naturally
+        # would -- the native inbox read has no reason to return messages
+        # in any particular order relative to when compose() later reads
+        # them), each with a DISTINCT real captured_at.
+        self._capture(client, headers, sustain, "unparseable text A", "2026-07-01T10:00:00")
+        self._capture(client, headers, sustain, "unparseable text C", "2026-07-15T10:00:00")
+        self._capture(client, headers, sustain, "unparseable text B", "2026-07-08T10:00:00")
+
+        r = client.get(f"/orchie/compose?sustain_id={sustain}&budget=10", headers=headers)
+        data = r.json()
+        classify_cards = [w for w in data["selected"] if w["id"] == "unmapped_capture_classify"]
+        assert len(classify_cards) == 3
+        raw_texts = [c["data"]["raw_payload"] for c in classify_cards]
+        assert raw_texts == ["unparseable text A", "unparseable text B", "unparseable text C"]
+
+    def test_oldest_first_survives_a_tight_budget(self, client, user, sustain):
+        # Under a tight budget that can't fit every classify card, the
+        # OLDEST ones must be the ones that make the cut -- replaying
+        # history front-to-back means starting from the beginning, not an
+        # arbitrary/newest subset.
+        headers, _ = user
+        for i, day in enumerate(["05", "01", "03", "04", "02"]):
+            self._capture(client, headers, sustain, f"unparseable text {i}", f"2026-07-{day}T10:00:00")
+
+        # classify_card costs 2 (declared on homestead.json); budget=3 fits
+        # exactly one, not two.
+        r = client.get(f"/orchie/compose?sustain_id={sustain}&budget=3", headers=headers)
+        data = r.json()
+        classify_cards = [w for w in data["selected"] if w["id"] == "unmapped_capture_classify"]
+        assert len(classify_cards) == 1
+        assert classify_cards[0]["data"]["raw_payload"] == "unparseable text 1"  # the "01" (oldest) capture
+
+    def test_does_not_disturb_needs_attention_itself(self, client, user, sustain):
+        # GET /api/v1/ingest/messages (backed by needs_attention-adjacent
+        # reads) stays newest-first -- this is a compose()-local re-sort,
+        # not a change to the underlying read other consumers rely on.
+        headers, _ = user
+        self._capture(client, headers, sustain, "older", "2026-07-01T10:00:00")
+        self._capture(client, headers, sustain, "newer", "2026-07-15T10:00:00")
+
+        r = client.get(f"/api/v1/ingest/messages?sustain_id={sustain}&status=needs_attention", headers=headers)
+        messages = r.json()["data"]["messages"]
+        assert [m["raw_payload"] for m in messages] == ["newer", "older"]

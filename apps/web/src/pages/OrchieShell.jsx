@@ -1416,14 +1416,17 @@ function WidgetCard({ widget, sustainId, onCommitted }) {
       )}
 
       {widget.render === 'rollup_summary_card' && (
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-          <span>unallocated <b style={{ color: 'var(--text-primary)' }}>KES {Math.round(d.liquid_balance || 0).toLocaleString()}</b></span>
-          {d.household_total !== undefined && (
-            <span>
-              household total <b style={{ color: 'var(--amber)' }}>KES {Math.round(d.household_total || 0).toLocaleString()}</b>
-              {' '}({d.included_children || 0} linked)
-            </span>
-          )}
+        <div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+            <span>unallocated <b style={{ color: 'var(--text-primary)' }}>KES {Math.round(d.liquid_balance || 0).toLocaleString()}</b></span>
+            {d.household_total !== undefined && (
+              <span>
+                household total <b style={{ color: 'var(--amber)' }}>KES {Math.round(d.household_total || 0).toLocaleString()}</b>
+                {' '}({d.included_children || 0} linked)
+              </span>
+            )}
+          </div>
+          <BalanceProvenance sustainId={sustainId} />
         </div>
       )}
 
@@ -1460,6 +1463,187 @@ function WidgetCard({ widget, sustainId, onCommitted }) {
       )}
 
       <WhyReveal widget={widget} />
+    </div>
+  );
+}
+
+/**
+ * One line of the balance trail -- an income (+) or an allocate (-), the
+ * only two events that ever move liquid balance (verified by grep across
+ * the whole backend, not assumed -- see orchie.py's own
+ * _liquid_provenance_for_one_sustain docstring). Tap reveals the raw
+ * message behind it, when one exists.
+ */
+function BalanceProvenanceEntry({ entry }) {
+  const [expanded, setExpanded] = useState(false);
+  const isIncome = entry.amount >= 0;
+  const amountAbs = Math.round(Math.abs(entry.amount)).toLocaleString();
+  const dateLabel = entry.date
+    ? new Date(entry.date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '';
+
+  return (
+    <div
+      onClick={() => entry.raw_text && setExpanded(e => !e)}
+      style={{ padding: '8px 0', borderBottom: '1px solid var(--border)', cursor: entry.raw_text ? 'pointer' : 'default' }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{
+            fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-primary)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200,
+          }}>
+            {entry.description || (isIncome ? 'income' : 'allocated to a pocket')}
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+            {dateLabel}{entry.source ? ` · ${entry.source}` : ''}
+          </div>
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700,
+            color: isIncome ? 'var(--teal)' : 'var(--amber)',
+          }}>
+            {isIncome ? '+' : '−'} KES {amountAbs}
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+            → KES {Math.round(entry.running_balance).toLocaleString()}
+          </div>
+        </div>
+      </div>
+
+      {expanded && entry.raw_text && (
+        <div style={{
+          marginTop: 6, padding: 8, borderRadius: 'var(--radius-sm)',
+          background: 'var(--bg-base)', border: '1px solid var(--border)',
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-secondary)',
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.5,
+        }}>
+          {entry.raw_text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Drillable provenance for the household/liquid rollup card (Bonnie,
+ * 2 Aug 2026: "I still can't tell where the balance number came from...
+ * I want PROVENANCE"). Sourced from GET /orchie/balance-provenance --
+ * every event that moved this sustain's own liquid balance, oldest
+ * first, summing to exactly what the card shows, with an explicit
+ * consistency line (this project's own real bug-finding discipline made
+ * visible: if the trace and the live number ever disagreed, this would
+ * say so, in red, not paper over it).
+ */
+function BalanceProvenance({ sustainId }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const d = await api.get(`/orchie/balance-provenance?sustain_id=${encodeURIComponent(sustainId)}`);
+      setData(d);
+    } catch (e) {
+      setError(e.message || 'could not reach orchie');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && data === null) load();
+  };
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button
+        onClick={toggle}
+        style={{
+          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+          fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.04em',
+          color: 'var(--text-muted)', textDecoration: 'underline dotted',
+        }}
+      >
+        {open ? 'hide trace' : 'trace this balance'}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {loading && <div style={mutedText}>loading…</div>}
+          {error && <div style={{ ...mutedText, color: 'var(--danger)' }}>{error}</div>}
+          {data && (
+            <div style={{
+              maxHeight: 360, overflowY: 'auto', padding: '4px 12px',
+              borderRadius: 'var(--radius-md)', border: '1px solid var(--border-mid)',
+              background: 'var(--bg-overlay)',
+            }}>
+              <div style={{
+                fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)', padding: '6px 0',
+                textTransform: 'uppercase', letterSpacing: '0.05em',
+              }}>
+                liquid — starting KES {Math.round(data.own.starting_balance).toLocaleString()}
+              </div>
+              {data.own.entries.length === 0 ? (
+                <div style={mutedText}>no events yet — the balance has never moved</div>
+              ) : (
+                data.own.entries.map((e, i) => <BalanceProvenanceEntry key={i} entry={e} />)
+              )}
+              <div style={{
+                marginTop: 8, padding: '8px 0', borderTop: '1px solid var(--border-mid)',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+              }}>
+                <span style={{ color: 'var(--text-primary)' }}>= KES {Math.round(data.own.computed_total).toLocaleString()}</span>
+                <span style={{ color: data.own.consistent ? 'var(--teal)' : 'var(--danger)' }}>
+                  {data.own.consistent
+                    ? '✓ matches live balance'
+                    : `⚠ live shows KES ${Math.round(data.own.live_balance).toLocaleString()}`}
+                </span>
+              </div>
+
+              {data.children.length > 0 && (
+                <>
+                  <div style={{
+                    fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)', padding: '10px 0 6px',
+                    textTransform: 'uppercase', letterSpacing: '0.05em',
+                  }}>
+                    household — {data.children.length} linked
+                  </div>
+                  {data.children.map(c => (
+                    <div
+                      key={c.sustain_id}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', padding: '4px 0',
+                        fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-secondary)',
+                      }}
+                    >
+                      <span>{c.label || c.sustain_id.slice(0, 8)}</span>
+                      <span>KES {Math.round(c.live_balance).toLocaleString()}{c.consistent ? '' : ' ⚠'}</span>
+                    </div>
+                  ))}
+                  <div style={{
+                    marginTop: 6, padding: '6px 0', borderTop: '1px solid var(--border-mid)',
+                    display: 'flex', justifyContent: 'space-between',
+                    fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                  }}>
+                    <span style={{ color: 'var(--amber)' }}>= KES {Math.round(data.household_total_computed).toLocaleString()}</span>
+                    <span style={{ color: data.household_consistent ? 'var(--teal)' : 'var(--danger)' }}>
+                      {data.household_consistent ? '✓ matches' : '⚠ mismatch'}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

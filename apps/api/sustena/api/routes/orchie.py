@@ -464,3 +464,164 @@ async def orchie_activity(
             break
 
     return {"sustain_id": sustain_id, "entries": entries}
+
+
+# ── GET /orchie/balance-provenance — trace the liquid/household number ─────
+#
+# Bonnie, 2 Aug 2026: "I still can't tell where the balance number came
+# from... I want PROVENANCE." Every event that has EVER changed a sustain's
+# own liquid balance, oldest first, summing to the displayed number -- plus
+# a real consistency check (computed sum vs. the actual live balance).
+#
+# Verified by grep across the whole codebase, not assumed: exactly TWO
+# operators ever write finances.liquid.balance --
+#   budget.record_income  -- ctx.state.increment(...)  (+)
+#   budget.allocate        -- ctx.state.decrement(...)  (-)
+# budget.spend/transfer/add_pocket never touch liquid at all (spend draws
+# from a pocket's own already-allocated balance; transfer moves allocation
+# between two pockets; add_pocket moves nothing). So event.finances.
+# income_received (+) and event.finances.pocket_allocated (-) are the
+# COMPLETE set of liquid-affecting events -- nothing else could be missing.
+
+
+def _liquid_provenance_for_one_sustain(engine, ingest, sid: str, label: str | None) -> dict:
+    """One sustain's own liquid provenance + consistency check. Never
+    assumes the genesis/reset snapshot started at zero (true for every
+    real spec's default_state today, but a migrated legacy sustain could
+    honestly have started somewhere else) -- reads the real starting value
+    off the genesis event's own replace_root mutation."""
+    import json
+
+    genesis_row = engine._db.execute(
+        "SELECT mutations_json FROM events WHERE sustain_id = ? ORDER BY seq ASC LIMIT 1",
+        (sid,),
+    ).fetchone()
+    starting_balance = 0.0
+    if genesis_row and genesis_row["mutations_json"]:
+        try:
+            for m in json.loads(genesis_row["mutations_json"]):
+                if m.get("op") == "replace_root":
+                    starting_balance = (
+                        ((m.get("value") or {}).get("finances") or {}).get("liquid") or {}
+                    ).get("balance", 0.0) or 0.0
+        except (ValueError, TypeError, AttributeError):
+            pass  # malformed/legacy mutation row -- honestly falls back to 0.0, not a crash
+
+    raw_events = engine.get_events(sid, limit=1000)  # newest first
+    entries: list[dict] = []
+    running = starting_balance
+    for ev in reversed(raw_events):  # oldest first, so running_balance reads top-to-bottom
+        payload = ev.get("payload") or {}
+        name = ev.get("event_name")
+        if name == "event.finances.income_received":
+            amount = payload.get("amount") or 0.0
+            signed = amount
+        elif name == "event.finances.pocket_allocated":
+            amount = payload.get("amount") or 0.0
+            signed = -amount
+        else:
+            continue
+        running += signed
+        entry = {
+            "sustain_id": sid, "label": label, "event_name": name, "amount": signed,
+            "date": ev.get("timestamp"),
+            "description": payload.get("description") or payload.get("source") or payload.get("pocket"),
+            "running_balance": round(running, 2),
+            "message_id": None, "source": None, "raw_text": None,
+        }
+        msg_id = payload.get("origin_message_id")
+        if msg_id:
+            msg = ingest.get_message(msg_id)
+            if msg and msg.get("sustain_id") == sid:
+                entry["message_id"] = msg_id
+                entry["source"] = msg.get("source_id")
+                entry["raw_text"] = msg.get("raw_payload")
+        entries.append(entry)
+
+    computed_total = round(running, 2)
+    try:
+        live_state = engine.get_state(sid)
+    except Exception:
+        live_state = {}
+    live_balance = round(
+        ((live_state.get("finances") or {}).get("liquid") or {}).get("balance", 0.0) or 0.0, 2,
+    )
+    return {
+        "sustain_id": sid,
+        "label": label,
+        "starting_balance": round(starting_balance, 2),
+        "entries": entries,
+        "computed_total": computed_total,
+        "live_balance": live_balance,
+        "consistent": abs(computed_total - live_balance) < 0.01,
+    }
+
+
+@router.get("/balance-provenance")
+async def orchie_balance_provenance(
+    sustain_id: str, current_user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Full provenance of the displayed 'liquid' and 'household' figures --
+    the exact events that produced them, oldest first, summing to the
+    displayed number. Real consistency check included per sustain
+    (computed sum of contributing events vs. the actual live balance) --
+    a mismatch means `consistent: false` with both numbers shown, never
+    silently reconciled or hidden.
+
+    'liquid' = this sustain's own provenance (`own` below).
+    'household' = the sum of every currently linked child's own liquid
+    balance, per child (`children` below) -- the exact same definition
+    compute_rollup() uses, cross-checked here (`household_consistent`)
+    rather than re-derived independently, so a real divergence between
+    the rollup engine and this trace would itself be caught, not masked
+    by two different code paths quietly agreeing to be wrong the same way.
+
+    Read-only, ownership-checked like every other Orchie route.
+    """
+    _assert_owns_sustain(sustain_id, current_user["id"])
+
+    from sustena.core.engine_singleton import get_shared_engine
+    from sustena.core.ingest_singleton import get_shared_ingest_engine
+
+    engine = get_shared_engine()
+    ingest = get_shared_ingest_engine()
+
+    own = _liquid_provenance_for_one_sustain(engine, ingest, sustain_id, label=None)
+
+    children_out = []
+    try:
+        links = engine.list_children(sustain_id)
+    except Exception:
+        links = []
+    for link in links:
+        child_id = link.get("child_sustain_id")
+        if not child_id:
+            continue
+        children_out.append(
+            _liquid_provenance_for_one_sustain(engine, ingest, child_id, label=link.get("member") or child_id)
+        )
+
+    household_total_from_children = round(sum(c["live_balance"] for c in children_out), 2)
+    try:
+        rollup = engine.compute_rollup(sustain_id) if links else None
+    except Exception:
+        rollup = None
+    rollup_total = None
+    if rollup and rollup.get("aggregates"):
+        agg = next(iter(rollup["aggregates"].values()), None)
+        if agg:
+            rollup_total = round(agg.get("value") or 0.0, 2)
+
+    return {
+        "sustain_id": sustain_id,
+        "own": own,
+        "children": children_out,
+        "household_total_computed": household_total_from_children,
+        "household_total_via_rollup_engine": rollup_total,
+        "household_consistent": (
+            own["consistent"]
+            and all(c["consistent"] for c in children_out)
+            and (rollup_total is None or abs(rollup_total - household_total_from_children) < 0.01)
+        ),
+    }

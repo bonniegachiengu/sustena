@@ -354,6 +354,25 @@ def _gather_candidates(
             except Exception as exc:  # pragma: no cover - defensive, never break compose()
                 logger.debug("compose(): needs_attention lookup failed: %s", exc)
                 messages = []
+            # Chronological, OLDEST FIRST (Bonnie, 2 Aug 2026): reconstructing
+            # a budget from message history means recording transactions and
+            # pocket-to-pocket transfers in the order they actually happened
+            # -- you can't transfer out of a pocket before it was funded.
+            # needs_attention() itself stays newest-first (that ordering is
+            # correct for OTHER consumers, e.g. devui.py's Monitor panel,
+            # where "what's new" is the useful question) -- this re-sort is
+            # local to the classify worklist specifically. Every classify
+            # candidate shares the same flat urgency/relevance (no per-
+            # message signal varies them), so knapsack_select's final
+            # `sort(key=lambda c: -c["score"])` is a Python STABLE sort over
+            # equal scores -- this insertion order survives it unchanged,
+            # all the way into the frontend's view.selected. received_at is
+            # the message's own real timestamp (captured_at, threaded
+            # through from the SMS's native timestamp by smsCapture.js's
+            # backfillInbox -- not "when the sync happened"), so this is a
+            # true chronological replay order even for an old message pulled
+            # in by a wide re-sync.
+            messages = sorted(messages, key=lambda m: m.get("received_at") or "")
             for m in messages:
                 candidates.append({
                     "widget": widget,
