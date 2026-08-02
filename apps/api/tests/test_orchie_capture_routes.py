@@ -865,3 +865,151 @@ class TestAllocateThenRetryRecovery:
 
         state = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]
         assert state["finances"]["pockets"]["Airtime"]["allocated"] == 0.0  # untouched by the failed allocate
+
+    def test_pocket_to_pocket_transfer_then_retry_succeeds(self, client, user, sustain):
+        """
+        The other real source: the human picks an EXISTING pocket with
+        spare allocation (not the unallocated liquid pool) to top up the
+        target pocket from. Routes through the real, already-existing
+        budget.transfer -- no new operator needed for this leg. Allocated
+        moves, spent doesn't; liquid balance is untouched throughout.
+        """
+        headers, _ = user
+        client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.add_pocket", "params": {"pocket_name": "Airtime"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.record_income", "params": {"amount": 5000, "source": "seed", "frequency": "once"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.allocate", "params": {"pocket_name": "food", "amount": 3000, "period": "monthly"}},
+            headers=headers,
+        )
+        refused = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.spend", "params": {"pocket_name": "Airtime", "amount": 50}},
+            headers=headers,
+        ).json()
+        shortfall = refused["result"]["data"]["shortfall"]
+        assert shortfall == 50.0
+        liquid_before = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]["finances"]["liquid"]["balance"]
+
+        # Step 1: transfer FROM the "food" pocket (has spare allocation),
+        # not the unallocated liquid pool -- the human's explicit choice.
+        transfer = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.transfer", "params": {"from_pocket": "food", "to_pocket": "Airtime", "amount": shortfall}},
+            headers=headers,
+        )
+        assert transfer.json()["result"]["status"] == "ok"
+
+        # Step 2: automatic retry of the original spend.
+        retry = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.spend", "params": {"pocket_name": "Airtime", "amount": 50}},
+            headers=headers,
+        )
+        assert retry.json()["result"]["status"] == "ok"
+
+        state = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]
+        assert state["finances"]["pockets"]["Airtime"]["allocated"] == 50.0
+        assert state["finances"]["pockets"]["Airtime"]["spent"] == 50.0
+        assert state["finances"]["pockets"]["food"]["allocated"] == 2950.0  # 3000 - 50 transferred out
+        assert state["finances"]["liquid"]["balance"] == liquid_before  # untouched -- this was a pocket-to-pocket move
+
+    def test_transfer_honestly_refuses_when_chosen_pocket_lacks_spare_allocation(self, client, user, sustain):
+        """The human picked a pocket that itself doesn't have enough spare
+        allocation -- budget.transfer's own real constraint refuses it,
+        surfaced as-is, target pocket untouched."""
+        headers, _ = user
+        client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.add_pocket", "params": {"pocket_name": "Airtime"}},
+            headers=headers,
+        )
+        client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.add_pocket", "params": {"pocket_name": "Empty"}},
+            headers=headers,
+        )
+        r = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.transfer", "params": {"from_pocket": "Empty", "to_pocket": "Airtime", "amount": 50}},
+            headers=headers,
+        )
+        result = r.json()["result"]
+        assert result["status"] == "failed"
+        assert result["constraint_violated"] == "from_pocket_balance_sufficient"
+
+        state = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]
+        assert state["finances"]["pockets"]["Airtime"]["allocated"] == 0.0
+
+
+class TestCaptureSources:
+    """GET /orchie/capture/sources -- the recovery loop's source-picker
+    data. Read-only, ownership-checked, no recommendation/default baked
+    in -- just the real current numbers for a human to choose from."""
+
+    def test_no_auth_returns_401(self, client, sustain):
+        r = client.get(f"/orchie/capture/sources?sustain_id={sustain}")
+        assert r.status_code == 401
+
+    def test_unowned_sustain_returns_404(self, client, user):
+        headers, _ = user
+        r = client.get("/orchie/capture/sources?sustain_id=does-not-exist", headers=headers)
+        assert r.status_code == 404
+
+    def test_lists_real_pockets_and_liquid_balance(self, client, user, sustain):
+        headers, _ = user
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.record_income", "params": {"amount": 10000, "source": "seed", "frequency": "once"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.allocate", "params": {"pocket_name": "food", "amount": 3000, "period": "monthly"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.spend", "params": {"pocket_name": "food", "amount": 1000}},
+            headers=headers,
+        )
+        r = client.get(f"/orchie/capture/sources?sustain_id={sustain}", headers=headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["liquid_balance"] == 7000.0
+        food = next(p for p in data["pockets"] if p["name"] == "food")
+        assert food == {"name": "food", "allocated": 3000.0, "spent": 1000.0, "available": 2000.0}
+
+    def test_empty_sustain_returns_honest_empty_shape(self, client, user, sustain):
+        headers, _ = user
+        r = client.get(f"/orchie/capture/sources?sustain_id={sustain}", headers=headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["pockets"] == []
+        assert data["liquid_balance"] == 0.0
+
+    def test_scoped_to_the_owning_users_own_sustain_only(self, client, user):
+        """A second real account's pockets never leak into this one's source list."""
+        headers_a, user_id_a = user
+        email_b = f"orchie-sources-other-{uuid.uuid4().hex[:10]}@example.com"
+        r = client.post("/api/v1/users/register", json={"email": email_b, "password": "test-password-123"})
+        headers_b = {"Authorization": f"Bearer {r.json()['data']['token']}"}
+
+        r = client.post("/devui/sustains", json={"template_id": "homestead", "user_id": user_id_a, "parameters": {}}, headers=headers_a)
+        sustain_a = r.json()["data"]["sustain_id"]
+        client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain_a, "operator": "budget.add_pocket", "params": {"pocket_name": "OnlyInA"}},
+            headers=headers_a,
+        )
+
+        r = client.get(f"/orchie/capture/sources?sustain_id={sustain_a}", headers=headers_b)
+        assert r.status_code == 404  # user B doesn't own sustain A -- same 404-for-both-cases pattern

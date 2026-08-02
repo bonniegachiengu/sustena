@@ -314,3 +314,56 @@ async def capture_confirm(
         "result": result.to_response(),
         "message_resolved": resolved,
     }
+
+
+# ── GET /orchie/capture/sources — allocate-recovery source picker data ────────
+#
+# Read-only, ownership-checked like every other Orchie route (never the
+# laxer "any authenticated user" pattern devui.py's own /state route uses).
+# Lists every OTHER pocket's real, current available (allocated - spent)
+# balance plus the unallocated liquid balance -- exactly what a human needs
+# to see before CHOOSING where a top-up should come from. Nothing here
+# picks a source; the choice is made by a real tap in the frontend, then
+# routed through budget.allocate (liquid source) or budget.transfer
+# (another pocket) -- the same gated operators every other write uses.
+
+
+@router.get("/capture/sources")
+async def capture_sources(
+    sustain_id: str, current_user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Candidate ALLOCATION SOURCES for the refused-spend recovery loop's
+    source picker: every pocket's name + allocated/spent/available, plus
+    the unallocated liquid balance. A plain read off the current, already-
+    folded state -- no aggregation, no recommendation, no default.
+    """
+    _assert_owns_sustain(sustain_id, current_user["id"])
+
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    try:
+        state = engine.get_state(sustain_id)
+    except Exception as exc:
+        logger.debug("capture_sources(%s): get_state failed: %s", sustain_id, exc)
+        state = {}
+
+    finances = state.get("finances") or {}
+    pockets_raw = finances.get("pockets") or {}
+    pockets = []
+    for name, p in pockets_raw.items():
+        if not isinstance(p, dict):
+            continue
+        allocated = p.get("allocated", 0.0) or 0.0
+        spent = p.get("spent", 0.0) or 0.0
+        pockets.append({
+            "name": name,
+            "allocated": allocated,
+            "spent": spent,
+            "available": allocated - spent,
+        })
+
+    liquid_balance = (finances.get("liquid") or {}).get("balance", 0.0) or 0.0
+
+    return {"pockets": pockets, "liquid_balance": liquid_balance}

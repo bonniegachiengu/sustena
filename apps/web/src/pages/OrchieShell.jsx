@@ -612,29 +612,46 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
   // A spend refused for INSUFFICIENT POCKET BALANCE (constraint_violated
   // === 'pocket_balance_sufficient', now carrying structured
   // {pocket, remaining, requested, shortfall} data -- see budget.spend's
-  // own fail branch) is recoverable right here: allocate the shortfall
-  // into the same pocket via the real, gated budget.allocate, then
-  // automatically replay the identical spend. Both legs go through the
-  // exact same /orchie/capture/confirm -> execute_operator() path as
-  // every other write in this app -- no hand-written state mutation, no
-  // bypass of the S2 gate either call would normally go through alone.
-  // Generalizes to ANY refused spend carrying this constraint_violated,
-  // not just the classify-card path -- driven entirely by what the gate
-  // itself reports, never a hardcoded pocket/operator name.
+  // own fail branch) is recoverable right here. The SOURCE the top-up
+  // draws from is a real human CHOICE, never auto-picked (Bonnie's
+  // explicit correction) -- the amount autofills from the shortfall, but
+  // the person taps exactly which pocket (or the unallocated liquid pool)
+  // it comes from. Two real gated operators, chosen by that tap:
+  //   liquid source   -> budget.allocate(pocket_name, amount)
+  //   another pocket  -> budget.transfer(from_pocket, to_pocket, amount)
+  // (budget.transfer already existed -- no new operator was needed for
+  // the pocket-to-pocket case.) Either way, a successful move is followed
+  // by an automatic replay of the identical original spend. All three
+  // calls go through the same /orchie/capture/confirm -> execute_operator()
+  // path as every other write in this app -- no hand-written mutation, no
+  // bypass of the gate any one of them would normally go through alone.
+  const LIQUID_SOURCE = '__liquid__';
   const [allocateAmountOverride, setAllocateAmountOverride] = useState(null);
   const [allocateError, setAllocateError] = useState(null);
+  const [sources, setSources] = useState(null); // {pockets: [{name,allocated,spent,available}], liquid_balance}
+  const [sourcesLoading, setSourcesLoading] = useState(false);
   const shortfallData = payload?.result?.data;
   const isInsufficientBalance = payload?.result?.constraint_violated === 'pocket_balance_sufficient';
 
   // A fresh refusal (a different shortfall figure) clears any prior typed
-  // override and any stale error from a previous allocate attempt.
+  // override / stale error, and re-fetches source balances -- they may
+  // have moved since the last time this card was shown.
   useEffect(() => {
     setAllocateAmountOverride(null);
     setAllocateError(null);
+    setSources(null);
+    if (!isInsufficientBalance) return;
+    let cancelled = false;
+    setSourcesLoading(true);
+    api.get(`/orchie/capture/sources?sustain_id=${encodeURIComponent(sustainId)}`)
+      .then(data => { if (!cancelled) setSources(data); })
+      .catch(e => { if (!cancelled) setAllocateError(e.message || 'could not load pocket balances'); })
+      .finally(() => { if (!cancelled) setSourcesLoading(false); });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shortfallData?.shortfall]);
+  }, [shortfallData?.shortfall, shortfallData?.pocket, isInsufficientBalance]);
 
-  const allocateThenRetry = async () => {
+  const allocateThenRetry = async (source) => {
     const pocketName = shortfallData?.pocket || lastAttempt?.params?.pocket_name;
     const amount = Number(allocateAmountOverride ?? shortfallData?.shortfall ?? 0);
     if (!pocketName || !(amount > 0)) {
@@ -642,16 +659,22 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
       return;
     }
     setAllocateError(null);
-    setPhase('allocating');
+    setPhase(source === LIQUID_SOURCE ? 'allocating' : 'transferring');
     try {
-      const allocResp = await api.post('/orchie/capture/confirm', {
-        sustain_id: sustainId, operator: 'budget.allocate', params: { pocket_name: pocketName, amount },
-      });
-      if (allocResp.result.status !== 'ok') {
-        // Honest failure -- e.g. no unallocated liquid balance to draw
-        // from. Stay on the refused view (payload untouched, so the
-        // recovery affordance is still there) with the real reason shown.
-        setAllocateError(allocResp.result.reason || 'could not allocate funds');
+      const moveResp = source === LIQUID_SOURCE
+        ? await api.post('/orchie/capture/confirm', {
+            sustain_id: sustainId, operator: 'budget.allocate', params: { pocket_name: pocketName, amount },
+          })
+        : await api.post('/orchie/capture/confirm', {
+            sustain_id: sustainId, operator: 'budget.transfer',
+            params: { from_pocket: source, to_pocket: pocketName, amount },
+          });
+      if (moveResp.result.status !== 'ok') {
+        // Honest failure -- e.g. the chosen pocket doesn't actually have
+        // that much spare allocation, or liquid can't cover it. Stay on
+        // the refused view (payload untouched, so the picker is still
+        // there) with the real reason shown -- pick a different source.
+        setAllocateError(moveResp.result.reason || 'could not move funds');
         setPhase('refused');
         return;
       }
@@ -748,6 +771,16 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
         </div>
       )}
 
+      {phase === 'transferring' && (
+        <div className="pulse" style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 500, color: 'var(--text-primary)',
+        }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)' }} />
+          transferring…
+        </div>
+      )}
+
       {phase === 'retrying' && (
         <div className="pulse" style={{
           display: 'flex', alignItems: 'center', gap: 8,
@@ -787,7 +820,7 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
               background: 'var(--bg-overlay)', border: '1px solid var(--border-mid)',
             }}>
               <div style={mutedText}>
-                top up '{shortfallData?.pocket}' and retry automatically
+                allocate KES {allocateAmountOverride ?? Math.round(shortfallData?.shortfall ?? 0)} to '{shortfallData?.pocket}' — pick where it comes from
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-secondary)' }}>KES</span>
@@ -803,12 +836,31 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
                   }}
                 />
               </div>
-              {allocateError && (
-                <div style={{ ...mutedText, color: 'var(--danger)', marginTop: 6 }}>{allocateError}</div>
+
+              {sourcesLoading && <div style={{ ...mutedText, marginTop: 10 }}>loading pocket balances…</div>}
+
+              {sources && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ ...mutedText, marginBottom: 6 }}>from:</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    <button onClick={() => allocateThenRetry(LIQUID_SOURCE)} style={bigTapButton}>
+                      unallocated · KES {Math.round(sources.liquid_balance).toLocaleString()}
+                    </button>
+                    {sources.pockets
+                      .filter(p => p.name !== shortfallData?.pocket)
+                      .sort((a, b) => b.available - a.available)
+                      .map(p => (
+                        <button key={p.name} onClick={() => allocateThenRetry(p.name)} style={bigTapButton}>
+                          {p.name} · KES {Math.round(p.available).toLocaleString()}
+                        </button>
+                      ))}
+                  </div>
+                </div>
               )}
-              <button onClick={allocateThenRetry} style={{ ...confirmButton, marginTop: 8 }}>
-                Allocate KES {allocateAmountOverride ?? Math.round(shortfallData?.shortfall ?? 0)} first
-              </button>
+
+              {allocateError && (
+                <div style={{ ...mutedText, color: 'var(--danger)', marginTop: 8 }}>{allocateError}</div>
+              )}
             </div>
           )}
 
