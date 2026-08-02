@@ -1197,6 +1197,33 @@ Bonnie's follow-up on the classify-card work, explicitly framed as human-in-the-
 
 ---
 
+### UI legibility fix — text-color contrast ramp raised, shared tokens (2 Aug 2026)
+
+Bonnie's own real accessibility need: he has to raise screen brightness to read some text. Computed real WCAG contrast ratios (relative-luminance formula) for every text-color token against ALL FOUR surface tokens this app actually renders text on (`--bg-base` #0f0f0f, `--bg-surface` #181818, `--bg-raised` #212121, `--bg-overlay` #2a2a2a — not just one, since a token used on a lighter card must still clear the floor) before touching anything, then again after, to prove the fix rather than eyeball it.
+
+**Measured, before → after (worst case across the four surfaces in parentheses; AA floors: 4.5:1 body/labels, 3:1 large/decorative):**
+
+| token | before hex | before contrast (worst → best) | after hex | after contrast (worst → best) |
+|---|---|---|---|---|
+| `--text-primary` | `#e8e4dc` | 11.3 → 15.1 (already excellent) | unchanged | unchanged |
+| `--text-secondary` | `#8a8680` | **3.97 → 5.30 (FAILED 4.5 AA on 3 of 4 surfaces)** | `#aca8a0` | 6.06 → 8.09 (clears 4.5 AA everywhere, comfortable margin) |
+| `--text-muted` | `#565250` | **1.86 → 2.48 (deeply illegible everywhere)** | `#9c9891` | 5.00 → 6.68 (clears 4.5 AA everywhere) |
+| `--text-dim` | `#3a3836` | **1.23 → 1.64 (nearly invisible)** | `#7a766f` | 3.18 → 4.24 (clears the 3:1 large/decorative floor everywhere; deliberately stays the quietest tier) |
+
+`--text-primary` was already excellent and untouched. The other three were the actual problem — `--text-muted` and `--text-dim` in particular were rendering at contrast ratios (1.2–2.5:1) so low they're essentially a legibility bug, not a stylistic choice; that's exactly what "raise brightness to read it" reports.
+
+**Applied via the shared token, not a one-card patch:** the four values live in `apps/web/src/styles/globals.css`'s single `:root` block — every component in the app (Orchie AND Studio both, confirmed by grepping: 32 `var(--text-secondary|muted|dim)` usages already exist across `StudioPage.jsx`/`studio/*.jsx` alone) picks up the new values automatically, no per-component changes needed for the color shift itself. Verified live in a running dev instance: `getComputedStyle(document.documentElement)` reports the new hex values, and a real rendered Studio element's computed `color` matches the new `--text-muted` RGB exactly.
+
+**Reclassified, not just recolored — four spots in `OrchieShell.jsx` were using `--text-dim` (the now-confirmed "genuinely decorative only" tier) for content a person actually needs to read, which the new dimmer-tier contrast (3.18–4.24:1) still isn't guaranteed to comfortably clear for real reading, only for large/decorative text:** the classify card's new `fieldLabel` (AMOUNT / DESCRIPTION-MERCHANT — real field labels), the widget-id caption naming which card you're looking at, the SMS auto-capture "active" status line, and the "N other things stayed quiet" toggle button. All four moved to `--text-muted` (the ~4.5:1+ body/label tier) instead, with font-weight nudged 400→500 on the two 9-9.5px mono labels specifically (per the explicit "if the light weight hurts legibility at small sizes, nudge label weight up one step" instruction) since the light DM Mono weight was compounding the problem at that size even before the color fix. Left correctly at `--text-dim` (genuinely decorative, not something a person needs to read to use the app): the `WhyReveal` urgency/relevance/score/cost debug stats, and the "action available: ..." operator-name caption on non-classify widgets.
+
+**Character preserved, not flattened:** the fix is a contrast-ramp shift (all four values keep the same warm, slightly-desaturated grey hue family, same relative ordering primary > secondary > muted > dim), not a jump to harsh pure white or a hue change — exactly "raise contrast, keep the soft typographic style" as asked.
+
+**Tests:** none new (a CSS token value change + 4 component color/weight reclassifications — verified via computed real WCAG math before writing any code, then confirmed live against a running dev instance's actual computed styles, matching this project's own "verify, don't assume" discipline for a visual change). No backend touched — full backend suite unaffected. Frontend builds clean in both modes.
+
+**APK:** `versionCode` 11→12, `versionName` 1.4.0→1.4.1, same `applicationId` — ships the token + reclassification changes to the native app. `apksigner verify --verbose` → Verifies (v2); `zipalign -c 4` → clean.
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:

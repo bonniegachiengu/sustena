@@ -284,8 +284,14 @@ function AmountEntry({ question, why, onSubmit }) {
 }
 
 const fieldLabel = {
-  fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
-  color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: 4, display: 'block',
+  // Reclassified from --text-dim to --text-muted (2 Aug 2026 legibility
+  // pass): a field label ("AMOUNT", "DESCRIPTION / MERCHANT") is content
+  // the person must read to correct a capture, not decoration -- it
+  // belongs at the ~4.5:1 body/label tier, not the ~3:1 decorative one.
+  // Weight nudged up one step (400->500) since the light mono weight was
+  // part of what made this hard to read at 9px even before the color fix.
+  fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 500, letterSpacing: '0.06em',
+  color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4, display: 'block',
 };
 const editableInput = {
   width: '100%', fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--text-primary)',
@@ -651,7 +657,9 @@ function SmsCaptureCard({ sustainId }) {
     return (
       <div style={{
         display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14,
-        fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--text-dim)',
+        // Reclassified from --text-dim to --text-muted (2 Aug 2026
+        // legibility pass) -- a real status line, not decoration.
+        fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 500, color: 'var(--text-muted)',
       }}>
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--teal)' }} />
         auto-capture active — M-Pesa &amp; KCB{syncedCount != null ? ` · ${syncedCount} synced` : ''}
@@ -705,8 +713,11 @@ function WidgetCard({ widget, sustainId, onCommitted }) {
       borderRadius: 'var(--radius-lg)', padding: '16px 18px', marginBottom: 14,
     }}>
       <div style={{
-        fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.08em',
-        color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase',
+        // Reclassified from --text-dim to --text-muted (2 Aug 2026
+        // legibility pass) -- this names which widget the person is
+        // looking at, real content, not decoration.
+        fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 500, letterSpacing: '0.08em',
+        color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase',
       }}>
         {widget.id.replace(/_/g, ' ')}
       </div>
@@ -939,7 +950,9 @@ export default function OrchieShell() {
                 onClick={() => setShowExcluded(s => !s)}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer',
-                  fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-dim)',
+                  // Reclassified from --text-dim to --text-muted (2 Aug
+                  // 2026 legibility pass) -- a real, tappable control label.
+                  fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, color: 'var(--text-muted)',
                 }}
               >
                 {showExcluded ? 'hide' : `${view.excluded.length} other thing${view.excluded.length === 1 ? '' : 's'} stayed quiet`}

@@ -12,11 +12,34 @@
   --border-mid: #3a3a3a;
   --border-light: #4a4a4a;
 
-  /* Text */
+  /* Text — legibility pass (2 Aug 2026): the secondary/muted/dim greys
+     below were too low-luminance against this app's dark surfaces, a real
+     accessibility issue (a user reported needing to raise screen
+     brightness to read them). Values below are chosen against ALL FOUR
+     surface tokens (bg-base/bg-surface/bg-raised/bg-overlay, the darkest
+     to lightest a text color here actually sits on), not just one, so
+     nothing regresses on a card that happens to use a lighter background.
+     Measured WCAG contrast ratios (relative-luminance formula), worst
+     case across the four surfaces in parentheses:
+       --text-primary  unchanged  (11.3:1 worst case -- already excellent)
+       --text-secondary  #8a8680 -> #aca8a0  (was 3.97:1 worst case, FAILED
+         AA body text; now 6.06:1 worst case -- comfortably clears the
+         4.5:1 AA body/label floor everywhere)
+       --text-muted     #565250 -> #9c9891  (was 1.86:1 worst case, deeply
+         illegible; now 5.00:1 worst case -- clears 4.5:1 AA everywhere)
+       --text-dim       #3a3836 -> #7a766f  (was 1.23:1 worst case, nearly
+         invisible; now 3.18:1 worst case -- clears the 3:1 floor for
+         large/secondary text; this tier stays the quietest on purpose,
+         for genuinely decorative content only -- anything a person needs
+         to actually read uses --text-muted or brighter)
+     The relative ORDER (primary > secondary > muted > dim) and the soft,
+     unsaturated warm-grey character of the palette are both preserved --
+     this is a contrast ramp shift, not a hue change or a jump to pure
+     white/harsh contrast. */
   --text-primary: #e8e4dc;
-  --text-secondary: #8a8680;
-  --text-muted: #565250;
-  --text-dim: #3a3836;
+  --text-secondary: #aca8a0;
+  --text-muted: #9c9891;
+  --text-dim: #7a766f;
 
   /* Amber */
   --amber: #E8A020;
