@@ -44,6 +44,8 @@ _VERB_TO_SUFFIX: dict[str, str] = {
     "spent": "spend", "paid": "spend", "bought": "spend", "spend": "spend",
     "allocate": "allocate", "allocated": "allocate", "set aside": "allocate",
     "put into": "allocate", "moved": "allocate", "budget for": "allocate",
+    "received": "record_income", "credited": "record_income", "deposited": "record_income",
+    "got paid": "record_income", "income": "record_income",
 }
 
 _AMOUNT_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)")
@@ -67,6 +69,7 @@ _CURRENCY_AMOUNT_RE = re.compile(r"(?:Ksh|KES)\.?\s*([\d,]+(?:\.\d+)?)", re.IGNO
 _OPERATOR_LABELS: dict[str, str] = {
     "budget.spend": "spend it",
     "budget.allocate": "set it aside",
+    "budget.record_income": "money received",
 }
 
 
@@ -323,10 +326,23 @@ def infer(
             spend_ops = [op for op in ops if op.rsplit(".", 1)[-1] == "spend"]
             if spend_ops:
                 hinted = spend_ops
+        if not hinted and parsed_fields.get("direction") == "received":
+            income_ops = [op for op in ops if op.rsplit(".", 1)[-1] == "record_income"]
+            if income_ops:
+                hinted = income_ops
         if hinted:
             ops = hinted
 
-    if "pocket_name" not in facts:
+    # A pocket is only relevant to SOME operators (spend/allocate) -- not to
+    # budget.record_income, which has no pocket_name param at all. Asking
+    # for a pocket before the direction is even resolved was a real UX flaw
+    # (a genuinely-received message would be forced through an irrelevant
+    # pocket question before the person ever got a chance to say "this was
+    # money IN, not OUT"). Skip the whole block when every remaining
+    # candidate operator has no use for a pocket.
+    pocket_relevant = any("pocket_name" in _param_names(op) for op in ops)
+
+    if pocket_relevant and "pocket_name" not in facts:
         search_text = " ".join(filter(None, [effect_text, facts.get("description")]))
         matches = match_pocket_names(search_text, state)
         live_pockets = ((state.get("finances") or {}).get("pockets")) or {}

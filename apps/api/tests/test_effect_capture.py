@@ -35,6 +35,13 @@ STATE = {
 
 CANDIDATES = ["budget.spend", "budget.allocate"]
 
+# unmapped_capture_classify's REAL declared emits (homestead.json, extended
+# 2 Aug 2026 to include budget.record_income for the "money IN" correction
+# path) -- kept as a separate constant from CANDIDATES above so the many
+# existing spend/allocate-only tests aren't affected by a third,
+# always-satisfiable candidate changing their disambiguation option counts.
+CANDIDATES_WITH_INCOME = ["budget.spend", "budget.allocate", "budget.record_income"]
+
 
 class TestExtractAmount:
     def test_plain_number(self):
@@ -392,3 +399,80 @@ class TestInferRawTextAmountFallback:
         r = infer(CANDIDATES, STATE, known={"pocket_name": "food", "amount": "not a number"})
         assert r.status == "needs_disambiguation"
         assert r.field == "amount"
+
+
+class TestDirectionCorrection:
+    """Real degrees of freedom, per Bonnie's explicit ask: a capture must be
+    correctable to money RECEIVED, not just routed to a pocket -- this is
+    the direction toggle's backend half. budget.record_income has no
+    pocket_name param at all, so choosing it must never force (or even
+    ask) a pocket decision that was never relevant."""
+
+    def test_explicit_income_choice_never_asks_for_a_pocket(self):
+        r = infer(
+            CANDIDATES_WITH_INCOME, STATE,
+            known={"operator": "budget.record_income", "amount": 500},
+        )
+        assert r.status == "ready"
+        assert r.operator == "budget.record_income"
+        assert "pocket_name" not in r.params
+
+    def test_switching_from_income_back_to_out_resumes_normal_pocket_flow(self):
+        # The frontend's "MONEY OUT" toggle clears the operator override --
+        # normal spend/allocate + pocket resolution must resume exactly as
+        # if income had never been chosen.
+        r = infer(
+            CANDIDATES_WITH_INCOME, STATE,
+            known={"amount": 500},  # operator override cleared, as the toggle does
+            effect_text="spent on WiFi",
+        )
+        assert r.status == "ready"
+        assert r.params["pocket_name"] == "WiFi"
+
+    def test_received_verb_hint_narrows_toward_income(self):
+        r = infer(CANDIDATES_WITH_INCOME, STATE, effect_text="received 500 from mum")
+        assert r.status == "ready"
+        assert r.operator == "budget.record_income"
+        assert r.params["amount"] == 500.0
+        assert "pocket_name" not in r.params
+
+    def test_credited_verb_hint_narrows_toward_income(self):
+        r = infer(CANDIDATES_WITH_INCOME, STATE, effect_text="credited 1200 salary")
+        assert r.operator == "budget.record_income"
+
+    def test_direction_received_in_parsed_fields_narrows_toward_income(self):
+        r = infer(
+            CANDIDATES_WITH_INCOME, STATE,
+            parsed_fields={"amount": 900, "counterparty": "employer", "direction": "received"},
+        )
+        assert r.status == "ready"
+        assert r.operator == "budget.record_income"
+
+    def test_ambiguous_three_way_still_asks_with_income_as_a_real_option(self):
+        # No verb/direction hint at all, pocket+amount both known -- the
+        # genuinely-ambiguous case offers "money received" as a real third
+        # tap option, not just spend-vs-allocate.
+        r = infer(
+            CANDIDATES_WITH_INCOME, STATE,
+            known={"pocket_name": "food", "amount": 500},
+        )
+        assert r.status == "needs_disambiguation"
+        assert r.field == "operator"
+        values = {o["value"] for o in r.options}
+        assert values == {"budget.spend", "budget.allocate", "budget.record_income"}
+        income_opt = next(o for o in r.options if o["value"] == "budget.record_income")
+        assert income_opt["label"] != income_opt["value"]  # a real humanized label
+
+    def test_pocket_is_never_asked_before_a_pending_direction_choice_resolves(self):
+        # The UX bug this whole fix targets: previously, pocket was always
+        # asked FIRST, before the person ever had a chance to say "this was
+        # money IN." With an explicit income choice already known, pocket
+        # must never even be considered.
+        r = infer(
+            CANDIDATES_WITH_INCOME, STATE,
+            known={"operator": "budget.record_income"},
+            raw_text="Dear Customer, your account has been credited with Ksh2,500.00 today.",
+        )
+        assert r.status == "ready"
+        assert r.params["amount"] == 2500.0
+        assert "pocket_name" not in r.params

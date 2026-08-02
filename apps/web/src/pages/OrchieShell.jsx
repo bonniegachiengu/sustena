@@ -283,6 +283,110 @@ function AmountEntry({ question, why, onSubmit }) {
   );
 }
 
+const fieldLabel = {
+  fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.06em',
+  color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: 4, display: 'block',
+};
+const editableInput = {
+  width: '100%', fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--text-primary)',
+  background: 'var(--bg-surface)', border: '1px solid var(--border-mid)',
+  borderRadius: 'var(--radius-sm)', padding: '9px 11px',
+};
+const directionToggle = (active) => ({
+  fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em',
+  padding: '9px 16px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+  border: `1px solid ${active ? 'var(--teal-border)' : 'var(--border-mid)'}`,
+  background: active ? 'var(--teal-glow)' : 'none',
+  color: active ? 'var(--teal)' : 'var(--text-muted)',
+});
+
+/**
+ * The "real degrees of freedom" review, per Bonnie's explicit ask: a
+ * captured transaction (correctly parsed or not) is reviewed HERE, in the
+ * moment, with amount / description / direction / pocket all genuinely
+ * editable before the single CONFIRM tap -- not just "pick a pocket."
+ * Every edit re-runs infer() with the correction folded into `known` (see
+ * CaptureFlow's setKnownField/clearKnownFields/setDirection), so the
+ * result shown is always what would actually be committed, never a local-
+ * only preview that could drift from what CONFIRM sends.
+ */
+function ReadyReview({ payload, onSetAmount, onSetDescription, onSetDirection, onChangePocket, onChangePocketFromHistory, onConfirm, onCancel }) {
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+
+  useEffect(() => {
+    setAmount(payload.params?.amount != null ? String(payload.params.amount) : '');
+    setDescription(payload.description || '');
+  }, [payload]);
+
+  const isIncome = payload.operator === 'budget.record_income';
+  const pocketRelevant = !isIncome;
+
+  const commitAmount = () => { if (amount !== '' && String(payload.params?.amount) !== amount) onSetAmount(amount); };
+  const commitDescription = () => { if (description !== (payload.description || '')) onSetDescription(description); };
+
+  return (
+    <div>
+      <div style={questionText}>{payload.why}</div>
+      {payload.from_history && (
+        <div style={{ ...mutedText, marginTop: 4, color: 'var(--teal)' }}>
+          pre-filled from how you classified this before — tap CONFIRM, or CHANGE if it's different this time
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+        <button onClick={() => onSetDirection('out')} style={directionToggle(!isIncome)}>MONEY OUT</button>
+        <button onClick={() => onSetDirection('in')} style={directionToggle(isIncome)}>MONEY IN</button>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <span style={fieldLabel}>amount</span>
+        <input
+          type="number" inputMode="decimal" value={amount}
+          onChange={e => setAmount(e.target.value)}
+          onBlur={commitAmount}
+          onKeyDown={e => { if (e.key === 'Enter') commitAmount(); }}
+          style={editableInput}
+        />
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <span style={fieldLabel}>description / merchant</span>
+        <input
+          type="text" value={description}
+          onChange={e => setDescription(e.target.value)}
+          onBlur={commitDescription}
+          onKeyDown={e => { if (e.key === 'Enter') commitDescription(); }}
+          placeholder="e.g. NAIVAS SUPERMARKET"
+          style={editableInput}
+        />
+      </div>
+
+      {pocketRelevant && (
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <span style={fieldLabel}>pocket</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--text-primary)' }}>
+              {payload.params?.pocket_name || '—'}
+            </span>
+          </div>
+          <button
+            onClick={payload.from_history ? onChangePocketFromHistory : onChangePocket}
+            style={{ ...cancelButton, padding: '6px 12px', fontSize: 10 }}
+          >
+            CHANGE
+          </button>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+        <button onClick={onConfirm} style={confirmButton}>CONFIRM</button>
+        <button onClick={onCancel} style={cancelButton}>CANCEL</button>
+      </div>
+    </div>
+  );
+}
+
 function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messageId, effectText, onClose, onCommitted }) {
   const [phase, setPhase] = useState('loading');
   const [payload, setPayload] = useState(null);
@@ -311,11 +415,43 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
 
   const answer = (value) => runInfer({ ...known, [payload.field]: value });
 
+  // General correction primitive -- human-in-the-loop degrees of freedom:
+  // set one fact (a typed amount/description correction, or an explicit
+  // direction/operator override) and re-run infer() with it. Every field
+  // infer() can resolve is correctable this way, not just pocket_name.
+  const setKnownField = (field, value) => runInfer({ ...known, [field]: value });
+
+  // Clear one or more previously-answered facts and re-run infer() without
+  // them, so the normal resolution (text match / history / a fresh ask)
+  // runs again -- the general "let me pick something else" primitive.
+  const clearKnownFields = (...fields) => {
+    const next = { ...known };
+    fields.forEach(f => delete next[f]);
+    runInfer(next);
+  };
+
   // CHANGE: the pre-filled ("usual") pocket wasn't right this time -- force
   // the normal disambiguation question instead of the history pre-fill.
-  const changePocket = () => {
+  const changePocketFromHistory = () => {
     setIgnoreHistory(true);
     runInfer(known, { ignoreHistory: true });
+  };
+
+  // A resolved (non-history) pocket wasn't right either -- clear it and
+  // let the normal pocket resolution/ask run again.
+  const changePocket = () => clearKnownFields('pocket_name');
+
+  // Direction correction -- the core "real degrees of freedom" fix: a
+  // capture that resolved (or was about to resolve) as an outgoing spend/
+  // allocate can be flipped to income, and back, at any point before
+  // CONFIRM. budget.record_income has no pocket_name param at all, so
+  // flipping to "money IN" also clears any already-picked pocket.
+  const setDirection = (direction) => {
+    if (direction === 'in') {
+      runInfer({ ...known, operator: 'budget.record_income' });
+    } else {
+      clearKnownFields('operator', 'pocket_name');
+    }
   };
 
   const confirm = async () => {
@@ -362,21 +498,16 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
       )}
 
       {phase === 'ready' && (
-        <div>
-          <div style={questionText}>{payload.why}</div>
-          {payload.from_history && (
-            <div style={{ ...mutedText, marginTop: 4, color: 'var(--teal)' }}>
-              pre-filled from how you classified this before — tap CONFIRM, or CHANGE if it's different this time
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-            <button onClick={confirm} style={confirmButton}>CONFIRM</button>
-            {payload.from_history && (
-              <button onClick={changePocket} style={cancelButton}>CHANGE</button>
-            )}
-            <button onClick={onClose} style={cancelButton}>CANCEL</button>
-          </div>
-        </div>
+        <ReadyReview
+          payload={payload}
+          onSetAmount={v => setKnownField('amount', v)}
+          onSetDescription={v => setKnownField('description', v)}
+          onSetDirection={setDirection}
+          onChangePocket={changePocket}
+          onChangePocketFromHistory={changePocketFromHistory}
+          onConfirm={confirm}
+          onCancel={onClose}
+        />
       )}
 
       {phase === 'confirming' && <div style={mutedText}>applying…</div>}

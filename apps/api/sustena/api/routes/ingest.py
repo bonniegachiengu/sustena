@@ -115,20 +115,28 @@ async def capture(body: CaptureBody, current_user: dict = Depends(get_current_us
 
 @router.get("/messages")
 async def list_messages(
-    sustain_id: str | None = None,
+    sustain_id: str,
     status: str | None = None,
     limit: int = 50,
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """
-    Recent ingest messages — applied, refused, and needs_attention alike,
-    newest first. If sustain_id is given, ownership is checked; omitting it
-    is only meaningful for an admin-style view and currently returns
-    everything (no cross-user filtering is applied server-side beyond the
-    per-sustain check) — narrow scope, disclosed rather than silently gated.
+    Recent ingest messages for one sustain — applied, refused, and
+    needs_attention alike, newest first. Every real capture's raw_payload
+    is retained here permanently (no deletion path exists on
+    ingest_messages) and stays queryable this way -- the durable substrate
+    a future audit/correction-history/parser-training surface is meant to
+    read from.
+
+    sustain_id is REQUIRED (tightened 2 Aug 2026): an earlier optional
+    version silently returned EVERY sustain's messages with no cross-user
+    filtering when omitted ("an admin-style view", never actually called
+    that way by anything in this codebase -- confirmed unused before
+    tightening). That's a real latent data-leak shape for a route about to
+    become load-bearing for a real audit feature; closing it now costs
+    nothing since nothing relied on the unscoped form.
     """
-    if sustain_id:
-        _assert_owns_sustain(sustain_id, current_user["id"])
+    _assert_owns_sustain(sustain_id, current_user["id"])
 
     from sustena.core.ingest_singleton import get_shared_ingest_engine
 

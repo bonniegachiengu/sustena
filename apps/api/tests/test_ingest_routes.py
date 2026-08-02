@@ -193,6 +193,35 @@ class TestMessages:
         assert r.status_code == 200
         assert len(r.json()["data"]["messages"]) == 1
 
+    def test_sustain_id_is_required_no_unscoped_admin_view(self, client, user):
+        # Tightened 2 Aug 2026 -- omitting sustain_id used to silently
+        # return every sustain's messages with no cross-user filtering.
+        # Nothing in this codebase ever called it that way; closing the gap
+        # is free. A real, authenticated request missing the now-required
+        # param is a 422, not a 200 with unscoped data.
+        headers, _ = user
+        r = client.get("/api/v1/ingest/messages", headers=headers)
+        assert r.status_code == 422
+
+    def test_captured_raw_payload_is_retained_and_retrievable(self, client, user, sustain):
+        # The durable substrate a future audit/correction-history surface
+        # is meant to read from: raw_payload is stored and comes back
+        # byte-for-byte via both the list and the single-message routes.
+        headers, _ = user
+        cap = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "d1", "sustain_id": sustain, "raw_payload": RECEIVED},
+            headers=headers,
+        )
+        message_id = cap.json()["data"]["message_id"]
+
+        listed = client.get("/api/v1/ingest/messages", params={"sustain_id": sustain}, headers=headers)
+        found = next(m for m in listed.json()["data"]["messages"] if m["message_id"] == message_id)
+        assert found["raw_payload"] == RECEIVED
+
+        single = client.get(f"/api/v1/ingest/messages/{message_id}", headers=headers)
+        assert single.json()["data"]["raw_payload"] == RECEIVED
+
     def test_get_single_message(self, client, user, sustain):
         headers, _ = user
         captured = client.post(

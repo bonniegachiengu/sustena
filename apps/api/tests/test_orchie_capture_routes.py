@@ -555,3 +555,162 @@ class TestUnparsedMessageNoLongerDeadEnds:
         )
         assert confirm.json()["result"]["status"] == "ok"
         assert confirm.json()["result"]["data"]["amount_spent"] == 500.0
+
+
+class TestFullCorrectionFreedom:
+    """Real degrees of freedom, per Bonnie's explicit ask: a captured
+    transaction (parsed wrong, or not parsed at all) must be fully
+    correctable in the moment -- amount, description, direction, and
+    pocket -- not just 'pick a pocket'. Mirrors exactly what the frontend's
+    ReadyReview component does: each correction re-runs infer() with the
+    fact folded into `known`."""
+
+    UNPARSED_SMS = "Dear Customer, your account XYZ456 has been credited with Ksh2,500.00 today. Thank you."
+
+    def test_direction_correctable_to_money_in_with_no_pocket_ever_asked(self, client, user, sustain):
+        headers, _ = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+        cap = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "kcb", "sustain_id": sustain, "raw_payload": self.UNPARSED_SMS},
+            headers=headers,
+        )
+        message_id = cap.json()["data"]["message_id"]
+
+        # The MONEY IN toggle: an explicit operator override, no pocket
+        # fact supplied at all.
+        infer1 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": message_id, "known": {"operator": "budget.record_income"}},
+            headers=headers,
+        ).json()
+        assert infer1["status"] == "ready"
+        assert infer1["operator"] == "budget.record_income"
+        assert infer1["params"]["amount"] == 2500.0
+        assert "pocket_name" not in infer1["params"]
+
+        confirm = client.post(
+            "/orchie/capture/confirm",
+            json={
+                "sustain_id": sustain, "operator": infer1["operator"], "params": infer1["params"],
+                "message_id": message_id, "description": infer1["description"],
+            },
+            headers=headers,
+        )
+        assert confirm.json()["result"]["status"] == "ok"
+        assert confirm.json()["result"]["data"]["amount_credited"] == 2500.0
+        assert confirm.json()["message_resolved"] is True
+
+    def test_a_wrong_auto_recovered_amount_is_correctable(self, client, user, sustain):
+        headers, _ = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+        cap = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "kcb", "sustain_id": sustain, "raw_payload": self.UNPARSED_SMS},
+            headers=headers,
+        )
+        message_id = cap.json()["data"]["message_id"]
+
+        infer1 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": message_id, "known": {"pocket_name": "food", "operator": "budget.spend"}},
+            headers=headers,
+        ).json()
+        assert infer1["params"]["amount"] == 2500.0  # auto-recovered from raw text
+
+        # The person notices the auto-recovered figure is wrong (e.g. the
+        # SMS's "2,500" was actually a reference number, not the amount)
+        # and corrects it -- a real edit, not just accepting the parse.
+        infer2 = client.post(
+            "/orchie/capture/infer",
+            json={
+                "sustain_id": sustain, "message_id": message_id,
+                "known": {"pocket_name": "food", "operator": "budget.spend", "amount": "1800"},
+            },
+            headers=headers,
+        ).json()
+        assert infer2["status"] == "ready"
+        assert infer2["params"]["amount"] == 1800.0
+
+        confirm = client.post(
+            "/orchie/capture/confirm",
+            json={
+                "sustain_id": sustain, "operator": infer2["operator"], "params": infer2["params"],
+                "message_id": message_id, "description": infer2["description"],
+            },
+            headers=headers,
+        )
+        assert confirm.json()["result"]["data"]["amount_spent"] == 1800.0
+
+    def test_description_is_correctable_and_flows_into_the_committed_event(self, client, user, sustain):
+        headers, _ = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+        cap = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "kcb", "sustain_id": sustain, "raw_payload": self.UNPARSED_SMS},
+            headers=headers,
+        )
+        message_id = cap.json()["data"]["message_id"]
+
+        infer1 = client.post(
+            "/orchie/capture/infer",
+            json={
+                "sustain_id": sustain, "message_id": message_id,
+                "known": {"pocket_name": "food", "operator": "budget.spend", "description": "electricity top-up"},
+            },
+            headers=headers,
+        ).json()
+        assert infer1["status"] == "ready"
+        assert infer1["params"]["description"] == "electricity top-up"
+        assert infer1["description"] == "electricity top-up"
+
+        confirm = client.post(
+            "/orchie/capture/confirm",
+            json={
+                "sustain_id": sustain, "operator": infer1["operator"], "params": infer1["params"],
+                "message_id": message_id, "description": infer1["description"],
+            },
+            headers=headers,
+        )
+        assert confirm.json()["result"]["data"]["description"] == "electricity top-up"
+
+    def test_switching_back_from_money_in_to_out_resumes_pocket_flow(self, client, user, sustain):
+        headers, _ = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+        cap = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "kcb", "sustain_id": sustain, "raw_payload": self.UNPARSED_SMS},
+            headers=headers,
+        )
+        message_id = cap.json()["data"]["message_id"]
+
+        # First, MONEY IN.
+        infer1 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": message_id, "known": {"operator": "budget.record_income"}},
+            headers=headers,
+        ).json()
+        assert infer1["operator"] == "budget.record_income"
+
+        # MONEY OUT toggle -- clears the operator override, normal
+        # spend/allocate + pocket resolution must resume.
+        infer2 = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "message_id": message_id, "known": {}},
+            headers=headers,
+        ).json()
+        assert infer2["status"] == "needs_disambiguation"
+        assert infer2["field"] == "pocket_name"
+        assert {o["value"] for o in infer2["options"]} == {"food"}
+
+    def test_raw_payload_is_present_for_the_classify_card_to_render(self, client, user, sustain):
+        headers, _ = user
+        _seed_pocket(client, headers, sustain, "food", 9000)
+        cap = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "kcb", "sustain_id": sustain, "raw_payload": self.UNPARSED_SMS},
+            headers=headers,
+        )
+        message_id = cap.json()["data"]["message_id"]
+        msg = client.get(f"/api/v1/ingest/messages/{message_id}", headers=headers).json()["data"]
+        assert msg["raw_payload"] == self.UNPARSED_SMS

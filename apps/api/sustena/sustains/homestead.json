@@ -454,7 +454,7 @@
       "unit": true,
       "inputs": [],
       "render": "classify_card",
-      "emits": ["budget.spend", "budget.allocate"],
+      "emits": ["budget.spend", "budget.allocate", "budget.record_income"],
       "cost": 2
     },
     {
