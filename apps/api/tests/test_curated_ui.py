@@ -242,3 +242,52 @@ class TestComposeReadOnly:
         asyncio.run(engine.execute_operator(sid, "budget.spend", {"pocket_name": "food", "amount": 480, "description": "x", "category": "test"}))
         result = compose(engine, sid)
         json.dumps(result)  # must not raise
+
+    def test_rollup_card_suppressed_on_a_genuinely_empty_slate(self, engine):
+        # Bonnie, 2 Aug 2026: "don't surface it as clutter" -- a freshly
+        # instantiated (or freshly reset) homestead has zero liquid balance
+        # and zero linked habitats, so the rollup card has nothing real to
+        # say and must not appear at all, not even as an honest "0".
+        sid = self._make_homestead(engine)
+        result = compose(engine, sid, budget=4)
+        ids = [w["id"] for w in result["selected"]]
+        assert "household_rollup_summary" not in ids
+        assert result["selected"] == []
+
+    def test_rollup_card_appears_once_liquid_balance_is_real(self, engine):
+        import asyncio
+
+        sid = self._make_homestead(engine)
+        asyncio.run(engine.execute_operator(sid, "budget.record_income", {"amount": 1500, "source": "test", "frequency": "once"}))
+        result = compose(engine, sid, budget=4)
+        ids = [w["id"] for w in result["selected"]]
+        assert "household_rollup_summary" in ids
+        card = next(w for w in result["selected"] if w["id"] == "household_rollup_summary")
+        assert card["data"]["liquid_balance"] == 1500
+
+    def test_rollup_why_explains_the_derivation_in_plain_words(self, engine):
+        import asyncio
+
+        sid = self._make_homestead(engine)
+        asyncio.run(engine.execute_operator(sid, "budget.record_income", {"amount": 500, "source": "test", "frequency": "once"}))
+        result = compose(engine, sid, budget=4)
+        card = next(w for w in result["selected"] if w["id"] == "household_rollup_summary")
+        why = card["why"].lower()
+        # A real explanation of WHAT each figure means and WHERE it comes
+        # from -- not just a generic "shown as a reference point" that
+        # leaves the "where does this come from?" question unanswered.
+        assert "liquid" in why and "not yet allocated" in why
+        assert "household" in why and "summed" in why
+        assert "no habitats linked" in why  # honest about the 0-linked case
+
+    def test_rollup_card_still_appears_with_linked_habitats_even_at_zero_liquid(self, engine):
+        # A parent with real linked children (even if their own balances
+        # happen to sum to zero) has something real to report -- included/
+        # excluded counts -- so it's NOT the "nothing to say" case and must
+        # still surface, distinct from the true empty-slate suppression.
+        sid = self._make_homestead(engine)
+        child = engine.instantiate("habitat", "u1", {"owner_ids": ["u1"], "name": "Kid"})
+        engine.link_child(sid, child, slot="s1", member="Kid")
+        result = compose(engine, sid, budget=4)
+        ids = [w["id"] for w in result["selected"]]
+        assert "household_rollup_summary" in ids

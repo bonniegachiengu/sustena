@@ -368,11 +368,48 @@ def _gather_candidates(
                     rollup = engine.compute_rollup(sustain_id)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("compose(): compute_rollup failed: %s", exc)
+
+            liquid_balance = ((state.get("finances") or {}).get("liquid") or {}).get("balance", 0) or 0
+            household_total = None
+            included_children = 0
+            excluded_children = 0
+            if rollup and rollup.get("aggregates"):
+                agg = next(iter(rollup["aggregates"].values()), None)
+                if agg:
+                    household_total = agg.get("value")
+                    included_children = len(agg.get("included", []))
+                    excluded_children = len(agg.get("excluded", []))
+
+            # Honest empty-slate suppression (Bonnie, 2 Aug 2026 -- "don't
+            # surface it as clutter"): nothing of its own AND nothing rolled
+            # up from anywhere (not even a stale/excluded child) means this
+            # card has genuinely nothing to say yet. Skip it entirely rather
+            # than showing an unexplained "0" that invites the exact
+            # "where does this come from?" confusion it caused live.
+            genuinely_empty = (
+                liquid_balance == 0
+                and not household_total
+                and included_children == 0 and excluded_children == 0
+            )
+            if genuinely_empty:
+                continue
+
+            linked_note = (
+                f"{included_children} habitat{'s' if included_children != 1 else ''} linked right now"
+                if (included_children or excluded_children) else "no habitats linked yet"
+            )
             candidates.append({
                 "widget": widget,
                 "ctx": {"rollup": rollup},
                 "urgency": 0.1,  # baseline-informational: present, but rarely the reason you're here
-                "why": "your household's baseline liquid position — always shown as a reference point",
+                "why": (
+                    "'liquid' is money sitting in this sustain's own account, not yet allocated to "
+                    "any pocket — it only changes when you record income, allocate, or spend. "
+                    f"'household' is the exact same figure, summed across every linked member "
+                    f"habitat's own liquid balance ({linked_note}); with none linked, or all "
+                    "empty, it's honestly zero, not an error. Always shown as a baseline "
+                    "reference point, never something that needs a decision from you."
+                ),
             })
         else:  # pragma: no cover - forward-compat for a future unit-bound widget with no bespoke case yet
             candidates.append({"widget": widget, "ctx": {}, "urgency": 0.1, "why": "always eligible"})

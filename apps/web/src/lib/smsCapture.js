@@ -151,8 +151,14 @@ function classifySource(sender) {
   return null; // shouldn't happen -- native side already filtered; defense in depth only
 }
 
+/** Returns {new, duplicate, total} -- distinguishing genuinely NEW captures
+ *  from ones the server already had (is_duplicate=true) is what lets a
+ *  wider re-sync (7 -> 14 -> 30 -> all) report something honest ("✓ 3 new
+ *  captured (12 already had)") instead of a flat, uninformative count that
+ *  looks identical whether the wider window found anything new or not. */
 async function forwardMessages(sustainId, messages, { signal } = {}) {
-  let forwarded = 0;
+  let newCount = 0;
+  let duplicateCount = 0;
   for (const msg of messages || []) {
     // Checked BEFORE each POST, not just once -- a cancelled sync must stop
     // issuing new network requests immediately, not finish whatever's left
@@ -174,8 +180,12 @@ async function forwardMessages(sustainId, messages, { signal } = {}) {
         raw_payload: msg.body,
         captured_at: new Date(msg.timestampMs).toISOString(),
       });
-      forwarded += 1;
       const result = resp?.data;
+      if (result?.is_duplicate === true) {
+        duplicateCount += 1;
+      } else {
+        newCount += 1;
+      }
       // Only a genuinely NEW needs_attention capture is worth a nudge --
       // is_duplicate=true means this exact message was already seen
       // (e.g. re-forwarded during a backfill), so notifying again would
@@ -192,7 +202,7 @@ async function forwardMessages(sustainId, messages, { signal } = {}) {
       console.error('[smsCapture] failed to forward a message:', e.message || e);
     }
   }
-  return forwarded;
+  return { new: newCount, duplicate: duplicateCount, total: newCount + duplicateCount };
 }
 
 /** {sms: 'granted'|'denied'|'prompt'|'prompt-with-rationale'} */

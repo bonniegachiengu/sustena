@@ -76,7 +76,7 @@ class TestOwnershipBoundary:
 
 
 class TestHappyPath:
-    def test_compose_returns_ranked_budget_limited_view(self, client, user, sustain):
+    def test_compose_returns_shape_on_a_fresh_homestead(self, client, user, sustain):
         headers, _ = user
         r = client.get(f"/orchie/compose?sustain_id={sustain}&device=phone&budget=4", headers=headers)
         assert r.status_code == 200, r.text
@@ -85,9 +85,25 @@ class TestHappyPath:
         assert data["device"] == "phone"
         assert data["budget"] == 4
         assert "selected" in data and "excluded" in data
-        # household_rollup_summary is Unit-bound and always eligible, so on
-        # a freshly instantiated homestead with a real budget it's expected.
-        assert len(data["selected"]) >= 1
+        # household_rollup_summary is Unit-bound and always eligible in
+        # PRINCIPLE, but a genuinely empty sustain (no liquid balance, no
+        # linked children at all) suppresses it -- see curated_ui.py's own
+        # "genuinely_empty" comment (2 Aug 2026, Bonnie: "don't surface it
+        # as clutter"). A freshly instantiated homestead has nothing else
+        # to show either, so the honest answer is an empty selection.
+        assert data["selected"] == []
+
+    def test_rollup_card_appears_once_there_is_a_real_liquid_balance(self, client, user, sustain):
+        headers, _ = user
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.record_income", "params": {"amount": 1000, "source": "t", "frequency": "once"}},
+            headers=headers,
+        )
+        r = client.get(f"/orchie/compose?sustain_id={sustain}&device=phone&budget=4", headers=headers)
+        data = r.json()
+        ids = [w["id"] for w in data["selected"]]
+        assert "household_rollup_summary" in ids
 
     def test_compose_reflects_a_real_recent_spend(self, client, user, sustain):
         headers, _ = user

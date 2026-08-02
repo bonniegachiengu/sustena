@@ -926,6 +926,21 @@ function NarrateBar({ sustainId, onCommitted }) {
   );
 }
 
+// Module-level mount counter -- a hard, structural guarantee that the
+// sync/window-picker card renders EXACTLY ONCE regardless of how many
+// SmsCaptureCard elements end up in the tree at once (2 Aug 2026: Bonnie
+// reported 5+ stacked copies of the sync card, with taps landing
+// unpredictably -- exactly the symptom of several independent instances
+// each tracking their own local `status`, so a tap on one card's "14
+// days" button did nothing VISIBLE if a different stacked instance was
+// the one Bonnie was actually looking at). Rather than resolve every
+// possible cause of extra mounts (a WebView resume quirk, a stray
+// duplicate render path, anything not reproducible from here), this
+// makes duplication structurally impossible: only the FIRST instance to
+// mount ever renders real content; any later one renders null and never
+// touches SMS permissions, live polling, or the sync UI at all.
+let _smsCaptureCardMountCount = 0;
+
 /**
  * The in-app rationale + control surface for the native SMS auto-reader
  * (Android/Capacitor only — Tauri desktop has no SMS to read). Shows a
@@ -944,8 +959,24 @@ function SmsCaptureCard({ sustainId }) {
   // history is a real tap inside WindowPicker, rendered as part of the
   // 'active' view below -- there is no other code path into backfillInbox().
   const [status, setStatus] = useState('checking'); // checking | prompt | requesting | active | denied | unavailable
+  const [isPrimary, setIsPrimary] = useState(true);
 
   useEffect(() => {
+    _smsCaptureCardMountCount += 1;
+    // Every instance checks the CURRENT count the instant it mounts --
+    // the first one to run this effect claims primacy (count is 1 for
+    // it), any later one sees a higher count and stands down for its
+    // whole lifetime, even if the earlier "primary" instance later
+    // unmounts (no fighting over the role mid-session).
+    if (_smsCaptureCardMountCount > 1) setIsPrimary(false);
+    return () => { _smsCaptureCardMountCount -= 1; };
+  }, []);
+
+  useEffect(() => {
+    // Non-primary instances (see _smsCaptureCardMountCount above) never
+    // check permissions, never touch native SMS state -- not just a
+    // render-output guard, a real no-op for the whole component.
+    if (!isPrimary) return;
     if (!Capacitor.isNativePlatform()) { setStatus('unavailable'); return; }
     let cancelled = false;
     checkSmsPermission().then(perm => {
@@ -959,20 +990,27 @@ function SmsCaptureCard({ sustainId }) {
       }
     }).catch(() => { if (!cancelled) setStatus('unavailable'); });
     return () => { cancelled = true; };
-  }, []);
+  }, [isPrimary]);
 
   useEffect(() => {
     // Real-time capture only (SmsReceiver's own queue, drained here) --
     // NOT a historical inbox scan. Starts the moment permission is
     // already granted; carries no flood risk since it only ever contains
     // messages that arrived after the receiver started listening.
-    if (status !== 'active' || !sustainId) return;
+    //
+    // isPrimary-gated for the same reason as the effect above -- without
+    // this, a non-primary instance would still call the module-level
+    // startLivePolling() singleton in smsCapture.js, and its OWN
+    // unmount could stop polling out from under the real primary
+    // instance (stopLivePolling() has no notion of "whose" interval it's
+    // clearing).
+    if (!isPrimary || status !== 'active' || !sustainId) return;
     startLivePolling(sustainId);
     // Best-effort, silent -- a denied/unavailable notification permission
     // just means no nudge fires; the item still lands in the compose feed.
     ensureNotificationPermission().catch(() => {});
     return () => stopLivePolling();
-  }, [status, sustainId]);
+  }, [isPrimary, status, sustainId]);
 
   const enable = async () => {
     setStatus('requesting');
@@ -984,6 +1022,7 @@ function SmsCaptureCard({ sustainId }) {
     }
   };
 
+  if (!isPrimary) return null;
   if (status === 'unavailable' || status === 'checking') return null;
 
   if (status === 'active') {
@@ -1059,18 +1098,20 @@ function SmsCaptureCard({ sustainId }) {
  */
 function WindowPicker({ sustainId }) {
   const [status, setStatus] = useState('idle'); // idle | confirming_all | syncing | done | error
-  const [lastCount, setLastCount] = useState(null);
+  const [lastWindowLabel, setLastWindowLabel] = useState(null);
+  const [result, setResult] = useState(null); // {new, duplicate, total}
   const [error, setError] = useState(null);
   const controllerRef = useRef(null);
 
-  const runSync = async (days) => {
+  const runSync = async (w) => {
     const controller = new AbortController();
     controllerRef.current = controller;
+    setLastWindowLabel(w.label);
     setStatus('syncing');
     setError(null);
     try {
-      const count = await backfillInbox(sustainId, days, { signal: controller.signal });
-      setLastCount(count);
+      const r = await backfillInbox(sustainId, w.days, { signal: controller.signal });
+      setResult(r);
       setStatus(controller.signal.aborted ? 'idle' : 'done');
     } catch (e) {
       setError(e.message || 'could not reach orchie');
@@ -1087,15 +1128,18 @@ function WindowPicker({ sustainId }) {
 
   const pick = (w) => {
     if (w.days <= 0) { setStatus('confirming_all'); return; }
-    runSync(w.days);
+    runSync(w);
   };
 
   // Auto-return to idle on a genuine success -- the result is shown
   // first, briefly, never silently swallowed, same discipline as
-  // CaptureFlow's own 'committed' phase.
+  // CaptureFlow's own 'committed' phase. Returning to 'idle' (the full
+  // window row, not a collapsed state) is deliberate: it's what makes
+  // "sync 7, then widen to 14, then 30" a real, immediately-repeatable
+  // flow rather than something needing a page reload between taps.
   useEffect(() => {
     if (status !== 'done') return;
-    const t = setTimeout(() => setStatus('idle'), 2600);
+    const t = setTimeout(() => setStatus('idle'), 3200);
     return () => clearTimeout(t);
   }, [status]);
 
@@ -1114,6 +1158,12 @@ function WindowPicker({ sustainId }) {
               <button key={w.label} onClick={() => pick(w)} style={bigTapButton}>{w.label}</button>
             ))}
           </div>
+          {result && (
+            <div style={{ ...mutedText, marginTop: 8 }}>
+              last: {lastWindowLabel} — {result.new} new, {result.duplicate} already had. widen the window
+              above to reach further back — already-synced messages are never double-captured.
+            </div>
+          )}
         </>
       )}
 
@@ -1124,7 +1174,7 @@ function WindowPicker({ sustainId }) {
             thousands of messages. Sure?
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => runSync(0)} style={confirmButton}>YES, SYNC ALL</button>
+            <button onClick={() => runSync({ label: 'all', days: 0 })} style={confirmButton}>YES, SYNC ALL</button>
             <button onClick={() => setStatus('idle')} style={cancelButton}>CANCEL</button>
           </div>
         </div>
@@ -1137,7 +1187,7 @@ function WindowPicker({ sustainId }) {
             fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
           }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)' }} />
-            syncing…
+            syncing {lastWindowLabel}…
           </div>
           <button onClick={stop} style={{ ...cancelButton, marginTop: 10, borderColor: 'var(--danger)', color: 'var(--danger)' }}>
             STOP
@@ -1151,7 +1201,7 @@ function WindowPicker({ sustainId }) {
           fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700, color: 'var(--teal)',
         }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--teal)' }} />
-          ✓ synced — {lastCount ?? 0} message{lastCount === 1 ? '' : 's'} checked
+          ✓ {result?.new ?? 0} new captured ({result?.duplicate ?? 0} already had)
         </div>
       )}
 
@@ -1366,10 +1416,13 @@ function WidgetCard({ widget, sustainId, onCommitted }) {
       )}
 
       {widget.render === 'rollup_summary_card' && (
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-secondary)', display: 'flex', gap: 16 }}>
-          <span>liquid <b style={{ color: 'var(--text-primary)' }}>{d.liquid_balance}</b></span>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+          <span>unallocated <b style={{ color: 'var(--text-primary)' }}>KES {Math.round(d.liquid_balance || 0).toLocaleString()}</b></span>
           {d.household_total !== undefined && (
-            <span>household <b style={{ color: 'var(--amber)' }}>{d.household_total}</b> ({d.included_children} linked)</span>
+            <span>
+              household total <b style={{ color: 'var(--amber)' }}>KES {Math.round(d.household_total || 0).toLocaleString()}</b>
+              {' '}({d.included_children || 0} linked)
+            </span>
           )}
         </div>
       )}
