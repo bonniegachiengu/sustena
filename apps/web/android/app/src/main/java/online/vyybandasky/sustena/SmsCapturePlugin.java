@@ -57,15 +57,22 @@ public class SmsCapturePlugin extends Plugin {
             return;
         }
 
+        // sinceDays <= 0 means "all" (the re-sync window picker's explicit
+        // no-lower-bound option) -- skip the date filter entirely rather
+        // than computing a bogus/negative cutoff timestamp.
         int sinceDays = call.getInt("sinceDays", 90);
-        long sinceMs = System.currentTimeMillis() - (sinceDays * 24L * 60L * 60L * 1000L);
 
         JSArray results = new JSArray();
         ContentResolver resolver = getContext().getContentResolver();
         Uri inbox = Telephony.Sms.Inbox.CONTENT_URI;
         String[] projection = { Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE };
-        String selection = Telephony.Sms.DATE + " >= ?";
-        String[] selectionArgs = { String.valueOf(sinceMs) };
+        String selection = null;
+        String[] selectionArgs = null;
+        if (sinceDays > 0) {
+            long sinceMs = System.currentTimeMillis() - (sinceDays * 24L * 60L * 60L * 1000L);
+            selection = Telephony.Sms.DATE + " >= ?";
+            selectionArgs = new String[] { String.valueOf(sinceMs) };
+        }
         String sortOrder = Telephony.Sms.DATE + " DESC";
 
         try (Cursor cursor = resolver.query(inbox, projection, selection, selectionArgs, sortOrder)) {

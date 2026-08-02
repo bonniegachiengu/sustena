@@ -22,7 +22,7 @@ import { api } from '../lib/api';
 import LoginGate from '../components/LoginGate';
 import {
   checkSmsPermission, requestSmsPermission, backfillInbox, startLivePolling, stopLivePolling,
-  ensureNotificationPermission, setNativeAuthContext, consumePendingClassifyTarget,
+  ensureNotificationPermission, setNativeAuthContext, consumePendingClassifyTarget, RESYNC_WINDOWS,
 } from '../lib/smsCapture';
 
 const LAST_SUSTAIN_KEY = 'sustena_orchie_last_sustain';
@@ -990,14 +990,17 @@ function SmsCaptureCard({ sustainId }) {
 
   if (status === 'active') {
     return (
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14,
-        // Reclassified from --text-dim to --text-muted (2 Aug 2026
-        // legibility pass) -- a real status line, not decoration.
-        fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 500, color: 'var(--text-muted)',
-      }}>
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--teal)' }} />
-        auto-capture active — M-Pesa &amp; KCB{syncedCount != null ? ` · ${syncedCount} synced` : ''}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          // Reclassified from --text-dim to --text-muted (2 Aug 2026
+          // legibility pass) -- a real status line, not decoration.
+          fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 500, color: 'var(--text-muted)',
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--teal)' }} />
+          auto-capture active — M-Pesa &amp; KCB{syncedCount != null ? ` · ${syncedCount} synced` : ''}
+        </div>
+        <ResyncControl sustainId={sustainId} onSynced={setSyncedCount} />
       </div>
     );
   }
@@ -1029,6 +1032,118 @@ function SmsCaptureCard({ sustainId }) {
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Explicit, human-triggered re-sync with a chosen time window (Bonnie,
+ * 2 Aug 2026 -- built alongside a clean-slate account reset: once a reset
+ * clears stored messages + their dedup keys, a re-sync must genuinely
+ * re-capture real SMS history within a chosen window, not silently do
+ * nothing because "it already ran once"). Reuses the exact same
+ * backfillInbox() the first-time enable flow already calls -- same
+ * sender filter, same OTP/secret drop (both applied natively, inside
+ * SmsCapturePlugin.readInbox(), never bypassed here), same idempotent
+ * capture() on the server -- just re-triggered on demand with an
+ * explicit window instead of the fixed 90-day default.
+ */
+function ResyncControl({ sustainId, onSynced }) {
+  const [open, setOpen] = useState(false);
+  const [status, setStatus] = useState('idle'); // idle | syncing | done | error
+  const [lastCount, setLastCount] = useState(null);
+  const [error, setError] = useState(null);
+
+  const runResync = async (days) => {
+    setStatus('syncing');
+    setError(null);
+    try {
+      const count = await backfillInbox(sustainId, days);
+      setLastCount(count);
+      setStatus('done');
+      onSynced?.(count);
+    } catch (e) {
+      setError(e.message || 'could not reach orchie');
+      setStatus('error');
+    }
+  };
+
+  // Auto-close on a genuine success, same discipline as CaptureFlow's own
+  // 'committed' phase -- the result is never left ambiguously sitting
+  // there, but it IS shown first, briefly, not silently swallowed.
+  useEffect(() => {
+    if (status !== 'done') return;
+    const t = setTimeout(() => { setOpen(false); setStatus('idle'); }, 2600);
+    return () => clearTimeout(t);
+  }, [status]);
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => { setOpen(true); setStatus('idle'); setError(null); }}
+        style={{
+          marginTop: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+          fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.04em',
+          color: 'var(--text-muted)', textDecoration: 'underline dotted',
+        }}
+      >
+        re-sync · choose window
+      </button>
+    );
+  }
+
+  return (
+    <div style={{
+      marginTop: 8, padding: 10, borderRadius: 'var(--radius-sm)',
+      background: 'var(--bg-overlay)', border: '1px solid var(--border-mid)',
+    }}>
+      {status === 'idle' && (
+        <>
+          <div style={{ ...mutedText, marginBottom: 8 }}>
+            re-read M-Pesa &amp; KCB messages from the last:
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {RESYNC_WINDOWS.map(w => (
+              <button key={w.label} onClick={() => runResync(w.days)} style={bigTapButton}>{w.label}</button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {status === 'syncing' && (
+        <div className="pulse" style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
+        }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)' }} />
+          re-syncing…
+        </div>
+      )}
+
+      {status === 'done' && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700, color: 'var(--teal)',
+        }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--teal)' }} />
+          ✓ resynced — {lastCount ?? 0} message{lastCount === 1 ? '' : 's'} checked
+        </div>
+      )}
+
+      {status === 'error' && (
+        <div>
+          <div style={{ ...mutedText, color: 'var(--danger)' }}>{error}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+            {RESYNC_WINDOWS.map(w => (
+              <button key={w.label} onClick={() => runResync(w.days)} style={bigTapButton}>{w.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {status !== 'syncing' && (
+        <button onClick={() => setOpen(false)} style={{ ...cancelButton, marginTop: 10 }}>CLOSE</button>
       )}
     </div>
   );

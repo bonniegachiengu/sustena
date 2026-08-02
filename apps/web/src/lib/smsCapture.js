@@ -201,11 +201,30 @@ export async function requestSmsPermission() {
   return status.sms;
 }
 
-/** One-time backfill of existing M-Pesa/KCB messages already in the inbox. */
+/** Backfill M-Pesa/KCB messages already in the inbox, filtered to the last
+ *  `sinceDays` days (0 or less means "all", no lower bound -- the re-sync
+ *  window picker's explicit "all" option, see RESYNC_WINDOWS below). Used
+ *  both for the automatic one-time backfill on first enabling capture, and
+ *  for an explicit user-triggered re-sync (SmsCaptureCard's RE-SYNC
+ *  control) -- same function either way, just a different chosen window.
+ *  Safe to call repeatedly: capture() is idempotent server-side, so
+ *  messages already captured just come back is_duplicate=true and are
+ *  skipped by forwardMessages()'s own notify guard; a message whose
+ *  dedup_key was cleared (e.g. after a clean-slate reset) is genuinely
+ *  re-captured fresh, which is the whole point of a re-sync after a reset. */
 export async function backfillInbox(sustainId, sinceDays = 90) {
   const { messages } = await SmsCapture.readInbox({ sinceDays });
   return forwardMessages(sustainId, messages);
 }
+
+/** The re-sync window picker's fixed option set -- 0 is the sentinel for
+ *  "all" (see backfillInbox()/SmsCapturePlugin.readInbox() above). */
+export const RESYNC_WINDOWS = [
+  { label: '7 days', days: 7 },
+  { label: '14 days', days: 14 },
+  { label: '30 days', days: 30 },
+  { label: 'all', days: 0 },
+];
 
 /** Drains whatever the native receiver captured since the last drain. */
 export async function drainLiveQueue(sustainId) {
