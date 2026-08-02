@@ -44,6 +44,13 @@ logger = logging.getLogger(__name__)
 STATUS_APPLIED = "applied"
 STATUS_REFUSED = "refused"
 STATUS_NEEDS_ATTENTION = "needs_attention"
+# A message the transducer recognised but which genuinely isn't a
+# transaction (a balance inquiry, a loan-status notice, an M-Pesa/KCB
+# system/error notice) -- recorded (never silently dropped) but deliberately
+# excluded from needs_attention()'s query below, since nothing about it
+# needs a human decision. See transducer.py's own "informational" tier
+# docstring for the 2 Aug 2026 fix this closes.
+STATUS_INFORMATIONAL = "informational"
 
 # NOT a stored row status -- a "rejected" capture is never inserted into
 # ingest_messages at all (see capture()'s own docstring for why). Exists as
@@ -427,6 +434,16 @@ class IngestEngine:
                 # been violated; any other reason is still a real refusal.
                 status = STATUS_REFUSED
                 reason = f"Operator refused: {op_result.reason}"
+        elif result.status == "informational":
+            # Recognised, but genuinely not a transaction -- recorded (never
+            # silently dropped) but NEVER surfaces in needs_attention(),
+            # since nothing about it needs a human decision. Fixed 2 Aug
+            # 2026: this used to share parsed_unmapped's fate (both became
+            # STATUS_NEEDS_ATTENTION below), which is exactly why a plain
+            # M-Pesa "unable to process your request" system notice was
+            # showing up as a classify card demanding a pocket decision it
+            # never needed.
+            status = STATUS_INFORMATIONAL
         # else: parsed_unmapped or unparsed -- both need a human, status stays needs_attention
 
         self._db.execute(

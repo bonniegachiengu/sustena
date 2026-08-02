@@ -1169,6 +1169,144 @@ function WindowPicker({ sustainId }) {
   );
 }
 
+/**
+ * General pocket management -- the on-ramp a freshly reset (or brand new)
+ * sustain needs (Bonnie, 2 Aug 2026): without this, a zero-pocket sustain
+ * had NO way to build a budget back up except stumbling into a classify
+ * card's own "+ NEW" tile, which only appears mid-capture. This is the
+ * standalone version -- always reachable from the top of Orchie, not
+ * gated behind having a transaction to classify first.
+ *
+ * Reuses GET /orchie/capture/sources (built for the allocate-recovery
+ * source picker) for the real, current pocket list + balances -- no new
+ * read route needed. Pocket creation goes through the same real gated
+ * budget.add_pocket every other pocket-creation path in this app uses.
+ */
+function PocketsPanel({ sustainId, onChanged }) {
+  const [sources, setSources] = useState(null); // {pockets, liquid_balance}
+  const [open, setOpen] = useState(false);
+  const [everOpened, setEverOpened] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [status, setStatus] = useState('idle'); // idle | saving | error
+  const [error, setError] = useState('');
+
+  const reload = useCallback(async () => {
+    if (!sustainId) return;
+    try {
+      const data = await api.get(`/orchie/capture/sources?sustain_id=${encodeURIComponent(sustainId)}`);
+      setSources(data);
+      // Auto-open once, the first time we learn there's nothing here yet --
+      // the whole point is that an empty budget shouldn't need discovering.
+      // Never re-forces itself open after that (e.g. a later reset), so a
+      // person who deliberately collapsed it isn't fought with every load.
+      if (data.pockets.length === 0 && !everOpened) { setOpen(true); setEverOpened(true); }
+    } catch {
+      setSources(null);
+    }
+  }, [sustainId, everOpened]);
+
+  useEffect(() => { reload(); }, [sustainId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const createPocket = async () => {
+    if (!name.trim() || status === 'saving') return;
+    setStatus('saving');
+    setError('');
+    try {
+      const data = await api.post('/orchie/capture/confirm', {
+        sustain_id: sustainId, operator: 'budget.add_pocket', params: { pocket_name: name.trim() },
+      });
+      if (data.result.status === 'ok') {
+        setName('');
+        setCreating(false);
+        setStatus('idle');
+        await reload();
+        onChanged?.();
+      } else {
+        setStatus('error');
+        setError(data.result.reason || 'could not create the pocket');
+      }
+    } catch (e) {
+      setStatus('error');
+      setError(e.message || 'could not reach orchie');
+    }
+  };
+
+  if (!sources) return null;
+  const count = sources.pockets.length;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.05em',
+          color: 'var(--text-muted)',
+        }}
+      >
+        {open ? 'hide pockets' : `pockets · ${count}`}
+      </button>
+
+      {open && (
+        <div style={{
+          marginTop: 8, padding: 12, borderRadius: 'var(--radius-md)',
+          background: 'var(--bg-raised)', border: '1px solid var(--border-mid)',
+        }}>
+          {count === 0 ? (
+            <div style={{ ...mutedText, marginBottom: 10 }}>
+              no pockets yet — this is where your budget lives. create one to get started.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+              {sources.pockets.map(p => (
+                <div
+                  key={p.name}
+                  style={{
+                    fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text-secondary)',
+                    background: 'var(--bg-overlay)', border: '1px solid var(--border-mid)',
+                    borderRadius: 'var(--radius-sm)', padding: '8px 12px',
+                  }}
+                >
+                  {p.name} · KES {Math.round(p.available).toLocaleString()}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!creating ? (
+            <button
+              onClick={() => setCreating(true)}
+              style={{ ...bigTapButton, borderStyle: 'dashed', borderColor: 'var(--teal-border)', color: 'var(--teal)' }}
+            >
+              + NEW POCKET
+            </button>
+          ) : (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="text" value={name}
+                onChange={e => setName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') createPocket(); }}
+                placeholder="pocket name, e.g. Holiday Fund"
+                autoFocus
+                disabled={status === 'saving'}
+                style={editableInput}
+              />
+              <button onClick={createPocket} style={confirmButton} disabled={status === 'saving'}>
+                {status === 'saving' ? 'creating…' : 'CREATE'}
+              </button>
+            </div>
+          )}
+
+          {status === 'error' && (
+            <div style={{ ...mutedText, color: 'var(--danger)', marginTop: 8 }}>{error}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WidgetCard({ widget, sustainId, onCommitted }) {
   const d = widget.data || {};
   // classify_card is the in-field classify/confirm surface -- per Bonnie's
@@ -1404,6 +1542,8 @@ export default function OrchieShell() {
       )}
 
       {sustainId && <SmsCaptureCard key={sustainId} sustainId={sustainId} />}
+
+      {sustainId && <PocketsPanel key={sustainId} sustainId={sustainId} onChanged={load} />}
 
       {sustainId && <NarrateBar sustainId={sustainId} onCommitted={load} />}
 

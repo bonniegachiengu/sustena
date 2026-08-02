@@ -182,9 +182,19 @@ class TestInferNeedsDisambiguation:
         for opt in r.options:
             assert set(opt.keys()) == {"value", "label"}
 
-    def test_no_pockets_declared_is_cannot_infer_not_a_forced_choice(self):
+    def test_no_pockets_declared_asks_instead_of_dead_ending(self):
+        # Was status="cannot_infer" -- a real dead end (reported live by
+        # Bonnie on a freshly-reset, zero-pocket sustain: no pockets, no
+        # "+ NEW" path, nowhere to go but CLOSE). Now asks for pocket_name
+        # with an empty options list, which the frontend's PocketPicker
+        # already renders correctly -- a "+ NEW" tile even with zero
+        # existing options, creating a real pocket via budget.add_pocket
+        # and continuing the flow into it.
         r = infer(CANDIDATES, {"finances": {"pockets": {}}}, effect_text="spent 500 on nothing")
-        assert r.status == "cannot_infer"
+        assert r.status == "needs_disambiguation"
+        assert r.field == "pocket_name"
+        assert r.options == []
+        assert "no pockets exist yet" in r.why
 
 
 class TestInferCannotInfer:

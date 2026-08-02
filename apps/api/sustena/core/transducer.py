@@ -12,7 +12,7 @@ transducer must be testable without a network call and must never produce a
 different answer for the same input twice — that's what "durable, idempotent
 intake" downstream is relying on.
 
-Four-tier result (three shape-classification tiers, plus a security gate
+Five-tier result (four shape-classification tiers, plus a security gate
 checked before any of them):
   rejected          - the text carries an OTP/verification code or similar
                        one-time secret. Checked FIRST, before any parser —
@@ -27,21 +27,32 @@ checked before any of them):
                       deliberately did NOT guess an operator — e.g. money
                       spent: which pocket? Nothing here invents a category.
                       An ingest-time categorisation config is real, separate
-                      follow-up work, not silently faked here. Also used for
-                      genuinely informational shapes with no money movement
-                      at all (a balance inquiry, a loan-status notice) —
-                      there is nothing to map AND nothing that needs a
-                      pocket decision either, but it's still real,
-                      recognised information worth surfacing, not silently
-                      dropped as unparsed.
+                      follow-up work, not silently faked here. ALWAYS a real
+                      transaction that needs a human pocket/operator
+                      decision — see "informational" below for recognised
+                      shapes that are NOT a transaction at all.
+  informational     - recognised, but genuinely NOT a transaction: no money
+                      moved, nothing to map, and no pocket/operator decision
+                      for a human to make either (a balance inquiry, a
+                      loan-status accrual notice, or an M-Pesa/KCB system
+                      "unable to process your request" / "try again later"
+                      notice). Still recorded (never silently dropped —
+                      matches every other tier's "disclose, don't drop"
+                      discipline) but does NOT surface in needs_attention,
+                      because nothing about it needs a human at all. Fixed
+                      2 Aug 2026: this used to share the parsed_unmapped
+                      tier, which meant every one of these ALSO surfaced as
+                      a classify card demanding a decision it never actually
+                      needed — a real, reported bug, not a design choice.
   unparsed          - no registered parser recognised the message's shape
                       at all.
 
 parsed_unmapped and unparsed both surface as "needs attention" upstream —
-the distinction is only in how much context the human is shown to resolve it.
-rejected is never stored at all (see ingest_engine.capture()'s own guard,
-which checks contains_sensitive_secret() before ever writing the raw text
-to the database — this module's own rejection here is necessary but not
+the distinction is only in how much context the human is shown to resolve
+it. informational does NOT surface there (see above). rejected is never
+stored at all (see ingest_engine.capture()'s own guard, which checks
+contains_sensitive_secret() before ever writing the raw text to the
+database — this module's own rejection here is necessary but not
 sufficient, since ingest_engine must not persist the OTP text just to learn
 that it should have refused it).
 
@@ -60,7 +71,7 @@ from typing import Callable
 
 @dataclass(frozen=True)
 class TransductionResult:
-    status: str  # "rejected" | "mapped" | "parsed_unmapped" | "unparsed"
+    status: str  # "rejected" | "mapped" | "parsed_unmapped" | "informational" | "unparsed"
     operator_name: str | None = None
     operator_params: dict = field(default_factory=dict)
     external_ref: str | None = None            # e.g. the M-Pesa transaction code -- strongest dedup key when present
@@ -201,6 +212,45 @@ def _needs_pocket_reason(kind: str, amount: float, counterparty: str, currency: 
     )
 
 
+# ── Informational system/error notices — recognised, but not a transaction ──
+# M-Pesa/KCB occasionally send a plain system or error notice from the SAME
+# sender id as a real transaction confirmation: "unable to process your
+# request", a busy/timeout message, "try again later". These carry no
+# amount and describe nothing that happened to your money -- surfacing one
+# as a classify card ("which pocket does this belong to?") is actively
+# wrong, not just unhelpful, since there is no transaction to classify.
+#
+# Checked as the LAST fallback in both _parse_mpesa/_parse_kcb, only AFTER
+# every real transaction-shape regex above has already failed to match --
+# this can never shadow or swallow a genuine transaction, since a real
+# transaction is always tried first and wins outright.
+#
+# Real, disclosed judgment call: built from ONE confirmed real sample
+# (Bonnie, 2 Aug 2026 -- "M-PESA is unable to process your request because a
+# similar transaction is currently underway. Please wait while we complete
+# your initial request.") plus common Safaricom/bank system-message
+# phrasing, NOT verified against a wide corpus the way the transaction
+# parsers above are. Deliberately narrow and focused on error/busy/retry
+# wording specifically, NOT general promotional content -- a promo blast
+# can share vocabulary with a real transaction's own trailer text (e.g.
+# "Download My OneApp" appears on the real, mapped airtime-purchase
+# message too), so promotional detection is NOT attempted here to avoid
+# false-positiving on a genuine transaction.
+_INFORMATIONAL_SYSTEM_PATTERNS = [
+    re.compile(r"unable to process your request", re.IGNORECASE),
+    re.compile(r"similar transaction (?:is|was) currently underway", re.IGNORECASE),
+    re.compile(r"please wait while we complete", re.IGNORECASE),
+    re.compile(r"(?:system|service) is currently (?:busy|unavailable)", re.IGNORECASE),
+    re.compile(r"service (?:is )?temporarily unavailable", re.IGNORECASE),
+    re.compile(r"please try again (?:later|after)", re.IGNORECASE),
+    re.compile(r"request (?:has )?timed? out", re.IGNORECASE),
+]
+
+
+def _is_informational_system_message(text: str) -> bool:
+    return any(p.search(text) for p in _INFORMATIONAL_SYSTEM_PATTERNS)
+
+
 def _parse_mpesa(text: str) -> TransductionResult | None:
     m = _MPESA_RECEIVED_RE.search(text)
     if m:
@@ -314,6 +364,14 @@ def _parse_mpesa(text: str) -> TransductionResult | None:
             parsed_fields=fields,
             reason=_needs_pocket_reason("Airtime purchase", amount, counterparty),
             parser_name="mpesa_airtime",
+        )
+
+    if _is_informational_system_message(text):
+        return TransductionResult(
+            status="informational",
+            parsed_fields={"direction": "none"},
+            reason="An M-Pesa system/error notice, not a transaction — nothing to record.",
+            parser_name="mpesa_system_notice",
         )
 
     return None
@@ -629,7 +687,7 @@ def _parse_kcb(text: str) -> TransductionResult | None:
     m = _KCB_BALANCE_RE.search(text)
     if m:
         return TransductionResult(
-            status="parsed_unmapped",
+            status="informational",
             external_ref=m.group("ref"),
             parsed_fields={
                 "direction": "none",
@@ -646,7 +704,7 @@ def _parse_kcb(text: str) -> TransductionResult | None:
     m = _KCB_LOAN_OVERDUE_RE.search(text)
     if m:
         return TransductionResult(
-            status="parsed_unmapped",
+            status="informational",
             parsed_fields={"direction": "none", "loan_status": "overdue", "amount_owed": _to_float(m.group("amount"))},
             reason=(
                 f"KCB Mobile Loan repayment overdue since {m.group('date')} — informational only, "
@@ -658,7 +716,7 @@ def _parse_kcb(text: str) -> TransductionResult | None:
     m = _KCB_LOAN_ARREARS_RE.search(text)
     if m:
         return TransductionResult(
-            status="parsed_unmapped",
+            status="informational",
             parsed_fields={"direction": "none", "loan_status": "arrears", "amount_owed": _to_float(m.group("amount"))},
             reason="KCB Mobile Loan in arrears — informational only, no transaction created.",
             parser_name="kcb_loan_arrears",
@@ -667,7 +725,7 @@ def _parse_kcb(text: str) -> TransductionResult | None:
     m = _KCB_LOAN_DEFAULT_RE.search(text)
     if m:
         return TransductionResult(
-            status="parsed_unmapped",
+            status="informational",
             parsed_fields={
                 "direction": "none", "loan_status": "default", "loan_number": m.group("loan_number"),
                 "amount_owed": _to_float(m.group("amount")),
@@ -679,10 +737,18 @@ def _parse_kcb(text: str) -> TransductionResult | None:
     m = _KCB_LOAN_DUE_TODAY_RE.search(text)
     if m:
         return TransductionResult(
-            status="parsed_unmapped",
+            status="informational",
             parsed_fields={"direction": "none", "loan_status": "due_today", "amount_owed": _to_float(m.group("amount"))},
             reason="KCB Mobile Loan due today — informational only, no transaction created.",
             parser_name="kcb_loan_due_today",
+        )
+
+    if _is_informational_system_message(text):
+        return TransductionResult(
+            status="informational",
+            parsed_fields={"direction": "none"},
+            reason="A KCB system/error notice, not a transaction — nothing to record.",
+            parser_name="kcb_system_notice",
         )
 
     return None

@@ -1013,3 +1013,68 @@ class TestCaptureSources:
 
         r = client.get(f"/orchie/capture/sources?sustain_id={sustain_a}", headers=headers_b)
         assert r.status_code == 404  # user B doesn't own sustain A -- same 404-for-both-cases pattern
+
+
+class TestZeroPocketOnRamp:
+    """A freshly created (or freshly reset) sustain has zero pockets --
+    this must never be a dead end. Reproduces Bonnie's exact real-device
+    scenario: a classify attempt on a sustain with no pockets at all must
+    offer a real "+ NEW" path, end to end over HTTP, through the same
+    /orchie/capture/infer -> PocketPicker -> budget.add_pocket -> confirm
+    flow every other pocket-creation path in this app uses."""
+
+    def test_infer_on_zero_pocket_sustain_asks_instead_of_dead_ending(self, client, user, sustain):
+        headers, _ = user
+        r = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "effect_text": "spent 500 on food"},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["status"] == "needs_disambiguation"
+        assert data["field"] == "pocket_name"
+        assert data["options"] == []
+        assert "no pockets exist yet" in data["why"]
+
+    def test_full_create_pocket_then_classify_into_it_on_a_zero_pocket_sustain(self, client, user, sustain):
+        headers, _ = user
+        # Confirm the sustain genuinely starts with zero pockets.
+        sources = client.get(f"/orchie/capture/sources?sustain_id={sustain}", headers=headers).json()
+        assert sources["pockets"] == []
+
+        # The "+ NEW" affordance: create a pocket via the real gated operator.
+        created = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.add_pocket", "params": {"pocket_name": "food"}},
+            headers=headers,
+        )
+        assert created.json()["result"]["status"] == "ok"
+
+        # Fund it (a real income + allocate, same as any other pocket).
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.record_income", "params": {"amount": 2000, "source": "seed", "frequency": "once"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.allocate", "params": {"pocket_name": "food", "amount": 1000, "period": "monthly"}},
+            headers=headers,
+        )
+
+        # The transaction now resolves cleanly into the just-created pocket.
+        infer_resp = client.post(
+            "/orchie/capture/infer",
+            json={"sustain_id": sustain, "effect_text": "spent 500 on food", "known": {"pocket_name": "food"}},
+            headers=headers,
+        )
+        assert infer_resp.json()["status"] == "ready"
+        assert infer_resp.json()["params"]["pocket_name"] == "food"
+
+        confirm_resp = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.spend", "params": {"pocket_name": "food", "amount": 500}},
+            headers=headers,
+        )
+        assert confirm_resp.json()["result"]["status"] == "ok"

@@ -356,12 +356,25 @@ def infer(
                 history_use_count = (history or {}).get("use_count")
             else:
                 options = sorted(live_pockets.keys())
-                if not options:
-                    return InferenceResult(status="cannot_infer", why="this sustain has no pockets declared yet to classify against")
+                # Zero existing pockets is NOT a dead end -- a brand-new or
+                # freshly-reset sustain has nowhere to classify a spend
+                # into yet, but the frontend's PocketPicker already renders
+                # a "+ NEW" tile unconditionally (even over an empty options
+                # list), which creates a real pocket via the gated
+                # budget.add_pocket and continues the flow into it. Fixed
+                # 2 Aug 2026: this used to return cannot_infer here, which
+                # rendered as a genuine dead end (a CLOSE button and
+                # nothing else) -- the exact case that made a freshly
+                # reset, zero-pocket sustain unusable.
+                why = (
+                    "no pockets exist yet — create one to get started"
+                    if not options else
+                    "couldn't find a pocket name in what you described"
+                )
                 return InferenceResult(
                     status="needs_disambiguation", field="pocket_name",
                     question="which pocket does this belong to?", options=[_option(o) for o in options],
-                    why="couldn't find a pocket name in what you described",
+                    why=why,
                 )
         else:
             return InferenceResult(

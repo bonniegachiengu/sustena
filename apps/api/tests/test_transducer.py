@@ -590,9 +590,12 @@ class TestKcbMpesaShapes:
 
 
 class TestKCBBalanceIsInformationalOnly:
-    def test_balance_is_parsed_unmapped_not_mapped(self):
+    def test_balance_is_informational_not_mapped(self):
+        # Was "parsed_unmapped" -- fixed 2 Aug 2026, since that tier
+        # surfaces as a needs_attention classify card, and a plain balance
+        # inquiry has nothing for a human to decide.
         result = parse_message(KCB_BALANCE)
-        assert result.status == "parsed_unmapped"
+        assert result.status == "informational"
         assert result.operator_name is None
 
     def test_balance_has_no_direction_or_amount(self):
@@ -616,8 +619,10 @@ class TestKCBLoanStatusIsInformationalOnly:
     informational, never mapped to an operator."""
 
     def test_overdue_is_informational(self):
+        # Was "parsed_unmapped" -- fixed 2 Aug 2026, same reasoning as the
+        # balance-inquiry fix above.
         result = parse_message(KCB_LOAN_OVERDUE)
-        assert result.status == "parsed_unmapped"
+        assert result.status == "informational"
         assert result.operator_name is None
         assert result.parsed_fields["direction"] == "none"
         assert result.parsed_fields["loan_status"] == "overdue"
@@ -757,3 +762,64 @@ class TestSourceStrictParsing:
     def test_source_id_is_case_insensitive(self):
         result = parse_message(KCB_RECEIVE, source_id="KCB")
         assert result.parser_name == "kcb_receive"
+
+
+# Bonnie's exact real sample (2 Aug 2026) -- an M-Pesa system/error notice,
+# not a transaction. No personal info in the text itself, safe to use
+# verbatim (unlike a real transaction sample, which would need names/amounts
+# redacted).
+MPESA_SYSTEM_BUSY = (
+    "M-PESA is unable to process your request because a similar transaction is currently "
+    "underway. Please wait while we complete your initial request."
+)
+
+
+class TestInformationalSystemMessages:
+    """M-Pesa/KCB system/error notices -- recognised, but genuinely not a
+    transaction. Fixed 2 Aug 2026: these used to fall through to
+    "unparsed" (no amount, no counterparty, no shape any transaction
+    parser recognises) and surfaced as a classify card demanding a pocket
+    decision for something that never happened to any money."""
+
+    def test_mpesa_busy_notice_is_informational_not_unparsed(self):
+        result = parse_message(MPESA_SYSTEM_BUSY, source_id="mpesa")
+        assert result.status == "informational"
+        assert result.operator_name is None
+        assert result.parsed_fields["direction"] == "none"
+        assert result.parser_name == "mpesa_system_notice"
+
+    def test_kcb_sender_with_the_same_wording_is_also_informational(self):
+        # Source-strict parsing (transducer.py's own _PARSERS_BY_SOURCE)
+        # means the identical wording is checked against the KCB parser
+        # set when tagged kcb -- confirms the informational fallback isn't
+        # only wired into the mpesa side.
+        result = parse_message(MPESA_SYSTEM_BUSY, source_id="kcb")
+        assert result.status == "informational"
+        assert result.parser_name == "kcb_system_notice"
+
+    def test_common_busy_error_phrasings_are_all_caught(self):
+        samples = [
+            "Sorry, the service is currently unavailable. Please try again later.",
+            "Your request has timed out. Please try again.",
+            "System is currently busy, please try again after a few minutes.",
+        ]
+        for text in samples:
+            result = parse_message(text, source_id="mpesa")
+            assert result.status == "informational", f"expected informational for: {text!r}"
+
+    def test_a_real_transaction_is_never_shadowed_by_the_informational_fallback(self):
+        # The fallback only runs AFTER every real transaction regex has
+        # already had a chance to match -- a genuine transaction, even one
+        # that happens to mention unrelated words, still parses normally.
+        result = parse_message(RECEIVED, source_id="mpesa")
+        assert result.status == "mapped"
+
+    def test_otp_guard_still_wins_even_over_informational_wording(self):
+        # The security gate is checked FIRST in parse_message(), before any
+        # parser -- an OTP-like message must never fall through to
+        # "informational" just because it also contains busy/error wording.
+        result = parse_message(
+            "Your OTP is 483920, please try again if it expires. Do not share this code.",
+            source_id="mpesa",
+        )
+        assert result.status == "rejected"

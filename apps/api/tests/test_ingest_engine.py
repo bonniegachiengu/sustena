@@ -358,6 +358,56 @@ class TestNeedsAttentionQueue:
         assert ingest.resolve_message("does-not-exist", resolved_by="user-test-1") is False
 
 
+# ── Informational: recognised, but never a needs_attention card ─────────────
+# Fixed 2 Aug 2026: an M-Pesa/KCB system/error/balance/loan-status notice
+# used to share parsed_unmapped's fate and surface as a classify card
+# demanding a decision it never needed. STATUS_INFORMATIONAL is recorded
+# (never silently dropped) but deliberately excluded from needs_attention().
+
+MPESA_SYSTEM_BUSY = (
+    "M-PESA is unable to process your request because a similar transaction is currently "
+    "underway. Please wait while we complete your initial request."
+)
+
+
+class TestInformationalNeverSurfacesAsNeedsAttention:
+    @pytest.mark.asyncio
+    async def test_system_notice_is_recorded_as_informational(self, ingest, homestead_sid):
+        from sustena.core.ingest_engine import STATUS_INFORMATIONAL
+        result = await ingest.capture("device-1", homestead_sid, MPESA_SYSTEM_BUSY)
+        assert result["status"] == STATUS_INFORMATIONAL
+
+    @pytest.mark.asyncio
+    async def test_system_notice_never_appears_in_needs_attention(self, ingest, homestead_sid):
+        await ingest.capture("device-1", homestead_sid, MPESA_SYSTEM_BUSY)
+        assert ingest.needs_attention(sustain_id=homestead_sid) == []
+
+    @pytest.mark.asyncio
+    async def test_system_notice_is_still_retrievable_not_silently_dropped(self, ingest, homestead_sid):
+        # Recorded, just not in the "needs a decision" queue -- list_messages
+        # (the raw, unfiltered per-sustain history) still has it.
+        result = await ingest.capture("device-1", homestead_sid, MPESA_SYSTEM_BUSY)
+        rows = ingest.list_messages(sustain_id=homestead_sid)
+        assert any(r["message_id"] == result["message_id"] for r in rows)
+
+    @pytest.mark.asyncio
+    async def test_system_notice_never_mutates_state(self, ingest, engine, homestead_sid):
+        before = engine.get_state(homestead_sid)
+        await ingest.capture("device-1", homestead_sid, MPESA_SYSTEM_BUSY)
+        assert engine.get_state(homestead_sid) == before
+
+    @pytest.mark.asyncio
+    async def test_a_real_transaction_still_lands_as_needs_attention_alongside_it(self, ingest, homestead_sid):
+        # The fix is scoped to genuinely non-transactional shapes -- a real
+        # parsed_unmapped transaction captured in the same sustain still
+        # correctly surfaces.
+        await ingest.capture("device-1", homestead_sid, MPESA_SYSTEM_BUSY)
+        await ingest.capture("device-1", homestead_sid, BUYGOODS)
+        queue = ingest.needs_attention(sustain_id=homestead_sid)
+        assert len(queue) == 1
+        assert queue[0]["parsed_fields"]["counterparty"] == "NAIVAS SUPERMARKET"
+
+
 # ── Staleness: never fabricated ──────────────────────────────────────────────
 
 class TestStaleness:
