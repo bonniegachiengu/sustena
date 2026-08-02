@@ -307,10 +307,16 @@ class TestComputeRollup:
 
         rollup = engine.compute_rollup(parent)
         agg = rollup["aggregates"]["pod_total"]
-        assert len(agg["included"]) == 1
-        assert len(agg["excluded"]) == 1
-        assert agg["excluded"][0]["sustain_id"] == ghost_id
-        assert agg["value"] == 0  # only the one real, zero-balance child
+        # Household-total fix (2 Aug 2026): the parent's own state is now
+        # also folded in -- honestly EXCLUDED here (not zeroed) since this
+        # synthetic "Pod" parent's own schema has no moisture_level field
+        # at all, same discipline as any child that doesn't have the path.
+        assert len(agg["included"]) == 1  # the one real, zero-balance child
+        assert len(agg["excluded"]) == 2  # the ghost child AND the parent's own (no such field)
+        excluded_ids = {e["sustain_id"] for e in agg["excluded"]}
+        assert ghost_id in excluded_ids
+        assert any(e.get("is_self") for e in agg["excluded"])
+        assert agg["value"] == 0  # only the one real, zero-balance child contributes
 
         ghost_report = next(c for c in rollup["children"] if c["child_sustain_id"] == ghost_id)
         assert ghost_report["status"] == "missing"

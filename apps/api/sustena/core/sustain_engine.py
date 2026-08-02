@@ -1110,6 +1110,24 @@ class SustainEngine:
                         f"sustain template '{template_id}'."
                     )
 
+        # 1b. Fill in declared defaults for any OPTIONAL parameter the caller
+        # omitted. A real bug found live (2 Aug 2026): habitat.json declares
+        # role_in_family as optional with default:"" , but holon.create_child
+        # (and any other caller that doesn't explicitly pass it) never
+        # supplied it — _resolve_tokens() has no defaulting behaviour of its
+        # own, so an omitted token was left as the literal unresolved string
+        # "{{role_in_family}}" in the instantiated state, visible to a real
+        # user. This was previously worked around per-field (initial_income
+        # has its own hardcoded fallback below) rather than fixed at the
+        # root; every future optional-with-default param gets this for free
+        # now. Copies `parameters` rather than mutating the caller's own
+        # dict in place.
+        parameters = dict(parameters)
+        for param_def in spec.get("parameters", []):
+            name = param_def["name"]
+            if name not in parameters and "default" in param_def:
+                parameters[name] = param_def["default"]
+
         # 2. Build initial state — token substitution on default_state
         initial_state: dict = copy.deepcopy(spec.get("default_state", {}))
         initial_state = self._resolve_tokens(initial_state, parameters)
@@ -3267,6 +3285,22 @@ class SustainEngine:
         disk read — every other child is read normally — to answer "what
         WOULD the roll-up be if this candidate state were already
         committed" without writing anything, anywhere.
+
+        Household total = parent + children (2 Aug 2026 fix): the
+        aggregate used to sum ONLY linked children, reading as "what your
+        children collectively hold" rather than a genuine combined total —
+        Bonnie's own framing was "household total = everything." The
+        parent's OWN current state is always its real, persisted value
+        here (never hypothetical — only a CHILD's candidate state is ever
+        the "what if" this function's override mechanism models), so
+        folding it in is safe and consistent across every caller:
+        compute_rollup() (plain), _check_parent_binding_gate()'s before/
+        after pair (the same real parent contribution appears in both,
+        so the refuse-only-on-newly-breach delta logic is unaffected —
+        only the child's own transition drives any before/after
+        difference), and simulate()'s _parent_rollup_for (a simulated
+        child's forked state combined with the parent's real current
+        total, exactly what a live promotion would actually produce).
         """
         spec = self._get_spec(parent_sustain_id)
         if spec is None:
@@ -3290,7 +3324,12 @@ class SustainEngine:
                     "reason": "no state found for this child — the link may be stale or the child was removed.",
                 })
 
-        aggregates = self._aggregate_from_child_states(spec, links, child_states)
+        try:
+            own_state = self._load_state_dict(parent_sustain_id)
+        except ValueError:
+            own_state = None
+
+        aggregates = self._aggregate_from_child_states(spec, links, child_states, parent_sustain_id, own_state)
         return {"children": children_report, "aggregates": aggregates}
 
     @staticmethod
@@ -3334,6 +3373,7 @@ class SustainEngine:
 
     def _aggregate_from_child_states(
         self, spec: dict, links: list[dict], child_states: dict[str, dict],
+        parent_sustain_id: str | None = None, own_state: dict | None = None,
     ) -> dict[str, dict]:
         """
         The core of ρ, factored out so both compute_rollup() (reads every
@@ -3341,6 +3381,19 @@ class SustainEngine:
         (substitutes ONE child's not-yet-committed candidate state, reading
         every other child normally) share the exact same aggregation logic —
         no second implementation to drift out of sync.
+
+        own_state (2 Aug 2026 — household total = parent + children): when
+        given, the PARENT's own current value at child_path is folded into
+        the same sum/avg/min/max/count as the children — a genuine combined
+        total, not "what the children alone hold." Included/excluded with
+        the identical honesty discipline as any child (a parent whose own
+        state doesn't have the path is excluded and named, never silently
+        treated as zero); its entry is tagged is_self:True and uses
+        parent_sustain_id itself so a consumer can distinguish "the
+        household's own contribution" from a child's without guessing.
+        Backward compatible: parent_sustain_id/own_state both default to
+        None (the pre-fix, children-only behaviour) for any caller that
+        doesn't pass them.
         """
         aggregates: dict[str, dict] = {}
         for agg in spec.get("aggregates", []):
@@ -3354,12 +3407,32 @@ class SustainEngine:
             included: list[dict] = []
             excluded: list[dict] = []
             values: list[float] = []
+
+            if own_state is not None:
+                try:
+                    own_val = self._resolve_child_path_value(own_state, child_path)
+                except Exception:
+                    own_val = None
+                if own_val is None:
+                    excluded.append({
+                        "sustain_id": parent_sustain_id, "slot": None, "member": "(household's own)",
+                        "is_self": True,
+                        "reason": f"path '{child_path}' not present or not numeric on the household's own state",
+                    })
+                else:
+                    values.append(own_val)
+                    included.append({
+                        "sustain_id": parent_sustain_id, "slot": None, "member": "(household's own)",
+                        "value": own_val, "is_self": True,
+                    })
+
             for link in links:
                 cid = link["child_sustain_id"]
                 state = child_states.get(cid)
                 if state is None:
                     excluded.append({
                         "sustain_id": cid, "slot": link.get("slot"), "member": link.get("member"),
+                        "is_self": False,
                         "reason": "child state unavailable",
                     })
                     continue
@@ -3370,17 +3443,20 @@ class SustainEngine:
                 if val is None:
                     excluded.append({
                         "sustain_id": cid, "slot": link.get("slot"), "member": link.get("member"),
+                        "is_self": False,
                         "reason": f"path '{child_path}' not present or not numeric on this child",
                     })
                     continue
                 values.append(val)
                 included.append({
-                    "sustain_id": cid, "slot": link.get("slot"), "member": link.get("member"), "value": val,
+                    "sustain_id": cid, "slot": link.get("slot"), "member": link.get("member"),
+                    "value": val, "is_self": False,
                 })
 
             aggregates[agg_id] = {
                 "op": op, "child_path": child_path, "value": reducer(values),
                 "included": included, "excluded": excluded,
+                "includes_parent_own_contribution": own_state is not None,
             }
         return aggregates
 

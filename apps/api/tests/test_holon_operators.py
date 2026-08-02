@@ -60,6 +60,18 @@ class TestHolonCreateChild:
         assert StateAccessor(state).get("identity.name") == "Project IO"
 
     @pytest.mark.asyncio
+    async def test_created_holon_never_shows_the_raw_unresolved_role_in_family_token(self, engine):
+        # Real bug found live: holon.create_child never passes role_in_family,
+        # and instantiate() used to leave the literal "{{role_in_family}}"
+        # string in the child's real state -- fixed at instantiate()'s own
+        # root (see test_sustain_engine.py's TestInstantiateMissingParam).
+        parent = _homestead(engine)
+        result = await _run(engine, parent, "holon.create_child", template="habitat", name="Project IO")
+        assert result.succeeded, result.reason
+        state = engine.get_state(result.data["child_sustain_id"])
+        assert StateAccessor(state).get("identity.role_in_family") == ""
+
+    @pytest.mark.asyncio
     async def test_refuses_a_template_not_in_child_policy(self, engine):
         parent = _homestead(engine)
         result = await _run(engine, parent, "holon.create_child", template="homestead", name="Nested Household")
@@ -519,8 +531,13 @@ class TestWildcardRollup:
 
         rollup = engine.compute_rollup(parent)
         agg = rollup["aggregates"]["household_pockets_total"]
-        assert agg["value"] == 500  # 300 + 150 + 50
-        assert len(agg["included"]) == 2
+        # Household-total fix (2 Aug 2026): the parent's own pockets now
+        # also contribute -- homestead's own finances.pockets is {} (never
+        # allocated in this test), which resolves to a real 0.0 (an empty
+        # dict, not a missing path), so it's INCLUDED at 0, not excluded.
+        assert agg["value"] == 500  # parent's own 0 + 300 + 150 + 50
+        assert len(agg["included"]) == 3  # parent + 2 children
+        assert sum(1 for i in agg["included"] if i.get("is_self")) == 1
 
     @pytest.mark.asyncio
     async def test_a_child_with_no_pockets_yet_contributes_zero_not_excluded(self, engine):
@@ -531,13 +548,35 @@ class TestWildcardRollup:
         rollup = engine.compute_rollup(parent)
         agg = rollup["aggregates"]["household_pockets_total"]
         assert agg["value"] == 0.0
-        assert len(agg["included"]) == 1
+        assert len(agg["included"]) == 2  # the parent's own (0) + the one child (0)
         assert len(agg["excluded"]) == 0
 
     @pytest.mark.asyncio
-    async def test_existing_single_path_aggregate_unaffected_by_wildcard_support(self, engine):
-        # household_liquid_total (the pre-existing, non-wildcard aggregate)
-        # must behave byte-identically to before this change.
+    async def test_parent_own_liquid_is_now_folded_into_the_household_total(self, engine):
+        # Household-total fix (2 Aug 2026): household_liquid_total used to
+        # sum ONLY linked children ("what your kids collectively hold").
+        # Bonnie's own framing: "household total = everything" -- the
+        # parent's own liquid balance must now be included too.
+        parent = _homestead(engine)
+        c1 = _habitat(engine, name="Bonnie")
+        engine.link_child(parent, c1, slot="s1", member="Bonnie")
+        await _run(engine, parent, "budget.record_income", amount=5000, source="salary")
+        await _run(engine, c1, "budget.record_income", amount=777, source="x")
+
+        rollup = engine.compute_rollup(parent)
+        agg = rollup["aggregates"]["household_liquid_total"]
+        assert agg["value"] == 5777  # 5000 (parent's own) + 777 (child)
+        assert agg["includes_parent_own_contribution"] is True
+        self_entry = next(i for i in agg["included"] if i.get("is_self"))
+        assert self_entry["sustain_id"] == parent
+        assert self_entry["value"] == 5000
+
+    @pytest.mark.asyncio
+    async def test_a_previously_written_test_with_zero_parent_balance_still_matches_numerically(self, engine):
+        # The parent's own liquid balance happens to be 0 in this scenario
+        # (never funded), so folding it in doesn't change the NUMBER -- but
+        # the mechanism genuinely changed (this now reads parent+child, not
+        # child-only, and just happens to produce the same total).
         parent = _homestead(engine)
         c1 = _habitat(engine, name="Bonnie")
         engine.link_child(parent, c1, slot="s1", member="Bonnie")

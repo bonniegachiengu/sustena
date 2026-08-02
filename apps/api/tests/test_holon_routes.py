@@ -180,12 +180,17 @@ class TestFullAcceptanceScenario:
         assert r.json()["result"]["status"] == "ok"
 
         # 5. Roll-up includes it -- both the liquid total and the pockets total.
+        # household_liquid_total is now PARENT + CHILDREN combined (2 Aug
+        # 2026 fix): homestead's own remaining liquid (20000 funded - 6000
+        # sent to the child = 14000) plus the child's own remaining liquid
+        # (6000 funded - 3000 allocated to pockets = 3000) = 17000.
         rollup = client.get(f"/devui/sustain/{homestead}/rollup", headers=headers).json()["data"]
         liquid_agg = rollup["aggregates"]["household_liquid_total"]
         pockets_agg = rollup["aggregates"]["household_pockets_total"]
         assert project_id in [c["sustain_id"] for c in liquid_agg["included"]]
-        assert liquid_agg["value"] == 3000  # 6000 funded - 3000 allocated to pockets
-        assert pockets_agg["value"] == 3000  # 1000 + 2000
+        assert liquid_agg["includes_parent_own_contribution"] is True
+        assert liquid_agg["value"] == 17000  # homestead's own 14000 + project's own 3000
+        assert pockets_agg["value"] == 3000  # homestead's own 0 + project's 1000 + 2000
 
         # 6. Navigate: children list from the parent, parent link from the child.
         children = client.get(f"/devui/sustain/{homestead}/children", headers=headers).json()["data"]["children"]

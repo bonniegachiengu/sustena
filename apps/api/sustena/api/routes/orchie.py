@@ -393,6 +393,70 @@ async def capture_mark_not_a_transaction(
     return {"message_id": message_id, "marked": marked}
 
 
+# ── POST /orchie/capture/learn-rule — "user fixes once -> it learns" ─────────
+#
+# Bonnie, 2 Aug 2026: turns Phase 3's parser-primitive-lift groundwork into
+# the real, visible feature. After a human classifies a message no
+# declared rule recognised, this route offers to crystallise THEIR OWN
+# just-confirmed correction into a real declared ParseRule (via the
+# already-built Phase 3C add_parse_rule), so a message repeating the same
+# template auto-recognises next time. Explicit, opt-in, separate from
+# CONFIRM itself -- never a silent side effect of a normal capture.
+#
+# Reuses the Phase 3D verifier (verify_proposed_rule) as-is: the human's
+# own confirmation IS the "generator" here, not an LLM -- the exact same
+# two-condition safety check (inducing-example fidelity + no regression
+# against the existing rule set's own examples) runs before anything is
+# ever added, so a bad/over-broad candidate is refused before it can
+# shadow an existing rule, exactly as it would be for a machine-generated
+# proposal.
+
+class LearnRuleRequest(BaseModel):
+    sustain_id: str
+    source_id: str
+    raw_text: str
+    operator: str
+    params: dict
+
+
+@router.post("/capture/learn-rule")
+async def capture_learn_rule(body: LearnRuleRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    """
+    Returns one of:
+      {"learned": True, "rule_id", "auto_applies": bool}
+      {"learned": False, "reason": "could_not_generalize", "detail": str}
+      {"learned": False, "reason": "failed_verification", "detail": [str, ...]}
+      {"learned": False, "reason": "add_rule_refused", "detail": str}
+    Never raises for an honest "couldn't do this safely" outcome -- only
+    a genuine auth/ownership failure is an HTTP error.
+    """
+    _assert_owns_sustain(body.sustain_id, current_user["id"])
+
+    from sustena.core.engine_singleton import get_shared_engine
+    from sustena.core.parse_rule_learn import synthesize_rule_from_correction
+    from sustena.core.parse_rule_proposer import verify_proposed_rule
+
+    engine = get_shared_engine()
+
+    candidate = synthesize_rule_from_correction(body.source_id, body.raw_text, body.operator, body.params)
+    if candidate is None:
+        return {
+            "learned": False, "reason": "could_not_generalize",
+            "detail": "couldn't find the confirmed amount's own text in this message, so a safe rule couldn't be built.",
+        }
+
+    existing_rules = engine.get_effective_parse_rules(body.source_id)
+    ok, reasons = verify_proposed_rule(candidate, body.raw_text, existing_rules)
+    if not ok:
+        return {"learned": False, "reason": "failed_verification", "detail": reasons}
+
+    result = engine.add_parse_rule(body.source_id, candidate, author_user_id=current_user["id"])
+    if result.get("status") != "ok":
+        return {"learned": False, "reason": "add_rule_refused", "detail": result.get("reason")}
+
+    return {"learned": True, "rule_id": candidate.id, "auto_applies": candidate.status == "mapped"}
+
+
 # ── GET /orchie/capture/sources — allocate-recovery source picker data ────────
 #
 # Read-only, ownership-checked like every other Orchie route (never the
@@ -638,12 +702,14 @@ async def orchie_balance_provenance(
     silently reconciled or hidden.
 
     'liquid' = this sustain's own provenance (`own` below).
-    'household' = the sum of every currently linked child's own liquid
-    balance, per child (`children` below) -- the exact same definition
-    compute_rollup() uses, cross-checked here (`household_consistent`)
-    rather than re-derived independently, so a real divergence between
-    the rollup engine and this trace would itself be caught, not masked
-    by two different code paths quietly agreeing to be wrong the same way.
+    'household' = EVERYTHING combined (2 Aug 2026 fix, matches
+    compute_rollup()'s own household-total-is-everything change): this
+    sustain's own liquid balance plus every currently linked child's own
+    liquid balance, per child (`children` below) -- cross-checked here
+    (`household_consistent`) rather than re-derived independently, so a
+    real divergence between the rollup engine and this trace would itself
+    be caught, not masked by two different code paths quietly agreeing to
+    be wrong the same way.
 
     Read-only, ownership-checked like every other Orchie route.
     """
@@ -670,7 +736,10 @@ async def orchie_balance_provenance(
             _liquid_provenance_for_one_sustain(engine, ingest, child_id, label=link.get("member") or child_id)
         )
 
-    household_total_from_children = round(sum(c["live_balance"] for c in children_out), 2)
+    # Everything combined (2 Aug 2026 fix): own liquid + every child's --
+    # was children-only, which no longer matches compute_rollup()'s own
+    # (also just-fixed) definition of "household total."
+    household_total_from_children = round(own["live_balance"] + sum(c["live_balance"] for c in children_out), 2)
     try:
         rollup = engine.compute_rollup(sustain_id) if links else None
     except Exception:

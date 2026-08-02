@@ -321,8 +321,13 @@ def _render_household_rollup_summary(state: dict, ctx: dict) -> dict:
         agg = next(iter(rollup["aggregates"].values()), None)
         if agg:
             out["household_total"] = agg.get("value")
-            out["included_children"] = len(agg.get("included", []))
-            out["excluded_children"] = len(agg.get("excluded", []))
+            # Household-total fix (2 Aug 2026): the aggregate's own
+            # included/excluded lists now also carry the PARENT's own
+            # self-entry (is_self:True) so household_total means everything
+            # combined. "N habitats linked" must count real linked children
+            # only -- excluding the parent's own entry from this count.
+            out["included_children"] = len([i for i in agg.get("included", []) if not i.get("is_self")])
+            out["excluded_children"] = len([e for e in agg.get("excluded", []) if not e.get("is_self")])
     return out
 
 
@@ -396,8 +401,13 @@ def _gather_candidates(
                 agg = next(iter(rollup["aggregates"].values()), None)
                 if agg:
                     household_total = agg.get("value")
-                    included_children = len(agg.get("included", []))
-                    excluded_children = len(agg.get("excluded", []))
+                    # Household-total fix (2 Aug 2026): exclude the parent's
+                    # own self-entry (is_self:True) from the "habitats
+                    # linked" count -- it's the household's own liquid, not
+                    # a linked child, even though it's now folded into
+                    # household_total itself. See _render_household_rollup_summary's identical fix above.
+                    included_children = len([i for i in agg.get("included", []) if not i.get("is_self")])
+                    excluded_children = len([e for e in agg.get("excluded", []) if not e.get("is_self")])
 
             # Honest empty-slate suppression (Bonnie, 2 Aug 2026 -- "don't
             # surface it as clutter"): nothing of its own AND nothing rolled

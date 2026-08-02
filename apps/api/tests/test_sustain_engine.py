@@ -400,6 +400,33 @@ class TestInstantiateMissingParam:
         )
         assert sid  # instantiated successfully
 
+    def test_an_omitted_optional_param_with_a_declared_default_resolves_not_left_as_a_raw_token(self, engine: SustainEngine):
+        """
+        Real bug found live (2 Aug 2026): habitat.json declares
+        role_in_family as optional with default:"" , but a caller that omits
+        it entirely (e.g. holon.create_child) used to leave the literal
+        unresolved string "{{role_in_family}}" sitting in real state, visible
+        to a real user. _resolve_tokens() has no defaulting behaviour of its
+        own -- instantiate() must fill in declared defaults for any omitted
+        optional param BEFORE token resolution runs.
+        """
+        sid = engine.instantiate("habitat", "u1", {"owner_ids": ["u1"], "name": "Project IO"})  # role_in_family omitted
+        state = engine.get_state(sid)
+        assert state["identity"]["role_in_family"] == ""
+        assert "{{" not in state["identity"]["role_in_family"]
+
+    def test_an_explicitly_passed_optional_param_still_wins_over_its_default(self, engine: SustainEngine):
+        sid = engine.instantiate("habitat", "u1", {"owner_ids": ["u1"], "name": "Bonnie", "role_in_family": "parent"})
+        state = engine.get_state(sid)
+        assert state["identity"]["role_in_family"] == "parent"
+
+    def test_default_filling_does_not_change_a_param_with_no_declared_default(self, engine: SustainEngine):
+        # initial_goal_name has no "default" key in homestead.json -- must
+        # stay genuinely absent, not filled with e.g. None or "".
+        sid = engine.instantiate("homestead", "u1", {"owner_ids": ["u1"]})
+        state = engine.get_state(sid)
+        assert state["finances"]["goals"] == []  # no goal was silently added
+
 
 # ── 8. Slice 2 — the enforcing gate (Move 2) ───────────────────────────────────
 

@@ -599,9 +599,89 @@ function ReadyReview({ payload, onSetAmount, onSetDescription, onSetDirection, o
   );
 }
 
+/* ─── "User fixes once -> it learns" (2 Aug 2026) ───────────────────────
+ * After a real capture confirms, offer to crystallise THIS correction into
+ * a real declared parse rule (Phase 3C's gated add_parse_rule, via the
+ * Phase 3D verifier reused as-is) -- explicit, opt-in, never a silent
+ * side effect of CONFIRM itself. Only offered when there's real SMS text
+ * behind the capture (a manual narration via NarrateBar has nothing to
+ * generalise from). */
+function LearnRuleControl({ sustainId, sourceId, rawText, operator, params }) {
+  const [status, setStatus] = useState('idle'); // idle | learning | learned | rejected | error
+  const [detail, setDetail] = useState(null);
+
+  const learn = async () => {
+    setStatus('learning');
+    setDetail(null);
+    try {
+      const data = await api.post('/orchie/capture/learn-rule', {
+        sustain_id: sustainId, source_id: sourceId, raw_text: rawText, operator, params,
+      });
+      if (data.learned) {
+        setStatus('learned');
+        setDetail(
+          data.auto_applies
+            ? 'similar messages will book automatically next time'
+            : 'similar messages will be pre-filled and ready to confirm next time'
+        );
+      } else {
+        setStatus('rejected');
+        setDetail(
+          data.reason === 'could_not_generalize' ? "couldn't find a safe pattern in this message"
+          : data.reason === 'failed_verification' ? 'this would risk matching other messages incorrectly'
+          : (typeof data.detail === 'string' ? data.detail : 'could not learn this one')
+        );
+      }
+    } catch (e) {
+      setStatus('error');
+      setDetail(e.message || 'could not reach orchie');
+    }
+  };
+
+  if (status === 'learned') {
+    return (
+      <div style={{ marginTop: 8, ...mutedText, color: 'var(--teal)', fontWeight: 700 }}>
+        ✓ learned — {detail}
+      </div>
+    );
+  }
+  if (status === 'rejected' || status === 'error') {
+    return (
+      <div style={{ marginTop: 8, ...mutedText }}>
+        didn't learn this one — {detail}
+      </div>
+    );
+  }
+  return (
+    <button
+      onClick={learn} disabled={status === 'learning'}
+      style={{ ...cancelButton, marginTop: 8, opacity: status === 'learning' ? 0.6 : 1 }}
+    >
+      {status === 'learning' ? 'learning…' : '+ REMEMBER THIS FORMAT'}
+    </button>
+  );
+}
+
 function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messageId, effectText, onClose, onCommitted }) {
   const [phase, setPhase] = useState('loading');
   const [payload, setPayload] = useState(null);
+  // The raw SMS behind this capture, if any -- fetched once per messageId
+  // so LearnRuleControl (below) has real text to generalise from. Stays
+  // null for a manual narration (no messageId) or if the fetch fails,
+  // and the "remember this format" offer is simply never shown then.
+  const [rawMessageInfo, setRawMessageInfo] = useState(null);
+  useEffect(() => {
+    if (!messageId) { setRawMessageInfo(null); return; }
+    let cancelled = false;
+    api.get(`/api/v1/ingest/messages/${encodeURIComponent(messageId)}`)
+      .then(data => {
+        if (cancelled) return;
+        const msg = data?.data;
+        if (msg?.raw_payload && msg?.source_id) setRawMessageInfo({ sourceId: msg.source_id, rawText: msg.raw_payload });
+      })
+      .catch(() => { if (!cancelled) setRawMessageInfo(null); });
+    return () => { cancelled = true; };
+  }, [messageId]);
   const [known, setKnown] = useState({});
   const [ignoreHistory, setIgnoreHistory] = useState(false);
 
@@ -794,12 +874,15 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
   // there once its job is done -- shows the confirmation, then collapses
   // on its own shortly after (CLOSE is still available for an immediate
   // manual dismiss). Never applies to 'refused' -- a refusal must stay
-  // visible until the person retries or explicitly closes it.
+  // visible until the person retries or explicitly closes it. When a real
+  // "remember this format" offer is being shown (rawMessageInfo present),
+  // the delay is longer -- give the person a real chance to see and tap
+  // it before the card vanishes out from under them.
   useEffect(() => {
     if (phase !== 'committed') return;
-    const t = setTimeout(() => onClose?.(), 2600);
+    const t = setTimeout(() => onClose?.(), rawMessageInfo ? 8000 : 2600);
     return () => clearTimeout(t);
-  }, [phase, onClose]);
+  }, [phase, onClose, rawMessageInfo]);
 
   return (
     <div style={{
@@ -915,6 +998,15 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--teal)' }} />
             ✓ recorded{committedSummary ? ` — ${committedSummary}` : ''}
           </div>
+          {rawMessageInfo && lastAttempt && (
+            <LearnRuleControl
+              sustainId={sustainId}
+              sourceId={rawMessageInfo.sourceId}
+              rawText={rawMessageInfo.rawText}
+              operator={lastAttempt.operator}
+              params={lastAttempt.params}
+            />
+          )}
           <button onClick={onClose} style={{ ...cancelButton, marginTop: 10 }}>CLOSE</button>
         </div>
       )}
@@ -1986,17 +2078,25 @@ function RollupCard({ rollup }) {
       <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>
         household roll-up
       </div>
-      {aggregates.map(([id, agg]) => (
-        <div key={id} style={{ marginBottom: 6 }}>
-          <div style={{ ...questionText, fontWeight: 700 }}>
-            {id.replace(/_/g, ' ')} — Ksh {Number(agg.value || 0).toLocaleString()}
+      {aggregates.map(([id, agg]) => {
+        // Household-total fix (2 Aug 2026): included/excluded now also
+        // carry the household's own self-entry (is_self:true) so the
+        // total means everything combined -- the "N linked holons" count
+        // below is real linked children only, excluding that self-entry.
+        const childIncluded = (agg.included || []).filter(i => !i.is_self);
+        const childExcluded = (agg.excluded || []).filter(e => !e.is_self);
+        return (
+          <div key={id} style={{ marginBottom: 6 }}>
+            <div style={{ ...questionText, fontWeight: 700 }}>
+              {id.replace(/_/g, ' ')} — Ksh {Number(agg.value || 0).toLocaleString()}
+            </div>
+            <div style={mutedText}>
+              everything combined — {agg.op} over your own + {childIncluded.length} linked holon{childIncluded.length === 1 ? '' : 's'}
+              {childExcluded.length > 0 && ` · ${childExcluded.length} excluded — ${childExcluded[0].reason}`}
+            </div>
           </div>
-          <div style={mutedText}>
-            {agg.op} over {agg.included.length} linked holon{agg.included.length === 1 ? '' : 's'}
-            {agg.excluded.length > 0 && ` · ${agg.excluded.length} excluded — ${agg.excluded[0].reason}`}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

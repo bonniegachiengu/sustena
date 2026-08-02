@@ -1400,3 +1400,124 @@ class TestMarkNotATransaction:
         # Untouched -- still a real needs_attention item under user A's sustain.
         msg = client.get(f"/api/v1/ingest/messages/{message_id}", headers=headers_a).json()["data"]
         assert msg["status"] == "needs_attention"
+
+
+# ── POST /orchie/capture/learn-rule -- "user fixes once -> it learns" ────────
+
+class TestLearnRule:
+    def test_requires_auth(self, client, sustain):
+        r = client.post(
+            "/orchie/capture/learn-rule",
+            json={"sustain_id": sustain, "source_id": "mpesa", "raw_text": "x", "operator": "budget.spend", "params": {"amount": 1}},
+        )
+        assert r.status_code == 401
+
+    def test_unowned_sustain_returns_404(self, client, user):
+        headers, _ = user
+        r = client.post(
+            "/orchie/capture/learn-rule",
+            json={"sustain_id": "does-not-exist", "source_id": "mpesa", "raw_text": "x", "operator": "budget.spend", "params": {"amount": 1}},
+            headers=headers,
+        )
+        assert r.status_code == 404
+
+    def test_learns_a_parsed_unmapped_rule_from_a_real_spend_correction(self, client, user, sustain):
+        headers, _ = user
+        raw_text = "XYZ9K2P7QR Confirmed. Ksh650.00 sent to KENYA POWER PREPAID via a brand new channel on 2/8/26 at 9:00 AM."
+        r = client.post(
+            "/orchie/capture/learn-rule",
+            json={
+                "sustain_id": sustain, "source_id": "mpesa", "raw_text": raw_text,
+                "operator": "budget.spend",
+                "params": {"pocket_name": "electricity", "amount": 650.0, "description": "KENYA POWER PREPAID", "category": ""},
+            },
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["learned"] is True
+        assert data["auto_applies"] is False  # spend stays a human-confirm shape, never silently auto-books
+
+        # Confirm it's now actually consulted by real ingest for a
+        # SAME-template, DIFFERENT-amount future message.
+        future_text = raw_text.replace("XYZ9K2P7QR", "XYZ9K2P8QS").replace("650.00", "900.00")
+        r2 = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "mpesa", "sustain_id": sustain, "raw_payload": future_text},
+            headers=headers,
+        )
+        assert r2.json()["data"]["status"] == "needs_attention"
+        assert r2.json()["data"]["parser_name"] == data["rule_id"]
+        assert r2.json()["data"]["parsed_fields"]["amount"] == 900.0
+
+    def test_learns_a_mapped_rule_from_a_real_income_correction_and_it_auto_applies(self, client, user, sustain):
+        headers, _ = user
+        raw_text = "ABC1234567 Confirmed. You have been credited Ksh2,500.00 via a brand new bonus programme on 2/8/26 at 10:00 AM."
+        r = client.post(
+            "/orchie/capture/learn-rule",
+            json={
+                "sustain_id": sustain, "source_id": "mpesa", "raw_text": raw_text,
+                "operator": "budget.record_income",
+                "params": {"amount": 2500.0, "source": "M-Pesa: bonus", "frequency": "once"},
+            },
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["learned"] is True
+        assert data["auto_applies"] is True
+
+        state_before = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]
+        balance_before = state_before["finances"]["liquid"]["balance"]
+
+        future_text = raw_text.replace("ABC1234567", "ABC7654321").replace("2,500.00", "3,000.00")
+        r2 = client.post(
+            "/api/v1/ingest/capture",
+            json={"source_id": "mpesa", "sustain_id": sustain, "raw_payload": future_text},
+            headers=headers,
+        )
+        assert r2.json()["data"]["status"] == "applied"  # genuinely auto-booked, no human tap
+
+        state_after = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]
+        assert state_after["finances"]["liquid"]["balance"] == balance_before + 3000.0
+
+    def test_could_not_generalize_when_amount_is_not_in_the_text(self, client, user, sustain):
+        headers, _ = user
+        r = client.post(
+            "/orchie/capture/learn-rule",
+            json={
+                "sustain_id": sustain, "source_id": "mpesa", "raw_text": "a message with no matching digits anywhere",
+                "operator": "budget.spend",
+                "params": {"pocket_name": "food", "amount": 500.0},
+            },
+            headers=headers,
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["learned"] is False
+        assert data["reason"] == "could_not_generalize"
+
+    def test_failed_verification_when_candidate_would_intercept_an_existing_rule(self, client, user, sustain):
+        headers, _ = user
+        # Deliberately near-identical to mpesa_buygoods' own real declared
+        # example (only the last ref character differs: ...P2R vs ...P2Q),
+        # same amount -- since the synthesizer keeps everything but ref+
+        # amount as a literal anchor, this candidate's pattern also matches
+        # the REAL seed rule's own stored example verbatim, which
+        # verify_proposed_rule's stored-message regression check must catch
+        # and refuse before it's ever added.
+        r = client.post(
+            "/orchie/capture/learn-rule",
+            json={
+                "sustain_id": sustain, "source_id": "mpesa",
+                "raw_text": "QGH7XJ4P2R Confirmed. Ksh450.00 paid to NAIVAS SUPERMARKET on 20/7/26 at 4:30 PM. New M-PESA balance is Ksh12,050.00",
+                "operator": "budget.spend",
+                "params": {"pocket_name": "food", "amount": 450.0},
+            },
+            headers=headers,
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["learned"] is False
+        assert data["reason"] == "failed_verification"
+        assert len(data["detail"]) > 0
