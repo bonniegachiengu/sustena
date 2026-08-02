@@ -1411,6 +1411,135 @@ function WidgetCard({ widget, sustainId, onCommitted }) {
   );
 }
 
+/**
+ * The processed/activity list (Bonnie, 2 Aug 2026: "there is no UI for the
+ * processed" -- Orchie only ever showed what still needed a decision plus
+ * the rollup number, never what had actually already been recorded).
+ *
+ * One row per real, committed spend/income transaction, newest first,
+ * sourced from GET /orchie/activity (the real S3 event log, not a guess).
+ * Tap a row to reveal the raw message behind it, when one exists -- the
+ * first, deliberately lightweight cut of a fuller message-audit log.
+ */
+function ActivityEntryRow({ entry }) {
+  const [expanded, setExpanded] = useState(false);
+  const amount = entry.amount != null ? Math.round(entry.amount).toLocaleString() : '—';
+  const dateLabel = entry.date
+    ? new Date(entry.date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '';
+  const title = entry.description || entry.pocket || (entry.direction === 'in' ? 'money received' : 'transaction');
+
+  return (
+    <div
+      onClick={() => setExpanded(e => !e)}
+      style={{ padding: '10px 2px', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <DirectionBadge direction={entry.direction === 'in' ? 'received' : 'sent'} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{
+              fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--text-primary)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220,
+            }}>
+              {title}
+            </div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+              {entry.pocket ? `${entry.pocket} · ` : ''}{dateLabel}{entry.source ? ` · ${entry.source}` : ''}
+            </div>
+          </div>
+        </div>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, flexShrink: 0,
+          color: entry.direction === 'in' ? 'var(--teal)' : 'var(--text-primary)',
+        }}>
+          KES {amount}
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{
+          marginTop: 8, padding: 10, borderRadius: 'var(--radius-sm)',
+          background: 'var(--bg-overlay)', border: '1px solid var(--border-mid)',
+        }}>
+          {entry.raw_text ? (
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-secondary)',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.5,
+            }}>
+              {entry.raw_text}
+            </div>
+          ) : (
+            <div style={mutedText}>entered directly — no message behind this</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityList({ sustainId }) {
+  const [open, setOpen] = useState(false);
+  const [entries, setEntries] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.get(`/orchie/activity?sustain_id=${encodeURIComponent(sustainId)}&limit=50`);
+      setEntries(data.entries);
+    } catch (e) {
+      setError(e.message || 'could not reach orchie');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && entries === null) load();
+  };
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <button
+        onClick={toggle}
+        style={{
+          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.05em',
+          color: 'var(--text-muted)',
+        }}
+      >
+        {open ? 'hide processed' : 'processed / activity'}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {loading && <div style={mutedText}>loading…</div>}
+          {error && <div style={{ ...mutedText, color: 'var(--danger)' }}>{error}</div>}
+          {entries && entries.length === 0 && (
+            <div style={mutedText}>nothing recorded yet</div>
+          )}
+          {entries && entries.length > 0 && (
+            <div style={{
+              maxHeight: 400, overflowY: 'auto', padding: '4px 12px',
+              borderRadius: 'var(--radius-md)', border: '1px solid var(--border-mid)',
+              background: 'var(--bg-raised)',
+            }}>
+              {entries.map((e, i) => (
+                <ActivityEntryRow key={e.message_id || `${e.event_name}-${e.date}-${i}`} entry={e} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Empty({ text }) {
   return (
     <div style={{
@@ -1597,6 +1726,8 @@ export default function OrchieShell() {
           )}
         </>
       )}
+
+      {sustainId && <ActivityList sustainId={sustainId} />}
     </div>
   );
 }

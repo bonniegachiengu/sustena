@@ -1285,6 +1285,7 @@ class SustainEngine:
         operator_name: str,
         params: dict,
         operative_id: str | None = None,
+        origin_message_id: str | None = None,
     ) -> OperatorResult:
         """
         Execute a named operator against a sustain's live state.
@@ -1303,6 +1304,14 @@ class SustainEngine:
 
         If the operator raises an exception, returns OperatorResult.fail()
         with the exception message — state is NOT persisted.
+
+        origin_message_id (optional): when this call originated from a
+        captured message (ingest_engine._process()'s own mapped-capture
+        call, or Orchie's capture_confirm route), stamping it directly onto
+        the resulting event's payload gives the processed/activity list
+        (2 Aug 2026) a REAL, structural link back to the raw message behind
+        a transaction -- not a guessed join on amount/timestamp proximity.
+        Every existing caller omits this and is completely unaffected.
 
         Returns:
             OperatorResult (check .succeeded / .failed, .data, .reason)
@@ -1435,7 +1444,10 @@ class SustainEngine:
                     {
                         "id": ev.get("id"),
                         "event_name": ev.get("event_name"),
-                        "payload": ev.get("_payload", {}),
+                        "payload": (
+                            {**ev.get("_payload", {}), "origin_message_id": origin_message_id}
+                            if origin_message_id else ev.get("_payload", {})
+                        ),
                         "operator_log_id": ev.get("operator_log_id"),
                         "timestamp": ev.get("timestamp"),
                         "mutations": mutations if i == 0 else [],

@@ -420,6 +420,7 @@ class IngestEngine:
         if result.status == "mapped":
             op_result = await self._sustain_engine.execute_operator(
                 row["sustain_id"], result.operator_name, result.operator_params,
+                origin_message_id=message_id,
             )
             operator_name = result.operator_name
             operator_params_json = json.dumps(result.operator_params, default=str)

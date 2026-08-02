@@ -1078,3 +1078,136 @@ class TestZeroPocketOnRamp:
             headers=headers,
         )
         assert confirm_resp.json()["result"]["status"] == "ok"
+
+
+class TestActivityList:
+    """GET /orchie/activity -- the processed/activity list (2 Aug 2026,
+    Bonnie: "there is no UI for the processed"). Sourced from the real S3
+    event log, newest first, with an honest raw-message link only when a
+    real origin_message_id exists on the event."""
+
+    def test_no_auth_returns_401(self, client, sustain):
+        r = client.get(f"/orchie/activity?sustain_id={sustain}")
+        assert r.status_code == 401
+
+    def test_unowned_sustain_returns_404(self, client, user):
+        headers, _ = user
+        r = client.get("/orchie/activity?sustain_id=does-not-exist", headers=headers)
+        assert r.status_code == 404
+
+    def test_empty_sustain_returns_honest_empty_list(self, client, user, sustain):
+        headers, _ = user
+        r = client.get(f"/orchie/activity?sustain_id={sustain}", headers=headers)
+        assert r.status_code == 200
+        assert r.json()["entries"] == []
+
+    def test_classified_spend_appears_with_raw_message_link(self, client, user, sustain):
+        headers, _ = user
+        client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.add_pocket", "params": {"pocket_name": "food"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.record_income", "params": {"amount": 2000, "source": "seed", "frequency": "once"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.allocate", "params": {"pocket_name": "food", "amount": 1000, "period": "monthly"}},
+            headers=headers,
+        )
+        r = client.post("/api/v1/ingest/capture", json={
+            "source_id": "mpesa", "sustain_id": sustain,
+            "raw_payload": "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIVAS SUPERMARKET on 20/7/26 at 4:30 PM. New M-PESA balance is Ksh12,050.00",
+        }, headers=headers)
+        message_id = r.json()["data"]["message_id"]
+
+        client.post(
+            "/orchie/capture/confirm",
+            json={
+                "sustain_id": sustain, "operator": "budget.spend",
+                "params": {"pocket_name": "food", "amount": 450, "description": "NAIVAS SUPERMARKET"},
+                "message_id": message_id,
+            },
+            headers=headers,
+        )
+
+        activity = client.get(f"/orchie/activity?sustain_id={sustain}", headers=headers).json()
+        entries = activity["entries"]
+        # Two tracked entries: the setup income (2000, "in") and the
+        # classified spend (450, "out") -- newest (the spend) first.
+        assert len(entries) == 2
+        entry = entries[0]
+        assert entry["direction"] == "out"
+        assert entry["amount"] == 450
+        assert entry["pocket"] == "food"
+        assert entry["description"] == "NAIVAS SUPERMARKET"
+        assert entry["source"] == "mpesa"
+        assert "NAIVAS" in entry["raw_text"]
+        assert entry["message_id"] == message_id
+
+    def test_narration_only_transaction_has_no_raw_message_honestly(self, client, user, sustain):
+        headers, _ = user
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.record_income", "params": {"amount": 3000, "source": "Salary", "frequency": "once"}},
+            headers=headers,
+        )
+        activity = client.get(f"/orchie/activity?sustain_id={sustain}", headers=headers).json()
+        entry = activity["entries"][0]
+        assert entry["direction"] == "in"
+        assert entry["amount"] == 3000
+        assert entry["source"] is None
+        assert entry["raw_text"] is None
+        assert entry["message_id"] is None
+
+    def test_newest_first_ordering(self, client, user, sustain):
+        headers, _ = user
+        for amount in (100, 200, 300):
+            client.post(
+                "/devui/console/execute",
+                json={"sustain_id": sustain, "operator": "budget.record_income", "params": {"amount": amount, "source": "seed", "frequency": "once"}},
+                headers=headers,
+            )
+        entries = client.get(f"/orchie/activity?sustain_id={sustain}", headers=headers).json()["entries"]
+        assert [e["amount"] for e in entries] == [300, 200, 100]
+
+    def test_allocate_and_transfer_are_excluded_from_this_first_cut(self, client, user, sustain):
+        headers, _ = user
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.record_income", "params": {"amount": 5000, "source": "seed", "frequency": "once"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.allocate", "params": {"pocket_name": "food", "amount": 2000, "period": "monthly"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.allocate", "params": {"pocket_name": "rent", "amount": 1000, "period": "monthly"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.transfer", "params": {"from_pocket": "food", "to_pocket": "rent", "amount": 200}},
+            headers=headers,
+        )
+        entries = client.get(f"/orchie/activity?sustain_id={sustain}", headers=headers).json()["entries"]
+        assert len(entries) == 1  # only the income -- allocate/transfer aren't in this first cut
+        assert entries[0]["direction"] == "in"
+
+    def test_scoped_to_the_owning_users_own_sustain_only(self, client, user):
+        headers_a, user_id_a = user
+        email_b = f"orchie-activity-other-{uuid.uuid4().hex[:10]}@example.com"
+        r = client.post("/api/v1/users/register", json={"email": email_b, "password": "test-password-123"})
+        headers_b = {"Authorization": f"Bearer {r.json()['data']['token']}"}
+
+        r = client.post("/devui/sustains", json={"template_id": "homestead", "user_id": user_id_a, "parameters": {}}, headers=headers_a)
+        sustain_a = r.json()["data"]["sustain_id"]
+
+        r = client.get(f"/orchie/activity?sustain_id={sustain_a}", headers=headers_b)
+        assert r.status_code == 404

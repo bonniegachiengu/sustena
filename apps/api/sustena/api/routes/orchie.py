@@ -289,7 +289,16 @@ async def capture_confirm(
     # Whether body.operator is actually declared on this sustain's spec is
     # checked INSIDE execute_operator itself (the same allow-list check
     # every other write goes through) -- not duplicated here.
-    result = await engine.execute_operator(body.sustain_id, body.operator, body.params)
+    #
+    # origin_message_id (when this confirm resolved a real captured
+    # message) stamps the resulting event with a real, structural link
+    # back to the raw SMS -- see execute_operator()'s own docstring. Omitted
+    # entirely for a narration-only capture (no message_id), which is
+    # exactly the honest "no raw message behind this" case the processed/
+    # activity list surfaces as such, not a guessed link.
+    result = await engine.execute_operator(
+        body.sustain_id, body.operator, body.params, origin_message_id=body.message_id,
+    )
 
     resolved = False
     if result.succeeded and body.message_id:
@@ -367,3 +376,91 @@ async def capture_sources(
     liquid_balance = (finances.get("liquid") or {}).get("balance", 0.0) or 0.0
 
     return {"pockets": pockets, "liquid_balance": liquid_balance}
+
+
+# ── GET /orchie/activity — the processed/activity list ─────────────────────
+#
+# Bonnie, 2 Aug 2026: "there is no UI for the processed" -- Orchie only ever
+# showed what still NEEDS a decision (classify cards) plus the rollup
+# number; there was no way to see what had actually already been recorded.
+# This is the first, deliberately lightweight cut of a fuller message-audit
+# log (queue #2) -- amount/direction/pocket/description/date/source per
+# transaction, plus access to the raw message behind it, newest first.
+
+# The two event types this first cut treats as "a transaction" -- what a
+# person means by "did money move in or out." allocate/transfer (money
+# moving between the household's OWN pockets) is a different category with
+# no merchant/direction in the everyday sense and is deliberately left out
+# of this first cut, not silently conflated with a real transaction.
+_ACTIVITY_EVENT_TYPES = {
+    "event.finances.pocket_spent": "out",
+    "event.finances.income_received": "in",
+}
+
+
+@router.get("/activity")
+async def orchie_activity(
+    sustain_id: str, limit: int = 50, current_user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Every real, committed spend/income transaction for this sustain,
+    newest first -- sourced directly from the real S3 event log (never
+    from ingest_messages alone: a narrated or Console-entered transaction
+    has no message row at all, so events are the one source guaranteed
+    complete regardless of how a transaction was entered).
+
+    Each entry includes source/raw_text ONLY when the underlying event
+    carries a real origin_message_id (see execute_operator()'s own
+    docstring for how that gets stamped on) -- a structural link, never a
+    guessed join on amount/timestamp proximity. A narration-only or
+    Console-entered transaction honestly has neither field, rather than a
+    fabricated or best-guessed one.
+
+    Read-only, ownership-checked like every other Orchie route.
+    """
+    _assert_owns_sustain(sustain_id, current_user["id"])
+
+    from sustena.core.engine_singleton import get_shared_engine
+    from sustena.core.ingest_singleton import get_shared_ingest_engine
+
+    engine = get_shared_engine()
+    # A generous, bounded raw pull -- filtered down to transaction events
+    # below, then truncated to the requested `limit`. Reuses get_events()
+    # (the real, already-tested, seq-ordered read every other consumer of
+    # the event log uses) rather than standing up a second, parallel query.
+    try:
+        raw_events = engine.get_events(sustain_id, limit=max(limit * 4, 200))
+    except Exception as exc:
+        logger.debug("orchie_activity(%s): get_events failed: %s", sustain_id, exc)
+        raw_events = []
+
+    ingest = get_shared_ingest_engine()
+    entries: list[dict] = []
+    for ev in raw_events:
+        direction = _ACTIVITY_EVENT_TYPES.get(ev.get("event_name"))
+        if direction is None:
+            continue
+        payload = ev.get("payload") or {}
+        entry = {
+            "event_name": ev["event_name"],
+            "direction": direction,
+            "amount": payload.get("amount"),
+            "pocket": payload.get("pocket"),
+            "description": payload.get("description") or payload.get("source") or None,
+            "date": ev.get("timestamp"),
+            "message_id": None,
+            "source": None,
+            "raw_text": None,
+        }
+        msg_id = payload.get("origin_message_id")
+        if msg_id:
+            msg = ingest.get_message(msg_id)
+            if msg and msg.get("sustain_id") == sustain_id:
+                entry["message_id"] = msg_id
+                entry["source"] = msg.get("source_id")
+                entry["raw_text"] = msg.get("raw_payload")
+        entries.append(entry)
+        if len(entries) >= limit:
+            break
+
+    return {"sustain_id": sustain_id, "entries": entries}

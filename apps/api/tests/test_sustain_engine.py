@@ -755,6 +755,57 @@ class TestEventSourcing:
         assert len(engine.get_events(homestead_sid, limit=100)) == before
 
 
+class TestOriginMessageId:
+    """
+    execute_operator()'s optional origin_message_id -- stamps a real,
+    structural link back to a captured message directly onto the
+    resulting event's payload (2 Aug 2026, built for the processed/
+    activity list's raw-message access). Every existing caller omits it
+    and must be completely unaffected.
+    """
+
+    @pytest.mark.asyncio
+    async def test_origin_message_id_lands_on_the_events_payload(self, engine: SustainEngine, homestead_sid: str):
+        await engine.execute_operator(
+            homestead_sid, "budget.record_income", {"amount": 500.0, "source": "seed"},
+            origin_message_id="msg-abc-123",
+        )
+        events = engine.get_events(homestead_sid, limit=5)
+        income_event = next(e for e in events if e["event_name"] == "event.finances.income_received")
+        assert income_event["payload"]["origin_message_id"] == "msg-abc-123"
+
+    @pytest.mark.asyncio
+    async def test_omitted_by_default_no_stray_key_on_the_payload(self, engine: SustainEngine, homestead_sid: str):
+        await engine.execute_operator(homestead_sid, "budget.record_income", {"amount": 500.0, "source": "seed"})
+        events = engine.get_events(homestead_sid, limit=5)
+        income_event = next(e for e in events if e["event_name"] == "event.finances.income_received")
+        assert "origin_message_id" not in income_event["payload"]
+
+    @pytest.mark.asyncio
+    async def test_rebuild_state_still_matches_get_state_with_origin_message_id_set(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        # The extra payload key must never disturb the fold -- mutations
+        # (what actually changes state) are untouched by this.
+        await engine.execute_operator(
+            homestead_sid, "budget.record_income", {"amount": 500.0, "source": "seed"},
+            origin_message_id="msg-abc-123",
+        )
+        assert engine.rebuild_state(homestead_sid) == engine.get_state(homestead_sid)
+
+    @pytest.mark.asyncio
+    async def test_a_refused_call_stamps_nothing_since_nothing_is_persisted(
+        self, engine: SustainEngine, homestead_sid: str
+    ):
+        before = len(engine.get_events(homestead_sid, limit=100))
+        result = await engine.execute_operator(
+            homestead_sid, "budget.spend", {"pocket_name": "nonexistent", "amount": 100.0},
+            origin_message_id="msg-should-never-land",
+        )
+        assert result.failed
+        assert len(engine.get_events(homestead_sid, limit=100)) == before
+
+
 class TestMigrateToEventSourcing:
     """
     migrate_to_event_sourcing() backfills sustains created before Slice 3 —
