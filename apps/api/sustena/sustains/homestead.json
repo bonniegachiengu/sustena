@@ -262,6 +262,15 @@
       "pawa_cost": 0
     },
     {
+      "name": "budget.add_pocket",
+      "description": "Create a new, empty budget pocket. No money movement.",
+      "params": [
+        "pocket_name",
+        "limit"
+      ],
+      "pawa_cost": 0
+    },
+    {
       "name": "budget.spend",
       "description": "Record a spend against a pocket.",
       "params": [

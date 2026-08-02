@@ -714,3 +714,54 @@ class TestFullCorrectionFreedom:
         message_id = cap.json()["data"]["message_id"]
         msg = client.get(f"/api/v1/ingest/messages/{message_id}", headers=headers).json()["data"]
         assert msg["raw_payload"] == self.UNPARSED_SMS
+
+
+class TestAddPocketEndToEnd:
+    """budget.add_pocket over the REAL HTTP route against a real homestead
+    sustain -- this is the exact path that caught a real gap live: adding
+    an operator to OPERATOR_REGISTRY is not enough, it must also be
+    declared on the sustain's own spec operator list or execute_operator's
+    allow-list check refuses it with constraint_violated=operator_allowed."""
+
+    def test_add_pocket_via_the_real_confirm_route(self, client, user, sustain):
+        headers, _ = user
+        r = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.add_pocket", "params": {"pocket_name": "holiday fund"}},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["result"]["status"] == "ok"
+        assert data["result"]["data"]["pocket"] == "holiday_fund"
+
+        state = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]
+        assert state["finances"]["pockets"]["holiday_fund"]["allocated"] == 0.0
+        assert state["finances"]["liquid"]["balance"] == 0.0  # no money moved by pocket creation itself
+
+    def test_newly_created_pocket_can_then_receive_a_real_classification(self, client, user, sustain):
+        # The full "+ NEW" flow: create the pocket, then a captured
+        # transaction files into it exactly like any pre-existing pocket.
+        headers, _ = user
+        client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.add_pocket", "params": {"pocket_name": "car repair"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.record_income", "params": {"amount": 5000, "source": "seed", "frequency": "once"}},
+            headers=headers,
+        )
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.allocate", "params": {"pocket_name": "car_repair", "amount": 3000, "period": "monthly"}},
+            headers=headers,
+        )
+        r = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.spend", "params": {"pocket_name": "car_repair", "amount": 1200, "description": "brake pads"}},
+            headers=headers,
+        )
+        assert r.json()["result"]["status"] == "ok"
+        assert r.json()["result"]["data"]["amount_spent"] == 1200.0
