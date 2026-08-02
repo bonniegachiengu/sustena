@@ -151,9 +151,16 @@ function classifySource(sender) {
   return null; // shouldn't happen -- native side already filtered; defense in depth only
 }
 
-async function forwardMessages(sustainId, messages) {
+async function forwardMessages(sustainId, messages, { signal } = {}) {
   let forwarded = 0;
   for (const msg of messages || []) {
+    // Checked BEFORE each POST, not just once -- a cancelled sync must stop
+    // issuing new network requests immediately, not finish whatever's left
+    // of a potentially thousands-long backlog. The 2 Aug 2026 incident (an
+    // ungated 90-day auto-backfill re-captured 598 messages and re-executed
+    // real budget operators before anyone could react) is exactly the class
+    // of runaway loop this guard exists to make stoppable.
+    if (signal?.aborted) break;
     const sourceId = classifySource(msg.sender);
     if (!sourceId) continue;
     try {
@@ -202,19 +209,26 @@ export async function requestSmsPermission() {
 }
 
 /** Backfill M-Pesa/KCB messages already in the inbox, filtered to the last
- *  `sinceDays` days (0 or less means "all", no lower bound -- the re-sync
- *  window picker's explicit "all" option, see RESYNC_WINDOWS below). Used
- *  both for the automatic one-time backfill on first enabling capture, and
- *  for an explicit user-triggered re-sync (SmsCaptureCard's RE-SYNC
- *  control) -- same function either way, just a different chosen window.
- *  Safe to call repeatedly: capture() is idempotent server-side, so
- *  messages already captured just come back is_duplicate=true and are
- *  skipped by forwardMessages()'s own notify guard; a message whose
- *  dedup_key was cleared (e.g. after a clean-slate reset) is genuinely
- *  re-captured fresh, which is the whole point of a re-sync after a reset. */
-export async function backfillInbox(sustainId, sinceDays = 90) {
+ *  `sinceDays` days (0 or less means "all", no lower bound). This is now
+ *  the ONLY way any historical inbox scan ever runs -- NEVER called
+ *  automatically. Both first-time enable and every later re-sync go
+ *  through SmsCaptureCard's explicit window picker (WindowPicker below),
+ *  which requires a real human tap on a chosen window before this fires.
+ *
+ *  Fixed 2 Aug 2026: this used to auto-fire with a fixed 90-day window on
+ *  every app mount once permission was already granted. Harmless while
+ *  dedup silently absorbed the repeat -- until a clean-slate reset cleared
+ *  every dedup_key, at which point the very next mount re-captured 598
+ *  real messages and re-executed real budget operators (moving real
+ *  money) before anyone could react. The fix is structural, not just a
+ *  removed call site: nothing in this module calls backfillInbox() except
+ *  ResyncControl's onRun, which only fires from an explicit tap.
+ *
+ *  `signal` (an AbortController's .signal) lets an in-progress sync be
+ *  genuinely stopped mid-flight -- see forwardMessages()'s own check. */
+export async function backfillInbox(sustainId, sinceDays = 90, { signal } = {}) {
   const { messages } = await SmsCapture.readInbox({ sinceDays });
-  return forwardMessages(sustainId, messages);
+  return forwardMessages(sustainId, messages, { signal });
 }
 
 /** The re-sync window picker's fixed option set -- 0 is the sentinel for

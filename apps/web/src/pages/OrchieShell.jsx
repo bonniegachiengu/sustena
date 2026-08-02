@@ -15,7 +15,7 @@
  * engine infers the operator + params; the human only ever confirms or
  * answers a single tap-question. Nothing mutates until CONFIRM is tapped.
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { api } from '../lib/api';
@@ -936,8 +936,14 @@ function NarrateBar({ sustainId, onCommitted }) {
  * module is the only thing that ever calls the ingest API).
  */
 function SmsCaptureCard({ sustainId }) {
-  const [status, setStatus] = useState('checking'); // checking | prompt | requesting | syncing | active | denied | unavailable
-  const [syncedCount, setSyncedCount] = useState(null);
+  // 'syncing' REMOVED from this state machine (2 Aug 2026 incident fix) --
+  // it used to be an auto-firing intermediate status that triggered a
+  // fixed 90-day backfill on every mount once permission was already
+  // granted. Permission granted -> 'active' directly, always, with no
+  // historical scan of any kind. The ONLY thing that ever reads inbox
+  // history is a real tap inside WindowPicker, rendered as part of the
+  // 'active' view below -- there is no other code path into backfillInbox().
+  const [status, setStatus] = useState('checking'); // checking | prompt | requesting | active | denied | unavailable
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) { setStatus('unavailable'); return; }
@@ -945,7 +951,7 @@ function SmsCaptureCard({ sustainId }) {
     checkSmsPermission().then(perm => {
       if (cancelled) return;
       if (perm === 'granted') {
-        setStatus('syncing');
+        setStatus('active');
       } else if (perm === 'denied') {
         setStatus('denied');
       } else {
@@ -956,31 +962,23 @@ function SmsCaptureCard({ sustainId }) {
   }, []);
 
   useEffect(() => {
-    if (status !== 'syncing' || !sustainId) return;
-    let cancelled = false;
-    backfillInbox(sustainId).then(count => {
-      if (cancelled) return;
-      setSyncedCount(count);
-      setStatus('active');
-      startLivePolling(sustainId);
-      // Best-effort, silent -- a denied/unavailable notification permission
-      // just means no nudge fires; the item still lands in the compose feed.
-      ensureNotificationPermission().catch(() => {});
-    }).catch(() => { if (!cancelled) setStatus('active'); });
-    return () => { cancelled = true; };
-  }, [status, sustainId]);
-
-  useEffect(() => {
-    // Stop the poll if the component unmounts or the selected sustain
-    // changes (a new mount will restart it against the new sustainId).
+    // Real-time capture only (SmsReceiver's own queue, drained here) --
+    // NOT a historical inbox scan. Starts the moment permission is
+    // already granted; carries no flood risk since it only ever contains
+    // messages that arrived after the receiver started listening.
+    if (status !== 'active' || !sustainId) return;
+    startLivePolling(sustainId);
+    // Best-effort, silent -- a denied/unavailable notification permission
+    // just means no nudge fires; the item still lands in the compose feed.
+    ensureNotificationPermission().catch(() => {});
     return () => stopLivePolling();
-  }, []);
+  }, [status, sustainId]);
 
   const enable = async () => {
     setStatus('requesting');
     try {
       const perm = await requestSmsPermission();
-      setStatus(perm === 'granted' ? 'syncing' : 'denied');
+      setStatus(perm === 'granted' ? 'active' : 'denied');
     } catch {
       setStatus('denied');
     }
@@ -993,14 +991,12 @@ function SmsCaptureCard({ sustainId }) {
       <div style={{ marginBottom: 14 }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6,
-          // Reclassified from --text-dim to --text-muted (2 Aug 2026
-          // legibility pass) -- a real status line, not decoration.
           fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 500, color: 'var(--text-muted)',
         }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--teal)' }} />
-          auto-capture active — M-Pesa &amp; KCB{syncedCount != null ? ` · ${syncedCount} synced` : ''}
+          real-time capture active — M-Pesa &amp; KCB
         </div>
-        <ResyncControl sustainId={sustainId} onSynced={setSyncedCount} />
+        <WindowPicker sustainId={sustainId} />
       </div>
     );
   }
@@ -1014,14 +1010,14 @@ function SmsCaptureCard({ sustainId }) {
         Let Orchie read your M-Pesa &amp; KCB texts
       </div>
       <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 12 }}>
-        Orchie can automatically pick up M-Pesa and KCB transaction alerts so your pockets
-        stay current without typing anything in. It only ever reads messages from those two
-        senders — every other text on your phone is never touched, never sent anywhere. When
-        something needs a quick decision, Orchie will send a notification so you can handle
-        it right there in the field.
+        Orchie can pick up M-Pesa and KCB transaction alerts so your pockets stay current
+        without typing anything in. It only ever reads messages from those two senders — every
+        other text on your phone is never touched, never sent anywhere. New messages are
+        captured as they arrive; nothing from your existing message history is read until you
+        choose to sync it yourself. When something needs a quick decision, Orchie will send a
+        notification so you can handle it right there in the field.
       </div>
       {status === 'requesting' && <div style={mutedText}>waiting for Android's permission dialog…</div>}
-      {status === 'syncing' && <div style={mutedText}>syncing recent messages…</div>}
       {(status === 'prompt' || status === 'denied') && (
         <>
           <button onClick={enable} style={confirmButton}>ENABLE AUTOMATIC CAPTURE</button>
@@ -1038,60 +1034,70 @@ function SmsCaptureCard({ sustainId }) {
 }
 
 /**
- * Explicit, human-triggered re-sync with a chosen time window (Bonnie,
- * 2 Aug 2026 -- built alongside a clean-slate account reset: once a reset
- * clears stored messages + their dedup keys, a re-sync must genuinely
- * re-capture real SMS history within a chosen window, not silently do
- * nothing because "it already ran once"). Reuses the exact same
- * backfillInbox() the first-time enable flow already calls -- same
- * sender filter, same OTP/secret drop (both applied natively, inside
- * SmsCapturePlugin.readInbox(), never bypassed here), same idempotent
- * capture() on the server -- just re-triggered on demand with an
- * explicit window instead of the fixed 90-day default.
+ * The ONLY way any historical inbox scan ever runs (2 Aug 2026, rebuilt
+ * after an incident -- see backfillInbox()'s own docstring in
+ * smsCapture.js for the full root cause). Always visible, never
+ * collapsed behind a toggle -- per the explicit fix requirement, the
+ * window choice is shown FIRST, before anything syncs, every time.
+ *
+ * Real safety properties, not just UI framing:
+ *   - Nothing runs on render. A window button must be tapped.
+ *   - "all" is not a single tap -- it shows an inline warning and needs a
+ *     second, explicit CONFIRM tap. Every other window runs on one tap
+ *     (7 days is listed first as the recommended default, per the
+ *     incident's own lesson: never let the largest option be the
+ *     easiest one to hit by accident).
+ *   - STOP is real, not decorative: an AbortController's signal is
+ *     threaded into backfillInbox() -> forwardMessages(), which checks
+ *     it before EVERY network POST, so tapping STOP halts new requests
+ *     immediately rather than draining whatever's left of the batch.
+ *     The native inbox read itself (SmsCapturePlugin.readInbox) is a
+ *     single fast local ContentProvider query, not itself interruptible
+ *     from JS -- STOP's real effect is on the POST loop, which is what
+ *     actually floods the server; this is disclosed here rather than
+ *     silently overclaiming a native-level abort that isn't built.
  */
-function ResyncControl({ sustainId, onSynced }) {
-  const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState('idle'); // idle | syncing | done | error
+function WindowPicker({ sustainId }) {
+  const [status, setStatus] = useState('idle'); // idle | confirming_all | syncing | done | error
   const [lastCount, setLastCount] = useState(null);
   const [error, setError] = useState(null);
+  const controllerRef = useRef(null);
 
-  const runResync = async (days) => {
+  const runSync = async (days) => {
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setStatus('syncing');
     setError(null);
     try {
-      const count = await backfillInbox(sustainId, days);
+      const count = await backfillInbox(sustainId, days, { signal: controller.signal });
       setLastCount(count);
-      setStatus('done');
-      onSynced?.(count);
+      setStatus(controller.signal.aborted ? 'idle' : 'done');
     } catch (e) {
       setError(e.message || 'could not reach orchie');
       setStatus('error');
+    } finally {
+      controllerRef.current = null;
     }
   };
 
-  // Auto-close on a genuine success, same discipline as CaptureFlow's own
-  // 'committed' phase -- the result is never left ambiguously sitting
-  // there, but it IS shown first, briefly, not silently swallowed.
+  const stop = () => {
+    controllerRef.current?.abort();
+    setStatus('idle');
+  };
+
+  const pick = (w) => {
+    if (w.days <= 0) { setStatus('confirming_all'); return; }
+    runSync(w.days);
+  };
+
+  // Auto-return to idle on a genuine success -- the result is shown
+  // first, briefly, never silently swallowed, same discipline as
+  // CaptureFlow's own 'committed' phase.
   useEffect(() => {
     if (status !== 'done') return;
-    const t = setTimeout(() => { setOpen(false); setStatus('idle'); }, 2600);
+    const t = setTimeout(() => setStatus('idle'), 2600);
     return () => clearTimeout(t);
   }, [status]);
-
-  if (!open) {
-    return (
-      <button
-        onClick={() => { setOpen(true); setStatus('idle'); setError(null); }}
-        style={{
-          marginTop: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-          fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '0.04em',
-          color: 'var(--text-muted)', textDecoration: 'underline dotted',
-        }}
-      >
-        re-sync · choose window
-      </button>
-    );
-  }
 
   return (
     <div style={{
@@ -1101,23 +1107,41 @@ function ResyncControl({ sustainId, onSynced }) {
       {status === 'idle' && (
         <>
           <div style={{ ...mutedText, marginBottom: 8 }}>
-            re-read M-Pesa &amp; KCB messages from the last:
+            sync M-Pesa &amp; KCB messages from the last:
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {RESYNC_WINDOWS.map(w => (
-              <button key={w.label} onClick={() => runResync(w.days)} style={bigTapButton}>{w.label}</button>
+              <button key={w.label} onClick={() => pick(w)} style={bigTapButton}>{w.label}</button>
             ))}
           </div>
         </>
       )}
 
+      {status === 'confirming_all' && (
+        <div>
+          <div style={{ ...mutedText, color: 'var(--amber)', marginBottom: 8 }}>
+            "all" has no time limit — on a phone with years of M-Pesa/KCB history this could be
+            thousands of messages. Sure?
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => runSync(0)} style={confirmButton}>YES, SYNC ALL</button>
+            <button onClick={() => setStatus('idle')} style={cancelButton}>CANCEL</button>
+          </div>
+        </div>
+      )}
+
       {status === 'syncing' && (
-        <div className="pulse" style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
-        }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)' }} />
-          re-syncing…
+        <div>
+          <div className="pulse" style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
+          }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)' }} />
+            syncing…
+          </div>
+          <button onClick={stop} style={{ ...cancelButton, marginTop: 10, borderColor: 'var(--danger)', color: 'var(--danger)' }}>
+            STOP
+          </button>
         </div>
       )}
 
@@ -1127,7 +1151,7 @@ function ResyncControl({ sustainId, onSynced }) {
           fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700, color: 'var(--teal)',
         }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--teal)' }} />
-          ✓ resynced — {lastCount ?? 0} message{lastCount === 1 ? '' : 's'} checked
+          ✓ synced — {lastCount ?? 0} message{lastCount === 1 ? '' : 's'} checked
         </div>
       )}
 
@@ -1136,14 +1160,10 @@ function ResyncControl({ sustainId, onSynced }) {
           <div style={{ ...mutedText, color: 'var(--danger)' }}>{error}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
             {RESYNC_WINDOWS.map(w => (
-              <button key={w.label} onClick={() => runResync(w.days)} style={bigTapButton}>{w.label}</button>
+              <button key={w.label} onClick={() => pick(w)} style={bigTapButton}>{w.label}</button>
             ))}
           </div>
         </div>
-      )}
-
-      {status !== 'syncing' && (
-        <button onClick={() => setOpen(false)} style={{ ...cancelButton, marginTop: 10 }}>CLOSE</button>
       )}
     </div>
   );
