@@ -1071,6 +1071,212 @@ class SustainEngine:
 
         return {"status": "reassigned", "sustain_id": sustain_id, "old_owner": current_owner, "new_owner": to_user_id}
 
+    # ── delete_child_sustain / reset_sustain_to_clean_slate ────────────────────
+    # A user-requested "practice on a clean slate" reset (2 Aug 2026). Same
+    # discipline as reassign_sustain_owner()/purge_test_egress_entries():
+    # ownership-checked (refuses rather than silently no-opping on a
+    # mismatch), scoped by exact sustain_id (never a blanket wipe), returns
+    # a report the caller must check. Generic -- nothing here references
+    # "homestead"/"habitat"; a habitat is just one child sustain among
+    # however many a parent happens to have linked.
+
+    # Every table a sustain's own operational data can appear in, keyed by
+    # sustain_id directly. events/sustain_states/sustains are handled
+    # separately (state-fold semantics, or the row identity itself) --
+    # this list is the flat "just delete WHERE sustain_id = ?" set.
+    _SUSTAIN_SCOPED_TABLES = (
+        "operative_overrides", "operative_suggestions", "egress_outbox",
+        "pawa_meter_log", "operators_log", "pawa_ledger",
+    )
+
+    def _delete_sustain_scoped_rows(self, sustain_id: str) -> dict:
+        """Delete every row keyed by sustain_id across the flat operational
+        tables above, plus council_proposals (and their council_votes,
+        which reference proposal_id, not sustain_id directly -- resolved
+        via a subquery). A table that doesn't exist on this connection
+        (e.g. a minimal test-only engine never wired to the full async
+        schema) is skipped, not fatal -- same defensive pattern
+        reassign_sustain_owner() already uses for the `users` table."""
+        removed: dict[str, int] = {}
+        for table in self._SUSTAIN_SCOPED_TABLES:
+            try:
+                cur = self._db.execute(f"DELETE FROM {table} WHERE sustain_id = ?", (sustain_id,))
+                removed[table] = cur.rowcount
+            except sqlite3.OperationalError:
+                removed[table] = 0
+        try:
+            proposal_ids = [
+                r["id"] for r in self._db.execute(
+                    "SELECT id FROM council_proposals WHERE sustain_id = ?", (sustain_id,),
+                ).fetchall()
+            ]
+            if proposal_ids:
+                placeholders = ",".join("?" * len(proposal_ids))
+                self._db.execute(f"DELETE FROM council_votes WHERE proposal_id IN ({placeholders})", proposal_ids)
+            cur = self._db.execute("DELETE FROM council_proposals WHERE sustain_id = ?", (sustain_id,))
+            removed["council_proposals"] = cur.rowcount
+            removed["council_votes"] = len(proposal_ids)
+        except sqlite3.OperationalError:
+            removed["council_proposals"] = 0
+            removed["council_votes"] = 0
+        self._db.commit()
+        return removed
+
+    def delete_child_sustain(self, child_sustain_id: str, owner_user_id: str) -> dict:
+        """
+        Fully and permanently remove ONE sustain -- unlinks it from any
+        parent, deletes every row scoped to it (events, cached state, and
+        every table _delete_sustain_scoped_rows() covers), then the
+        `sustains` row itself. Unlike unlink_child() (disaggregation --
+        the child keeps its own state, only the link is dissolved), this
+        actually destroys the child. Never call this on a sustain you
+        haven't already backed up.
+
+        Ownership-checked: refuses (does NOT delete anything) if the
+        sustain doesn't exist or isn't owned by owner_user_id -- the same
+        "refuse, don't silently no-op on a stale assumption" discipline as
+        reassign_sustain_owner().
+
+        Returns {"status": "deleted"|"not_found"|"owner_mismatch",
+                 "sustain_id", "events_removed", "table_counts"}.
+        """
+        row = self._db.execute("SELECT user_id FROM sustains WHERE id = ?", (child_sustain_id,)).fetchone()
+        if row is None:
+            return {"status": "not_found", "sustain_id": child_sustain_id, "events_removed": 0, "table_counts": {}}
+        if row["user_id"] != owner_user_id:
+            return {"status": "owner_mismatch", "sustain_id": child_sustain_id, "events_removed": 0, "table_counts": {}}
+
+        # Unlink both directions -- as a child under some parent, and (for
+        # generality, even though no habitat has ever had its own children)
+        # as a parent of anything linked under IT.
+        self._db.execute("DELETE FROM sustain_composition WHERE child_sustain_id = ?", (child_sustain_id,))
+        self._db.execute("DELETE FROM sustain_composition WHERE parent_sustain_id = ?", (child_sustain_id,))
+
+        events_removed = self._db.execute(
+            "DELETE FROM events WHERE sustain_id = ?", (child_sustain_id,),
+        ).rowcount
+        self._db.execute("DELETE FROM sustain_states WHERE sustain_id = ?", (child_sustain_id,))
+        table_counts = self._delete_sustain_scoped_rows(child_sustain_id)
+        self._db.execute("DELETE FROM sustains WHERE id = ?", (child_sustain_id,))
+        self._db.commit()
+
+        # Drop this engine's in-memory caches for the now-deleted sustain --
+        # nothing can reach it via the ownership-checked API paths once its
+        # `sustains` row is gone, but a stale cache entry is still tidiness
+        # worth doing (same instinct as Slice 6's cache-invalidation fix).
+        self._specs.pop(child_sustain_id, None)
+        self._owners.pop(child_sustain_id, None)
+        self._operatives.pop(child_sustain_id, None)
+
+        logger.info(
+            "[SustainEngine] deleted child sustain_id=%s (owner=%s): events_removed=%d table_counts=%s",
+            child_sustain_id, owner_user_id, events_removed, table_counts,
+        )
+        return {
+            "status": "deleted", "sustain_id": child_sustain_id,
+            "events_removed": events_removed, "table_counts": table_counts,
+        }
+
+    def reset_sustain_to_clean_slate(self, sustain_id: str, owner_user_id: str) -> dict:
+        """
+        Reset ONE sustain to a genuinely empty starting state -- every
+        pocket/dimension gone, every linked child sustain permanently
+        deleted (not just unlinked -- see delete_child_sustain()), every
+        operational row (suggestions, egress, pawa metering, operator
+        execution log, council proposals/votes) scoped to it cleared. The
+        `sustains` row and its owner are UNTOUCHED -- this empties a
+        sustain, it does not delete it; the account and its login are
+        never touched by this method at all.
+
+        The state reset itself goes through the exact same event-sourcing
+        primitive every other write in this engine uses
+        (_append_events_and_update_cache) -- old event rows are deleted
+        (a real, disclosed choice: a superseding replace_root would leave
+        rebuild_state() correct but the event log cluttered with the old
+        history a "clean slate to practice on" is explicitly asking to be
+        rid of) and replaced with exactly ONE fresh event carrying
+        {"op": "replace_root", "value": <this template's own default_state>}
+        -- structurally identical to what instantiate() itself writes for
+        a brand-new sustain of the same template. rebuild_state() and
+        get_state() are therefore trivially equal afterward, by
+        construction, not by coincidence.
+
+        Does NOT touch ingest_messages/ingest_sources/
+        capture_classification_history -- those are IngestEngine's tables,
+        not SustainEngine's; call IngestEngine.purge_sustain_data() (once
+        per sustain_id you want cleared) alongside this for a full reset.
+
+        Ownership-checked exactly like delete_child_sustain(): refuses
+        (does nothing) rather than silently resetting the wrong sustain.
+
+        Returns {"status": "reset"|"not_found"|"owner_mismatch",
+                 "sustain_id", "habitats_removed": [...ids...],
+                 "old_event_count", "old_pockets": [...names...],
+                 "table_counts"}.
+        """
+        row = self._db.execute(
+            "SELECT user_id, template_id FROM sustains WHERE id = ?", (sustain_id,),
+        ).fetchone()
+        if row is None:
+            return {"status": "not_found", "sustain_id": sustain_id, "habitats_removed": [], "old_event_count": 0, "old_pockets": [], "table_counts": {}}
+        if row["user_id"] != owner_user_id:
+            return {"status": "owner_mismatch", "sustain_id": sustain_id, "habitats_removed": [], "old_event_count": 0, "old_pockets": [], "table_counts": {}}
+
+        # Snapshot what's about to be gone, for the report -- never assume,
+        # always report exactly what was found and removed.
+        try:
+            old_state = self._load_state_dict(sustain_id)
+        except ValueError:
+            old_state = {}
+        old_pockets = sorted((old_state.get("finances") or {}).get("pockets", {}).keys())
+        old_event_count = self._db.execute(
+            "SELECT COUNT(*) AS n FROM events WHERE sustain_id = ?", (sustain_id,),
+        ).fetchone()["n"]
+
+        # Permanently remove every linked child FIRST (each is fully backed
+        # up before this method is ever called against real data -- see the
+        # caller's own pre-flight backup step).
+        children = self.list_children(sustain_id)
+        habitats_removed = []
+        for child in children:
+            result = self.delete_child_sustain(child["child_sustain_id"], owner_user_id)
+            if result["status"] == "deleted":
+                habitats_removed.append(child["child_sustain_id"])
+        # Defensive: an orphaned composition row (a link whose child sustain
+        # row was already gone for some other reason) has no delete_child_
+        # sustain() call to clean it up via the child-side DELETE above --
+        # clear any parent-side leftovers explicitly.
+        self._db.execute("DELETE FROM sustain_composition WHERE parent_sustain_id = ?", (sustain_id,))
+
+        table_counts = self._delete_sustain_scoped_rows(sustain_id)
+
+        self._db.execute("DELETE FROM events WHERE sustain_id = ?", (sustain_id,))
+        self._db.commit()
+
+        spec = self._load_spec(row["template_id"])
+        default_state = copy.deepcopy(spec.get("default_state", {}))
+        self._append_events_and_update_cache(sustain_id, default_state, [{
+            "event_name": "event.system.reset_to_clean_slate",
+            "payload": {
+                "template_id": row["template_id"],
+                "reason": "user-requested clean-slate reset",
+                "old_event_count": old_event_count,
+                "old_pockets": old_pockets,
+                "habitats_removed": habitats_removed,
+            },
+            "mutations": [{"op": "replace_root", "value": default_state}],
+        }])
+
+        logger.info(
+            "[SustainEngine] reset sustain_id=%s to clean slate (owner=%s): "
+            "habitats_removed=%d old_event_count=%d old_pockets=%s",
+            sustain_id, owner_user_id, len(habitats_removed), old_event_count, old_pockets,
+        )
+        return {
+            "status": "reset", "sustain_id": sustain_id, "habitats_removed": habitats_removed,
+            "old_event_count": old_event_count, "old_pockets": old_pockets, "table_counts": table_counts,
+        }
+
     # ── execute_operator ───────────────────────────────────────────────────────
 
     async def execute_operator(

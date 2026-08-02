@@ -165,6 +165,46 @@ class IngestEngine:
         )
         self._db.commit()
 
+    def purge_sustain_data(self, sustain_id: str, owner_user_id: str) -> dict:
+        """
+        Permanently clear every row this engine owns for ONE sustain --
+        ingest_sources, ingest_messages (including their dedup_key
+        fingerprints, so a re-sync genuinely re-captures rather than being
+        silently treated as a duplicate of pre-wipe history), and
+        capture_classification_history ("remembered" pocket mappings).
+
+        A user-requested clean-slate reset (2 Aug 2026): resetting
+        SustainEngine's own state/events without ALSO clearing this data
+        would leave every old captured SMS still marked resolved against
+        pockets that no longer exist, and every dedup_key still blocking a
+        fresh re-capture of the exact same real message text -- exactly
+        the stale residue a "truly fresh start" is asking to be rid of.
+
+        Ownership-checked via the SAME live `sustains` table SustainEngine
+        itself uses (this engine shares its connection) -- refuses (does
+        nothing) rather than silently purging the wrong sustain's data.
+
+        Returns {"status": "purged"|"not_found"|"owner_mismatch",
+                 "sustain_id", "table_counts": {...}}.
+        """
+        row = self._db.execute("SELECT user_id FROM sustains WHERE id = ?", (sustain_id,)).fetchone()
+        if row is None:
+            return {"status": "not_found", "sustain_id": sustain_id, "table_counts": {}}
+        if row["user_id"] != owner_user_id:
+            return {"status": "owner_mismatch", "sustain_id": sustain_id, "table_counts": {}}
+
+        table_counts: dict[str, int] = {}
+        for table in ("ingest_messages", "ingest_sources", "capture_classification_history"):
+            cur = self._db.execute(f"DELETE FROM {table} WHERE sustain_id = ?", (sustain_id,))
+            table_counts[table] = cur.rowcount
+        self._db.commit()
+
+        logger.info(
+            "[IngestEngine] purged sustain_id=%s (owner=%s): table_counts=%s",
+            sustain_id, owner_user_id, table_counts,
+        )
+        return {"status": "purged", "sustain_id": sustain_id, "table_counts": table_counts}
+
     # ── Dedup ──────────────────────────────────────────────────────────────────
 
     @staticmethod
