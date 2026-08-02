@@ -465,3 +465,37 @@ class TestBudgetSpend:
         )
         assert result.failed
         assert "exceed" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_insufficient_balance_refusal_carries_structured_shortfall_data(self):
+        """
+        The refusal's `data` field (not just the human-readable `reason`
+        string) carries pocket/remaining/requested/shortfall -- this is what
+        Orchie's allocate-then-retry recovery loop reads to autofill the
+        "Allocate KES X first" amount without parsing prose.
+        """
+        state = _fresh_state(balance=50000.0)
+        ctx = _make_ctx(state)
+        # A brand-new pocket via budget.add_pocket -- allocated=spent=0,
+        # matching Bonnie's real "Airtime" pocket scenario exactly.
+        await OPERATOR_REGISTRY["budget.add_pocket"].fn(ctx, pocket_name="Airtime")
+        result = await OPERATOR_REGISTRY["budget.spend"].fn(
+            _make_ctx(state), pocket_name="Airtime", amount=50.0
+        )
+        assert result.failed
+        assert result.constraint_violated == "pocket_balance_sufficient"
+        assert result.data == {
+            "pocket": "Airtime", "remaining": 0.0, "requested": 50.0, "shortfall": 50.0,
+        }
+
+    @pytest.mark.asyncio
+    async def test_shortfall_is_only_the_difference_not_the_full_request(self):
+        """A pocket with SOME balance -- shortfall is requested-remaining, not requested."""
+        state, ctx = await self._state_with_food_pocket()  # food: allocated 5000, spent 0
+        await OPERATOR_REGISTRY["budget.spend"].fn(ctx, pocket_name="food", amount=4700.0)
+        result = await OPERATOR_REGISTRY["budget.spend"].fn(
+            _make_ctx(state), pocket_name="food", amount=1000.0
+        )
+        assert result.failed
+        assert result.data["remaining"] == 300.0
+        assert result.data["shortfall"] == 700.0

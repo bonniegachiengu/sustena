@@ -765,3 +765,103 @@ class TestAddPocketEndToEnd:
         )
         assert r.json()["result"]["status"] == "ok"
         assert r.json()["result"]["data"]["amount_spent"] == 1200.0
+
+
+class TestAllocateThenRetryRecovery:
+    """
+    Bonnie's real case: +NEW an "Airtime" pocket (KES 0), spend 50 into it
+    -> refused for insufficient pocket balance -> allocate the shortfall
+    (via the real gated budget.allocate) -> retry the identical spend ->
+    now recorded. Reproduces the exact scenario over the real HTTP routes
+    the Orchie frontend's allocateThenRetry() calls, end to end, with no
+    hand-written side channel around the gate anywhere in the loop.
+    """
+
+    def test_spend_against_empty_pocket_carries_structured_shortfall_over_http(self, client, user, sustain):
+        headers, _ = user
+        client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.add_pocket", "params": {"pocket_name": "Airtime"}},
+            headers=headers,
+        )
+        r = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.spend", "params": {"pocket_name": "Airtime", "amount": 50}},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        result = r.json()["result"]
+        assert result["status"] == "failed"
+        assert result["constraint_violated"] == "pocket_balance_sufficient"
+        assert result["data"] == {"pocket": "Airtime", "remaining": 0.0, "requested": 50.0, "shortfall": 50.0}
+
+    def test_allocate_shortfall_then_retry_the_same_spend_succeeds(self, client, user, sustain):
+        headers, _ = user
+        client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.add_pocket", "params": {"pocket_name": "Airtime"}},
+            headers=headers,
+        )
+        # Fund liquid balance so there's something real to allocate FROM --
+        # a genuinely empty pocket with a genuinely empty liquid balance
+        # is the honest-failure case covered by the next test.
+        client.post(
+            "/devui/console/execute",
+            json={"sustain_id": sustain, "operator": "budget.record_income", "params": {"amount": 500, "source": "seed", "frequency": "once"}},
+            headers=headers,
+        )
+        refused = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.spend", "params": {"pocket_name": "Airtime", "amount": 50}},
+            headers=headers,
+        ).json()
+        shortfall = refused["result"]["data"]["shortfall"]
+        assert shortfall == 50.0
+
+        # Step 1 of the recovery loop: allocate the shortfall into the
+        # pocket -- the exact call allocateThenRetry() makes.
+        alloc = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.allocate", "params": {"pocket_name": "Airtime", "amount": shortfall}},
+            headers=headers,
+        )
+        assert alloc.json()["result"]["status"] == "ok"
+
+        # Step 2: automatic retry of the ORIGINAL, identical spend.
+        retry = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.spend", "params": {"pocket_name": "Airtime", "amount": 50}},
+            headers=headers,
+        )
+        assert retry.json()["result"]["status"] == "ok"
+        assert retry.json()["result"]["data"]["amount_spent"] == 50.0
+
+        state = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]
+        assert state["finances"]["pockets"]["Airtime"]["spent"] == 50.0
+        assert state["finances"]["pockets"]["Airtime"]["allocated"] == 50.0
+        assert state["finances"]["liquid"]["balance"] == 450.0  # 500 income - 50 allocated
+
+    def test_allocate_honestly_refuses_when_liquid_balance_cant_cover_it(self, client, user, sustain):
+        """No unallocated funds to draw from -- the allocate step itself is
+        refused (by budget.allocate's own real constraint, not a fake one
+        invented for this recovery flow), surfaced as-is, nothing silently
+        retried against state that can't support it."""
+        headers, _ = user
+        client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.add_pocket", "params": {"pocket_name": "Airtime"}},
+            headers=headers,
+        )
+        # Zero liquid balance -- nothing to allocate from.
+        alloc = client.post(
+            "/orchie/capture/confirm",
+            json={"sustain_id": sustain, "operator": "budget.allocate", "params": {"pocket_name": "Airtime", "amount": 50}},
+            headers=headers,
+        )
+        assert alloc.status_code == 200
+        result = alloc.json()["result"]
+        assert result["status"] == "failed"
+        assert "liquid" in result["reason"].lower() or "balance" in result["reason"].lower()
+
+        state = client.get(f"/devui/state?sustain_id={sustain}", headers=headers).json()["data"]["state"]
+        assert state["finances"]["pockets"]["Airtime"]["allocated"] == 0.0  # untouched by the failed allocate

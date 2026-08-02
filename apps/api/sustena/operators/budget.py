@@ -455,12 +455,22 @@ async def budget_spend(
     remaining = allocated - spent
 
     if amount > remaining:
+        # Structured shortfall data (pocket/remaining/requested/shortfall) --
+        # not just the human-readable reason string -- lets a caller build a
+        # real allocate-then-retry recovery loop without parsing prose. See
+        # Orchie's CaptureFlow allocateThenRetry() for the one consumer.
         return OperatorResult.fail(
             reason=(
                 f"Spend of KES {amount:,.0f} exceeds remaining balance "
                 f"in '{pocket_name}' pocket (KES {remaining:,.0f} left)."
             ),
             constraint_violated="pocket_balance_sufficient",
+            data={
+                "pocket": pocket_name,
+                "remaining": remaining,
+                "requested": amount,
+                "shortfall": round(amount - remaining, 2),
+            },
         )
 
     ctx.state.increment(f"{pocket_path}.spent", amount)

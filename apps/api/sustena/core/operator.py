@@ -127,8 +127,9 @@ class OperatorResult:
         cls,
         reason: str,
         constraint_violated: str | None = None,
+        data: dict | None = None,
     ) -> "OperatorResult":
-        return cls(status="failed", reason=reason, constraint_violated=constraint_violated)
+        return cls(status="failed", data=data, reason=reason, constraint_violated=constraint_violated)
 
     @classmethod
     def deferred(cls, proposal_id: str) -> "OperatorResult":
