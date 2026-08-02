@@ -107,6 +107,12 @@ EGRESS_OPERATORS = [
     "egress.prepare_household_summary",
 ]
 
+HOLON_OPERATORS = [
+    "holon.transfer",
+    "holon.create_child",
+    "holon.dissolve_child",
+]
+
 ALL_KNOWN_OPERATORS = (
     BUDGET_OPERATORS + PROCUREMENT_OPERATORS + CALENDAR_OPERATORS
     + UI_RENDER_OPERATORS                  # Sprint 2 UIParser
@@ -121,6 +127,7 @@ ALL_KNOWN_OPERATORS = (
     + TASKS_OPERATORS                      # Sprint 6.1
     + ORCHIE_OPERATORS                     # Sprint 6.2
     + EGRESS_OPERATORS                     # Slice 11 (Egress)
+    + HOLON_OPERATORS                      # Phase 2 (Nested Holons, 2 Aug 2026)
 )
 
 

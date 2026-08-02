@@ -412,6 +412,27 @@ async def list_children_route(sustain_id: str, _: dict = Depends(get_current_use
     return ok({"children": links})
 
 
+@router.get("/sustain/{sustain_id}/parent", summary="The link record for a child's parent, or null (Phase 2 — nested holons)")
+async def get_parent_route(sustain_id: str, _: dict = Depends(get_current_user)) -> dict:
+    """
+    get_parent() already existed as an engine method with no route (flagged
+    in the Phase 2 design doc as the one real gap for Orchie's breadcrumb
+    "up" — everything else composition-navigation needs already had a
+    route). Returns {"parent": null} for a sustain with no parent (most
+    sustains), or {"parent": {...link, "display_name"}} — same
+    best-effort display_name enrichment list_children_route already uses.
+    """
+    from sustena.core.engine_singleton import get_shared_engine
+
+    engine = get_shared_engine()
+    link = engine.get_parent(sustain_id)
+    if link is None:
+        return ok({"parent": None})
+    spec = engine._get_spec(link["parent_sustain_id"])
+    link["display_name"] = spec.get("display_name") if spec else None
+    return ok({"parent": link})
+
+
 @router.post("/sustain/{sustain_id}/children", summary="Link an existing sustain as a child (⊕)")
 async def link_child_route(
     sustain_id: str, body: LinkChildRequest, _: dict = Depends(get_current_user),

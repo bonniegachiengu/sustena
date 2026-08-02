@@ -79,6 +79,17 @@ class OperatorContext:
     - sustain_id, user_id: execution context
     - operative_id: which operative called this (None = user direct call)
     - timestamp: execution timestamp (use this, not datetime.utcnow())
+    - engine: the owning SustainEngine (Phase 2, nested holons — 2 Aug
+      2026). Defaults to None for the ~50 operators that only ever touch
+      their own single sustain via ctx.state. A narrow, deliberate escape
+      hatch for the small number of operators (holon.create_child,
+      holon.dissolve_child, holon.transfer) whose whole point is to read
+      or atomically mutate a SECOND sustain — something ctx.state, scoped
+      to exactly one sustain, structurally cannot express. Those operators
+      use ctx.engine's own composition (link_child/get_parent/
+      list_children/instantiate) and atomic-write (
+      _commit_atomic_multi_sustain) primitives directly; every other
+      operator ignores this field entirely.
     """
     state: Any              # StateAccessor
     events: Any             # EventBus
@@ -89,6 +100,7 @@ class OperatorContext:
     timestamp: datetime = field(default_factory=datetime.utcnow)
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger("sustena.operator"))
     egress: Any = None      # EgressQueue
+    engine: Any = None      # SustainEngine
 
 
 # ── Operator result ───────────────────────────────────────────────────────────

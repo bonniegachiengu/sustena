@@ -352,6 +352,24 @@
       "description": "Prepare a household finance summary for export. Queued in the outbox as 'prepared' — nothing leaves the system until a human confirms it.",
       "params": ["label"],
       "pawa_cost": 0
+    },
+    {
+      "name": "holon.create_child",
+      "description": "Spawn a new ad-hoc child holon (e.g. a project) under this household, gated by child_policy.",
+      "params": ["template", "name", "slot"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "holon.dissolve_child",
+      "description": "Detach a linked child holon — returns its funds first, then unlinks.",
+      "params": ["child_sustain_id"],
+      "pawa_cost": 0
+    },
+    {
+      "name": "holon.transfer",
+      "description": "Move liquid funds between this household and a directly linked parent or child holon, atomically and conserved.",
+      "params": ["to_sustain_id", "amount", "idempotency_key"],
+      "pawa_cost": 0
     }
   ],
   "operatives": {
@@ -430,11 +448,22 @@
     { "slot": "habitat_5", "member": "Kui",      "template": "habitat" },
     { "slot": "habitat_6", "member": "Frankie",  "template": "habitat" }
   ],
+  "child_policy": {
+    "accepts": ["habitat"],
+    "cap": null,
+    "_note": "Phase 2 (nested holons, 2 Aug 2026, SPEC-nested-holons.addendum §4D.7): an allow-list for AD-HOC, user-created children (e.g. 'Project IO') at runtime via holon.create_child — separate from declared_children above, which is the fixed six-habitat-slot preset. Reuses the 'habitat' template (already the right shape: finances.liquid + finances.pockets + budget.* operators) rather than inventing a new 'project' template for the same structural need. No cap declared — a household may spawn as many ad-hoc holons as it needs."
+  },
   "aggregates": [
     {
       "id": "household_liquid_total",
-      "description": "Computed: sum of every linked habitat's finances.liquid.balance. Never persisted — folded fresh from live children on every read (Slice 8, roll-up ρ). Purely observational: never gates a child's or the parent's own operator calls (see _compile_spec_invariants' 'enforced' flag) — the parent observes its children, it never vetoes them.",
+      "description": "Computed: sum of every linked child's finances.liquid.balance (declared habitats AND ad-hoc holons alike — the aggregate reads whatever is linked, not just declared_children). Never persisted — folded fresh from live children on every read (Slice 8, roll-up ρ). Purely observational: never gates a child's or the parent's own operator calls (see _compile_spec_invariants' 'enforced' flag) — the parent observes its children, it never vetoes them.",
       "child_path": "finances.liquid.balance",
+      "op": "sum"
+    },
+    {
+      "id": "household_pockets_total",
+      "description": "Computed: sum of every linked child's finances.pockets[*].allocated — a household total that includes children's own pocket allocations, not just their unallocated liquid (Phase 2, §4D.7's wildcard/reducer child_path form). Same observational-only discipline as household_liquid_total.",
+      "child_path": "finances.pockets[*].allocated",
       "op": "sum"
     }
   ],

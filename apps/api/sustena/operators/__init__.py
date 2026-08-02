@@ -17,3 +17,4 @@ from sustena.operators import operative_ops  # noqa: F401  (registers operative.
 from sustena.operators import tasks          # noqa: F401  (registers homestead.tasks.* operators)
 from sustena.operators import orchie_ops     # noqa: F401  (registers orchie.* operators)
 from sustena.operators import egress_ops     # noqa: F401  (registers egress.* operators)
+from sustena.operators import holon          # noqa: F401  (registers holon.* operators)

@@ -1892,6 +1892,218 @@ function ActivityList({ sustainId }) {
   );
 }
 
+/* ─── Nested holons (Phase 2, 2 Aug 2026) — breadcrumb, children, roll-up ───
+ * compose(r) already resolves per-sustain, so "navigate" is just re-picking
+ * sustainId (reusing useSustainPicker's chooseSustain, same mechanism the
+ * TopBar picker already uses) -- no new state machinery, per the canon's
+ * own §4H.6 note ("no new state machinery -- the per-request composer
+ * already does this"). */
+
+function FundTransferForm({ sustainId, targetId, targetLabel, onDone }) {
+  const [amount, setAmount] = useState('');
+  const [status, setStatus] = useState('idle'); // idle | sending | done | error
+  const [error, setError] = useState(null);
+
+  const send = async () => {
+    const value = parseFloat(amount);
+    if (!value || value <= 0) { setError('enter an amount greater than zero'); return; }
+    setStatus('sending'); setError(null);
+    try {
+      const data = await api.post('/orchie/capture/confirm', {
+        sustain_id: sustainId, operator: 'holon.transfer',
+        params: { to_sustain_id: targetId, amount: value, idempotency_key: `orchie-${sustainId}-${targetId}-${Date.now()}` },
+      });
+      if (data.result.status === 'ok') { setStatus('done'); setTimeout(() => onDone?.(), 1400); }
+      else { setStatus('error'); setError(data.result.reason || 'transfer refused'); }
+    } catch (e) { setStatus('error'); setError(e.message || 'could not reach orchie'); }
+  };
+
+  if (status === 'done') {
+    return <div style={{ ...mutedText, color: 'var(--teal)', fontWeight: 700 }}>✓ moved Ksh {amount} — {targetLabel}</div>;
+  }
+
+  return (
+    <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <input
+        type="number" inputMode="decimal" placeholder="amount"
+        value={amount} onChange={e => setAmount(e.target.value)}
+        style={{ ...editableInput, width: 100 }}
+      />
+      <button onClick={send} disabled={status === 'sending'} style={{ ...confirmButton, opacity: status === 'sending' ? 0.6 : 1 }}>
+        {status === 'sending' ? 'moving…' : `MOVE TO ${targetLabel.toUpperCase()}`}
+      </button>
+      {error && <div style={{ ...mutedText, color: 'var(--danger)', width: '100%' }}>{error}</div>}
+    </div>
+  );
+}
+
+function NewHolonForm({ sustainId, onCreated, onCancel }) {
+  const [name, setName] = useState('');
+  const [status, setStatus] = useState('idle');
+  const [error, setError] = useState(null);
+
+  const create = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) { setError('name it first'); return; }
+    setStatus('creating'); setError(null);
+    try {
+      const data = await api.post('/orchie/capture/confirm', {
+        sustain_id: sustainId, operator: 'holon.create_child',
+        params: { template: 'habitat', name: trimmed },
+      });
+      if (data.result.status === 'ok') { onCreated?.(data.result.data.child_sustain_id); }
+      else { setStatus('error'); setError(data.result.reason || 'could not create this holon'); }
+    } catch (e) { setStatus('error'); setError(e.message || 'could not reach orchie'); }
+  };
+
+  return (
+    <div style={{ marginTop: 10, padding: 12, borderRadius: 'var(--radius-sm)', border: '1px dashed var(--border-mid)' }}>
+      <div style={{ ...mutedText, marginBottom: 8 }}>new holon — e.g. a project, a shared fund</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <input
+          placeholder="name it — e.g. Project IO" value={name}
+          onChange={e => setName(e.target.value)}
+          style={{ ...editableInput, flex: 1, minWidth: 140 }}
+        />
+        <button onClick={create} disabled={status === 'creating'} style={{ ...confirmButton, opacity: status === 'creating' ? 0.6 : 1 }}>
+          {status === 'creating' ? 'creating…' : 'CREATE'}
+        </button>
+        <button onClick={onCancel} style={cancelButton}>CANCEL</button>
+      </div>
+      {error && <div style={{ ...mutedText, color: 'var(--danger)', marginTop: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
+function RollupCard({ rollup }) {
+  const aggregates = rollup?.aggregates ? Object.entries(rollup.aggregates) : [];
+  if (aggregates.length === 0) return null;
+  return (
+    <div style={{
+      marginTop: 12, padding: 14, borderRadius: 'var(--radius-md)',
+      background: 'var(--bg-raised)', border: '1px solid var(--border)',
+    }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>
+        household roll-up
+      </div>
+      {aggregates.map(([id, agg]) => (
+        <div key={id} style={{ marginBottom: 6 }}>
+          <div style={{ ...questionText, fontWeight: 700 }}>
+            {id.replace(/_/g, ' ')} — Ksh {Number(agg.value || 0).toLocaleString()}
+          </div>
+          <div style={mutedText}>
+            {agg.op} over {agg.included.length} linked holon{agg.included.length === 1 ? '' : 's'}
+            {agg.excluded.length > 0 && ` · ${agg.excluded.length} excluded — ${agg.excluded[0].reason}`}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HolonNav({ sustainId, onNavigate }) {
+  const [parent, setParent] = useState(undefined); // undefined = loading, null = none
+  const [children, setChildren] = useState([]);
+  const [rollup, setRollup] = useState(null);
+  const [showNewForm, setShowNewForm] = useState(false);
+  const [fundingTarget, setFundingTarget] = useState(null); // {id, label} or null
+
+  const load = useCallback(async () => {
+    if (!sustainId) return;
+    setShowNewForm(false);
+    setFundingTarget(null);
+    try {
+      const [parentResp, childrenResp, rollupResp] = await Promise.all([
+        api.get(`/devui/sustain/${encodeURIComponent(sustainId)}/parent`),
+        api.get(`/devui/sustain/${encodeURIComponent(sustainId)}/children`),
+        api.get(`/devui/sustain/${encodeURIComponent(sustainId)}/rollup`).catch(() => ({ data: { aggregates: {}, children: [] } })),
+      ]);
+      setParent(parentResp.data.parent);
+      setChildren(childrenResp.data.children || []);
+      setRollup(rollupResp.data);
+    } catch (e) {
+      // best-effort -- honest silence, not a blocking error, matches this
+      // page's own established discipline for secondary panels.
+      setParent(null);
+      setChildren([]);
+      setRollup(null);
+    }
+  }, [sustainId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (!sustainId) return null;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      {parent && (
+        <button
+          onClick={() => onNavigate(parent.parent_sustain_id)}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0 8px',
+            fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--text-secondary)',
+          }}
+        >
+          ← {parent.display_name || 'up'}
+        </button>
+      )}
+
+      {children.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {children.map(c => (
+            <div key={c.child_sustain_id} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '10px 12px', borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-overlay)', border: '1px solid var(--border-mid)',
+            }}>
+              <button
+                onClick={() => onNavigate(c.child_sustain_id)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', flex: 1, ...questionText }}
+              >
+                {c.member || c.display_name || c.slot} →
+              </button>
+              <button
+                onClick={() => setFundingTarget(t => (t?.id === c.child_sustain_id ? null : { id: c.child_sustain_id, label: c.member || c.slot }))}
+                style={{ ...cancelButton, padding: '6px 10px', fontSize: 9 }}
+              >
+                FUND
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {fundingTarget && (
+        <FundTransferForm
+          sustainId={sustainId} targetId={fundingTarget.id} targetLabel={fundingTarget.label}
+          onDone={() => load()}
+        />
+      )}
+
+      <RollupCard rollup={rollup} />
+
+      {!showNewForm ? (
+        <button
+          onClick={() => setShowNewForm(true)}
+          style={{
+            marginTop: 10, background: 'none', border: '1px dashed var(--border-mid)', borderRadius: 'var(--radius-sm)',
+            padding: '10px 14px', cursor: 'pointer', width: '100%',
+            fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.06em', color: 'var(--text-muted)',
+          }}
+        >
+          + NEW HOLON
+        </button>
+      ) : (
+        <NewHolonForm
+          sustainId={sustainId}
+          onCancel={() => setShowNewForm(false)}
+          onCreated={() => load()}
+        />
+      )}
+    </div>
+  );
+}
+
 function Empty({ text }) {
   return (
     <div style={{
@@ -2021,6 +2233,8 @@ export default function OrchieShell() {
           />
         </div>
       )}
+
+      {sustainId && <HolonNav sustainId={sustainId} onNavigate={chooseSustain} />}
 
       {sustainId && <SmsCaptureCard key={sustainId} sustainId={sustainId} />}
 

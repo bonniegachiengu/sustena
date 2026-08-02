@@ -112,6 +112,12 @@
       "description": "Prepare a personal finance summary for export. Queued in the outbox as 'prepared' — nothing leaves the system until a human confirms it.",
       "params": ["label"],
       "pawa_cost": 0
+    },
+    {
+      "name": "holon.transfer",
+      "description": "Move liquid funds between this habitat and a directly linked parent or child holon, atomically and conserved (e.g. returning funds to the household).",
+      "params": ["to_sustain_id", "amount", "idempotency_key"],
+      "pawa_cost": 0
     }
   ],
   "operatives": {},

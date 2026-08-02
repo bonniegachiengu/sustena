@@ -276,6 +276,16 @@ class SustainEngine:
                 elapsed_ms      REAL,
                 timestamp       TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS holon_transfers (
+                id                  TEXT PRIMARY KEY,
+                from_sustain_id     TEXT NOT NULL,
+                to_sustain_id       TEXT NOT NULL,
+                amount              REAL NOT NULL,
+                idempotency_key     TEXT NOT NULL,
+                created_at          TEXT NOT NULL,
+                UNIQUE(idempotency_key)
+            );
         """)
         self._db.commit()
         self._migrate_events_schema_sync()
@@ -560,6 +570,65 @@ class SustainEngine:
         ).fetchone()
         return row["next_seq"] if row is not None else 1
 
+    def _write_events_and_cache_no_commit(
+        self, sustain_id: str, new_state: dict, events: list[dict],
+    ) -> None:
+        """
+        The write half of _append_events_and_update_cache, WITHOUT the
+        commit/rollback — factored out so a caller that needs to write
+        MORE THAN ONE sustain's events+cache in a single atomic transaction
+        (holon.transfer's paired debit+credit — see
+        _commit_atomic_multi_sustain) can issue several of these against
+        the shared connection before committing once. Never call this
+        directly outside that pattern; every single-sustain caller should
+        keep using _append_events_and_update_cache, which wraps this with
+        its own commit/rollback exactly as before.
+        """
+        now = datetime.utcnow().isoformat()
+        seq = self._next_seq(sustain_id)
+        for ev in events:
+            payload = ev.get("payload", {})
+            try:
+                payload_json = json.dumps(payload, default=str)
+            except (TypeError, ValueError):
+                payload_json = json.dumps(str(payload))
+            mutations_json = json.dumps(ev.get("mutations") or [], default=str)
+            self._db.execute(
+                "INSERT INTO events "
+                "(id, sustain_id, event_name, payload_json, operator_log_id, timestamp, seq, mutations_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ev.get("id") or str(uuid.uuid4()),
+                    sustain_id,
+                    ev.get("event_name", "event.unknown"),
+                    payload_json,
+                    ev.get("operator_log_id"),
+                    ev.get("timestamp") or now,
+                    seq,
+                    mutations_json,
+                ),
+            )
+            seq += 1
+
+        state_json = json.dumps(new_state)
+        existing = self._db.execute(
+            "SELECT id, version_number FROM sustain_states WHERE sustain_id = ?",
+            (sustain_id,),
+        ).fetchone()
+        if existing is None:
+            self._db.execute(
+                "INSERT INTO sustain_states (id, sustain_id, state_json, version_number, updated_at) "
+                "VALUES (?, ?, ?, 1, ?)",
+                (str(uuid.uuid4()), sustain_id, state_json, now),
+            )
+        else:
+            self._db.execute(
+                "UPDATE sustain_states "
+                "SET state_json = ?, version_number = ?, updated_at = ? "
+                "WHERE sustain_id = ?",
+                (state_json, existing["version_number"] + 1, now, sustain_id),
+            )
+
     def _append_events_and_update_cache(
         self, sustain_id: str, new_state: dict, events: list[dict],
     ) -> None:
@@ -582,55 +651,78 @@ class SustainEngine:
         """
         if not events:
             return
-        now = datetime.utcnow().isoformat()
         try:
-            seq = self._next_seq(sustain_id)
-            for ev in events:
-                payload = ev.get("payload", {})
-                try:
-                    payload_json = json.dumps(payload, default=str)
-                except (TypeError, ValueError):
-                    payload_json = json.dumps(str(payload))
-                mutations_json = json.dumps(ev.get("mutations") or [], default=str)
-                self._db.execute(
-                    "INSERT INTO events "
-                    "(id, sustain_id, event_name, payload_json, operator_log_id, timestamp, seq, mutations_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        ev.get("id") or str(uuid.uuid4()),
-                        sustain_id,
-                        ev.get("event_name", "event.unknown"),
-                        payload_json,
-                        ev.get("operator_log_id"),
-                        ev.get("timestamp") or now,
-                        seq,
-                        mutations_json,
-                    ),
-                )
-                seq += 1
-
-            state_json = json.dumps(new_state)
-            existing = self._db.execute(
-                "SELECT id, version_number FROM sustain_states WHERE sustain_id = ?",
-                (sustain_id,),
-            ).fetchone()
-            if existing is None:
-                self._db.execute(
-                    "INSERT INTO sustain_states (id, sustain_id, state_json, version_number, updated_at) "
-                    "VALUES (?, ?, ?, 1, ?)",
-                    (str(uuid.uuid4()), sustain_id, state_json, now),
-                )
-            else:
-                self._db.execute(
-                    "UPDATE sustain_states "
-                    "SET state_json = ?, version_number = ?, updated_at = ? "
-                    "WHERE sustain_id = ?",
-                    (state_json, existing["version_number"] + 1, now, sustain_id),
-                )
+            self._write_events_and_cache_no_commit(sustain_id, new_state, events)
             self._db.commit()
         except Exception:
             self._db.rollback()
             raise
+
+    def _commit_atomic_multi_sustain(
+        self, entries: list[tuple[str, dict, list[dict]]],
+        extra_writes: list | None = None,
+    ) -> None:
+        """
+        Write MORE THAN ONE sustain's events+cache in a single transaction —
+        either every entry lands, or none does. This is the literal
+        mechanism behind holon.transfer's conservation guarantee (§4E.6):
+        "the transfer emits a paired debit+credit under one commit: both
+        apply or neither does." Achievable because SustainEngine holds one
+        shared sqlite3 connection across every sustain (sustain_id is a
+        column value, not a separate database/connection) — a normal
+        transaction on that connection genuinely spans both holons.
+
+        entries: [(sustain_id, new_state, events), ...]. An entry with an
+        empty events list contributes nothing (same no-op rule as
+        _append_events_and_update_cache) but doesn't block the others.
+
+        extra_writes: optional list of zero-arg callables that issue their
+        own self._db.execute(...) calls (no commit of their own) — used to
+        fold a non-event write (the holon_transfers ledger row) into the
+        SAME transaction as the state writes, so a crash between "state
+        committed" and "ledger row written" can never happen — the two are
+        atomic together, not sequential.
+        """
+        try:
+            for sustain_id, new_state, events in entries:
+                if events:
+                    self._write_events_and_cache_no_commit(sustain_id, new_state, events)
+            for write_fn in (extra_writes or []):
+                write_fn()
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
+
+    def _get_holon_transfer(self, idempotency_key: str) -> dict | None:
+        """A previously-committed transfer by its idempotency key, or None."""
+        row = self._db.execute(
+            "SELECT id, from_sustain_id, to_sustain_id, amount, idempotency_key, created_at "
+            "FROM holon_transfers WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def _write_holon_transfer_no_commit(
+        self, transfer_id: str, from_sustain_id: str, to_sustain_id: str,
+        amount: float, idempotency_key: str, timestamp: str,
+    ) -> None:
+        """The audit/dedup ledger row for one committed cross-holon transfer. See _commit_atomic_multi_sustain's extra_writes."""
+        self._db.execute(
+            "INSERT INTO holon_transfers (id, from_sustain_id, to_sustain_id, amount, idempotency_key, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (transfer_id, from_sustain_id, to_sustain_id, amount, idempotency_key, timestamp),
+        )
+
+    def list_holon_transfers(self, sustain_id: str, limit: int = 20) -> list[dict]:
+        """Every transfer touching sustain_id (either side), newest first — for a real transfer-history UI."""
+        rows = self._db.execute(
+            "SELECT id, from_sustain_id, to_sustain_id, amount, idempotency_key, created_at "
+            "FROM holon_transfers WHERE from_sustain_id = ? OR to_sustain_id = ? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (sustain_id, sustain_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def commit_external_mutation(
         self, sustain_id: str, state: StateAccessor, event_name: str, payload: dict,
@@ -1362,6 +1454,7 @@ class SustainEngine:
             operative_id=operative_id,
             timestamp=datetime.utcnow(),
             egress=egress_queue,
+            engine=self,
         )
 
         # Execute operator — catch all exceptions, return fail result
@@ -3021,6 +3114,45 @@ class SustainEngine:
         aggregates = self._aggregate_from_child_states(spec, links, child_states)
         return {"children": children_report, "aggregates": aggregates}
 
+    @staticmethod
+    def _resolve_child_path_value(state: dict, child_path: str) -> float | None:
+        """
+        Resolve child_path against one child's state, returning a single
+        number, or None if the path doesn't resolve to something numeric.
+
+        Supports two forms:
+          - a plain single-numeric path (unchanged, the only form that
+            existed before Phase 2 — e.g. "finances.liquid.balance").
+          - a wildcard-SUM reducer over a dict of variable keys (Phase 2,
+            nested-holons addendum §4D.7's "reducer/wildcard child_path" —
+            e.g. "finances.pockets[*].allocated" sums .allocated across
+            every pocket the child happens to have, since a household total
+            can't be pinned to one fixed pocket name). The wildcard's OWN
+            reduction is always SUM — the one sensible combination for "the
+            child's total across its own dict of pockets" — the aggregate's
+            declared `op` then combines the resulting per-child numbers
+            ACROSS children exactly as it already did for the plain form.
+        """
+        if "[*]" in child_path:
+            prefix, _, suffix = child_path.partition("[*]")
+            suffix = suffix.lstrip(".")
+            container = StateAccessor(state).get(prefix)
+            if not isinstance(container, dict):
+                return None
+            total = 0.0
+            for item in container.values():
+                if not isinstance(item, dict):
+                    continue
+                val = item.get(suffix) if suffix else item
+                if isinstance(val, (int, float)) and not isinstance(val, bool):
+                    total += val
+            return total
+
+        val = StateAccessor(state).get(child_path)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            return val
+        return None
+
     def _aggregate_from_child_states(
         self, spec: dict, links: list[dict], child_states: dict[str, dict],
     ) -> dict[str, dict]:
@@ -3053,10 +3185,10 @@ class SustainEngine:
                     })
                     continue
                 try:
-                    val = StateAccessor(state).get(child_path)
+                    val = self._resolve_child_path_value(state, child_path)
                 except Exception:
                     val = None
-                if not isinstance(val, (int, float)) or isinstance(val, bool):
+                if val is None:
                     excluded.append({
                         "sustain_id": cid, "slot": link.get("slot"), "member": link.get("member"),
                         "reason": f"path '{child_path}' not present or not numeric on this child",
