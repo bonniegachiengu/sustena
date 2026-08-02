@@ -1254,6 +1254,59 @@ A real constraint caught by testing, not by inspection: `StateAccessor`'s own pa
 
 ---
 
+### Phase 2 ✅ — Nested holons: gated ⊕/⊕⁻¹, atomic conserved cross-holon transfer, roll-up over pocket sets (2 Aug 2026)
+
+**`holon.create_child`/`holon.dissolve_child`** — gated operators (real S2 gate + S3 fold, not a side path) that let one sustain declare/remove a child holon at runtime, backed by a `child_policy` on the parent spec. **`holon.transfer`** — the keystone: an atomic, conserved cross-holon money movement (debits one sustain's pocket, credits another's, both mutations committed together or neither is) via `_commit_atomic_multi_sustain`, verified with hard conservation tests (total money across both holons is byte-identical before/after, including the failure-path case where a mid-transfer failure leaves BOTH sides untouched, not half-applied). Roll-up ρ extended to aggregate over declared pocket sets, not just a single flat balance. Orchie gained holon navigation (`GET .../parent`, a breadcrumb-style UX to move between a habitat and its household). 1 backend commit (`f131998`), APK bumped to v1.12.0 (versionCode 22).
+
+---
+
+### Phase 3 ✅ — Parser primitive-lift: declared ParseRule data, gated corrections, honest ML-proposer scaffold (2 Aug 2026)
+
+Promotes the transducer's matching logic from hand-wired Python functions to a typed, declared data primitive — same "no eval, no magic" discipline as `constraints.py`/`predicates.py`.
+
+**`core/parse_rule.py`** — `FieldSpec`/`ParseRule` dataclasses; `typecheck_rule` (a real Γ⊢r well-formedness judgment: invalid regex, an operator that doesn't exist, a param that operator doesn't declare are all load-time findings, never a silent runtime miss); `run_rules`/`apply_rule`, a small first-match-wins interpreter. `parse_message()` in `transducer.py` tries the declared tier FIRST, falls through to the existing hand-wired `_parse_mpesa`/`_parse_kcb` only when nothing declared matches — the fallback tier is never bypassed, only pre-empted.
+
+**`core/parse_rules_seed.py`** — the seed library migrating the 6 original M-Pesa shapes to ParseRule data (parity proven by the full pre-existing `test_transducer.py` suite passing byte-for-byte unchanged with the declared tier wired in ahead of the fallback).
+
+**Gated corrections (Phase 3C)** — `SustainEngine.add_parse_rule`/`modify_parse_rule`/`retire_parse_rule`, backed by a versioned, append-only `parse_rule_edits` table (`status` ∈ active/superseded/retired) — a correction is never a silent overwrite, it's a new version with history.
+
+**ML proposer (Phase 3D), honestly scoped** — `core/parse_rule_proposer.py`'s `propose_and_verify(generator=None)` has NO real LLM/generator wired. `verify_proposed_rule` (a real, usable 2-condition verifier: inducing-example fidelity + regression against stored messages) exists and is tested, but there is nothing yet that PRODUCES a candidate rule from raw text without a human — disclosed as a stub, not presented as more than it is.
+
+---
+
+### Correction-learning UI + household total fix + role_in_family fix (2 Aug 2026)
+
+**The human-correction path made real and visible** — the highest-value piece of Phase 3, turning the gated-edit machinery above into something Bonnie actually uses. `core/parse_rule_learn.py`'s `synthesize_rule_from_correction()` — deterministic TEMPLATE synthesis (explicitly NOT an LLM): given a human's confirmed capture (raw text + the operator/params they confirmed), it finds the confirmed amount's own text inside the raw message, parameterizes only that (plus a leading reference code if present), and keeps everything else as a literal anchor — a conservative, no-false-generalization design. `verify_proposed_rule` (Phase 3D's own verifier) is reused directly against the new candidate before it's ever added. `POST /orchie/capture/learn-rule` wires this to `add_parse_rule`; a new `LearnRuleControl` in `OrchieShell.jsx` offers "remember this format" right on the classify card's success state, with full idle/learning/learned/rejected/error feedback. Money-safety asymmetry preserved: a learned income rule auto-applies (`status="mapped"`), a learned spend/allocate rule still asks a human every time (`status="parsed_unmapped"`) — matching every shipped seed rule's own existing asymmetry, not a new policy.
+
+**Household roll-up fixed to mean everything, not just the children.** `compute_rollup()`/`_aggregate_from_child_states` now fold the PARENT's own state in first (tagged `is_self: True`) before folding in each child — "household total" now genuinely means parent + every linked child combined, with `includes_parent_own_contribution` on the aggregate output making this explicit rather than implicit. Traced through all 3 real call sites (`compute_rollup()`, the Slice 7 `_check_parent_binding_gate`, and `simulate()`'s `_parent_rollup_for`) to confirm this doesn't disturb the refuse-only-on-newly-breach binding-gate logic or the simulator's own hypothetical-state substitution — both only ever touch a CHILD's state, never the parent's real one, so folding the parent's own real contribution in alongside is safe. `curated_ui.py`'s rollup widget and `OrchieShell.jsx`'s `RollupCard` both updated to exclude the new `is_self` entry from "N linked holons" counts (that count means children, the total itself means everything).
+
+**`{{role_in_family}}` unresolved-placeholder bug fixed at the root.** `SustainEngine.instantiate()` never applied a spec's own declared OPTIONAL-parameter defaults before resolving `{{placeholder}}` tokens — a habitat instantiated without an explicit `role_in_family` param left the literal, unresolved `"{{role_in_family}}"` string sitting in real state forever. Fixed with a defaulting loop that fills any declared-but-omitted optional param from its own spec-declared default before token resolution runs. Verified live: `role_in_family` now reads as a clean empty string, never the raw placeholder.
+
+**Tests:** 3 new in `test_sustain_engine.py` (default-filling), 2 new + 2 fixed in `test_holon_operators.py`/`test_composition.py`/`test_holon_routes.py` (the rollup semantic change moves several real numbers — e.g. a household total that used to read 3,000 now correctly reads 17,000, homestead's own 14,000 plus the child's 3,000 — assertions updated to the new, correct numbers, not reverted around), 13 new in `test_parse_rule_learn.py`, 6 new in `test_orchie_capture_routes.py::TestLearnRule`. APK bumped to v1.13.0 (versionCode 23).
+
+---
+
+### Broaden parser coverage: mpesa_withdraw + all 15 KCB shapes migrated to declared ParseRule data (2 Aug 2026)
+
+Closes out the "KCB stays 100% on the Python fallback tier" scope boundary Phase 3B originally disclosed — every KCB shape (bar one deliberate exception, see below) and the one remaining un-migrated M-Pesa shape are now declared data, reachable by Bonnie's own "remember this format" correction UI if a real message ever needs a tweak, not just hard-coded Python.
+
+**Two new `FieldSpec` field types, both declarative, no callables:**
+- `prefix_if_missing` — normalises a captured string to always carry a given prefix (mpesa_withdraw's real "Agent {name}" transform: some real withdrawal SMS already say "Agent 123456", others just the bare code).
+- `upper` — uppercases a captured string (kcb_card's currency KES/USD normalisation).
+- `template` — a `str.format()` field whose value is built from MULTIPLE captured pieces (raw regex groups plus any field already extracted earlier in the same rule's `extract` dict, in that precedence order) rather than one plain group — needed for several KCB shapes whose `counterparty` is a composed string, e.g. `kcb_loan_repay`'s `"KCB Mobile Loan {loan_number} repayment"`. `reason_template` was widened the same way (sees raw regex groups too, not just extracted fields) so a reason can state a fact (e.g. a loan-status shape's "overdue since {date}") that was never worth promoting to a permanent parsed field — matching the original hand-wired parsers exactly.
+
+**A real, previously-latent bug in the interpreter found by this migration, not by inspection:** `apply_rule`'s `informational`-status branch never set `external_ref` (only the `mapped`/`parsed_unmapped` branches did) — invisible until now because no informational-status declared rule existed before `kcb_balance` (the first one, with an optional trailing ref group). Fixed to match the mapped/parsed_unmapped branches.
+
+**All 15 KCB shapes migrated**, in the exact order the original `_parse_kcb()` if-chain used (precedence-preserving, since `run_rules()` is first-match-wins over a list): `kcb_receive`, `kcb_card`, `kcb_loan_disbursed`, `kcb_loan_repay`, `kcb_vooma_loan_repay`, `kcb_mpesa_paybill`, `kcb_mpesa_account`, `kcb_mpesa_received`, `kcb_mpesa_sent`, `kcb_mpesa_transferred`, `kcb_balance`, and the 4 loan-status informational shapes (overdue/arrears/default/due_today). **Deliberately NOT migrated:** `kcb_system_notice` — the shared, generic informational-system-message catch-all for both sources (matched via a list of ~20 loosely-related sub-patterns, not one named-group regex — a genuinely different shape of thing, stays on the Python fallback tier).
+
+**Zero regression, proven not asserted:** the full pre-existing `test_transducer.py` suite (86 tests) passes byte-for-byte unchanged. A new `TestKCBDeclaredParity` class in `test_parse_rule.py` runs every migrated shape's own real sample text through BOTH the declared tier and the Python fallback (forced via `parse_message(..., declared_rules=[])`) and asserts identical status/operator/params/external_ref/reason — the same parity discipline Phase 3B established for M-Pesa, extended to all 15 KCB shapes. Two harmless, pre-existing, additive discrepancies (declared parsed_fields always also carry `ref`, and an intermediate field like `name` used only to build a `template` field) are explicitly allowed for and documented in the test, not silently ignored — neither ever changes or removes anything the original returned. Two stale tests that asserted the OLD "KCB has zero declared rules" scope boundary (`test_parse_rule.py`, `test_parse_rule_routes.py`) were corrected in place to assert the new reality, not reverted around.
+
+**Item 4 (rough edges) — investigated, nothing further found needing a fix.** Checked: the classify card's rendering (`curated_ui.py::_render_unmapped_capture_classify`) and `effect_capture.py`'s pocket/direction resolution are both already fully generic (keyed on `amount`/`counterparty`/`direction`, present on every shape uniformly) — the richer KCB-specific fields (`currency`, `loan_number`, `sub_source`, `transaction_cost`) ride along unused without any display or resolution issue. `parse_message()`'s source-based strict routing already lowercases `source_id` before lookup, so KCB/Kcb/kcb all resolve identically. The previously-flagged `shell.jsx` hardcoded-owner-string bug (Slice 13's own notes) was checked and confirmed already fixed (`createSustain` uses `authUser?.user_id`). The KCB/M-Pesa cross-source double-count risk remains a real, disclosed, deliberately-deferred gap (needs cross-source correlation by amount + shared M-PESA ref, not built — would need real evidence the ref values genuinely match across sources before shipping, per this project's own "don't guess a format" lesson).
+
+**Tests:** `MPESA_WITHDRAW` + 15 `KCB_*` ParseRule objects in `parse_rules_seed.py`; 22 new tests across `test_parse_rule.py` (field-type mechanics, the KCB parity class, template/upper/reason-widening-specific cases, the paybill/account direction-is-received-not-sent regression check) plus 2 corrected in-place scope-boundary tests. **2161 backend tests pass.** No frontend changes this round (backend-only migration) — no APK rebuild needed.
+
+---
+
 ### Sprint 6 ✅ — Today List + Morning Brief
 All 4 tasks done and committed (1297 tests):
 Tasks 6.1–6.4:

@@ -67,11 +67,19 @@ class TestListParseRules:
         assert "mpesa_received" in rule_ids
         assert "mpesa_paybill" in rule_ids
 
-    def test_kcb_has_zero_declared_rules_by_design(self, client, user):
+    def test_kcb_has_fifteen_declared_rules(self, client, user):
+        # KCB was migrated to declared ParseRule data 2 Aug 2026 (the
+        # "broaden parser coverage" round) -- this test used to assert the
+        # opposite (kcb has zero declared rules by design) when that was
+        # the real, disclosed scope boundary. Corrected in place now that
+        # the boundary has moved, not reverted around.
         headers, _ = user
         r = client.get("/devui/parse-rules?source=kcb", headers=headers)
         assert r.status_code == 200
-        assert r.json()["data"]["rules"] == []
+        rule_ids = [rule["id"] for rule in r.json()["data"]["rules"]]
+        assert len(rule_ids) == 15
+        assert "kcb_receive" in rule_ids
+        assert "kcb_mpesa_paybill" in rule_ids
 
 
 class TestAddModifyRetireOverHttp:

@@ -43,16 +43,46 @@ time finding (typecheck_rule returns errors), never a silent runtime
 "just don't match." Checked once when a rule is loaded/added, not on
 every message.
 
-Deliberately data-only, no callables: `extract`'s FieldSpec supports
-exactly THREE field types (amount -- comma-stripped float; string --
-stripped text; literal -- a fixed value) because that is what every
-currently-migrated shape actually needs. A shape needing genuinely bespoke
-post-processing (e.g. mpesa_withdraw's "Agent {name}" prefix transform)
-is NOT force-fit into this schema -- it stays on the Python fallback tier
-until either the schema gains a real, shared need for a 4th field type or
-the transform turns out to be common enough to warrant one. Same
-"additive, migrate what fits cleanly, keep the rest" discipline as every
-version of this codebase's own migrations.
+Deliberately data-only, no callables: `extract`'s FieldSpec supports six
+field types -- amount (comma-stripped float), string (stripped text),
+literal (a fixed value), prefix_if_missing (normalise a captured string to
+always carry a given prefix, added 2 Aug 2026 to migrate mpesa_withdraw's
+real "Agent {name}" transform: some real withdrawal SMS already say
+"Agent 123456 - TOWN SHOP", others just "654321 - ESTATE SHOP" --
+prefix_if_missing prepends "Agent " only when the captured text doesn't
+already start with it, case-insensitively), upper (uppercase a captured
+string -- added the same day to migrate kcb_card's `currency.upper()`
+normalisation: the regex alternation KES|USD is already uppercase, but a
+case-insensitive match could in principle capture "kes"/"usd" lowercase,
+and the hand-wired parser always normalised to upper), and template (a
+str.format() template evaluated against BOTH the raw regex match's own
+named groups and any already-extracted fields, in that precedence order
+with extracted fields winning -- added the same day to express several
+real KCB shapes whose one parsed_fields value is a STRING BUILT FROM
+MULTIPLE captured pieces, e.g. kcb_loan_repay's
+counterparty=f"KCB Mobile Loan {loan_number} repayment"; declaring the
+dependency field (e.g. "loan_number" as its own stripped `string` extract)
+BEFORE the template field that references it, in the `extract` dict's own
+literal order, is what makes the extracted (stripped) value win over the
+raw group -- Python dicts preserve insertion order, and _apply_extract
+walks `rule.extract.items()` in that order).
+
+This is still declared, generic, reusable field-type data, not bespoke
+callables -- each transform is a simple, well-scoped, side-effect-free
+string/number operation, not arbitrary code. A genuinely different
+transform stays out of scope and on the Python fallback tier until
+there's a real, shared need for it, same "additive, migrate what fits
+cleanly" discipline as every version of this codebase's own migrations.
+
+reason_template (and any field of type="template") can reference EITHER
+a raw regex-matched group name OR an already-extracted field name --
+apply_rule() merges {**m.groupdict(), **fields} once per match and passes
+that combined dict to every .format() call. This lets a reason state a
+fact (e.g. a loan-status shape's "since {date}") that was never worth
+promoting to a permanent parsed_fields entry, matching the hand-wired
+parsers' own original behaviour exactly (they read straight off the match
+object for values that were reason-text-only, never returned to the
+caller as data).
 
 The security pre-gate (contains_sensitive_secret) is NOT a ParseRule and
 is out of scope for this module entirely -- see transducer.py's own
@@ -79,10 +109,19 @@ class FieldSpec:
     type="literal": `value` is used verbatim, no regex group involved --
     for a fixed field a rule always carries regardless of match content
     (e.g. direction="received" on every mpesa_received hit).
+    type="prefix_if_missing": `group` names the captured text, `value` is
+    the prefix to normalise onto it -- "Agent {captured}" if the captured
+    text doesn't already start with that prefix (case-insensitive), else
+    the captured text verbatim.
+    type="upper": `group` names the captured text, uppercased.
+    type="template": `value` is a str.format() template evaluated against
+    the raw match's named groups plus any already-extracted fields (see
+    module docstring for the precedence/ordering rule) -- no `group`.
+    See the module docstring for the full rationale of each type.
     """
-    type: str = "string"          # "amount" | "string" | "literal"
-    group: str | None = None      # regex named group (amount/string types)
-    value: Any = None             # fixed value (literal type)
+    type: str = "string"          # "amount" | "string" | "literal" | "prefix_if_missing" | "upper" | "template"
+    group: str | None = None      # regex named group (amount/string/prefix_if_missing/upper types)
+    value: Any = None             # fixed value (literal), prefix string (prefix_if_missing), or format template (template)
 
 
 @dataclass(frozen=True)
@@ -102,7 +141,7 @@ class ParseRule:
     examples: tuple[str, ...] = ()
 
 
-_ALLOWED_FIELD_TYPES = {"amount", "string", "literal"}
+_ALLOWED_FIELD_TYPES = {"amount", "string", "literal", "prefix_if_missing", "upper", "template"}
 _ALLOWED_STATUSES = {"mapped", "parsed_unmapped", "informational"}
 _ALLOWED_FLAGS = {"IGNORECASE", "DOTALL", "MULTILINE"}
 
@@ -131,10 +170,14 @@ def typecheck_rule(rule: ParseRule) -> list[str]:
     for field_name, spec in rule.extract.items():
         if spec.type not in _ALLOWED_FIELD_TYPES:
             errors.append(f"extract field '{field_name}' has unknown type '{spec.type}'")
-        elif spec.type in ("amount", "string") and not spec.group:
+        elif spec.type in ("amount", "string", "upper") and not spec.group:
             errors.append(f"extract field '{field_name}' (type={spec.type}) requires a regex group name")
         elif spec.type == "literal" and spec.value is None:
             errors.append(f"extract field '{field_name}' (type=literal) requires a value")
+        elif spec.type == "prefix_if_missing" and (not spec.group or spec.value is None):
+            errors.append(f"extract field '{field_name}' (type=prefix_if_missing) requires both a regex group and a prefix value")
+        elif spec.type == "template" and not spec.value:
+            errors.append(f"extract field '{field_name}' (type=template) requires a format-string value")
 
     if rule.status == "mapped":
         # Import locally -- parse_rule.py must not create an import cycle
@@ -165,17 +208,29 @@ def typecheck_rule(rule: ParseRule) -> list[str]:
 
 def _apply_extract(rule: ParseRule, m: re.Match) -> dict:
     fields: dict[str, Any] = {}
+    raw_groups = m.groupdict()
     for name, spec in rule.extract.items():
         if spec.type == "literal":
             fields[name] = spec.value
             continue
+        if spec.type == "template":
+            # Extracted fields declared earlier in this dict win over a
+            # same-named raw group -- see module docstring's ordering note.
+            fields[name] = spec.value.format(**{**raw_groups, **fields})
+            continue
         raw = m.group(spec.group)
         if raw is None:
             continue  # an optional group that legitimately didn't match this time
+        raw = raw.strip()
         if spec.type == "amount":
             fields[name] = float(raw.replace(",", ""))
+        elif spec.type == "prefix_if_missing":
+            prefix = spec.value or ""
+            fields[name] = raw if raw.lower().startswith(prefix.lower()) else f"{prefix} {raw}"
+        elif spec.type == "upper":
+            fields[name] = raw.upper()
         else:
-            fields[name] = raw.strip()
+            fields[name] = raw
     return fields
 
 
@@ -222,7 +277,10 @@ def apply_rule(rule: ParseRule, raw_text: str):
         return None
 
     fields = _apply_extract(rule, m)
-    reason = rule.reason_template.format(**fields) if rule.reason_template else ""
+    # reason_template may reference either an extracted field OR a raw
+    # regex group that was never promoted to parsed_fields (e.g. a loan
+    # status shape's "since {date}") -- see module docstring.
+    reason = rule.reason_template.format(**{**m.groupdict(), **fields}) if rule.reason_template else ""
 
     if rule.status == "mapped":
         return TransductionResult(
@@ -245,6 +303,14 @@ def apply_rule(rule: ParseRule, raw_text: str):
     # informational
     return TransductionResult(
         status="informational",
+        # Real bug found and fixed 2 Aug 2026 (surfaced by kcb_balance, the
+        # first informational-status declared rule with an optional ref
+        # group -- every prior migrated rule was mapped/parsed_unmapped, so
+        # this branch's missing external_ref was never exercised): the
+        # hand-wired _parse_kcb's own kcb_balance branch DOES set
+        # external_ref from its optional ref group, so the declared tier
+        # must too, for byte-identical parity.
+        external_ref=fields.get("ref"),
         parsed_fields=fields or {"direction": "none"},
         reason=reason,
         parser_name=rule.id,
