@@ -22,6 +22,7 @@ from sustena.core.effect_capture import (
     required_params_satisfiable,
     resolve_description,
 )
+from sustena.core.transducer import parse_message
 
 STATE = {
     "finances": {
@@ -476,3 +477,33 @@ class TestDirectionCorrection:
         assert r.status == "ready"
         assert r.params["amount"] == 2500.0
         assert "pocket_name" not in r.params
+
+    def test_real_outgoing_mpesa_payment_infers_spend_never_allocate(self):
+        """The explicit sanity check Bonnie asked for: a real, genuine
+        outgoing M-Pesa payment (money already left the account) must
+        infer budget.spend, never budget.allocate -- even with
+        budget.record_income ALSO a live candidate (the full real widget
+        declaration). Goes through the real transducer, not a hand-built
+        parsed_fields dict, to prove the whole pipeline agrees end to end."""
+        real_text = (
+            "UH1B91JZZN Confirmed. Ksh1,500.00 sent to SAFARICOMHOME for account 11619547 "
+            "on 1/8/26 at 11:22 PM. New M-PESA balance is Ksh12,154.47. Transaction cost, Ksh0.00."
+        )
+        parsed = parse_message(real_text, source_id="mpesa")
+        assert parsed.status == "parsed_unmapped"  # sanity-check the fixture itself
+
+        r = infer(CANDIDATES_WITH_INCOME, STATE, parsed_fields=parsed.parsed_fields, known={"pocket_name": "food"})
+        assert r.status == "ready"
+        assert r.operator == "budget.spend"
+        assert r.operator != "budget.allocate"
+        assert r.params["amount"] == 1500.0
+
+    def test_real_airtime_purchase_also_infers_spend(self):
+        real_text = (
+            "UH1B91JUJI confirmed. You bought Ksh50.00 of airtime on 1/8/26 at 11:15 PM. "
+            "New M-PESA balance is Ksh13,654.47. Transaction cost, Ksh0.00."
+        )
+        parsed = parse_message(real_text, source_id="mpesa")
+        r = infer(CANDIDATES_WITH_INCOME, STATE, parsed_fields=parsed.parsed_fields, known={"pocket_name": "food"})
+        assert r.status == "ready"
+        assert r.operator == "budget.spend"

@@ -41,6 +41,7 @@ All four primitives are wired together in every operator:
   5. PawaLedger          — ctx.pawa.deduct() charges pawa after constraints pass
 """
 
+import re
 import uuid
 from datetime import datetime
 
@@ -49,6 +50,20 @@ from sustena.core.operator import OPERATOR_REGISTRY, OperatorContext, OperatorRe
 
 # Shared engine instance — stateless, safe to reuse across calls
 _engine = ConstraintEngine()
+
+# StateAccessor's own path parser only accepts \w segments (state.py's
+# _SEGMENT_RE) -- every pocket name in this codebase has always
+# incidentally been a single \w+ word ("food", "rent", "WiFi") until now.
+# budget.add_pocket is the first place a person can type an arbitrary
+# name, so this normalisation has to exist somewhere -- collapsing any
+# run of non-word characters to a single underscore turns a perfectly
+# reasonable "holiday fund" into "holiday_fund" instead of crashing with
+# a raw StatePathError.
+_POCKET_NAME_INVALID_RE = re.compile(r"[^\w]+")
+
+
+def _normalize_pocket_name(raw: str) -> str:
+    return _POCKET_NAME_INVALID_RE.sub("_", (raw or "").strip()).strip("_")
 
 
 def _check_constraints(operator_name: str, ctx: OperatorContext, params: dict) -> OperatorResult | None:
@@ -264,6 +279,102 @@ async def budget_allocate(
         "amount_allocated": amount,
         "pocket_total_allocated": allocated,
         "liquid_remaining": liquid,
+    })
+
+
+# ── budget.add_pocket ────────────────────────────────────────────────────────────
+# No existing operator could create a bare, empty pocket -- budget.allocate
+# always moves real money (constraints require amount > 0) and would refuse
+# a zero-amount call outright, so it can't be used to just NAME a pocket
+# before deciding how much goes into it. Added specifically for Orchie's
+# "+ NEW" pocket tile (2 Aug 2026): every state change stays a real, typed,
+# gated operator call -- no side-write, per the standing "everything as
+# Sustena primitives" principle.
+
+@sustena_operator(
+    name="budget.add_pocket",
+    description="Create a new, empty budget pocket. No money movement -- allocated and spent both start at zero.",
+    constraints=[],  # existence check enforced inline in the operator body, same pattern budget.spend uses for the opposite check
+    side_effects=["event.finances.pocket_created"],
+    pawa_cost=0,
+    license_tier="free",
+    author="sustena_core",
+    protocol="rpc",
+    ui_schema={
+        "widget_type": "budget_allocation_card",
+        "fields": [
+            {"label": "Pocket", "source": "inputs.pocket_name", "display": "text"},
+            {"label": "Limit", "source": "inputs.limit", "display": "currency"},
+        ],
+        "ctas": ["View Budget"],
+    },
+)
+async def budget_add_pocket(
+    ctx: OperatorContext,
+    pocket_name: str,
+    limit: float = 0.0,
+) -> OperatorResult:
+    """
+    Create a new pocket with allocated=0, spent=0 -- deliberately no money
+    movement, unlike budget.allocate (which requires amount > 0 and always
+    debits liquid balance). Exists for the moment a person just wants to
+    NAME a pocket before deciding how much goes into it.
+
+    Fails honestly if the pocket already exists -- a real, visible refusal
+    (same OperatorResult.fail() shape as any other gate refusal), never
+    silently treated as a no-op success, so a duplicate tap or a genuine
+    name collision is never masked.
+
+    Primitives used:
+      StateAccessor  — creates finances.pockets.<name> with allocated=spent=0
+      PawaLedger     — deducts 0 pawa (free operator)
+      EventBus       — fires event.finances.pocket_created
+
+    params:
+      pocket_name -- e.g. "holiday fund", "car repair" -- normalised (see
+                     below) before being used as a state path segment
+      limit       -- optional hard cap (0 = no limit), same field meaning
+                     every existing pocket already carries
+
+    A real constraint caught by testing, not by inspection: StateAccessor's
+    own path parser only accepts \\w segments (state.py's _SEGMENT_RE =
+    r"(\\w+)(?:\\[(\\d+)\\])?") -- a raw "holiday fund" (with a space) would
+    raise StatePathError, an unhandled exception, not a clean refusal. This
+    operator normalises the name (whitespace/punctuation -> underscore)
+    rather than bluntly rejecting a perfectly reasonable typed name -- the
+    RETURNED "pocket" field is the real, final name actually used; the
+    caller (Orchie's "+ NEW" flow) shows that back, not the raw input.
+    """
+    pocket_name = _normalize_pocket_name(pocket_name)
+    if not pocket_name:
+        return OperatorResult.fail(
+            reason="Pocket name can't be empty.",
+            constraint_violated="pocket_name_valid",
+        )
+
+    if ctx.state.exists(f"finances.pockets.{pocket_name}.allocated"):
+        return OperatorResult.fail(
+            reason=f"Pocket '{pocket_name}' already exists.",
+            constraint_violated="pocket_not_already_present",
+        )
+
+    fail = await _charge_pawa("budget.add_pocket", ctx)
+    if fail:
+        return fail
+
+    pocket_path = f"finances.pockets.{pocket_name}"
+    ctx.state.set(pocket_path, {"allocated": 0.0, "spent": 0.0, "limit": limit})
+
+    await ctx.events.publish(
+        "event.finances.pocket_created",
+        {"pocket": pocket_name, "limit": limit},
+    )
+
+    return OperatorResult.ok({
+        "pocket": pocket_name,
+        "allocated": 0.0,
+        "spent": 0.0,
+        "limit": limit,
     })
 
 

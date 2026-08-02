@@ -155,6 +155,33 @@ _MPESA_WITHDRAW_RE = re.compile(
     r"New M-PESA balance is Ksh(?P<balance>[\d,]+\.?\d*)",
 )
 
+# Two more real, genuine Safaricom M-Pesa shapes -- REAL text Bonnie pasted
+# (2 Aug 2026) -- that came through UNPARSED against the original 5 above.
+# Textually distinct from every existing mpesa_* pattern (checked before
+# adding, not assumed): PAYBILL_SENT uses "sent to X for account Y" (the
+# existing PAYBILL pattern only recognises "paid to X for account Y" --
+# Safaricom genuinely uses both verbs for what is structurally the same
+# paybill-payment shape); AIRTIME is an entirely different sentence shape
+# ("You bought Ksh X of airtime") with no counterparty at all. AIRTIME's
+# own real sample also has lowercase "confirmed" (every other real M-Pesa
+# sample in this file capitalises it) -- re.IGNORECASE added specifically
+# because of that observed real variation, not applied speculatively.
+_MPESA_PAYBILL_SENT_RE = re.compile(
+    r"(?P<ref>[A-Z0-9]{10})\s+Confirmed\.\s+Ksh(?P<amount>[\d,]+\.?\d*)\s+sent to\s+"
+    r"(?P<business>[A-Za-z0-9 ]+?)\s+for account\s+(?P<account>\S+)\s+on\s+(?P<date>\S+)\s+at\s+(?P<time>\d{1,2}:\d{2}\s*[APap][Mm])\.?\s+"
+    r"New M-PESA balance is Ksh(?P<balance>[\d,]+\.?\d*)"
+    r"(?:\.\s*Transaction cost,?\s*Ksh(?P<cost>[\d,]+\.?\d*))?",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_MPESA_AIRTIME_RE = re.compile(
+    r"(?P<ref>[A-Z0-9]{10})\s+confirmed\.\s+You bought\s+Ksh(?P<amount>[\d,]+\.?\d*)\s+of airtime\s+on\s+"
+    r"(?P<date>\S+)\s+at\s+(?P<time>\d{1,2}:\d{2}\s*[APap][Mm])\.?\s+"
+    r"New M-PESA balance is Ksh(?P<balance>[\d,]+\.?\d*)"
+    r"(?:\.\s*Transaction cost,?\s*Ksh(?P<cost>[\d,]+\.?\d*))?",
+    re.IGNORECASE | re.DOTALL,
+)
+
 # NOTE: two "Ksh X sent to KCB Pay Bill/account ... M-PESA ref Z" shapes used
 # to live here, kept under the mpesa parser on the assumption they were genuine
 # Safaricom M-Pesa notifications. Bonnie confirmed (1 Aug 2026) that on his
@@ -251,6 +278,42 @@ def _parse_mpesa(text: str) -> TransductionResult | None:
             },
             reason=_needs_pocket_reason("Cash withdrawal", amount, counterparty),
             parser_name="mpesa_withdraw",
+        )
+
+    m = _MPESA_PAYBILL_SENT_RE.search(text)
+    if m:
+        amount = _to_float(m.group("amount"))
+        business = m.group("business").strip()
+        fields = {
+            "direction": "sent", "amount": amount, "counterparty": business,
+            "account": m.group("account"), "balance_after": _to_float(m.group("balance")),
+        }
+        if m.group("cost") is not None:
+            fields["transaction_cost"] = _to_float(m.group("cost"))
+        return TransductionResult(
+            status="parsed_unmapped",
+            external_ref=m.group("ref"),
+            parsed_fields=fields,
+            reason=_needs_pocket_reason("Paybill payment", amount, business),
+            parser_name="mpesa_paybill_sent",
+        )
+
+    m = _MPESA_AIRTIME_RE.search(text)
+    if m:
+        amount = _to_float(m.group("amount"))
+        counterparty = "Safaricom airtime"
+        fields = {
+            "direction": "sent", "amount": amount, "counterparty": counterparty,
+            "balance_after": _to_float(m.group("balance")),
+        }
+        if m.group("cost") is not None:
+            fields["transaction_cost"] = _to_float(m.group("cost"))
+        return TransductionResult(
+            status="parsed_unmapped",
+            external_ref=m.group("ref"),
+            parsed_fields=fields,
+            reason=_needs_pocket_reason("Airtime purchase", amount, counterparty),
+            parser_name="mpesa_airtime",
         )
 
     return None

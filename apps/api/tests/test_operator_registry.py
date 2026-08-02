@@ -24,6 +24,7 @@ import sustena.operators  # triggers registration of all operator modules
 BUDGET_OPERATORS = [
     "budget.record_income",
     "budget.allocate",
+    "budget.add_pocket",
     "budget.spend",
     "budget.transfer",
     "budget.summary",

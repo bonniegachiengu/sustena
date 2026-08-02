@@ -47,6 +47,26 @@ WITHDRAW_NO_AGENT_PREFIX = (
     "on 20/7/26 at 7:00 PM. New M-PESA balance is Ksh6,850.00"
 )
 
+# ── Two more real M-Pesa shapes — REAL text Bonnie pasted (2 Aug 2026) ──────
+# Both came through UNPARSED against the original 5 patterns above.
+# PAYBILL_SENT uses "sent to X for account Y" -- the existing PAYBILL
+# pattern only recognises "paid to X for account Y"; Safaricom genuinely
+# uses both verbs for the same paybill-payment shape. AIRTIME is a wholly
+# different sentence structure with no counterparty at all, and its real
+# sample has lowercase "confirmed" (every other real sample capitalises
+# it) -- a genuine, observed variation, not a guess.
+
+MPESA_PAYBILL_SENT = (
+    "UH1B91JZZN Confirmed. Ksh1,500.00 sent to SAFARICOMHOME for account 11619547 "
+    "on 1/8/26 at 11:22 PM. New M-PESA balance is Ksh12,154.47. Transaction cost, Ksh0.00."
+)
+
+MPESA_AIRTIME = (
+    "UH1B91JUJI confirmed. You bought Ksh50.00 of airtime on 1/8/26 at 11:15 PM. "
+    "New M-PESA balance is Ksh13,654.47. Transaction cost, Ksh0.00. Amount you can "
+    "transact within the day is 440,663.00. Download My OneApp on https://saf.cx/3wAmy"
+)
+
 # ── KCB<->M-Pesa samples — REAL text Bonnie pasted (1 Aug 2026) ─────────────
 # Personal names replaced with placeholder Kenyan names matching this
 # file's existing convention (JOHN KAMAU / MARY WANJIRU) -- amounts, dates,
@@ -274,6 +294,53 @@ class TestParsedUnmappedNeverGuessesAPocket:
         for text in (PAYBILL, BUYGOODS, SENT, WITHDRAW):
             result = parse_message(text)
             assert "pocket" in result.reason.lower()
+
+
+class TestNewMpesaShapes:
+    """Two real, genuine M-Pesa shapes (2 Aug 2026) that came through
+    UNPARSED against the original 5 patterns -- both are outgoing (money
+    OUT), so both must carry direction="sent" (the signal effect_capture.
+    infer() uses to correctly narrow toward budget.spend, never
+    budget.allocate)."""
+
+    def test_paybill_sent_variant_is_parsed_unmapped(self):
+        result = parse_message(MPESA_PAYBILL_SENT)
+        assert result.status == "parsed_unmapped"
+        assert result.parser_name == "mpesa_paybill_sent"
+        assert result.operator_name is None
+        assert result.parsed_fields["direction"] == "sent"
+        assert result.parsed_fields["amount"] == 1500.0
+        assert result.parsed_fields["counterparty"] == "SAFARICOMHOME"
+        assert result.parsed_fields["account"] == "11619547"
+        assert result.parsed_fields["transaction_cost"] == 0.0
+        assert result.parsed_fields["balance_after"] == 12154.47
+        assert result.external_ref == "UH1B91JZZN"
+
+    def test_airtime_is_parsed_unmapped(self):
+        result = parse_message(MPESA_AIRTIME)
+        assert result.status == "parsed_unmapped"
+        assert result.parser_name == "mpesa_airtime"
+        assert result.operator_name is None
+        assert result.parsed_fields["direction"] == "sent"
+        assert result.parsed_fields["amount"] == 50.0
+        assert result.parsed_fields["balance_after"] == 13654.47
+        assert result.parsed_fields["transaction_cost"] == 0.0
+        assert result.external_ref == "UH1B91JUJI"
+
+    def test_airtime_lowercase_confirmed_still_matches(self):
+        # The real sample's own wording -- "confirmed." not "Confirmed." --
+        # unlike every other real M-Pesa sample in this module.
+        assert "confirmed." in MPESA_AIRTIME and "Confirmed." not in MPESA_AIRTIME
+        assert parse_message(MPESA_AIRTIME).status == "parsed_unmapped"
+
+    def test_both_new_shapes_reasons_mention_pocket(self):
+        for text in (MPESA_PAYBILL_SENT, MPESA_AIRTIME):
+            result = parse_message(text)
+            assert "pocket" in result.reason.lower()
+
+    def test_neither_new_shape_is_flagged_as_sensitive(self):
+        for text in (MPESA_PAYBILL_SENT, MPESA_AIRTIME):
+            assert parse_message(text).status != "rejected"
 
 
 # ── Sensitive-secret rejection — CRITICAL, checked before every parser ─────

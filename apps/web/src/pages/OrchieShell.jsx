@@ -227,6 +227,21 @@ const cancelButton = {
 const mutedText = { fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--text-muted)' };
 const questionText = { fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--text-primary)' };
 
+/** A plain-language summary of what a confirm is ABOUT to do, captured
+ *  before the /confirm call overwrites `payload` with the response body --
+ *  used for the success message so it can still say "Ksh X to food"
+ *  rather than a generic "done". */
+function describeOutcome(readyPayload) {
+  const amount = readyPayload?.params?.amount;
+  if (readyPayload?.operator === 'budget.record_income') {
+    return amount != null ? `Ksh ${amount} received` : 'income recorded';
+  }
+  const pocket = readyPayload?.params?.pocket_name;
+  if (amount != null && pocket) return `Ksh ${amount} to ${pocket}`;
+  if (amount != null) return `Ksh ${amount}`;
+  return null;
+}
+
 /**
  * A plain +/- money-direction cue, styled entirely in Sustena's OWN palette
  * (globals.css's --teal/--amber) -- explicitly NOT VOS's safety-orange
@@ -278,6 +293,104 @@ function AmountEntry({ question, why, onSubmit }) {
         />
         <button onClick={submit} style={confirmButton}>OK</button>
       </div>
+      <div style={{ ...mutedText, marginTop: 10 }}>{why}</div>
+    </div>
+  );
+}
+
+/**
+ * The pocket-name disambiguation, extended with a "+ NEW" tile per
+ * Bonnie's ask -- creating a pocket goes through a real, gated operator
+ * (budget.add_pocket, new), never a side-write. On success, the REAL
+ * final pocket name (server-normalised -- see budget.add_pocket's own
+ * docstring for why a typed "holiday fund" comes back as "holiday_fund")
+ * is what the flow continues with, and a brief inline confirmation is
+ * shown before handing off (see confirm/success feedback discipline
+ * applied throughout this file, 2 Aug 2026 pass).
+ */
+function PocketPicker({ question, why, options, sustainId, onPick }) {
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [status, setStatus] = useState('idle'); // idle | saving | created | error
+  const [error, setError] = useState('');
+  const [createdName, setCreatedName] = useState('');
+
+  const submitNew = async () => {
+    if (!name.trim() || status === 'saving') return;
+    setStatus('saving');
+    try {
+      const data = await api.post('/orchie/capture/confirm', {
+        sustain_id: sustainId, operator: 'budget.add_pocket', params: { pocket_name: name.trim() },
+      });
+      if (data.result.status === 'ok') {
+        const realName = data.result.data.pocket;
+        setCreatedName(realName);
+        setStatus('created');
+        setTimeout(() => onPick(realName), 900);
+      } else {
+        setStatus('error');
+        setError(data.result.reason || 'could not create the pocket');
+      }
+    } catch (e) {
+      setStatus('error');
+      setError(e.message || 'could not reach orchie');
+    }
+  };
+
+  return (
+    <div>
+      <div style={questionText}>{question}</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+        {options.map(o => (
+          <button key={o.value} onClick={() => onPick(o.value)} style={bigTapButton}>{o.label}</button>
+        ))}
+        {!creating && status === 'idle' && (
+          <button
+            onClick={() => setCreating(true)}
+            style={{ ...bigTapButton, borderStyle: 'dashed', borderColor: 'var(--teal-border)', color: 'var(--teal)' }}
+          >
+            + NEW
+          </button>
+        )}
+      </div>
+
+      {creating && status !== 'created' && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <input
+            type="text" value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') submitNew(); }}
+            placeholder="pocket name, e.g. Holiday Fund"
+            autoFocus
+            disabled={status === 'saving'}
+            style={editableInput}
+          />
+          <button onClick={submitNew} style={confirmButton} disabled={status === 'saving'}>
+            {status === 'saving' ? 'creating…' : 'CREATE'}
+          </button>
+        </div>
+      )}
+
+      {status === 'created' && (
+        <div className="pulse" style={{
+          marginTop: 12, display: 'flex', alignItems: 'center', gap: 8,
+          fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: 'var(--teal)',
+        }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--teal)' }} />
+          ✓ '{createdName}' created — continuing…
+        </div>
+      )}
+
+      {status === 'error' && (
+        <div style={{
+          marginTop: 8, display: 'flex', alignItems: 'center', gap: 8,
+          fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700, color: 'var(--danger)',
+        }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--danger)' }} />
+          ✗ {error}
+        </div>
+      )}
+
       <div style={{ ...mutedText, marginTop: 10 }}>{why}</div>
     </div>
   );
@@ -460,15 +573,22 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
     }
   };
 
+  // The transaction just confirmed, kept alongside `payload` (which gets
+  // OVERWRITTEN by the /confirm response below, losing operator/params) so
+  // the success message can still say what actually happened.
+  const [committedSummary, setCommittedSummary] = useState(null);
+
   const confirm = async () => {
     setPhase('confirming');
     try {
+      const summary = describeOutcome(payload);
       const data = await api.post('/orchie/capture/confirm', {
         sustain_id: sustainId, operator: payload.operator, params: payload.params,
         message_id: messageId, description: payload.description,
       });
       setPayload(data);
       if (data.result.status === 'ok') {
+        setCommittedSummary(summary);
         setPhase('committed');
         onCommitted?.();
       } else {
@@ -479,6 +599,17 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
       setPhase('error');
     }
   };
+
+  // Auto-resolve on success: the card is never left ambiguously sitting
+  // there once its job is done -- shows the confirmation, then collapses
+  // on its own shortly after (CLOSE is still available for an immediate
+  // manual dismiss). Never applies to 'refused' -- a refusal must stay
+  // visible until the person retries or explicitly closes it.
+  useEffect(() => {
+    if (phase !== 'committed') return;
+    const t = setTimeout(() => onClose?.(), 2600);
+    return () => clearTimeout(t);
+  }, [phase, onClose]);
 
   return (
     <div style={{
@@ -491,7 +622,14 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
         <AmountEntry question={payload.question} why={payload.why} onSubmit={answer} />
       )}
 
-      {phase === 'needs_disambiguation' && payload.field !== 'amount' && (
+      {phase === 'needs_disambiguation' && payload.field === 'pocket_name' && (
+        <PocketPicker
+          question={payload.question} why={payload.why} options={payload.options}
+          sustainId={sustainId} onPick={answer}
+        />
+      )}
+
+      {phase === 'needs_disambiguation' && payload.field !== 'amount' && payload.field !== 'pocket_name' && (
         <div>
           <div style={questionText}>{payload.question}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
@@ -516,12 +654,24 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
         />
       )}
 
-      {phase === 'confirming' && <div style={mutedText}>applying…</div>}
+      {phase === 'confirming' && (
+        <div className="pulse" style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 500, color: 'var(--text-primary)',
+        }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--amber)' }} />
+          recording…
+        </div>
+      )}
 
       {phase === 'committed' && (
         <div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--teal)' }}>
-            ✓ done — {payload.operator} applied, state updated
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: 'var(--teal)',
+          }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--teal)' }} />
+            ✓ recorded{committedSummary ? ` — ${committedSummary}` : ''}
           </div>
           <button onClick={onClose} style={{ ...cancelButton, marginTop: 10 }}>CLOSE</button>
         </div>
@@ -529,10 +679,17 @@ function CaptureFlow({ sustainId, widgetId = 'unmapped_capture_classify', messag
 
       {phase === 'refused' && (
         <div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--danger)' }}>
-            ✗ refused — {payload.result?.reason || 'the gate refused this — nothing changed'}
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 8,
+            fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: 'var(--danger)',
+          }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--danger)', marginTop: 4, flexShrink: 0 }} />
+            <span>✗ not recorded — {payload.result?.reason || 'the gate refused this — nothing changed'}</span>
           </div>
-          <button onClick={onClose} style={{ ...cancelButton, marginTop: 10 }}>CLOSE</button>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button onClick={() => runInfer(known)} style={confirmButton}>RETRY</button>
+            <button onClick={onClose} style={cancelButton}>CLOSE</button>
+          </div>
         </div>
       )}
 
@@ -776,7 +933,16 @@ function WidgetCard({ widget, sustainId, onCommitted }) {
           sustainId={sustainId}
           messageId={d.message_id}
           onClose={() => setCapturing(false)}
-          onCommitted={() => { setCapturing(false); onCommitted?.(); }}
+          // The real bug behind "no feedback after CONFIRM": this used to
+          // ALSO call setCapturing(false) here, synchronously, in the same
+          // tick as CaptureFlow's own setPhase('committed') -- React 18
+          // batches both updates into one re-render, so CaptureFlow
+          // unmounted before its own "success" message ever painted. Now
+          // only the background data refresh happens immediately;
+          // collapsing the card is entirely CaptureFlow's own call (its
+          // CLOSE button, or its auto-dismiss timer on the committed
+          // phase) so the success/refusal state is always actually seen.
+          onCommitted={() => onCommitted?.()}
         />
       )}
 
@@ -941,7 +1107,15 @@ export default function OrchieShell() {
           {(!view.selected || view.selected.length === 0) ? (
             <Empty text={view.message || 'nothing needs you right now'} />
           ) : (
-            view.selected.map(w => <WidgetCard key={w.id} widget={w} sustainId={sustainId} onCommitted={load} />)
+            // key: multiple classify_card instances (one needs_attention
+            // message each) all share the same widget.id
+            // ("unmapped_capture_classify") -- compose() doesn't qualify
+            // it per message, so w.id alone would collide and let React
+            // conflate two different cards. Fall back to the real
+            // message_id when present, which IS unique per card.
+            view.selected.map(w => (
+              <WidgetCard key={w.data?.message_id ? `${w.id}:${w.data.message_id}` : w.id} widget={w} sustainId={sustainId} onCommitted={load} />
+            ))
           )}
 
           {view.excluded && view.excluded.length > 0 && (

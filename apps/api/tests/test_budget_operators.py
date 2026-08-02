@@ -66,6 +66,7 @@ class TestOperatorRegistry:
         expected = [
             "budget.record_income",
             "budget.allocate",
+            "budget.add_pocket",
             "budget.spend",
             "budget.transfer",
             "budget.summary",
@@ -74,7 +75,7 @@ class TestOperatorRegistry:
             assert name in OPERATOR_REGISTRY, f"'{name}' not in OPERATOR_REGISTRY"
 
     def test_operators_have_required_metadata(self):
-        for name in ["budget.record_income", "budget.allocate", "budget.spend",
+        for name in ["budget.record_income", "budget.allocate", "budget.add_pocket", "budget.spend",
                      "budget.transfer", "budget.summary"]:
             meta = OPERATOR_REGISTRY[name]
             assert meta.description
@@ -86,7 +87,7 @@ class TestOperatorRegistry:
 
     def test_budget_operators_have_ui_schema(self):
         """Every budget operator should declare a ui_schema for card rendering."""
-        for name in ["budget.record_income", "budget.allocate", "budget.spend",
+        for name in ["budget.record_income", "budget.allocate", "budget.add_pocket", "budget.spend",
                      "budget.transfer", "budget.summary"]:
             meta = OPERATOR_REGISTRY[name]
             assert meta.ui_schema, f"'{name}' is missing ui_schema"
@@ -96,6 +97,7 @@ class TestOperatorRegistry:
         """Operators that fire events must declare them in side_effects."""
         assert "event.finances.income_received" in OPERATOR_REGISTRY["budget.record_income"].side_effects
         assert "event.finances.pocket_allocated" in OPERATOR_REGISTRY["budget.allocate"].side_effects
+        assert "event.finances.pocket_created"   in OPERATOR_REGISTRY["budget.add_pocket"].side_effects
         assert "event.finances.pocket_spent"     in OPERATOR_REGISTRY["budget.spend"].side_effects
         assert "event.finances.pocket_transfer"  in OPERATOR_REGISTRY["budget.transfer"].side_effects
 
@@ -306,6 +308,105 @@ class TestBudgetAllocate:
         ctx = _make_ctx(state)
         balance_before = await ctx.pawa.get_balance(ctx.user_id)
         await OPERATOR_REGISTRY["budget.allocate"].fn(ctx, pocket_name="food", amount=1000.0)
+        balance_after = await ctx.pawa.get_balance(ctx.user_id)
+        assert balance_after == balance_before  # pawa_cost=0
+
+
+class TestBudgetAddPocket:
+    """The '+ NEW' pocket flow (2 Aug 2026): a real, gated operator that
+    creates an empty pocket with NO money movement -- distinct from
+    budget.allocate, which always requires amount > 0 and always debits
+    liquid balance."""
+
+    @pytest.mark.asyncio
+    async def test_creates_empty_pocket_no_money_moved(self):
+        state = _fresh_state(balance=50000.0)
+        ctx = _make_ctx(state)
+        result = await OPERATOR_REGISTRY["budget.add_pocket"].fn(ctx, pocket_name="food")
+        assert result.succeeded
+        assert state.get("finances.pockets.food.allocated") == 0.0
+        assert state.get("finances.pockets.food.spent") == 0.0
+        assert state.get("finances.liquid.balance") == 50000.0  # untouched
+
+    @pytest.mark.asyncio
+    async def test_optional_limit_is_stored(self):
+        state = _fresh_state(balance=50000.0)
+        ctx = _make_ctx(state)
+        await OPERATOR_REGISTRY["budget.add_pocket"].fn(ctx, pocket_name="car_repair", limit=15000.0)
+        assert state.get("finances.pockets.car_repair.limit") == 15000.0
+
+    @pytest.mark.asyncio
+    async def test_a_typed_name_with_spaces_is_normalised_not_crashed(self):
+        # StateAccessor's own path parser only accepts \w segments (a real
+        # constraint found by testing, not by inspection) -- a natural
+        # typed name like "holiday fund" must be normalised to a valid
+        # state path, never raise, and the RETURNED pocket name is the
+        # real, final one actually used.
+        state = _fresh_state(balance=50000.0)
+        ctx = _make_ctx(state)
+        result = await OPERATOR_REGISTRY["budget.add_pocket"].fn(ctx, pocket_name="holiday fund")
+        assert result.succeeded
+        assert result.data["pocket"] == "holiday_fund"
+        assert state.exists("finances.pockets.holiday_fund.allocated")
+
+    @pytest.mark.asyncio
+    async def test_punctuation_and_extra_whitespace_normalised(self):
+        state = _fresh_state(balance=50000.0)
+        ctx = _make_ctx(state)
+        result = await OPERATOR_REGISTRY["budget.add_pocket"].fn(ctx, pocket_name="  Car-Repair!!  ")
+        assert result.succeeded
+        assert result.data["pocket"] == "Car_Repair"
+
+    @pytest.mark.asyncio
+    async def test_a_name_that_normalises_to_empty_is_refused_not_crashed(self):
+        state = _fresh_state(balance=50000.0)
+        ctx = _make_ctx(state)
+        result = await OPERATOR_REGISTRY["budget.add_pocket"].fn(ctx, pocket_name="   !!!   ")
+        assert result.failed
+        assert "empty" in result.reason.lower()
+
+    @pytest.mark.asyncio
+    async def test_limit_defaults_to_zero_no_limit(self):
+        state = _fresh_state(balance=50000.0)
+        ctx = _make_ctx(state)
+        await OPERATOR_REGISTRY["budget.add_pocket"].fn(ctx, pocket_name="misc")
+        assert state.get("finances.pockets.misc.limit") == 0.0
+
+    @pytest.mark.asyncio
+    async def test_fires_pocket_created_event(self):
+        state = _fresh_state(balance=50000.0)
+        ctx = _make_ctx(state)
+        await OPERATOR_REGISTRY["budget.add_pocket"].fn(ctx, pocket_name="rent")
+        events = ctx.events.published_this_context()
+        assert any(e["event_name"] == "event.finances.pocket_created" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_refuses_a_pocket_that_already_exists(self):
+        # A real, visible refusal -- never a silent no-op success, so a
+        # duplicate tap or a genuine name collision is never masked.
+        state = _fresh_state(balance=50000.0)
+        ctx = _make_ctx(state)
+        await OPERATOR_REGISTRY["budget.allocate"].fn(ctx, pocket_name="food", amount=5000.0)
+        result = await OPERATOR_REGISTRY["budget.add_pocket"].fn(ctx, pocket_name="food")
+        assert result.failed
+        assert "already exists" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_no_event_when_refused(self):
+        state = _fresh_state(balance=50000.0)
+        ctx = _make_ctx(state)
+        await OPERATOR_REGISTRY["budget.allocate"].fn(ctx, pocket_name="food", amount=5000.0)
+        events_before = len(ctx.events.published_this_context())
+        await OPERATOR_REGISTRY["budget.add_pocket"].fn(ctx, pocket_name="food")
+        events_after = len(ctx.events.published_this_context())
+        assert events_after == events_before
+
+    @pytest.mark.asyncio
+    async def test_pawa_deducted(self):
+        state = _fresh_state(balance=50000.0)
+        ctx = _make_ctx(state)
+        balance_before = await ctx.pawa.get_balance(ctx.user_id)
+        await OPERATOR_REGISTRY["budget.add_pocket"].fn(ctx, pocket_name="food")
         balance_after = await ctx.pawa.get_balance(ctx.user_id)
         assert balance_after == balance_before  # pawa_cost=0
 
