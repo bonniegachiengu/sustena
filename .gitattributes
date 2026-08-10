@@ -1,0 +1,47 @@
+# Enforce consistent LF line endings across every platform.
+# Fixes the CRLF↔LF churn that made 27 files look "modified" when nothing changed,
+# and keeps the repo clean for cross-platform contributors.
+
+# Default: treat as text, normalise to LF in the repo.
+* text=auto eol=lf
+
+# Source & config — explicit LF
+*.py     text eol=lf
+*.pyi    text eol=lf
+*.js     text eol=lf
+*.jsx    text eol=lf
+*.ts     text eol=lf
+*.tsx    text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.rs     text eol=lf
+*.java   text eol=lf
+*.kt     text eol=lf
+*.toml   text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.html   text eol=lf
+*.css    text eol=lf
+*.sh     text eol=lf
+*.sql    text eol=lf
+*.jsonl  text eol=lf
+
+# Windows scripts must stay CRLF
+*.bat        text eol=crlf
+*.cmd        text eol=crlf
+gradlew.bat  text eol=crlf
+
+# Binary — never touched
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.svg  text eol=lf
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.jar  binary
+*.keystore binary
+*.xlsx binary
+*.xls  binary

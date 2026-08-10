@@ -81,6 +81,17 @@ apps/web/dist/
 apps/web/.next/
 apps/web/out/
 
+# ── Native build caches (Android / Tauri-Rust) ────────────────────────────────
+**/.gradle/
+**/android/build/
+**/android/app/build/
+**/src-tauri/target/
+**/src-tauri/gen/
+
+# ── Test / tooling caches (general, not just backend/) ────────────────────────
+.pytest_cache/
+**/.pytest_cache/
+
 # ── IDE ───────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
