@@ -1,161 +1,110 @@
-# Sustena XII
+# Sustena
 
-> The operating system for Kenyan household and business sustains. Operators, Operatives, Council DAO, and Orchie — built on React and FastAPI.
+**Sustena models any describable system — a household, a farm, a business, a savings group — as one recursive primitive: the Sustain.**
 
-Phase 0-A
+A Sustain contains Sustains, all the way down. The same engine that tracks one person's spending money composes upward into a household, and downward into a single pocket. There is no separate "household system" and "personal system" — there is one primitive, applied recursively.
 
----
-
-## What is Sustena?
-
-Sustena is an operating system for real-world economic activity — households managing budgets, food businesses running commissaries, farmers tracking harvests, chamas coordinating savings. It doesn't abstract these into dashboards. It models them: their state, rules, events, and participants, then puts a conversational AI agent (Orchie) in front of all of it.
-
-A household joins as a **Homestead sustain**. A food business joins as a **Vyyb sustain**. A savings circle joins as a **Colosso Finance sustain**. Each sustain has its own operators, constraints, and operative agents — but they all run on the same 7-primitive engine.
-
-The network of sustains is the **Mycelium**. Participants can discover each other, transact, and govern shared resources through a **Council DAO**. What gets built on top of Sustena is limited only by what can be described in its DSL.
+Formally, a Sustain is **Σ = ⟨B, S, V, T, ⊕⟩** — Boundary, State, Viable region, Transitions, and composition.
 
 ---
 
-## Architecture
+## The idea in one paragraph
 
-Sustena has seven core primitives:
-
-```
-State · Operator · Constraint · Event · Time · Consensus · Operative
-```
-
-Everything in the system is composed from these. A budget is a State. A deposit is an Event. A spending rule is a Constraint. An Orchie conversation is an Operative executing Operators.
-
-```
- User (React Web / React Native)
-        │
-        ▼
-   ┌─────────┐
-   │  Orchie  │  ← conversational AI agent (Claude)
-   └────┬────┘
-        │ speaks Sustena DSL
-        ▼
- ┌──────────────┐
- │ Sustain Engine│  ← validates, resolves, executes
- └──────┬───────┘
-        │
-   ┌────┴────────────────────────────┐
-   │         7 Primitives             │
-   │  State · Operator · Constraint  │
-   │  Event · Time · Consensus       │
-   │  Operative                      │
-   └────┬────────────────────────────┘
-        │
-   ┌────┴──────────────────────────────────┐
-   │              Sustains                  │
-   │  Homestead · Vyyb · Colosso · Biashara│
-   │  Mkulima · (any new sustain)          │
-   └───────────────────────────────────────┘
-        │
-   ┌────┴────┐
-   │Mycelium │  ← public marketplace: Arena
-   │  DAO    │  ← Council governance
-   └─────────┘
-```
-
-**Operators** are the business-logic modules inside each sustain (budget, chama, cart, harvest). **Operatives** are the AI agents that interact with users on behalf of those operators — Mentor, Protégé, Chama Secretary. The **Council DAO** governs cross-sustain rules and network upgrades.
+Most software models a domain by inventing a schema for it. Sustena models a domain by *declaring* it: you describe your system's dimensions, the region it must stay inside to remain viable, and the moves that change it. The engine then enforces that description. A move that would push the system outside its viable region is **refused before it commits** — not logged after the fact, not corrected later. State is never edited in place; it is the replay of everything that ever happened, so any state can be rebuilt from its own history and proven correct.
 
 ---
 
-## What's in this repo
+## The seven primitives
 
-```
-sustena-xii/
-├── backend/                # Python / FastAPI backend
-│   ├── sustena/
-│   │   ├── api/            # FastAPI routes (sustains, users, webhook, ...)
-│   │   ├── core/           # The 7 primitives engine
-│   │   ├── db/             # SQLAlchemy schema + Alembic migrations + Firestore sync
-│   │   ├── operators/      # Operator implementations per sustain
-│   │   ├── operatives/     # Operative (AI agent) classes
-│   │   └── sustains/       # Sustain JSON specs
-│   ├── Dockerfile
-│   ├── cloudbuild.yaml     # Cloud Build → Cloud Run CI/CD
-│   └── Makefile
-│
-├── brand/                  # Design system + UI mockups
-│   ├── design-system/      # Colour tokens, typography, spacing
-│   ├── logos/              # Sustena, Vyyb, Colosso, 365+ SVGs
-│   └── ui-components/      # Budget ring, sustain card, council UI, Orchie chat
-│
-├── docs/                   # Technical specs (public)
-│   └── README.md
-│
-├── lore/                   # Public-facing pages: blog, Arena, docs, about
-│
-├── homestead/              # Homestead sustain — household intelligence
-├── vyyb/                   # Vyyb sustain — food business / QSR
-├── colosso/                # Colosso Finance sustain — chama / financial
-├── biashara/               # Biashara sustain — SME intelligence
-└── mkulima/                # Mkulima sustain — smallholder farming
-```
-
----
-
-## Running locally
-
-### Backend (Python / FastAPI)
-
-```bash
-cd backend/
-
-# 1. Create and activate a virtual environment
-python -m venv venv
-source venv/bin/activate          # Windows: .\venv\Scripts\Activate.ps1
-
-# 2. Copy env config — all defaults work locally, no credentials needed
-cp .env.example .env
-
-# 3. Install dependencies
-pip install -e ".[dev]"
-
-# 4. Start the server (auto-creates DB tables on first run)
-uvicorn sustena.api.main:app --reload --host 0.0.0.0 --port 9000
-```
-
-API docs at `http://localhost:9000/docs`.
-
-### Tests
-
-```bash
-cd backend/
-make test          # run all tests
-make test-cov      # with coverage report
-```
-
----
-
-## Tech stack
-
-| Layer | Technology |
+| Primitive | What it is |
 |---|---|
-| Backend | Python 3.12, FastAPI, SQLAlchemy, Alembic |
-| AI | Anthropic Claude (Haiku for parsing, Sonnet for reasoning) |
-| Database | SQLite (local dev) → Cloud Firestore (production) |
-| Frontend | React + Vite + TypeScript (web), React Native (mobile, planned) |
-| Deploy | Google Cloud Run via Cloud Build |
-| Mobile | React Native *(planned)* |
-| Design | Sustena Design System — amber/teal on near-black |
+| **State** | What the system currently is. Never written directly — always the fold of its events. |
+| **Operators** | Guarded transitions. A declared, gated move that changes State. |
+| **Constraints** | The viable region. Typed predicates the engine evaluates *before* committing. |
+| **Events** | The append-only log. State is `fold(events)` — reproducible from scratch. |
+| **Time** | Ordering and scheduling over the log. |
+| **Consensus** | How multiple parties agree on a change to a shared Sustain. |
+| **Operatives** | Semi-autonomous agents that observe and *advise*. They never decide unilaterally. |
+
+Two properties hold throughout, by construction rather than by convention:
+
+- **The gate.** Every state change passes the same enforcement check before it persists. A refusal changes nothing — no partial write, no silent correction.
+- **The human decides.** Operatives propose; a person confirms. Nothing reaches the outside world without an explicit human confirmation step.
 
 ---
 
 ## Status
 
-**Phase 0-A — actively building.**
+Sustena is in active development and is **pre-1.0**. It runs in production for a single household today.
 
-The 7-primitive engine is implemented. Homestead and Vyyb operators are the first live sustains. Orchie (Claude-backed) parses user input from the React web app and executes operator logic. SQLite in dev, Firestore sync wired. Cloud Run deploy pipeline working.
+The engine is currently implemented in Python. Per [ADR-0001](docs/adr/0001-phase2-restructure-and-architecture.md), it is being re-implemented as a portable **Rust** core so the same engine runs natively on Android, iOS, desktop, and the web — with the existing test suite serving as the correctness oracle. Expect the layout under `apps/` to change as that work lands.
 
-See `brand/` for the design system and UI mockup components — that's the clearest visual preview of where this is heading.
+**What is in this repository:** the framework — the engine, the primitives, the applications, and the specification.
 
----
-
-*Sustena XII is open for builders. If you're working on economic infrastructure for East Africa and want to run a sustain on this network, read the docs.*
+**What is not:** the network and economy layer (settlement, marketplace, treasury, token). That is held back pending legal review and is not part of the open framework today.
 
 ---
 
-<sub>A my.bg project · Nairobi</sub>
+## Repository layout
+
+```
+apps/
+  api/        The engine + the FastAPI host over it
+    sustena/
+      core/       state · events · fold · predicates · constraints · transducer · council
+      operators/  budget · calendar · tasks · holon · egress · …
+      operatives/ the advisory layer
+      sustains/   Sustain specifications (JSON)
+      api/        HTTP routes
+    tests/        the correctness suite
+  web/        React frontend + the Android (Capacitor) and desktop (Tauri) hosts
+docs/         architecture decisions and design
+```
+
+---
+
+## Quickstart
+
+Requires **Python 3.11+** and **Node 20+**.
+
+```bash
+# Backend
+cd apps/api
+pip install -r requirements.txt
+cp .env.example .env          # defaults run fully offline, with no API spend
+uvicorn sustena.api.main:app --reload --port 9000
+
+# Frontend (separate terminal)
+cd apps/web
+npm install
+npm run dev                    # http://localhost:5173
+```
+
+Run the test suite:
+
+```bash
+cd apps/api
+python -m pytest tests/ -q
+```
+
+> Always invoke pytest as `python -m pytest` so the package path resolves correctly.
+
+The default configuration sets `ANTHROPIC_API_KEY=mock`, which activates a local mock client. The entire stack runs with **zero API calls and zero spend**. Language models are an optional, pluggable node in an operative's graph — never a requirement for the engine to run.
+
+---
+
+## Documentation
+
+- [`docs/adr/`](docs/adr/) — architecture decision records. Start with ADR-0001.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to build, test, and submit changes.
+- [`SECURITY.md`](SECURITY.md) — how to report a vulnerability.
+
+The formal specification is a corpus of technical papers, each paired with a plain-language companion. These are being prepared for publication and will be added here in stages.
+
+---
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
+
+Copyright 2026 Bonnie Gachiengu.

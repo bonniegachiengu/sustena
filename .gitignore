@@ -1,3 +1,34 @@
+# ── Local safety snapshots (pre-change tarballs — large, never committed) ─────
+_snapshots/
+
+# ── Agent / editor session config (local-only) ────────────────────────────────
+.claude/
+
+# ── Articles: STAGED PUBLICATION, not private ─────────────────────────────────
+# The 36 article files are the project's specification and ARE intended to be
+# published under Apache-2.0 (ADR-0001, Decision 5). They are held back only
+# until each has been cleaned of private, business, and economy-layer material
+# and released in phases. Remove this entry per-article as each one is cleared.
+Articles (Serious)/
+
+# ── Internal working docs — not part of the public framework ──────────────────
+# Governance, roadmap, and candid internal audit notes. The contributor-facing
+# subset (docs/adr/, RESTRUCTURE_DESIGN) is published separately.
+docs/CLAUDE_RULES.md
+docs/SCOPE.md
+docs/Tasks & Notes.md
+docs/Ideas.md
+docs/SUSTENA_CORE.md
+docs/SUSTENA_WBD.md
+docs/SUSTENA_FEATURE_TRACKER.md
+docs/ARTICLE_BUILD_LEDGER.md
+docs/BLOG_VOICE_SPEC.md
+docs/COMPLETE_AWARENESS_MAP.md
+docs/ARTICLE_CODE_ALIGNMENT.md
+# GLOSSARY carries unreviewed economy/tokenomics material — see ADR-0001 D5.
+# Publish once cleaned, on the same phased track as the articles.
+docs/GLOSSARY.md
+
 # ── Private strategic docs — never public ─────────────────────────────────────
 docs/COWORK_BACKLOG.md
 docs/CONSOLE_GUIDE.md
@@ -49,6 +80,8 @@ apps/api/*.db
 apps/api/whatsapp_mock_outbox.jsonl
 apps/api/exports/
 apps/api/debug_*.log
+# repo-root copy (the rules above only covered backend/ and apps/api/)
+/whatsapp_mock_outbox.jsonl
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
