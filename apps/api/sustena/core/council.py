@@ -668,6 +668,39 @@ class CouncilSession:
 
     # ── resolve ───────────────────────────────────────────────────────────────
 
+    def _set_proposal_status(
+        self,
+        proposal_id: str,
+        new_status: str,
+        resolved: bool,
+    ) -> None:
+        """
+        Write a proposal's status back THROUGH StateAccessor.
+
+        resolve() previously assigned into the proposal dict directly. That
+        dict is a live reference into state, so the status flip changed real
+        state while recording no mutation: the fold never learned the proposal
+        had been resolved, and a rebuild resurrected it in its pre-vote status.
+
+        Rebuilds the list and sets it, which is the recorded-write shape the
+        rest of the codebase uses for list edits. Two call sites shared this
+        bug, so the fix lives in one place rather than being repeated.
+        """
+        proposals: list[dict] = self.state.get("council_proposals", []) or []
+        now = self._clock().isoformat()
+        self.state.set(
+            "council_proposals",
+            [
+                {
+                    **p,
+                    "status": new_status,
+                    **({"resolved_at": now} if resolved else {}),
+                }
+                if p.get("id") == proposal_id else p
+                for p in proposals
+            ],
+        )
+
     def resolve(
         self,
         proposal_id: str,
@@ -700,12 +733,7 @@ class CouncilSession:
         # Failure path: collect_votes was called but no operatives responded at all
         if proposal_id in self._votes_collected and len(proposal_votes) == 0:
             new_status = STATUS_FAILED
-            proposals: list[dict] = self.state.get("council_proposals", [])
-            for p in proposals:
-                if p.get("id") == proposal_id:
-                    p["status"] = new_status
-                    p["resolved_at"] = self._clock().isoformat()
-                    break
+            self._set_proposal_status(proposal_id, new_status, resolved=True)
             logger.info(
                 "[council] proposal %s resolved → %s (no operatives responded)",
                 proposal_id, new_status,
@@ -745,14 +773,12 @@ class CouncilSession:
             else:
                 new_status = STATUS_IN_VOTING
 
-        # Update proposal in state
-        proposals: list[dict] = self.state.get("council_proposals", [])
-        for p in proposals:
-            if p.get("id") == proposal_id:
-                p["status"] = new_status
-                if new_status not in (STATUS_IN_VOTING,):
-                    p["resolved_at"] = self._clock().isoformat()
-                break
+        # Update proposal in state (write-through — see _set_proposal_status)
+        self._set_proposal_status(
+            proposal_id,
+            new_status,
+            resolved=(new_status not in (STATUS_IN_VOTING,)),
+        )
 
         logger.info(
             "[council] proposal %s resolved → %s (yes_votes=%d user_vote=%s)",

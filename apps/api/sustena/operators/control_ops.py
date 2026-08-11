@@ -158,12 +158,21 @@ async def control_execute_approved(
             constraint_violated="operator_execution",
         )
 
-    # 5. Update proposal status in state
-    for p in proposals:
-        if p.get("id") == proposal_id:
-            p["status"] = "EXECUTED"
-            p["resolved_at"] = datetime.utcnow().isoformat()
-            break
+    # 5. Update proposal status THROUGH StateAccessor.
+    #
+    # This previously assigned into `p` directly. `p` is a live reference into
+    # the state list, so the status flip changed real state while recording no
+    # mutation — the fold never learned the proposal had been executed, and a
+    # rebuild would have resurrected it as still PASSED and re-executable.
+    resolved_at = datetime.utcnow().isoformat()
+    ctx.state.set(
+        "council_proposals",
+        [
+            {**p, "status": "EXECUTED", "resolved_at": resolved_at}
+            if p.get("id") == proposal_id else p
+            for p in proposals
+        ],
+    )
 
     # 6. Publish execution event
     await ctx.events.publish(

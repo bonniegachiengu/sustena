@@ -603,11 +603,32 @@ async def procurement_confirm_delivery(
     new_status = "DELIVERED" if is_full_delivery else "PARTIAL"
     variance_kg = round(actual_quantity_kg - expected_qty, 4)
 
-    # Mutate PO in-place (live reference into state list)
-    po["actual_quantity_kg"] = actual_quantity_kg
-    po["status"] = new_status
-    po["delivered_at"] = ctx.timestamp.isoformat()
-    po["variance_kg"] = variance_kg
+    # Write the updated PO back THROUGH StateAccessor.
+    #
+    # This previously mutated `po` in place. `po` is a live reference into the
+    # state list, so those four assignments changed real state while recording
+    # no mutation at all: the event log never learned the delivery happened,
+    # and rebuild_state() silently stopped matching get_state().
+    #
+    # Same rebuild-then-set shape tasks.py already uses for list edits. The
+    # engine now reconciles this class of mistake automatically, but an
+    # operator should record its own writes rather than lean on that.
+    pos: list = ctx.state.get("procurement.purchase_orders", [])
+    updated = [
+        {
+            **p,
+            "actual_quantity_kg": actual_quantity_kg,
+            "status": new_status,
+            "delivered_at": ctx.timestamp.isoformat(),
+            "variance_kg": variance_kg,
+        }
+        if p.get("id") == po_id else p
+        for p in pos
+    ]
+    ctx.state.set("procurement.purchase_orders", updated)
+    # Keep the local reference aligned with what was just committed — the
+    # event payload below reads from it.
+    po = next((p for p in updated if p.get("id") == po_id), po)
 
     # 4. EventBus
     await ctx.events.publish(

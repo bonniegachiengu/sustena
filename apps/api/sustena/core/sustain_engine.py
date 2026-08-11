@@ -931,7 +931,12 @@ class SustainEngine:
 
         Returns (True, "") on success or no-op, (False, reason) on refusal.
         """
-        mutations = state.mutations()
+        # reconciled_mutations() for the same reason execute_operator uses it:
+        # this is a real write path, so whatever it logs must reproduce the
+        # state it commits. CouncilSession.resolve() reaches this method after
+        # editing proposal dicts in place through a live reference, which
+        # records nothing — reconciling here is what keeps the fold honest.
+        mutations = state.reconciled_mutations()
         if not mutations:
             return True, ""
 
@@ -1714,7 +1719,39 @@ class SustainEngine:
         # would double-apply it on fold. The extra events stay fully present
         # and readable in the log; they just aren't fold contributors.
         if result.succeeded:
-            mutations = state.mutations()
+            # reconciled_mutations(), NOT mutations() — this is the structural
+            # guarantee that state stays a reproducible fold of its events.
+            #
+            # StateAccessor.get() returns a live reference, so an operator can
+            # change real state with a plain `po["status"] = "DELIVERED"` and
+            # record nothing. That change would persist to the cache while the
+            # event log never learned of it, and rebuild_state() would silently
+            # stop matching get_state() — the failure is invisible until
+            # someone rebuilds, by which point the real number is gone.
+            #
+            # Reconciling here, at the ONE place a successful operator call is
+            # allowed to change state, makes the invariant hold by
+            # construction for every operator — including ones not yet
+            # written. A well-behaved operator produces zero corrections and
+            # is entirely unaffected.
+            mutations = state.reconciled_mutations()
+
+            unrecorded = state.unrecorded_changes()
+            if unrecorded:
+                # Reconciled, so state is correct and nothing is lost — but an
+                # operator writing through a live reference is a real defect
+                # that should be fixed at source, so name it loudly.
+                logger.warning(
+                    "FOLD-FIDELITY: operator '%s' on sustain %s changed state "
+                    "outside StateAccessor (%d unrecorded change(s) at %s). "
+                    "Reconciled automatically so the fold stays correct, but "
+                    "this operator should write via set()/append()/remove().",
+                    operator_name,
+                    sustain_id,
+                    len(unrecorded),
+                    ", ".join(m.get("path", "<root>") for m in unrecorded[:5]),
+                )
+
             published = bus.published_this_context()
             if mutations and not published:
                 await bus.publish(
@@ -2048,7 +2085,12 @@ class SustainEngine:
                 # computed against the sandbox's own mutations/events -- a
                 # refused step never reaches here, so it stays 0.0, matching
                 # "a refusal is zero real work" for real runs.
-                mutations = state_accessor.mutations()
+                # Reconciled here too. Nothing in the sandbox persists, but a
+                # simulated step must predict what the real run would do — and
+                # the real run meters reconciled mutations. Using the raw list
+                # would under-count the cost of exactly those operators that
+                # write through a live reference.
+                mutations = state_accessor.reconciled_mutations()
                 published = bus.published_this_context()
                 gate_ran = self._enforcement_enabled(spec)
                 step_compute = pawa_meter.compute_units(

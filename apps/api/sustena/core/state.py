@@ -216,8 +216,63 @@ class StateAccessor:
         return copy.deepcopy(self._data)
 
     def mutations(self) -> list[dict]:
-        """Return all mutations made since construction."""
+        """
+        Return the mutations RECORDED since construction.
+
+        Note this is what was recorded, which is not necessarily everything
+        that changed — get() returns a live reference, so an in-place edit
+        changes state without passing through set()/append()/remove(). Use
+        reconciled_mutations() for anything that persists to the event log;
+        it is the version that is guaranteed to reproduce the real state.
+        """
         return list(self._mutations)
+
+    def reconciled_mutations(self) -> list[dict]:
+        """
+        Return mutations guaranteed to reproduce this accessor's real state.
+
+        THIS is what must be written to the event log — never mutations().
+
+        Sustena's core promise is that state is a provably reproducible fold
+        of its events, so `rebuild_state(sid) == get_state(sid)` must hold for
+        every sustain at all times. That promise cannot rest on every operator
+        remembering to route its writes through set()/append()/remove():
+        get() hands back a live reference, so `po["status"] = "DELIVERED"` is
+        a perfectly ordinary-looking line that silently breaks it.
+
+        So the guarantee is made structurally instead. Replay what was
+        recorded onto the pristine starting state, compare against what the
+        state actually is now, and append corrective mutations for any
+        difference. An operator that bypassed the API is reconciled
+        automatically; an operator that used it properly produces no
+        corrections at all and is completely unaffected.
+
+        Returns the recorded mutations plus any corrections needed.
+        """
+        corrections = self.unrecorded_changes()
+        if not corrections:
+            return list(self._mutations)
+        return list(self._mutations) + corrections
+
+    def unrecorded_changes(self) -> list[dict]:
+        """
+        Return corrective mutations for state changes that escaped recording.
+
+        Empty for a well-behaved operator. Non-empty means real state changed
+        by a route that did not record it — which is exactly the defect class
+        that silently breaks the fold. Exposed separately so the engine can
+        name the offending operator in a warning, and so tests can assert an
+        operator is fold-clean rather than merely assert the end state.
+        """
+        # Imported here rather than at module scope: event_fold imports
+        # StateAccessor, so a top-level import would be circular.
+        from sustena.core.event_fold import diff_to_mutations, fold_events
+
+        replayed = fold_events(
+            [{"mutations": self._mutations}],
+            initial_state=copy.deepcopy(self._original),
+        )
+        return diff_to_mutations(replayed, self._data)
 
     def diff(self) -> dict:
         """Return a summary of changes from original to current state."""
