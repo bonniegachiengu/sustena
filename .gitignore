@@ -130,6 +130,8 @@ apps/web/out/
 **/android/build/
 **/android/app/build/
 **/src-tauri/target/
+# Rust core build artifacts
+/sustena-core/target/
 **/src-tauri/gen/
 
 # ── Test / tooling caches (general, not just backend/) ────────────────────────

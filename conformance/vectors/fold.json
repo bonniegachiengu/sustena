@@ -1,0 +1,489 @@
+{
+  "conformance_version": 1,
+  "slice": "fold",
+  "generated_from": "sustena/core/event_fold.py",
+  "note": "Recorded from the reference engine. See conformance/README.md.",
+  "fold_cases": [
+    {
+      "name": "empty_log_yields_initial",
+      "initial": {
+        "a": 1
+      },
+      "events": [],
+      "expect": {
+        "state": {
+          "a": 1
+        }
+      }
+    },
+    {
+      "name": "genesis_replace_root_discards_prior",
+      "initial": {
+        "stale": true
+      },
+      "events": [
+        {
+          "mutations": [
+            {
+              "op": "replace_root",
+              "value": {
+                "a": 1
+              }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "state": {
+          "a": 1
+        }
+      }
+    },
+    {
+      "name": "sets_apply_in_order",
+      "initial": {},
+      "events": [
+        {
+          "mutations": [
+            {
+              "op": "set",
+              "path": "a.b",
+              "old": null,
+              "new": 1
+            }
+          ]
+        },
+        {
+          "mutations": [
+            {
+              "op": "set",
+              "path": "a.b",
+              "old": 1,
+              "new": 2
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "state": {
+          "a": {
+            "b": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "append_then_remove",
+      "initial": {},
+      "events": [
+        {
+          "mutations": [
+            {
+              "op": "append",
+              "path": "items",
+              "action": "append",
+              "item_id": "i1",
+              "item": {
+                "id": "i1",
+                "k": 1
+              }
+            }
+          ]
+        },
+        {
+          "mutations": [
+            {
+              "op": "remove",
+              "path": "items",
+              "action": "remove",
+              "item_id": "i1"
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "state": {
+          "items": []
+        }
+      }
+    },
+    {
+      "name": "event_with_no_mutations_is_a_noop",
+      "initial": {
+        "a": 1
+      },
+      "events": [
+        {
+          "mutations": []
+        }
+      ],
+      "expect": {
+        "state": {
+          "a": 1
+        }
+      }
+    },
+    {
+      "name": "multi_mutation_event",
+      "initial": {},
+      "events": [
+        {
+          "mutations": [
+            {
+              "op": "set",
+              "path": "a",
+              "old": null,
+              "new": 1
+            },
+            {
+              "op": "set",
+              "path": "b",
+              "old": null,
+              "new": 2
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "state": {
+          "a": 1,
+          "b": 2
+        }
+      }
+    },
+    {
+      "name": "remove_of_missing_item_fails_loudly",
+      "initial": {
+        "items": []
+      },
+      "events": [
+        {
+          "mutations": [
+            {
+              "op": "remove",
+              "path": "items",
+              "action": "remove",
+              "item_id": "gone"
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "error": {
+          "kind": "fold",
+          "message": "failed to replay mutation {'op': 'remove', 'path': 'items', 'action': 'remove', 'item_id': 'gone'}: Item id='gone' not found in list at 'items'"
+        }
+      }
+    }
+  ],
+  "diff_cases": [
+    {
+      "name": "identical",
+      "before": {
+        "a": 1
+      },
+      "after": {
+        "a": 1
+      },
+      "expect": {
+        "mutations": [],
+        "roundtrip": {
+          "a": 1
+        }
+      }
+    },
+    {
+      "name": "changed_scalar",
+      "before": {
+        "a": 1
+      },
+      "after": {
+        "a": 2
+      },
+      "expect": {
+        "mutations": [
+          {
+            "op": "set",
+            "path": "a",
+            "old": 1,
+            "new": 2
+          }
+        ],
+        "roundtrip": {
+          "a": 2
+        }
+      }
+    },
+    {
+      "name": "added_key",
+      "before": {
+        "a": 1
+      },
+      "after": {
+        "a": 1,
+        "b": 2
+      },
+      "expect": {
+        "mutations": [
+          {
+            "op": "set",
+            "path": "b",
+            "old": null,
+            "new": 2
+          }
+        ],
+        "roundtrip": {
+          "a": 1,
+          "b": 2
+        }
+      }
+    },
+    {
+      "name": "removed_key_widens",
+      "before": {
+        "x": {
+          "k1": 1,
+          "k2": 2
+        }
+      },
+      "after": {
+        "x": {
+          "k1": 1
+        }
+      },
+      "expect": {
+        "mutations": [
+          {
+            "op": "set",
+            "path": "x",
+            "old": {
+              "k1": 1,
+              "k2": 2
+            },
+            "new": {
+              "k1": 1
+            }
+          }
+        ],
+        "roundtrip": {
+          "x": {
+            "k1": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "nested_precise",
+      "before": {
+        "f": {
+          "p": {
+            "food": {
+              "spent": 0
+            }
+          }
+        }
+      },
+      "after": {
+        "f": {
+          "p": {
+            "food": {
+              "spent": 250
+            }
+          }
+        }
+      },
+      "expect": {
+        "mutations": [
+          {
+            "op": "set",
+            "path": "f.p.food.spent",
+            "old": 0,
+            "new": 250
+          }
+        ],
+        "roundtrip": {
+          "f": {
+            "p": {
+              "food": {
+                "spent": 250
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "list_change_widens",
+      "before": {
+        "i": [
+          1,
+          2,
+          3
+        ]
+      },
+      "after": {
+        "i": [
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "expect": {
+        "mutations": [
+          {
+            "op": "set",
+            "path": "i",
+            "old": [
+              1,
+              2,
+              3
+            ],
+            "new": [
+              1,
+              2,
+              3,
+              4
+            ]
+          }
+        ],
+        "roundtrip": {
+          "i": [
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_of_dicts_status_flip",
+      "before": {
+        "o": [
+          {
+            "id": "po1",
+            "status": "RAISED"
+          }
+        ]
+      },
+      "after": {
+        "o": [
+          {
+            "id": "po1",
+            "status": "DELIVERED"
+          }
+        ]
+      },
+      "expect": {
+        "mutations": [
+          {
+            "op": "set",
+            "path": "o",
+            "old": [
+              {
+                "id": "po1",
+                "status": "RAISED"
+              }
+            ],
+            "new": [
+              {
+                "id": "po1",
+                "status": "DELIVERED"
+              }
+            ]
+          }
+        ],
+        "roundtrip": {
+          "o": [
+            {
+              "id": "po1",
+              "status": "DELIVERED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "unaddressable_key_widens",
+      "before": {
+        "p": {
+          "holiday fund": 0
+        }
+      },
+      "after": {
+        "p": {
+          "holiday fund": 50
+        }
+      },
+      "expect": {
+        "mutations": [
+          {
+            "op": "set",
+            "path": "p",
+            "old": {
+              "holiday fund": 0
+            },
+            "new": {
+              "holiday fund": 50
+            }
+          }
+        ],
+        "roundtrip": {
+          "p": {
+            "holiday fund": 50
+          }
+        }
+      }
+    },
+    {
+      "name": "type_change",
+      "before": {
+        "a": {
+          "b": 1
+        }
+      },
+      "after": {
+        "a": "str"
+      },
+      "expect": {
+        "mutations": [
+          {
+            "op": "set",
+            "path": "a",
+            "old": {
+              "b": 1
+            },
+            "new": "str"
+          }
+        ],
+        "roundtrip": {
+          "a": "str"
+        }
+      }
+    },
+    {
+      "name": "root_shape_change",
+      "before": {
+        "a": 1,
+        "b": 2
+      },
+      "after": {
+        "a": 1
+      },
+      "expect": {
+        "mutations": [
+          {
+            "op": "replace_root",
+            "value": {
+              "a": 1
+            }
+          }
+        ],
+        "roundtrip": {
+          "a": 1
+        }
+      }
+    }
+  ]
+}

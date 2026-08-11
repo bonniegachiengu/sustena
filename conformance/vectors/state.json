@@ -1,0 +1,1322 @@
+{
+  "conformance_version": 1,
+  "slice": "state",
+  "generated_from": "sustena/core/state.py",
+  "note": "Recorded from the reference engine. See conformance/README.md.",
+  "cases": [
+    {
+      "name": "read_missing_path_yields_null",
+      "initial": {
+        "a": {
+          "b": 1
+        }
+      },
+      "ops": [
+        {
+          "op": "get",
+          "path": "a.zzz"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": null
+          }
+        ],
+        "snapshot": {
+          "a": {
+            "b": 1
+          }
+        },
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "read_nested",
+      "initial": {
+        "a": {
+          "b": {
+            "c": 7
+          }
+        }
+      },
+      "ops": [
+        {
+          "op": "get",
+          "path": "a.b.c"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": 7
+          }
+        ],
+        "snapshot": {
+          "a": {
+            "b": {
+              "c": 7
+            }
+          }
+        },
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "read_indexed",
+      "initial": {
+        "r": [
+          {
+            "n": "x"
+          },
+          {
+            "n": "y"
+          }
+        ]
+      },
+      "ops": [
+        {
+          "op": "get",
+          "path": "r[1].n"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": "y"
+          }
+        ],
+        "snapshot": {
+          "r": [
+            {
+              "n": "x"
+            },
+            {
+              "n": "y"
+            }
+          ]
+        },
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "get_strict_missing_raises",
+      "initial": {
+        "a": {}
+      },
+      "ops": [
+        {
+          "op": "get_strict",
+          "path": "a.nope"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "error": {
+              "kind": "path",
+              "message": "Key 'nope' not found at path 'a.nope'"
+            }
+          }
+        ],
+        "snapshot": {
+          "a": {}
+        },
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "exists_true_and_false",
+      "initial": {
+        "a": {
+          "b": null
+        }
+      },
+      "ops": [
+        {
+          "op": "exists",
+          "path": "a.b"
+        },
+        {
+          "op": "exists",
+          "path": "a.c"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": true
+          },
+          {
+            "ok": false
+          }
+        ],
+        "snapshot": {
+          "a": {
+            "b": null
+          }
+        },
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "set_scalar",
+      "initial": {
+        "a": {
+          "b": 1
+        }
+      },
+      "ops": [
+        {
+          "op": "set",
+          "path": "a.b",
+          "value": 2
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": null
+          }
+        ],
+        "snapshot": {
+          "a": {
+            "b": 2
+          }
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "a.b",
+            "old": 1,
+            "new": 2
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "a.b",
+            "old": 1,
+            "new": 2
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "set_creates_intermediate_objects",
+      "initial": {},
+      "ops": [
+        {
+          "op": "set",
+          "path": "x.y.z",
+          "value": 5
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": null
+          }
+        ],
+        "snapshot": {
+          "x": {
+            "y": {
+              "z": 5
+            }
+          }
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "x.y.z",
+            "old": null,
+            "new": 5
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "x.y.z",
+            "old": null,
+            "new": 5
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "set_replaces_whole_subtree",
+      "initial": {
+        "a": {
+          "b": {
+            "c": 1
+          }
+        }
+      },
+      "ops": [
+        {
+          "op": "set",
+          "path": "a.b",
+          "value": {
+            "d": 2
+          }
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": null
+          }
+        ],
+        "snapshot": {
+          "a": {
+            "b": {
+              "d": 2
+            }
+          }
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "a.b",
+            "old": {
+              "c": 1
+            },
+            "new": {
+              "d": 2
+            }
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "a.b",
+            "old": {
+              "c": 1
+            },
+            "new": {
+              "d": 2
+            }
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "set_indexed_element",
+      "initial": {
+        "r": [
+          {
+            "n": "x"
+          },
+          {
+            "n": "y"
+          }
+        ]
+      },
+      "ops": [
+        {
+          "op": "set",
+          "path": "r[0].n",
+          "value": "z"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": null
+          }
+        ],
+        "snapshot": {
+          "r": [
+            {
+              "n": "z"
+            },
+            {
+              "n": "y"
+            }
+          ]
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "r[0].n",
+            "old": "x",
+            "new": "z"
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "r[0].n",
+            "old": "x",
+            "new": "z"
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "set_string_and_null_and_bool",
+      "initial": {},
+      "ops": [
+        {
+          "op": "set",
+          "path": "s",
+          "value": "hi"
+        },
+        {
+          "op": "set",
+          "path": "n",
+          "value": null
+        },
+        {
+          "op": "set",
+          "path": "b",
+          "value": true
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": null
+          },
+          {
+            "ok": null
+          },
+          {
+            "ok": null
+          }
+        ],
+        "snapshot": {
+          "s": "hi",
+          "n": null,
+          "b": true
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "s",
+            "old": null,
+            "new": "hi"
+          },
+          {
+            "op": "set",
+            "path": "n",
+            "old": null,
+            "new": null
+          },
+          {
+            "op": "set",
+            "path": "b",
+            "old": null,
+            "new": true
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "s",
+            "old": null,
+            "new": "hi"
+          },
+          {
+            "op": "set",
+            "path": "n",
+            "old": null,
+            "new": null
+          },
+          {
+            "op": "set",
+            "path": "b",
+            "old": null,
+            "new": true
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "increment_number",
+      "initial": {
+        "f": {
+          "bal": 100
+        }
+      },
+      "ops": [
+        {
+          "op": "increment",
+          "path": "f.bal",
+          "delta": 50
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": 150
+          }
+        ],
+        "snapshot": {
+          "f": {
+            "bal": 150
+          }
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 100,
+            "new": 150
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 100,
+            "new": 150
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "increment_float",
+      "initial": {
+        "f": {
+          "bal": 100.5
+        }
+      },
+      "ops": [
+        {
+          "op": "increment",
+          "path": "f.bal",
+          "delta": 0.25
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": 100.75
+          }
+        ],
+        "snapshot": {
+          "f": {
+            "bal": 100.75
+          }
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 100.5,
+            "new": 100.75
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 100.5,
+            "new": 100.75
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "increment_non_numeric_raises",
+      "initial": {
+        "f": {
+          "bal": "nope"
+        }
+      },
+      "ops": [
+        {
+          "op": "increment",
+          "path": "f.bal",
+          "delta": 1
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "error": {
+              "kind": "value",
+              "message": "Cannot increment non-numeric value at 'f.bal': 'nope'"
+            }
+          }
+        ],
+        "snapshot": {
+          "f": {
+            "bal": "nope"
+          }
+        },
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "increment_missing_path_raises",
+      "initial": {},
+      "ops": [
+        {
+          "op": "increment",
+          "path": "nope",
+          "delta": 1
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "error": {
+              "kind": "path",
+              "message": "Key 'nope' not found at path 'nope'"
+            }
+          }
+        ],
+        "snapshot": {},
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "decrement_number",
+      "initial": {
+        "f": {
+          "bal": 100
+        }
+      },
+      "ops": [
+        {
+          "op": "decrement",
+          "path": "f.bal",
+          "delta": 40
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": 60
+          }
+        ],
+        "snapshot": {
+          "f": {
+            "bal": 60
+          }
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 100,
+            "new": 60
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 100,
+            "new": 60
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "decrement_to_exactly_zero_is_allowed",
+      "initial": {
+        "f": {
+          "bal": 40
+        }
+      },
+      "ops": [
+        {
+          "op": "decrement",
+          "path": "f.bal",
+          "delta": 40
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": 0
+          }
+        ],
+        "snapshot": {
+          "f": {
+            "bal": 0
+          }
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 40,
+            "new": 0
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 40,
+            "new": 0
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "decrement_below_zero_refused",
+      "initial": {
+        "f": {
+          "bal": 10
+        }
+      },
+      "ops": [
+        {
+          "op": "decrement",
+          "path": "f.bal",
+          "delta": 25
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "error": {
+              "kind": "value",
+              "message": "Decrement would make 'f.bal' negative: 10 - 25 = -15"
+            }
+          }
+        ],
+        "snapshot": {
+          "f": {
+            "bal": 10
+          }
+        },
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "decrement_below_zero_allowed_when_permitted",
+      "initial": {
+        "f": {
+          "bal": 10
+        }
+      },
+      "ops": [
+        {
+          "op": "decrement",
+          "path": "f.bal",
+          "delta": 25,
+          "allow_negative": true
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": -15
+          }
+        ],
+        "snapshot": {
+          "f": {
+            "bal": -15
+          }
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 10,
+            "new": -15
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 10,
+            "new": -15
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "append_to_existing_list",
+      "initial": {
+        "items": []
+      },
+      "ops": [
+        {
+          "op": "append",
+          "path": "items",
+          "item": {
+            "kind": "task"
+          },
+          "id": "i1"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": "i1"
+          }
+        ],
+        "snapshot": {
+          "items": [
+            {
+              "kind": "task",
+              "id": "i1"
+            }
+          ]
+        },
+        "mutations": [
+          {
+            "op": "append",
+            "path": "items",
+            "action": "append",
+            "item_id": "i1",
+            "item": {
+              "kind": "task",
+              "id": "i1"
+            }
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "append",
+            "path": "items",
+            "action": "append",
+            "item_id": "i1",
+            "item": {
+              "kind": "task",
+              "id": "i1"
+            }
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "append_creates_missing_list",
+      "initial": {},
+      "ops": [
+        {
+          "op": "append",
+          "path": "todo.items",
+          "item": {
+            "kind": "task"
+          },
+          "id": "i1"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": "i1"
+          }
+        ],
+        "snapshot": {
+          "todo": {
+            "items": [
+              {
+                "kind": "task",
+                "id": "i1"
+              }
+            ]
+          }
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "todo.items",
+            "old": null,
+            "new": []
+          },
+          {
+            "op": "append",
+            "path": "todo.items",
+            "action": "append",
+            "item_id": "i1",
+            "item": {
+              "kind": "task",
+              "id": "i1"
+            }
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "todo.items",
+            "old": null,
+            "new": []
+          },
+          {
+            "op": "append",
+            "path": "todo.items",
+            "action": "append",
+            "item_id": "i1",
+            "item": {
+              "kind": "task",
+              "id": "i1"
+            }
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "append_preserves_supplied_id",
+      "initial": {
+        "items": []
+      },
+      "ops": [
+        {
+          "op": "append",
+          "path": "items",
+          "item": {
+            "id": "given",
+            "k": 1
+          },
+          "id": "ignored"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": "given"
+          }
+        ],
+        "snapshot": {
+          "items": [
+            {
+              "id": "given",
+              "k": 1
+            }
+          ]
+        },
+        "mutations": [
+          {
+            "op": "append",
+            "path": "items",
+            "action": "append",
+            "item_id": "given",
+            "item": {
+              "id": "given",
+              "k": 1
+            }
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "append",
+            "path": "items",
+            "action": "append",
+            "item_id": "given",
+            "item": {
+              "id": "given",
+              "k": 1
+            }
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "append_to_non_list_raises",
+      "initial": {
+        "items": {
+          "a": 1
+        }
+      },
+      "ops": [
+        {
+          "op": "append",
+          "path": "items",
+          "item": {},
+          "id": "i1"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "error": {
+              "kind": "value",
+              "message": "'items' is not a list \u2014 cannot append"
+            }
+          }
+        ],
+        "snapshot": {
+          "items": {
+            "a": 1
+          }
+        },
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "remove_by_id",
+      "initial": {
+        "items": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b"
+          }
+        ]
+      },
+      "ops": [
+        {
+          "op": "remove",
+          "path": "items",
+          "item_id": "a"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": null
+          }
+        ],
+        "snapshot": {
+          "items": [
+            {
+              "id": "b"
+            }
+          ]
+        },
+        "mutations": [
+          {
+            "op": "remove",
+            "path": "items",
+            "action": "remove",
+            "item_id": "a"
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "remove",
+            "path": "items",
+            "action": "remove",
+            "item_id": "a"
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "remove_missing_id_raises",
+      "initial": {
+        "items": [
+          {
+            "id": "a"
+          }
+        ]
+      },
+      "ops": [
+        {
+          "op": "remove",
+          "path": "items",
+          "item_id": "zzz"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "error": {
+              "kind": "path",
+              "message": "Item id='zzz' not found in list at 'items'"
+            }
+          }
+        ],
+        "snapshot": {
+          "items": [
+            {
+              "id": "a"
+            }
+          ]
+        },
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "remove_from_non_list_raises",
+      "initial": {
+        "items": {
+          "a": 1
+        }
+      },
+      "ops": [
+        {
+          "op": "remove",
+          "path": "items",
+          "item_id": "a"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "error": {
+              "kind": "value",
+              "message": "'items' is not a list \u2014 cannot remove"
+            }
+          }
+        ],
+        "snapshot": {
+          "items": {
+            "a": 1
+          }
+        },
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "sequence_records_every_mutation_in_order",
+      "initial": {
+        "f": {
+          "bal": 100
+        },
+        "items": []
+      },
+      "ops": [
+        {
+          "op": "set",
+          "path": "f.note",
+          "value": "start"
+        },
+        {
+          "op": "increment",
+          "path": "f.bal",
+          "delta": 10
+        },
+        {
+          "op": "append",
+          "path": "items",
+          "item": {
+            "k": 1
+          },
+          "id": "i1"
+        },
+        {
+          "op": "decrement",
+          "path": "f.bal",
+          "delta": 5
+        },
+        {
+          "op": "remove",
+          "path": "items",
+          "item_id": "i1"
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "ok": null
+          },
+          {
+            "ok": 110
+          },
+          {
+            "ok": "i1"
+          },
+          {
+            "ok": 105
+          },
+          {
+            "ok": null
+          }
+        ],
+        "snapshot": {
+          "f": {
+            "bal": 105,
+            "note": "start"
+          },
+          "items": []
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "f.note",
+            "old": null,
+            "new": "start"
+          },
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 100,
+            "new": 110
+          },
+          {
+            "op": "append",
+            "path": "items",
+            "action": "append",
+            "item_id": "i1",
+            "item": {
+              "k": 1,
+              "id": "i1"
+            }
+          },
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 110,
+            "new": 105
+          },
+          {
+            "op": "remove",
+            "path": "items",
+            "action": "remove",
+            "item_id": "i1"
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "f.note",
+            "old": null,
+            "new": "start"
+          },
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 100,
+            "new": 110
+          },
+          {
+            "op": "append",
+            "path": "items",
+            "action": "append",
+            "item_id": "i1",
+            "item": {
+              "k": 1,
+              "id": "i1"
+            }
+          },
+          {
+            "op": "set",
+            "path": "f.bal",
+            "old": 110,
+            "new": 105
+          },
+          {
+            "op": "remove",
+            "path": "items",
+            "action": "remove",
+            "item_id": "i1"
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "failed_op_records_nothing",
+      "initial": {
+        "f": {
+          "bal": 10
+        }
+      },
+      "ops": [
+        {
+          "op": "decrement",
+          "path": "f.bal",
+          "delta": 999
+        },
+        {
+          "op": "set",
+          "path": "f.after",
+          "value": 1
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "error": {
+              "kind": "value",
+              "message": "Decrement would make 'f.bal' negative: 10 - 999 = -989"
+            }
+          },
+          {
+            "ok": null
+          }
+        ],
+        "snapshot": {
+          "f": {
+            "bal": 10,
+            "after": 1
+          }
+        },
+        "mutations": [
+          {
+            "op": "set",
+            "path": "f.after",
+            "old": null,
+            "new": 1
+          }
+        ],
+        "reconciled_mutations": [
+          {
+            "op": "set",
+            "path": "f.after",
+            "old": null,
+            "new": 1
+          }
+        ],
+        "unrecorded_changes": []
+      }
+    },
+    {
+      "name": "invalid_path_segment_raises",
+      "initial": {
+        "a": 1
+      },
+      "ops": [
+        {
+          "op": "set",
+          "path": "a-b",
+          "value": 1
+        }
+      ],
+      "expect": {
+        "results": [
+          {
+            "error": {
+              "kind": "path",
+              "message": "Invalid final segment 'a-b' in 'a-b'"
+            }
+          }
+        ],
+        "snapshot": {
+          "a": 1
+        },
+        "mutations": [],
+        "reconciled_mutations": [],
+        "unrecorded_changes": []
+      }
+    }
+  ]
+}

@@ -117,6 +117,20 @@ class StateAccessor:
 
     def set(self, path: str, value: Any) -> None:
         """Set a value at path. Creates intermediate dicts if they don't exist."""
+        # A StateAccessor OWNS its data. Store a copy, never the caller's
+        # object — otherwise state aliases whatever was handed in, and a later
+        # mutation of that object silently rewrites state (or vice versa).
+        #
+        # This is not hypothetical. Replaying a log calls set(path,
+        # mutation["new"]), so without this copy the rebuilt state shared its
+        # list with the mutation RECORD. Appending during replay then rewrote
+        # the record being replayed, and `unrecorded_changes()` — a read-only
+        # diagnostic — corrupted the history it was inspecting. An append to a
+        # missing list ended up applied twice on rebuild.
+        #
+        # Found by generating the cross-language conformance vectors: the
+        # aliasing made both sides agree while both were being corrupted.
+        value = copy.deepcopy(value)
         segments = path.split(".")
         node = self._data
 
@@ -137,14 +151,39 @@ class StateAccessor:
             raise StatePathError(f"Invalid final segment '{last}' in '{path}'")
         key, idx = m.group(1), m.group(2)
 
+        # `old` and `new` are recorded as DEEP COPIES, never as live references.
+        #
+        # A mutation record is a snapshot of what was true at the moment of the
+        # write. Storing the caller's object instead let the record be rewritten
+        # afterwards, with two real consequences:
+        #
+        #   1. append() to a missing path calls set(path, []) and then appends
+        #      to that same list — so the recorded `new: []` silently became
+        #      `new: [item]`, and replaying the log applied the item TWICE.
+        #
+        #   2. Because the replayed value was the same object as live state,
+        #      folding a sustain's history MUTATED the state it was rebuilt
+        #      from. Reading the past changed the present.
+        #
+        # append() already deep-copies its item and documents exactly this
+        # reasoning; set() was the one that did not. Found by generating the
+        # cross-language conformance vectors, which replay every recorded
+        # mutation and compare — the aliasing made the comparison pass while
+        # both sides were being corrupted together.
         if idx is not None:
             old_value = node[key][int(idx)] if isinstance(node.get(key), list) and int(idx) < len(node[key]) else None
             node[key][int(idx)] = value
-            self._mutations.append({"op": "set", "path": path, "old": old_value, "new": value})
+            self._mutations.append({
+                "op": "set", "path": path,
+                "old": copy.deepcopy(old_value), "new": copy.deepcopy(value),
+            })
         else:
             old_value = node.get(key)
             node[key] = value
-            self._mutations.append({"op": "set", "path": path, "old": old_value, "new": value})
+            self._mutations.append({
+                "op": "set", "path": path,
+                "old": copy.deepcopy(old_value), "new": copy.deepcopy(value),
+            })
 
     def exists(self, path: str) -> bool:
         """Return True if path resolves to an existing value (even if None)."""
@@ -190,7 +229,9 @@ class StateAccessor:
             raise StateValueError(f"'{path}' is not a list — cannot append")
         if "id" not in item:
             item["id"] = str(uuid.uuid4())
-        lst.append(item)
+        # Same ownership rule as set(): state stores its own copy, so a caller
+        # that keeps and later mutates `item` cannot reach into state.
+        lst.append(copy.deepcopy(item))
         # "item" is stored as a deep copy so a later in-place mutation by the
         # caller can't retroactively alter what fold(events) will replay —
         # the mutation record must be exactly what was true at append time.
