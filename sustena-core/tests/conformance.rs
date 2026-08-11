@@ -62,16 +62,12 @@ fn run_ops(initial: &Value, ops: &[Value]) -> (State, Vec<OpOutcome>) {
                 .set(path, op["value"].clone())
                 .map(|_| Value::Null)
                 .map_err(|e| e),
-            "increment" => state
-                .increment(path, op["delta"].as_f64().unwrap())
-                .map(num_to_value),
-            "decrement" => state
-                .decrement(
-                    path,
-                    op["delta"].as_f64().unwrap(),
-                    op["allow_negative"].as_bool().unwrap_or(false),
-                )
-                .map(num_to_value),
+            "increment" => state.increment(path, &op["delta"]),
+            "decrement" => state.decrement(
+                path,
+                &op["delta"],
+                op["allow_negative"].as_bool().unwrap_or(false),
+            ),
             "append" => {
                 let id = op["id"].as_str().unwrap_or_default();
                 state
@@ -288,4 +284,119 @@ fn rule_vectors() {
         matched += 1;
     }
     eprintln!("rule vectors: {matched} cases matched the reference engine");
+}
+
+#[test]
+fn operator_vectors() {
+    use sustena_core::operator::{execute, Enforcement, Registry};
+
+    let doc = load("operators.json");
+    let cases = doc["cases"].as_array().expect("cases array");
+    assert!(!cases.is_empty(), "no operator vectors to check");
+
+    let registry = Registry::default();
+
+    for case in cases {
+        let name = case["name"].as_str().unwrap();
+        let allowed: Vec<String> = case["allowed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+
+        let enf = Enforcement {
+            enabled: case["enforcement"]["enabled"].as_bool().unwrap_or(false),
+            invariants: case["enforcement"]["invariants"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|i| {
+                            (
+                                i["id"].as_str().unwrap().to_string(),
+                                i["expression"].as_str().unwrap().to_string(),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        };
+
+        let mut state = case["initial"].clone();
+        let calls = case["calls"].as_array().unwrap();
+        let expected = case["expect"]["outcomes"].as_array().unwrap();
+        assert_eq!(calls.len(), expected.len(), "{name}: malformed vector");
+
+        for (i, call) in calls.iter().enumerate() {
+            let op = call["operator"].as_str().unwrap();
+            let params: serde_json::Map<String, Value> =
+                call["params"].as_object().cloned().unwrap_or_default();
+
+            let ex = execute(&registry, &allowed, &enf, &state, op, &params);
+            let want = &expected[i];
+            let want_ok = want["status"] == "ok";
+
+            assert_eq!(
+                ex.committed(),
+                want_ok,
+                "{name}: call {i} ({op}) admitted={} but the reference said {}",
+                ex.committed(),
+                want["status"]
+            );
+
+            if !want_ok {
+                assert_eq!(
+                    ex.result.constraint_violated.as_deref(),
+                    want["constraint_violated"].as_str(),
+                    "{name}: call {i} refused by a different rule"
+                );
+                // The property that matters most: a refusal changes nothing.
+                assert_eq!(ex.state, state, "{name}: call {i} refused but state moved");
+                assert!(ex.mutations.is_empty(), "{name}: refusal left mutations");
+                assert!(ex.events.is_empty(), "{name}: refusal emitted events");
+            } else {
+                let want_events: Vec<&str> = want["events"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|e| e.as_str()).collect())
+                    .unwrap_or_default();
+                let got_events: Vec<&str> =
+                    ex.events.iter().map(|e| e.name.as_str()).collect();
+                assert_eq!(got_events, want_events, "{name}: call {i} emitted different events");
+            }
+
+            state = ex.state;
+        }
+
+        // Identity and time are host-supplied (see budget.rs): the reference
+        // mints a UUID and a timestamp inside the operator, which no
+        // reproducible core can match. Blank both before comparing, so the
+        // assertion is about behaviour rather than about entropy.
+        assert_eq!(
+            normalise_host_fields(&state),
+            normalise_host_fields(&case["expect"]["final_state"]),
+            "{name}: final state differs from the reference"
+        );
+    }
+}
+
+
+/// Blank the two fields a host supplies — a generated id and a wall-clock
+/// timestamp. Everything else must match exactly.
+fn normalise_host_fields(v: &Value) -> Value {
+    match v {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, val)| {
+                    let cleaned = if k == "id" || k == "received_at" {
+                        Value::Null
+                    } else {
+                        normalise_host_fields(val)
+                    };
+                    (k.clone(), cleaned)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(normalise_host_fields).collect()),
+        other => other.clone(),
+    }
 }

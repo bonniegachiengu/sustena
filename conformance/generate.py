@@ -21,12 +21,15 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 REPO = HERE.parent
 sys.path.insert(0, str(REPO / "apps" / "api"))
 
 from sustena.core.event_fold import FoldError, diff_to_mutations, fold_events  # noqa: E402
 from sustena.core.predicates import PredicateSyntaxError, evaluate_predicate, parse_predicate  # noqa: E402
 from sustena.core.state import StateAccessor, StatePathError, StateValueError  # noqa: E402
+
+from gen_operators import OPERATOR_CASES, run_operator_case  # noqa: E402
 
 CONFORMANCE_VERSION = 1
 
@@ -327,7 +330,21 @@ def main() -> int:
         ],
     }
 
-    for filename, doc in (("state.json", state_doc), ("fold.json", fold_doc), ("rules.json", rules_doc)):
+    operators_doc = {
+        "conformance_version": CONFORMANCE_VERSION,
+        "slice": "operators",
+        "generated_from": "sustena/operators/budget.py + the engine's gate",
+        "note": "Recorded from the reference engine. See conformance/README.md.",
+        "cases": [
+            {"name": name, "initial": initial, "allowed": allowed,
+             "enforcement": enf, "calls": calls,
+             "expect": run_operator_case(initial, allowed, enf, calls)}
+            for name, initial, allowed, enf, calls in OPERATOR_CASES
+        ],
+    }
+
+    for filename, doc in (("state.json", state_doc), ("fold.json", fold_doc),
+                          ("rules.json", rules_doc), ("operators.json", operators_doc)):
         path = out_dir / filename
         path.write_text(json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8")
         count = len(doc.get("cases") or doc.get("fold_cases", [])) + len(doc.get("diff_cases", []))

@@ -1,0 +1,1248 @@
+{
+  "conformance_version": 1,
+  "slice": "operators",
+  "generated_from": "sustena/operators/budget.py + the engine's gate",
+  "note": "Recorded from the reference engine. See conformance/README.md.",
+  "cases": [
+    {
+      "name": "allocate_commits",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "food",
+            "amount": 250.0,
+            "period": "monthly"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_allocated"
+            ]
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 750.0
+            },
+            "pockets": {
+              "food": {
+                "allocated": 250.0,
+                "spent": 0.0,
+                "limit": 0.0
+              }
+            },
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "allocate_guard_refuses_overspend",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "food",
+            "amount": 5000.0,
+            "period": "monthly"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "failed",
+            "constraint_violated": "finances.liquid.balance >= params.amount"
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 1000.0
+            },
+            "pockets": {},
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "allocate_guard_refuses_zero",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "food",
+            "amount": 0.0,
+            "period": "monthly"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "failed",
+            "constraint_violated": "params.amount > 0"
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 1000.0
+            },
+            "pockets": {},
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "record_income_commits",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.record_income",
+          "params": {
+            "amount": 500.0,
+            "source": "salary"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.income_received"
+            ]
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 1500.0
+            },
+            "pockets": {},
+            "income": {
+              "monthly_total": 500.0,
+              "sources": [
+                {
+                  "id": "7eb94fc8-65f7-45ee-a132-e171eedc5215",
+                  "label": "salary",
+                  "amount": 500.0,
+                  "frequency": "once",
+                  "received_at": "2026-08-11T16:49:30.741611"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "record_income_guard_refuses_negative",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.record_income",
+          "params": {
+            "amount": -5.0,
+            "source": "x"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "failed",
+            "constraint_violated": "params.amount > 0"
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 1000.0
+            },
+            "pockets": {},
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "add_pocket_then_allocate_then_spend",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.add_pocket",
+          "params": {
+            "pocket_name": "travel",
+            "limit": 0.0
+          }
+        },
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "travel",
+            "amount": 100.0,
+            "period": "monthly"
+          }
+        },
+        {
+          "operator": "budget.spend",
+          "params": {
+            "pocket_name": "travel",
+            "amount": 40.0,
+            "description": "x"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_created"
+            ]
+          },
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_allocated"
+            ]
+          },
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_spent"
+            ]
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 900.0
+            },
+            "pockets": {
+              "travel": {
+                "allocated": 100.0,
+                "spent": 40.0,
+                "limit": 0.0
+              }
+            },
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "spend_beyond_remaining_refused",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "food",
+            "amount": 100.0,
+            "period": "monthly"
+          }
+        },
+        {
+          "operator": "budget.spend",
+          "params": {
+            "pocket_name": "food",
+            "amount": 500.0,
+            "description": "x"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_allocated"
+            ]
+          },
+          {
+            "status": "failed",
+            "constraint_violated": "pocket_balance_sufficient"
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 900.0
+            },
+            "pockets": {
+              "food": {
+                "allocated": 100.0,
+                "spent": 0.0,
+                "limit": 0.0
+              }
+            },
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "spend_on_missing_pocket_refused",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.spend",
+          "params": {
+            "pocket_name": "nope",
+            "amount": 1.0,
+            "description": "x"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "failed",
+            "constraint_violated": "pocket_exists"
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 1000.0
+            },
+            "pockets": {},
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "spend_exactly_remaining_is_allowed",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "food",
+            "amount": 100.0,
+            "period": "monthly"
+          }
+        },
+        {
+          "operator": "budget.spend",
+          "params": {
+            "pocket_name": "food",
+            "amount": 100.0,
+            "description": "x"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_allocated"
+            ]
+          },
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_spent"
+            ]
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 900.0
+            },
+            "pockets": {
+              "food": {
+                "allocated": 100.0,
+                "spent": 100.0,
+                "limit": 0.0
+              }
+            },
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "add_pocket_duplicate_refused",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.add_pocket",
+          "params": {
+            "pocket_name": "food",
+            "limit": 0.0
+          }
+        },
+        {
+          "operator": "budget.add_pocket",
+          "params": {
+            "pocket_name": "food",
+            "limit": 0.0
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_created"
+            ]
+          },
+          {
+            "status": "failed",
+            "constraint_violated": "pocket_not_already_present"
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 1000.0
+            },
+            "pockets": {
+              "food": {
+                "allocated": 0.0,
+                "spent": 0.0,
+                "limit": 0.0
+              }
+            },
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "pocket_name_is_normalised",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.add_pocket",
+          "params": {
+            "pocket_name": "holiday fund",
+            "limit": 0.0
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_created"
+            ]
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 1000.0
+            },
+            "pockets": {
+              "holiday_fund": {
+                "allocated": 0.0,
+                "spent": 0.0,
+                "limit": 0.0
+              }
+            },
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "pocket_name_all_punctuation_refused",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.add_pocket",
+          "params": {
+            "pocket_name": "!!!",
+            "limit": 0.0
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "failed",
+            "constraint_violated": "pocket_name_valid"
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 1000.0
+            },
+            "pockets": {},
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "operator_not_declared_by_the_sustain",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.summary"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "food",
+            "amount": 1.0,
+            "period": "monthly"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "failed",
+            "constraint_violated": "operator_allowed"
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 1000.0
+            },
+            "pockets": {},
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "sequence_of_commits",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.record_income",
+          "params": {
+            "amount": 200.0,
+            "source": "s"
+          }
+        },
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "a",
+            "amount": 300.0,
+            "period": "monthly"
+          }
+        },
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "b",
+            "amount": 400.0,
+            "period": "monthly"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.income_received"
+            ]
+          },
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_allocated"
+            ]
+          },
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_allocated"
+            ]
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 500.0
+            },
+            "pockets": {
+              "a": {
+                "allocated": 300.0,
+                "spent": 0.0,
+                "limit": 0.0
+              },
+              "b": {
+                "allocated": 400.0,
+                "spent": 0.0,
+                "limit": 0.0
+              }
+            },
+            "income": {
+              "monthly_total": 200.0,
+              "sources": [
+                {
+                  "id": "7eea048c-ae36-4f38-8ca4-6a9f93dfb8de",
+                  "label": "s",
+                  "amount": 200.0,
+                  "frequency": "once",
+                  "received_at": "2026-08-11T16:49:30.755330"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a_refusal_mid_sequence_leaves_earlier_commits_intact",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": true,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "a",
+            "amount": 300.0,
+            "period": "monthly"
+          }
+        },
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "b",
+            "amount": 5000.0,
+            "period": "monthly"
+          }
+        },
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "c",
+            "amount": 100.0,
+            "period": "monthly"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_allocated"
+            ]
+          },
+          {
+            "status": "failed",
+            "constraint_violated": "finances.liquid.balance >= params.amount"
+          },
+          {
+            "status": "ok",
+            "constraint_violated": null,
+            "events": [
+              "event.finances.pocket_allocated"
+            ]
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 600.0
+            },
+            "pockets": {
+              "a": {
+                "allocated": 300.0,
+                "spent": 0.0,
+                "limit": 0.0
+              },
+              "c": {
+                "allocated": 100.0,
+                "spent": 0.0,
+                "limit": 0.0
+              }
+            },
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "gate_disarmed_still_honours_operator_guards",
+      "initial": {
+        "finances": {
+          "liquid": {
+            "balance": 1000.0
+          },
+          "pockets": {},
+          "income": {
+            "monthly_total": 0.0,
+            "sources": []
+          }
+        }
+      },
+      "allowed": [
+        "budget.record_income",
+        "budget.allocate",
+        "budget.add_pocket",
+        "budget.spend"
+      ],
+      "enforcement": {
+        "enabled": false,
+        "invariants": [
+          {
+            "id": "liquid_non_negative",
+            "expression": "finances.liquid.balance >= 0"
+          },
+          {
+            "id": "pocket_allocated_non_negative",
+            "expression": "ALL finances.pockets[*].allocated >= 0"
+          }
+        ]
+      },
+      "calls": [
+        {
+          "operator": "budget.allocate",
+          "params": {
+            "pocket_name": "food",
+            "amount": 5000.0,
+            "period": "monthly"
+          }
+        }
+      ],
+      "expect": {
+        "outcomes": [
+          {
+            "status": "failed",
+            "constraint_violated": "finances.liquid.balance >= params.amount"
+          }
+        ],
+        "final_state": {
+          "finances": {
+            "liquid": {
+              "balance": 1000.0
+            },
+            "pockets": {},
+            "income": {
+              "monthly_total": 0.0,
+              "sources": []
+            }
+          }
+        }
+      }
+    }
+  ]
+}

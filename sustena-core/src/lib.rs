@@ -39,12 +39,13 @@
 //! | State | [`state`] | R1 |
 //! | Event fold | [`fold`] | R1 |
 //! | Rules | [`predicate`] | R1 |
-//! | Operators | — | not started |
+//! | Operators | [`operator`] | R1 |
 //! | Council | — | not started |
 
 pub mod error;
 pub mod fold;
 pub mod mutation;
+pub mod operator;
 pub mod path;
 pub mod predicate;
 pub mod state;
@@ -52,6 +53,7 @@ pub mod state;
 pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};
 pub use mutation::Mutation;
+pub use operator::{execute, Enforcement, Execution, OperatorResult, Registry};
 pub use predicate::{check, parse_predicate, Predicate};
 pub use state::State;
 

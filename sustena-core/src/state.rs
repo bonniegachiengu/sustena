@@ -192,26 +192,43 @@ impl State {
     }
 
     /// Add to a numeric value, returning the new value.
-    pub fn increment(&mut self, path: &str, delta: f64) -> StateResult<f64> {
-        let current = self.numeric_at(path, "increment")?;
-        let new_val = current + delta;
-        self.set(path, json_number(new_val))?;
+    ///
+    /// `delta` is a `Value`, not an `f64`, because int-versus-float is
+    /// OBSERVABLE in stored state and must survive the round trip. Python
+    /// promotes to float only when an operand is a float, so `1000.0 - 250.0`
+    /// stays `750.0` while `100 + 50` stays `150`. Taking an `f64` here lost
+    /// that distinction and rendered whole floats as integers — a difference
+    /// the conformance vectors caught the moment a float balance was touched.
+    pub fn increment(&mut self, path: &str, delta: &Value) -> StateResult<Value> {
+        let current = self.get_strict(path)?.clone();
+        let current_n = self.numeric_at(path, "increment")?;
+        let delta_n = delta.as_f64().unwrap_or(0.0);
+        let new_val = number_like(&current, delta, current_n + delta_n);
+        self.set(path, new_val.clone())?;
         Ok(new_val)
     }
 
     /// Subtract from a numeric value. Refuses to go negative unless allowed.
-    pub fn decrement(&mut self, path: &str, delta: f64, allow_negative: bool) -> StateResult<f64> {
-        let current = self.numeric_at(path, "decrement")?;
-        let new_val = current - delta;
-        if !allow_negative && new_val < 0.0 {
+    pub fn decrement(
+        &mut self,
+        path: &str,
+        delta: &Value,
+        allow_negative: bool,
+    ) -> StateResult<Value> {
+        let current = self.get_strict(path)?.clone();
+        let current_n = self.numeric_at(path, "decrement")?;
+        let delta_n = delta.as_f64().unwrap_or(0.0);
+        let result = current_n - delta_n;
+        if !allow_negative && result < 0.0 {
             return Err(StateError::Value(format!(
                 "Decrement would make '{path}' negative: {} - {} = {}",
-                fmt_num(current),
-                fmt_num(delta),
-                fmt_num(new_val)
+                fmt_num(current_n),
+                fmt_num(delta_n),
+                fmt_num(result)
             )));
         }
-        self.set(path, json_number(new_val))?;
+        let new_val = number_like(&current, delta, result);
+        self.set(path, new_val.clone())?;
         Ok(new_val)
     }
 
@@ -319,13 +336,15 @@ impl State {
     }
 }
 
-/// Numbers round-trip as integers when they are whole, matching how Python
-/// and serde_json both render them, so snapshots compare byte-for-byte.
-fn json_number(v: f64) -> Value {
-    if v.fract() == 0.0 && v.abs() < 9.0e15 {
-        Value::from(v as i64)
+/// Produce a number typed the way Python would: integer only when BOTH
+/// operands were integers, float otherwise — even when the result is whole.
+fn number_like(a: &Value, b: &Value, result: f64) -> Value {
+    let both_int = a.is_i64() || a.is_u64();
+    let b_int = b.is_i64() || b.is_u64();
+    if both_int && b_int && result.fract() == 0.0 && result.abs() < 9.0e15 {
+        Value::from(result as i64)
     } else {
-        Value::from(v)
+        Value::from(result)
     }
 }
 
