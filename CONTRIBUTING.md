@@ -10,10 +10,12 @@ Requires **Python 3.11+** and **Node 20+**.
 
 ```bash
 cd apps/api
-pip install -r requirements.txt
+pip install -r requirements.lock   # exact pins — use this one
 cp .env.example .env
-python -m pytest tests/ -q      # everything should pass before you change anything
+python -m pytest tests/ -q         # everything should pass before you change anything
 ```
+
+**Install from `requirements.lock`, not `requirements.txt`.** The lock holds exact, verified-green pins. `requirements.txt` declares the direct dependencies with `>=` ranges, so it resolves differently on different days. This suite is the correctness oracle for the Rust engine port, so it must run against an identical dependency set every time. CI installs the lock. Regeneration steps are in the lock file's own header.
 
 Always run pytest as `python -m pytest`, never bare `pytest`, so the package path resolves.
 

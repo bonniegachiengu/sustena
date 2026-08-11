@@ -28,11 +28,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: pip install -r apps/api/requirements.txt
+      # The LOCK, not requirements.txt. This suite is the correctness oracle
+      # for the Rust engine port (ADR-0001, Decision 1), so the dependency set
+      # it runs against must be identical every time. requirements.txt uses
+      # `>=` ranges and drifts between installs.
+      - name: Install locked dependencies
+        run: pip install -r apps/api/requirements.lock
 
       - name: Run tests
-        run: cd apps/api && python -m pytest tests/ -v --tb=short
+        run: cd apps/api && python -m pytest tests/ -q --tb=short
 
   build-web:
     name: Frontend Build (Vite)
