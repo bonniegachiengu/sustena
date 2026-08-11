@@ -15,7 +15,7 @@
 1. **Repo is not clean-public-ready** — a committed `venv/` (~3,900 files), build artifacts in the tree (`node_modules`, `dist`, `.gradle`, tauri `target`, `.idea`, `.obsidian`, pytest cache), and an awkward nested root `Sustena XII/Sustena XII`.
 2. **Two databases on one file** — the engine (raw sqlite3) and the routes (SQLAlchemy async) write the same file with no shared transaction.
 3. **Web-first monolith vs the native-apps direction** — one FastAPI process is both API and web-host; the native apps are thin wrappers around it. The goal is genuine native installs with a local engine.
-4. **Prod runs in dev mode + default secrets** — no clean deploy config.
+4. **Prod runs in dev mode** — wildcard CORS, `/docs`, and the dev-only `devui`/`seed`/`dev` routers are live in production; no clean deploy config. *(Corrected 2026-08-11: this line previously read "+ default secrets". Verified false — the live deployment sets real `SECRET_KEY`/`ADMIN_TOKEN` from the environment. The **defaults in `config.py` are still a hazard for any other deployer**, which the fail-to-boot check addresses.)*
 5. **Legacy dead code** — 4 dormant operatives, the WhatsApp stub, `operators.py` stub, mock Firestore sync.
 6. **Redundancy** — 4 widget-render systems, 2 in-memory registries, duplicated logic.
 7. **Frontend monolith** — mixed `.jsx/.js` (no TS), 3,410-line files, no tests.

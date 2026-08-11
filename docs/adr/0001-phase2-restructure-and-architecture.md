@@ -27,7 +27,7 @@
 ## Decision 3 — Clean deploy configuration (prod ≠ dev)
 **Decision.** Split dev/prod for real: prod disables wildcard CORS, `/docs`, SQL echo, and the dev routers (`devui`/`seed`/`dev`); secrets come from the environment; the app **refuses to boot** in prod without real secrets.
 
-**Why.** The live deployment currently runs `is_development=True` with the default `dev-secret` JWT key. **Consequences.** Security-correct public/multi-device deploy.
+**Why.** The live deployment currently runs `is_development=True` — so wildcard CORS, `/docs`, and the dev-only `devui`/`seed`/`dev` routers are all live in production. *(Corrected 2026-08-11: an earlier revision of this line also claimed the deployment ran with the default `dev-secret` JWT key. That was verified and is **false** — `SECRET_KEY` and `ADMIN_TOKEN` are both set from the environment to real values. The dev-mode finding stands; the default-secret one does not. The **defaults in `config.py` remain a real hazard for anyone else deploying this**, which is what "refuses to boot in prod without real secrets" fixes.)* **Consequences.** Security-correct public/multi-device deploy.
 
 ## Decision 4 — Quarantine legacy code (do NOT delete)
 **Decision.** Move dead/legacy code into a clearly-marked `legacy/` area (kept in history, not deleted): the 4 dormant operatives (Navigator/Attaché/Curator/Protégé), the WhatsApp channel (handler/sender/webhook/dev routes), the `operators.py` stub. Protégé flagged as later-salvageable (a state-path fix). **Bonnie approves the exact list before anything moves.**
