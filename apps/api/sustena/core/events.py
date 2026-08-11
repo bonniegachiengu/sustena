@@ -13,9 +13,22 @@ Event name protocol (dot-path, 3+ segments):
   event.inventory.low_stock_alert
 
 Events are:
-  - Written to the SQLite events table (append-only, never deleted)
-  - Mirrored to Firestore via FirestoreSync
+  - Buffered into the current execution context by publish()
+  - Mirrored to Firestore via FirestoreSync (a downstream copy, not the record)
   - Dispatched to any registered in-process subscribers (for operative triggers)
+
+DURABILITY IS NOT THIS CLASS'S JOB. publish() does not commit anything; it
+records that an event happened during this operator call. The engine drains
+published_this_context() and writes the events, their per-sustain `seq` and
+their state mutations in ONE transaction, re-raising on failure. That commit is
+the ack (RECORD / Events-and-Time: an ack means durably committed) — a publish
+call is not.
+
+This class previously accepted a SQLAlchemy session and inserted rows itself,
+swallowing failures. That path is gone: nothing ever passed a session, and its
+INSERT omitted `seq` and `mutations_json`, so any row it wrote would have
+broken state reconstruction for that sustain. One writer, one transaction —
+ADR-0001 Decision 2.
 """
 
 import logging
@@ -33,18 +46,44 @@ _EVENT_NAME_RE = re.compile(r"^event(\.[a-z][a-z0-9_]*){2,}$")
 
 class EventBus:
     """
-    Publishes events to the SQLite event log and dispatches to subscribers.
+    Records events for one execution context and dispatches to subscribers.
 
     Each EventBus instance is scoped to a single sustain execution context.
-    The operator runner creates one per operator call and passes it in via OperatorContext.
+    The operator runner creates one per operator call and passes it in via
+    OperatorContext. It holds no database handle: the engine commits what was
+    published here, together with state mutations, in one transaction.
     """
 
     def __init__(self, sustain_id: str, db_session=None, firestore_sync=None) -> None:
         self._sustain_id = sustain_id
-        self._db = db_session          # SQLAlchemy async session (None = in-memory only)
         self._fs = firestore_sync      # FirestoreSync instance (None = skip)
         self._subscribers: dict[str, list[Callable]] = defaultdict(list)
         self._published: list[dict] = []  # All events published this execution context
+
+        # `db_session` is refused, not ignored.
+        #
+        # This bus used to accept a SQLAlchemy session and INSERT events itself.
+        # That writer was dead (nothing has ever passed a session) and, worse,
+        # it was a trap: its INSERT omitted `seq` and `mutations_json`, the two
+        # columns the fold depends on. A row written that way sorts before the
+        # genesis event on replay and contributes no mutations — so enabling it
+        # would have silently corrupted state reconstruction for that sustain.
+        #
+        # Durability belongs to exactly one place: the engine's own commit
+        # (SustainEngine._append_events_and_update_cache), which writes seq and
+        # mutations together in one transaction and re-raises on failure. Two
+        # writers on one table with no shared transaction is the hazard ADR-0001
+        # Decision 2 exists to remove.
+        #
+        # Failing loudly rather than accepting-and-ignoring: silently dropping a
+        # caller's persistence request would be exactly the kind of quiet
+        # non-application this codebase refuses elsewhere.
+        if db_session is not None:
+            raise ValueError(
+                "EventBus does not persist events and cannot accept a db_session. "
+                "Event durability belongs to SustainEngine's commit, which writes "
+                "seq and mutations_json in one transaction. See ADR-0001 Decision 2."
+            )
 
     # ── Validation ─────────────────────────────────────────────────────────────
 
@@ -71,10 +110,11 @@ class EventBus:
         operator_log_id: str | None = None,
     ) -> str:
         """
-        Publish an event.
-        Returns the event_id.
-        Writes to SQLite (if db session available) and Firestore (if configured).
-        Dispatches to any registered subscribers.
+        Publish an event into this execution context.
+
+        Returns the event_id. Buffers the event, mirrors it to Firestore if
+        configured, and dispatches to subscribers. Does NOT durably commit —
+        see the module docstring; the engine's transaction is the ack.
         """
         self.validate_event_name(name)
 
@@ -95,14 +135,21 @@ class EventBus:
         self._published.append(event)
         logger.debug("EVENT %s → %s", self._sustain_id, name)
 
-        # Write to SQLite
-        if self._db is not None:
-            try:
-                await self._write_to_db(event, ts)
-            except Exception as e:
-                logger.error("Failed to persist event '%s': %s", name, e)
+        # NOTE ON DURABILITY (RECORD / Events-and-Time: an ack means durably
+        # committed). publish() does NOT durably commit — it buffers into this
+        # execution context. The engine drains published_this_context() and
+        # writes the events, their seq and their mutations in ONE transaction,
+        # re-raising on failure so a failed history write can never pass for a
+        # success. That commit is the ack; this call is not.
+        #
+        # This used to also INSERT via a SQLAlchemy session and swallow any
+        # failure with logger.error. Removed: it was a dead second writer that
+        # omitted the fold columns. See __init__.
 
-        # Mirror to Firestore
+        # Mirror to Firestore. Swallowing here is deliberate and correct: the
+        # mirror is a downstream copy, not the source of truth, so a mirror
+        # outage must not fail an operation whose real record committed fine.
+        # The log line is the honest disclosure that the copy is behind.
         if self._fs is not None:
             try:
                 await self._fs.sync_event(event)
@@ -113,22 +160,6 @@ class EventBus:
         await self._dispatch(name, payload)
 
         return event_id
-
-    async def _write_to_db(self, event: dict, ts: datetime) -> None:
-        """Persist event to SQLite events table."""
-        import json
-        from sustena.db.schema import events as events_table
-        await self._db.execute(
-            events_table.insert().values(
-                id=event["id"],
-                sustain_id=event["sustain_id"],
-                event_name=event["event_name"],
-                payload_json=json.dumps(event["_payload"]),
-                operator_log_id=event.get("operator_log_id"),
-                timestamp=ts,
-            )
-        )
-        await self._db.commit()
 
     # ── Subscribing ────────────────────────────────────────────────────────────
 
@@ -167,40 +198,23 @@ class EventBus:
         limit: int = 50,
     ) -> list[dict]:
         """
-        Retrieve event history from SQLite.
-        Falls back to in-process published events if no DB session.
+        Return events published during THIS execution context.
+
+        Scoped to the current context on purpose. The bus is created per
+        operator call and holds no database handle, so it cannot see a
+        sustain's durable history — and should not pretend to. This used to
+        fall back to a SQLAlchemy query when handed a session, which also
+        ordered by `timestamp`; the durable log orders by `seq`, because
+        near-simultaneous events tie on timestamp and sort nondeterministically
+        (a real bug already fixed once on the engine's own read path).
+
+        For a sustain's real history use SustainEngine.get_events(), which is
+        seq-ordered and reads the committed log.
         """
-        if self._db is None:
-            # In-memory fallback (useful in tests)
-            events = self._published
-            if event_name:
-                events = [e for e in events if e["event_name"] == event_name]
-            return events[-limit:]
-
-        import json
-        from sqlalchemy import select, desc
-        from sustena.db.schema import events as events_table
-
-        query = (
-            select(events_table)
-            .where(events_table.c.sustain_id == self._sustain_id)
-            .order_by(desc(events_table.c.timestamp))
-            .limit(limit)
-        )
+        events = self._published
         if event_name:
-            query = query.where(events_table.c.event_name == event_name)
-
-        result = await self._db.execute(query)
-        rows = result.mappings().all()
-        return [
-            {
-                "id": r["id"],
-                "event_name": r["event_name"],
-                "payload": json.loads(r["payload_json"]),
-                "timestamp": r["timestamp"].isoformat() if hasattr(r["timestamp"], "isoformat") else str(r["timestamp"]),
-            }
-            for r in rows
-        ]
+            events = [e for e in events if e["event_name"] == event_name]
+        return events[-limit:]
 
     def published_this_context(self) -> list[dict]:
         """Return all events published during this execution context."""

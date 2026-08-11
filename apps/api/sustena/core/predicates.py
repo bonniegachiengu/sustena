@@ -549,16 +549,27 @@ def _walk_validate(node: Any, scope_schema: dict, root_schema: dict, errors: lis
         return
 
 
-def compile_invariant(expr: str, state_schema: dict) -> tuple[Any | None, list[str]]:
+def compile_invariant(expr: str, state_schema: dict | None) -> tuple[Any | None, list[str]]:
     """
     Parse + schema-validate a constraint string in one call.
     Returns (node, []) on success, or (None, [error, ...]) on failure —
     either a PredicateSyntaxError message or one or more schema-binding errors.
+
+    `state_schema=None` means parse only, skipping schema binding. That is a
+    real case rather than a loophole: an expression can legitimately need a
+    syntax check before any schema exists to bind it against — the definition
+    builder validates invariants while dimensions are still being declared.
+
+    Passing None previously reached the schema walker and raised TypeError deep
+    inside it, which surfaced as "this expression is broken" when the
+    expression was fine and only the schema was absent.
     """
     try:
         node = parse_predicate(expr)
     except PredicateSyntaxError as e:
         return None, [f"parse error: {e}"]
+    if state_schema is None:
+        return node, []
     errors = validate_against_schema(node, state_schema)
     if errors:
         return None, errors

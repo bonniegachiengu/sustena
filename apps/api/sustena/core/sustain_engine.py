@@ -2776,6 +2776,26 @@ class SustainEngine:
         a real pass/fail here — display only, never gated (see
         _check_enforcement_gate's "enforced" skip). Sustains with no
         declared aggregates get their normal state back unchanged.
+
+        ONE EVALUATOR, shared with the gate.
+
+        This used to evaluate the raw expression strings through
+        ConstraintEngine, while the enforcement gate evaluated the same strings
+        through predicates.py. The two do not agree: predicates.py implements
+        the aggregate grammar (SUM/COUNT/AVG/MIN/MAX) the DSL paper specifies,
+        and ConstraintEngine explicitly rejects it. So an invariant such as
+        `ALL accounts.journal_entries[*]: SUM(lines[*].debit) ==
+        SUM(lines[*].credit)` passed the gate and simultaneously displayed as
+        FAILING — the screen contradicting the engine about the same rule.
+
+        Worse, ConstraintEngine reported "I cannot parse this" as False, which
+        renders identically to "this rule is violated". A parser limitation was
+        being shown to a person as a broken household.
+
+        Both paths now evaluate the SAME compiled AST from
+        spec["_compiled_invariants"], so display and enforcement cannot
+        disagree by construction. An invariant that failed to compile is
+        reported honestly as "error" rather than silently counted either way.
         """
         spec = self._get_spec(sustain_id)
         if spec is None:
@@ -2784,14 +2804,47 @@ class SustainEngine:
             state_dict = self._state_with_aggregates(sustain_id)
         except ValueError:
             return []
+
+        self._compile_spec_invariants(spec)
         state = StateAccessor(state_dict)
-        from sustena.core.constraints import ConstraintEngine
-        constraint_engine = ConstraintEngine()
-        results = []
+
+        compiled_by_expr = {
+            inv.get("expr"): inv for inv in spec.get("_compiled_invariants", [])
+        }
+        errors_by_expr = {
+            err.get("expr"): err for err in spec.get("_invariant_compile_errors", [])
+        }
+
+        results: list[dict] = []
         for inv in spec.get("invariants", []):
             expr = inv.get("expression", "")
-            ok_flag, _ = constraint_engine.evaluate(expr, state)
-            results.append({"expr": expr, "status": "ok" if ok_flag else "fail", "value": None})
+            compiled = compiled_by_expr.get(expr)
+
+            if compiled is None:
+                # Did not compile. Say so — never dress a parse failure up as
+                # a violated rule.
+                err = errors_by_expr.get(expr, {})
+                reason = "; ".join(err.get("errors", []) or []) or "invariant did not compile"
+                results.append({
+                    "expr": expr, "status": "error", "value": None, "reason": reason,
+                })
+                continue
+
+            try:
+                ok_flag, reason = evaluate_predicate(compiled["node"], state, {})
+            except Exception as exc:  # defensive: a broken rule must not break the panel
+                results.append({
+                    "expr": expr, "status": "error", "value": None,
+                    "reason": f"evaluation failed: {exc}",
+                })
+                continue
+
+            results.append({
+                "expr": expr,
+                "status": "ok" if ok_flag else "fail",
+                "value": None,
+                "reason": "" if ok_flag else reason,
+            })
         return results
 
     # ── Definitions — user-created sustain templates (Slice 6) ─────────────────

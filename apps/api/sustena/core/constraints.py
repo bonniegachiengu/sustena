@@ -351,7 +351,15 @@ class ConstraintEngine:
         The wildcard `[*]` tokenises to '[' ']' tokens, e.g.
         'ALL finances.pockets[*].allocated >= 0' →
         ['ALL','finances.pockets','[',']','allocated','>=','0'].
-        Aggregate/block forms (`[*]: SUM(...)`) are not supported here.
+
+        Aggregate/block forms (`[*]: SUM(...)`) are NOT handled here — this is
+        the guard evaluator, and the aggregate grammar the DSL paper specifies
+        lives in predicates.py. Encountering one raises ConstraintSyntaxError
+        rather than returning False: "I cannot parse this" and "this rule is
+        violated" are different answers, and returning the second for the first
+        made a parser limitation look like a broken household on screen.
+        Invariants are evaluated by predicates.py on both the gate and display
+        paths, so nothing legitimate reaches here.
         """
         if '[' in tokens and ']' in tokens:
             lb = tokens.index('[')
@@ -361,7 +369,11 @@ class ConstraintEngine:
             if not pred_tokens or pred_tokens[0] == ':' or any(
                 t.upper() in ('SUM', 'COUNT', 'AVG', 'MIN', 'MAX') for t in pred_tokens
             ):
-                return False, f"{quantifier}: unsupported aggregate/block expression"
+                raise ConstraintParseError(
+                    f"{quantifier}: aggregate/block expressions are not supported by "
+                    f"ConstraintEngine (the guard evaluator). Use predicates.py, which "
+                    f"implements the aggregate grammar. Expression tokens: {tokens}"
+                )
         else:
             try:
                 field_idx = next(i for i, t in enumerate(tokens) if t.upper() == 'FIELD')
@@ -405,6 +417,19 @@ class ConstraintEngine:
         Evaluate a constraint string against state and params.
         Returns (True, "") on pass.
         Returns (False, reason_string) on fail.
+
+        Raises ConstraintParseError if the expression cannot be understood.
+
+        "I cannot parse this" is NOT "this rule is violated". Returning False
+        for an unparseable expression made a malformed guard indistinguishable
+        from a real violation: the operation was refused, and the person was
+        told their rule had failed when in fact the rule had never run. A guard
+        this evaluator cannot read is a defect in the spec or the code, and it
+        must surface as one.
+
+        Genuine evaluation problems (a missing state path, a type mismatch)
+        still resolve to a normal (False, reason) failure — those ARE answers
+        about the state, not about the expression.
         """
         if not constraint or not constraint.strip():
             return True, ""
@@ -414,8 +439,8 @@ class ConstraintEngine:
             return True, ""
         try:
             return self._eval(tokens, state, params)
-        except ConstraintParseError as e:
-            return False, f"Parse error: {e}"
+        except ConstraintParseError:
+            raise
         except Exception as e:
             return False, f"Evaluation error: {e}"
 

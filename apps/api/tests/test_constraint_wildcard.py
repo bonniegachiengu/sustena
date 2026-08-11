@@ -65,11 +65,46 @@ def test_scalar_constraint_unaffected():
     assert ok is True
 
 
-def test_aggregate_block_form_is_handled_gracefully():
-    # SUM(...)/block forms are not supported — must return (False, reason), not crash.
-    ok, reason = _ev(
-        "ALL accounts.journal_entries[*]: SUM(lines[*].debit) == SUM(lines[*].credit)",
-        {"accounts": {"journal_entries": []}},
-    )
+def test_aggregate_block_form_raises_rather_than_reporting_a_violation():
+    """
+    SUM(...)/block forms belong to predicates.py, not to this guard evaluator.
+
+    This previously asserted that an unsupported expression returns
+    (False, "unsupported"). That was the bug, not the contract: "I cannot parse
+    this" and "this rule is violated" are different answers, and returning the
+    second for the first is what made aggregate invariants display as FAILING
+    on screen while the enforcement gate — which uses predicates.py — held the
+    very same rules to be satisfied.
+
+    The case below shows how perverse the old answer was: an EMPTY journal is
+    trivially balanced, yet it was reported as a violation.
+
+    The original intent (don't crash the caller) is preserved: this raises a
+    typed, catchable ConstraintParseError, not an arbitrary exception.
+    """
+    from sustena.core.constraints import ConstraintParseError
+
+    expr = "ALL accounts.journal_entries[*]: SUM(lines[*].debit) == SUM(lines[*].credit)"
+    with pytest.raises(ConstraintParseError, match="aggregate"):
+        _ev(expr, {"accounts": {"journal_entries": []}})
+
+
+def test_predicates_is_the_evaluator_that_understands_aggregates():
+    """The other half of the contract: the supported path genuinely works."""
+    from sustena.core.predicates import compile_invariant, evaluate_predicate
+
+    expr = "ALL accounts.journal_entries[*]: SUM(lines[*].debit) == SUM(lines[*].credit)"
+    node, errors = compile_invariant(expr, None)
+    assert not errors, f"predicates.py must compile the aggregate grammar: {errors}"
+
+    balanced = {"accounts": {"journal_entries": [
+        {"lines": [{"debit": 100, "credit": 0}, {"debit": 0, "credit": 100}]}
+    ]}}
+    ok, _ = evaluate_predicate(node, StateAccessor(balanced), {})
+    assert ok is True
+
+    unbalanced = {"accounts": {"journal_entries": [
+        {"lines": [{"debit": 100, "credit": 0}, {"debit": 0, "credit": 42}]}
+    ]}}
+    ok, _ = evaluate_predicate(node, StateAccessor(unbalanced), {})
     assert ok is False
-    assert "unsupported" in reason
