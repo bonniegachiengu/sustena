@@ -247,10 +247,21 @@ app.include_router(journal.router,   prefix="/api/v1/journal",   tags=["journal"
 app.include_router(arena.router,     prefix="/api/v1/arena",     tags=["arena"])
 app.include_router(ingest.router,    prefix="/api/v1/ingest",    tags=["ingest"])
 
-# Dev-only simulation and inspection endpoints
+# The cockpit API. NOT dev-only, despite the /devui name and its history:
+# Orchie (phone), Studio (desktop) and Mycelium all depend on it, and every
+# endpoint requires a real JWT session. Gating it on is_development is what
+# forced this deployment to stay in development mode — hardening the host
+# would have amputated all three apps. See config.enable_cockpit.
+if settings.enable_cockpit:
+    app.include_router(devui.router, prefix="/devui", tags=["devui"])
+
+# Genuinely development-only, and separate from the cockpit on purpose.
+# /seed writes rows directly, bypassing the engine (it can half-create a
+# sustain with no genesis event, leaving state unreproducible from the fold);
+# /dev is a debug surface for the legacy WhatsApp stub. Neither should ever be
+# reachable on a live host.
 if settings.is_development:
     app.include_router(dev.router, prefix="/dev", tags=["dev"])
-    app.include_router(devui.router, prefix="/devui", tags=["devui"])
     app.include_router(seed.router, prefix="/seed", tags=["seed"])
 
 

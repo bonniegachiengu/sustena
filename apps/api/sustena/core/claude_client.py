@@ -149,13 +149,21 @@ class MockClaudeClient:
 
 def get_claude_client() -> Any:
     """
-    Returns the correct Claude client for the current environment.
+    Returns the correct Claude client.
 
-    Mock conditions (both must be true):
-      1. ENVIRONMENT=development
-      2. ANTHROPIC_API_KEY is missing, 'mock', or starts with 'sk-ant-mock'
+    A mock/placeholder ANTHROPIC_API_KEY means the mock client — full stop,
+    regardless of ENVIRONMENT.
 
-    Otherwise returns a real AsyncAnthropic client.
+    This previously also required ENVIRONMENT=development. That was wrong, and
+    it was a live tripwire: switching the host to production while the key was
+    still 'mock' would have skipped the mock and constructed a REAL
+    AsyncAnthropic with the literal string 'mock' as its credential. Unlike
+    the WhatsApp and Firestore paths, there is no graceful fallback here, so
+    every LLM-backed call (Orchie's chat route) would have started failing at
+    request time — with the cause a long way from the symptom.
+
+    The key already states the intent. The environment does not get to
+    override it: a deployment that wants real LLM calls sets a real key.
     """
     api_key = settings.anthropic_api_key
     is_mock_key = (
@@ -164,7 +172,7 @@ def get_claude_client() -> Any:
         or api_key.startswith("sk-ant-mock")
     )
 
-    if settings.is_development and is_mock_key:
+    if is_mock_key:
         return MockClaudeClient()
 
     # Real client

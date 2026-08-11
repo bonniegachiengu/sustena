@@ -53,8 +53,19 @@ homestead/
 biashara/
 mkulima/
 colosso/
-/scripts/
 lore/
+
+# ── Operational scripts: TRACKED (deploy + uptime supervision) ────────────────
+# /scripts/ used to be ignored wholesale, grouped with the content folders
+# above. That was a miscategorisation: these are real operational code — the
+# deploy pipeline and the uptime watchdog the live site depends on — and they
+# existed on exactly one disk. Verified free of secrets before tracking.
+# The content folders above stay ignored; this un-ignores only the scripts.
+/scripts/*
+!/scripts/*.ps1
+!/scripts/*.vbs
+# Runtime logs and state markers the watchdog writes — never committed.
+/scripts/logs/
 
 # ── Financial spreadsheets ────────────────────────────────────────────────────
 *.xlsx

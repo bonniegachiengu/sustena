@@ -19,6 +19,7 @@ Usage:
 """
 
 import logging
+import os
 from collections import defaultdict
 from typing import Any, Callable
 
@@ -116,15 +117,31 @@ _instance: Any = None
 
 def get_firestore_sync() -> MockFirestoreSync | FirestoreSync:
     """
-    Returns MockFirestoreSync in development or when cloud project is not configured.
-    Returns real FirestoreSync in production with credentials available.
+    Returns the real FirestoreSync only when a project AND real credentials
+    are both configured. Otherwise the mock.
+
+    Gated on CREDENTIALS, not on ENVIRONMENT. It used to be
+    `settings.is_development or ...`, which meant flipping the host to
+    production would start attempting real Google Cloud calls purely as a
+    side effect of an unrelated flag — with no credentials present and no
+    cross-device sync actually in use. It degraded gracefully (the except
+    below), but "attempt a cloud connection because a different setting
+    changed" is the wrong behaviour, not merely a survivable one.
+
+    Real cloud sync is something a deployment opts into by supplying
+    credentials, which is exactly what this now checks.
     """
     global _instance
     if _instance is not None:
         return _instance
 
     project = settings.google_cloud_project
-    use_mock = settings.is_development or not project or project == "sustena-xii-placeholder"
+    has_credentials = bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
+    use_mock = (
+        not has_credentials
+        or not project
+        or project == "sustena-xii-placeholder"
+    )
 
     if use_mock:
         _instance = MockFirestoreSync()
