@@ -93,6 +93,14 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/docs" if settings.is_development else None,
     redoc_url="/redoc" if settings.is_development else None,
+    # openapi_url must be disabled too, not just the two UIs. FastAPI serves
+    # the raw schema independently of them, so with only docs_url/redoc_url
+    # set to None a hardened host still published its entire API surface at
+    # /openapi.json — every path, parameter and model, including the cockpit.
+    # Caught by testing the live host after the production flip rather than by
+    # reading the config. Verified nothing (deploy.ps1, keepalive.ps1, the
+    # frontend) reads this endpoint.
+    openapi_url="/openapi.json" if settings.is_development else None,
     lifespan=lifespan,
 )
 
