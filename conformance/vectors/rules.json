@@ -1,0 +1,598 @@
+{
+  "conformance_version": 1,
+  "slice": "rules",
+  "generated_from": "sustena/core/predicates.py",
+  "note": "Recorded from the reference engine. See conformance/README.md.",
+  "cases": [
+    {
+      "name": "liquid_non_negative_ok",
+      "expr": "finances.liquid.balance >= 0",
+      "state": {
+        "finances": {
+          "liquid": {
+            "balance": 10
+          }
+        }
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "liquid_non_negative_fail",
+      "expr": "finances.liquid.balance >= 0",
+      "state": {
+        "finances": {
+          "liquid": {
+            "balance": -1
+          }
+        }
+      },
+      "params": {},
+      "expect": {
+        "verdict": false,
+        "reason": "finances.liquid.balance (-1) >= 0 (0) failed"
+      }
+    },
+    {
+      "name": "liquid_boundary_zero",
+      "expr": "finances.liquid.balance >= 0",
+      "state": {
+        "finances": {
+          "liquid": {
+            "balance": 0
+          }
+        }
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "pockets_dict_quantifier",
+      "expr": "ALL finances.pockets[*].allocated >= 0",
+      "state": {
+        "finances": {
+          "pockets": {
+            "food": {
+              "allocated": 5.0,
+              "spent": 1.0
+            },
+            "rent": {
+              "allocated": 0.0,
+              "spent": 0.0
+            }
+          }
+        }
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "pockets_dict_quantifier_fail",
+      "expr": "ALL finances.pockets[*].allocated >= 0",
+      "state": {
+        "finances": {
+          "pockets": {
+            "a": {
+              "allocated": -5
+            }
+          }
+        }
+      },
+      "params": {},
+      "expect": {
+        "verdict": false,
+        "reason": "ALL 'finances.pockets' failed at index 0: allocated (-5) >= 0 (0) failed"
+      }
+    },
+    {
+      "name": "journal_balanced",
+      "expr": "ALL accounts.journal_entries[*]: SUM(lines[*].debit) == SUM(lines[*].credit)",
+      "state": {
+        "accounts": {
+          "journal_entries": [
+            {
+              "lines": [
+                {
+                  "debit": 100,
+                  "credit": 0
+                },
+                {
+                  "debit": 0,
+                  "credit": 100
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "journal_unbalanced",
+      "expr": "ALL accounts.journal_entries[*]: SUM(lines[*].debit) == SUM(lines[*].credit)",
+      "state": {
+        "accounts": {
+          "journal_entries": [
+            {
+              "lines": [
+                {
+                  "debit": 100,
+                  "credit": 0
+                },
+                {
+                  "debit": 0,
+                  "credit": 42
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "params": {},
+      "expect": {
+        "verdict": false,
+        "reason": "ALL 'accounts.journal_entries' failed at index 0: SUM(lines[*].debit) (100) == SUM(lines[*].credit) (42) failed"
+      }
+    },
+    {
+      "name": "journal_empty_is_trivially_balanced",
+      "expr": "ALL accounts.journal_entries[*]: SUM(lines[*].debit) == SUM(lines[*].credit)",
+      "state": {
+        "accounts": {
+          "journal_entries": []
+        }
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "sum_over_dict",
+      "expr": "SUM(finances.pockets[*].allocated) >= 0",
+      "state": {
+        "finances": {
+          "pockets": {
+            "food": {
+              "allocated": 5.0,
+              "spent": 1.0
+            },
+            "rent": {
+              "allocated": 0.0,
+              "spent": 0.0
+            }
+          }
+        }
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "count_items",
+      "expr": "COUNT(items[*]) == 3",
+      "state": {
+        "items": [
+          1,
+          2,
+          3
+        ]
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "avg_of_empty_is_zero",
+      "expr": "AVG(items[*]) == 0",
+      "state": {
+        "items": []
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "min_of_empty_is_null",
+      "expr": "MIN(items[*]) == null",
+      "state": {
+        "items": []
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "max_value",
+      "expr": "MAX(items[*].v) == 9",
+      "state": {
+        "items": [
+          {
+            "v": 3
+          },
+          {
+            "v": 9
+          }
+        ]
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "aggregate_ignores_booleans",
+      "expr": "SUM(items[*]) == 3",
+      "state": {
+        "items": [
+          1,
+          2,
+          true
+        ]
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "body_reaches_outer_state",
+      "expr": "ALL fines[*].reason IN rules.allowed",
+      "state": {
+        "fines": [
+          {
+            "reason": "late"
+          }
+        ],
+        "rules": {
+          "allowed": [
+            "late",
+            "damage"
+          ]
+        }
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "body_reaches_outer_state_fail",
+      "expr": "ALL fines[*].reason IN rules.allowed",
+      "state": {
+        "fines": [
+          {
+            "reason": "other"
+          }
+        ],
+        "rules": {
+          "allowed": [
+            "late"
+          ]
+        }
+      },
+      "params": {},
+      "expect": {
+        "verdict": false,
+        "reason": "ALL 'fines' failed at index 0: reason ('other') not IN ['late']"
+      }
+    },
+    {
+      "name": "item_shadows_outer",
+      "expr": "ALL items[*].status == \"inner\"",
+      "state": {
+        "status": "outer",
+        "items": [
+          {
+            "status": "inner"
+          }
+        ]
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "membership_list_literal",
+      "expr": "status IN [\"a\", \"b\"]",
+      "state": {
+        "status": "a"
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "membership_not_in",
+      "expr": "status NOT IN [\"a\"]",
+      "state": {
+        "status": "b"
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "membership_fail",
+      "expr": "status IN [\"a\"]",
+      "state": {
+        "status": "z"
+      },
+      "params": {},
+      "expect": {
+        "verdict": false,
+        "reason": "status ('z') not IN ['a']"
+      }
+    },
+    {
+      "name": "logical_and",
+      "expr": "a > 0 AND b == 0",
+      "state": {
+        "a": 1,
+        "b": 0
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "logical_or",
+      "expr": "a > 5 OR b == 0",
+      "state": {
+        "a": 1,
+        "b": 0
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "logical_not",
+      "expr": "NOT a > 5",
+      "state": {
+        "a": 1
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "precedence_or_binds_loosest",
+      "expr": "a > 5 AND b == 1 OR a == 1",
+      "state": {
+        "a": 1,
+        "b": 0
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "parenthesised_group",
+      "expr": "(a > 5 OR a == 1) AND b == 0",
+      "state": {
+        "a": 1,
+        "b": 0
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "param_reference",
+      "expr": "finances.liquid.balance >= params.amount",
+      "state": {
+        "finances": {
+          "liquid": {
+            "balance": 100
+          }
+        }
+      },
+      "params": {
+        "amount": 50
+      },
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "param_reference_fail",
+      "expr": "finances.liquid.balance >= params.amount",
+      "state": {
+        "finances": {
+          "liquid": {
+            "balance": 10
+          }
+        }
+      },
+      "params": {
+        "amount": 50
+      },
+      "expect": {
+        "verdict": false,
+        "reason": "finances.liquid.balance (10) >= params.amount (50) failed"
+      }
+    },
+    {
+      "name": "missing_param_is_null",
+      "expr": "a >= params.nope",
+      "state": {
+        "a": 1
+      },
+      "params": {},
+      "expect": {
+        "verdict": false,
+        "reason": "Type error comparing 1 >= None: '>=' not supported between instances of 'int' and 'NoneType'"
+      }
+    },
+    {
+      "name": "missing_path_ordering_is_a_type_error",
+      "expr": "missing.path > 0",
+      "state": {},
+      "params": {},
+      "expect": {
+        "verdict": false,
+        "reason": "Type error comparing None > 0: '>' not supported between instances of 'NoneType' and 'int'"
+      }
+    },
+    {
+      "name": "equality_across_int_and_float",
+      "expr": "a == 1",
+      "state": {
+        "a": 1.0
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "string_comparison",
+      "expr": "name >= \"b\"",
+      "state": {
+        "name": "c"
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "exists_true",
+      "expr": "EXISTS items[*].done == true",
+      "state": {
+        "items": [
+          {
+            "done": false
+          },
+          {
+            "done": true
+          }
+        ]
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "exists_false",
+      "expr": "EXISTS items[*].done == true",
+      "state": {
+        "items": [
+          {
+            "done": false
+          }
+        ]
+      },
+      "params": {},
+      "expect": {
+        "verdict": false,
+        "reason": "EXISTS: no item in 'items' matches the predicate"
+      }
+    },
+    {
+      "name": "quantifier_over_non_list",
+      "expr": "ALL a[*].x == 1",
+      "state": {
+        "a": 5
+      },
+      "params": {},
+      "expect": {
+        "verdict": false,
+        "reason": "ALL: 'a' is not a list or dict"
+      }
+    },
+    {
+      "name": "indexed_path",
+      "expr": "r[1].n == \"y\"",
+      "state": {
+        "r": [
+          {
+            "n": "x"
+          },
+          {
+            "n": "y"
+          }
+        ]
+      },
+      "params": {},
+      "expect": {
+        "verdict": true,
+        "reason": ""
+      }
+    },
+    {
+      "name": "syntax_error_garbage",
+      "expr": "this is (not ) valid",
+      "state": {},
+      "params": {},
+      "expect": {
+        "parse_error": "Expected a comparison operator, got 'is' (at token 1)"
+      }
+    },
+    {
+      "name": "syntax_error_dangling_operator",
+      "expr": "a >",
+      "state": {},
+      "params": {},
+      "expect": {
+        "parse_error": "Unexpected end of expression while reading an operand (at token 2)"
+      }
+    },
+    {
+      "name": "syntax_error_trailing_token",
+      "expr": "a > 1 b",
+      "state": {},
+      "params": {},
+      "expect": {
+        "parse_error": "Unexpected trailing token 'b' (at token 3)"
+      }
+    }
+  ]
+}

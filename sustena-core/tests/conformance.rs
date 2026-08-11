@@ -250,3 +250,42 @@ fn folding_a_log_never_mutates_its_source() {
         "the item was applied twice"
     );
 }
+
+#[test]
+fn rule_vectors() {
+    let doc = load("rules.json");
+    let cases = doc["cases"].as_array().expect("cases array");
+    assert!(!cases.is_empty(), "no rule vectors to check");
+
+    let mut matched = 0;
+    for case in cases {
+        let name = case["name"].as_str().unwrap();
+        let expr = case["expr"].as_str().unwrap();
+        let state = &case["state"];
+        let params: serde_json::Map<String, Value> = case["params"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        let expect = &case["expect"];
+
+        match sustena_core::check(expr, state, &params) {
+            Err(_) => assert!(
+                expect.get("parse_error").is_some(),
+                "{name}: this core rejected an expression the reference accepted"
+            ),
+            Ok((verdict, reason)) => {
+                assert!(
+                    expect.get("parse_error").is_none(),
+                    "{name}: this core accepted an expression the reference rejected"
+                );
+                assert_eq!(
+                    verdict,
+                    expect["verdict"].as_bool().unwrap(),
+                    "{name}: verdict differs (reason given: {reason})"
+                );
+            }
+        }
+        matched += 1;
+    }
+    eprintln!("rule vectors: {matched} cases matched the reference engine");
+}

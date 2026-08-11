@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from sustena.core.event_fold import FoldError, diff_to_mutations, fold_events
+from sustena.core.predicates import PredicateSyntaxError, evaluate_predicate, parse_predicate
 from sustena.core.state import StateAccessor, StatePathError, StateValueError
 
 VECTORS = Path(__file__).resolve().parents[3] / "conformance" / "vectors"
@@ -160,3 +161,27 @@ def test_a_recorded_mutation_cannot_be_rewritten_afterwards():
     recorded = acc.mutations()[0]["new"]
     acc.get("items").append({"id": "x"})
     assert recorded == [], "a mutation record must be a snapshot, not a live reference"
+
+
+def _rule_cases():
+    return [(c["name"], c) for c in _load("rules.json")["cases"]]
+
+
+@pytest.mark.parametrize("name,case", _rule_cases(), ids=[n for n, _ in _rule_cases()])
+def test_rule_vector(name, case):
+    """
+    The rules slice: one grammar, one evaluator.
+
+    These cases include the aggregate invariants that the two Python evaluators
+    disagreed about (gate said pass, screen said fail). The Rust core has a
+    single evaluator, so that divergence cannot be ported.
+    """
+    expect = case["expect"]
+    if "parse_error" in expect:
+        with pytest.raises(PredicateSyntaxError):
+            parse_predicate(case["expr"])
+        return
+
+    node = parse_predicate(case["expr"])
+    verdict, _reason = evaluate_predicate(node, StateAccessor(case["state"]), case["params"])
+    assert verdict == expect["verdict"], f"{name}: verdict differs"

@@ -38,7 +38,7 @@
 //! |---|---|---|
 //! | State | [`state`] | R1 |
 //! | Event fold | [`fold`] | R1 |
-//! | Rules | — | not started |
+//! | Rules | [`predicate`] | R1 |
 //! | Operators | — | not started |
 //! | Council | — | not started |
 
@@ -46,11 +46,13 @@ pub mod error;
 pub mod fold;
 pub mod mutation;
 pub mod path;
+pub mod predicate;
 pub mod state;
 
 pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};
 pub use mutation::Mutation;
+pub use predicate::{check, parse_predicate, Predicate};
 pub use state::State;
 
 /// Version of the conformance contract this build satisfies.
