@@ -40,8 +40,9 @@
 //! | Event fold | [`fold`] | R1 |
 //! | Rules | [`predicate`] | R1 |
 //! | Operators | [`operator`] | R1 |
-//! | Council | — | not started |
+//! | Council | [`council`] | R1 |
 
+pub mod council;
 pub mod error;
 pub mod fold;
 pub mod mutation;
@@ -50,6 +51,7 @@ pub mod path;
 pub mod predicate;
 pub mod state;
 
+pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalStatus, ResolutionInput, VoteChoice};
 pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};
 pub use mutation::Mutation;

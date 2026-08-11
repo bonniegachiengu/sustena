@@ -1,0 +1,274 @@
+{
+  "conformance_version": 1,
+  "slice": "council",
+  "generated_from": "sustena/core/council.py",
+  "note": "Recorded from the reference engine. See conformance/README.md.",
+  "aggregation_cases": [
+    {
+      "name": "heavier_confidence_wins",
+      "votes": [
+        {
+          "position": "YES",
+          "confidence": 0.9
+        },
+        {
+          "position": "NO",
+          "confidence": 0.4
+        }
+      ],
+      "expect": {
+        "vote": "YES",
+        "utility": 0.9
+      }
+    },
+    {
+      "name": "heavier_no_wins",
+      "votes": [
+        {
+          "position": "YES",
+          "confidence": 0.2
+        },
+        {
+          "position": "NO",
+          "confidence": 0.8
+        }
+      ],
+      "expect": {
+        "vote": "NO",
+        "utility": 0.2
+      }
+    },
+    {
+      "name": "tie_abstains",
+      "votes": [
+        {
+          "position": "YES",
+          "confidence": 0.5
+        },
+        {
+          "position": "NO",
+          "confidence": 0.5
+        }
+      ],
+      "expect": {
+        "vote": "ABSTAIN",
+        "utility": 0.5
+      }
+    },
+    {
+      "name": "abstentions_carry_no_weight",
+      "votes": [
+        {
+          "position": "ABSTAIN",
+          "confidence": 1.0
+        },
+        {
+          "position": "YES",
+          "confidence": 0.1
+        }
+      ],
+      "expect": {
+        "vote": "YES",
+        "utility": 0.1
+      }
+    },
+    {
+      "name": "all_abstain",
+      "votes": [
+        {
+          "position": "ABSTAIN",
+          "confidence": 0.9
+        },
+        {
+          "position": "ABSTAIN",
+          "confidence": 0.9
+        }
+      ],
+      "expect": {
+        "vote": "ABSTAIN",
+        "utility": 0.5
+      }
+    },
+    {
+      "name": "no_votes_at_all",
+      "votes": [],
+      "expect": {
+        "vote": "ABSTAIN",
+        "utility": 0.5
+      }
+    },
+    {
+      "name": "utility_neutral_when_no_yes",
+      "votes": [
+        {
+          "position": "NO",
+          "confidence": 0.9
+        }
+      ],
+      "expect": {
+        "vote": "NO",
+        "utility": 0.5
+      }
+    },
+    {
+      "name": "utility_is_mean_of_yes_confidences",
+      "votes": [
+        {
+          "position": "YES",
+          "confidence": 0.4
+        },
+        {
+          "position": "YES",
+          "confidence": 0.8
+        },
+        {
+          "position": "NO",
+          "confidence": 0.1
+        }
+      ],
+      "expect": {
+        "vote": "YES",
+        "utility": 0.6000000000000001
+      }
+    },
+    {
+      "name": "single_yes",
+      "votes": [
+        {
+          "position": "YES",
+          "confidence": 1.0
+        }
+      ],
+      "expect": {
+        "vote": "YES",
+        "utility": 1.0
+      }
+    }
+  ],
+  "resolution_cases": [
+    {
+      "name": "council_support_alone_does_not_pass",
+      "votes": [
+        "YES",
+        "YES",
+        "YES"
+      ],
+      "votes_collected": true,
+      "user_vote": null,
+      "expired": false,
+      "expect": {
+        "status": "IN_VOTING"
+      }
+    },
+    {
+      "name": "one_yes_still_waits",
+      "votes": [
+        "YES"
+      ],
+      "votes_collected": true,
+      "user_vote": null,
+      "expired": false,
+      "expect": {
+        "status": "IN_VOTING"
+      }
+    },
+    {
+      "name": "user_yes_passes",
+      "votes": [
+        "YES",
+        "YES"
+      ],
+      "votes_collected": true,
+      "user_vote": "YES",
+      "expired": false,
+      "expect": {
+        "status": "PASSED"
+      }
+    },
+    {
+      "name": "user_no_overrides_a_unanimous_council",
+      "votes": [
+        "YES",
+        "YES",
+        "YES"
+      ],
+      "votes_collected": true,
+      "user_vote": "NO",
+      "expired": false,
+      "expect": {
+        "status": "OVERRIDDEN_BY_USER"
+      }
+    },
+    {
+      "name": "user_yes_passes_despite_a_rejecting_council",
+      "votes": [
+        "NO",
+        "NO"
+      ],
+      "votes_collected": true,
+      "user_vote": "YES",
+      "expired": false,
+      "expect": {
+        "status": "PASSED"
+      }
+    },
+    {
+      "name": "expired_with_no_user_decision_defers",
+      "votes": [
+        "YES",
+        "YES"
+      ],
+      "votes_collected": true,
+      "user_vote": null,
+      "expired": true,
+      "expect": {
+        "status": "DEFERRED"
+      }
+    },
+    {
+      "name": "expired_but_user_said_yes_still_passes",
+      "votes": [
+        "YES"
+      ],
+      "votes_collected": true,
+      "user_vote": "YES",
+      "expired": true,
+      "expect": {
+        "status": "PASSED"
+      }
+    },
+    {
+      "name": "asked_and_nobody_answered_fails",
+      "votes": [],
+      "votes_collected": true,
+      "user_vote": null,
+      "expired": false,
+      "expect": {
+        "status": "FAILED"
+      }
+    },
+    {
+      "name": "not_yet_asked_keeps_waiting",
+      "votes": [],
+      "votes_collected": false,
+      "user_vote": null,
+      "expired": false,
+      "expect": {
+        "status": "IN_VOTING"
+      }
+    },
+    {
+      "name": "all_no_votes_keeps_waiting_for_the_person",
+      "votes": [
+        "NO",
+        "NO"
+      ],
+      "votes_collected": true,
+      "user_vote": null,
+      "expired": false,
+      "expect": {
+        "status": "IN_VOTING"
+      }
+    }
+  ]
+}

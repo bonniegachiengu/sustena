@@ -400,3 +400,63 @@ fn normalise_host_fields(v: &Value) -> Value {
         other => other.clone(),
     }
 }
+
+#[test]
+fn council_vectors() {
+    use sustena_core::council::{
+        aggregate_delegated_votes, resolve, DelegatedVote, ResolutionInput, VoteChoice,
+    };
+
+    let doc = load("council.json");
+
+    for case in doc["aggregation_cases"].as_array().expect("aggregation_cases") {
+        let name = case["name"].as_str().unwrap();
+        let delegated: Vec<DelegatedVote> = case["votes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| DelegatedVote {
+                position: VoteChoice::parse(v["position"].as_str().unwrap()).unwrap(),
+                confidence: v["confidence"].as_f64().unwrap(),
+                reasoning: "r".into(),
+            })
+            .collect();
+
+        let got = aggregate_delegated_votes(&delegated);
+        let want_vote = case["expect"]["vote"].as_str().unwrap();
+        assert_eq!(
+            VoteChoice::parse(want_vote).unwrap(),
+            got.vote,
+            "{name}: aggregated vote differs"
+        );
+        let want_utility = case["expect"]["utility"].as_f64().unwrap();
+        assert!(
+            (got.utility - want_utility).abs() < 1e-9,
+            "{name}: utility {} != {want_utility}",
+            got.utility
+        );
+    }
+
+    for case in doc["resolution_cases"].as_array().expect("resolution_cases") {
+        let name = case["name"].as_str().unwrap();
+        let votes: Vec<VoteChoice> = case["votes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| VoteChoice::parse(v.as_str().unwrap()).unwrap())
+            .collect();
+
+        let status = resolve(&ResolutionInput {
+            votes: &votes,
+            votes_collected: case["votes_collected"].as_bool().unwrap(),
+            user_vote: case["user_vote"].as_str().and_then(VoteChoice::parse),
+            expired: case["expired"].as_bool().unwrap(),
+        });
+
+        assert_eq!(
+            status.as_str(),
+            case["expect"]["status"].as_str().unwrap(),
+            "{name}: resolution differs from the reference"
+        );
+    }
+}

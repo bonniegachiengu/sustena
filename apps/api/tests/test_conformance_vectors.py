@@ -185,3 +185,79 @@ def test_rule_vector(name, case):
     node = parse_predicate(case["expr"])
     verdict, _reason = evaluate_predicate(node, StateAccessor(case["state"]), case["params"])
     assert verdict == expect["verdict"], f"{name}: verdict differs"
+
+
+def _council_agg_cases():
+    return [(c["name"], c) for c in _load("council.json")["aggregation_cases"]]
+
+
+@pytest.mark.parametrize("name,case", _council_agg_cases(), ids=[n for n, _ in _council_agg_cases()])
+def test_council_aggregation_vector(name, case):
+    from sustena.core.council import DelegatedVote, aggregate_delegated_votes
+
+    delegated = [
+        DelegatedVote(position=v["position"], confidence=v["confidence"], reasoning="r")
+        for v in case["votes"]
+    ]
+    out = aggregate_delegated_votes(delegated)
+    vote = out.vote.value if hasattr(out.vote, "value") else str(out.vote)
+    assert vote == case["expect"]["vote"], f"{name}: aggregated vote differs"
+    assert abs(out.utility - case["expect"]["utility"]) < 1e-9
+
+
+def _council_res_cases():
+    return [(c["name"], c) for c in _load("council.json")["resolution_cases"]]
+
+
+@pytest.mark.parametrize("name,case", _council_res_cases(), ids=[n for n, _ in _council_res_cases()])
+def test_council_resolution_vector(name, case):
+    """
+    The property the whole design turns on: operatives never resolve anything
+    themselves. Council support moves a proposal to IN_VOTING and no further;
+    a person's NO overrides a unanimous council; and silence past the deadline
+    defers rather than approves.
+    """
+    import sys
+    sys.path.insert(0, str(VECTORS.parent))
+    from gen_council import run_resolution_case
+
+    got = run_resolution_case(
+        case["votes"], case["votes_collected"], case["user_vote"], case["expired"]
+    )
+    assert got["status"] == case["expect"]["status"], f"{name}: resolution differs"
+
+
+def _operator_cases():
+    return [(c["name"], c) for c in _load("operators.json")["cases"]]
+
+
+@pytest.mark.parametrize("name,case", _operator_cases(), ids=[n for n, _ in _operator_cases()])
+def test_operator_vector(name, case):
+    """
+    The execution contract: guard -> effect -> gate -> commit, and the property
+    that a refusal changes nothing.
+    """
+    import sys
+    sys.path.insert(0, str(VECTORS.parent))
+    from gen_operators import run_operator_case
+
+    got = run_operator_case(
+        case["initial"], case["allowed"], case["enforcement"], case["calls"]
+    )
+    assert [o["status"] for o in got["outcomes"]] ==            [o["status"] for o in case["expect"]["outcomes"]], f"{name}: admission differs"
+
+    # Identity and time are host-supplied: the reference mints a fresh UUID and
+    # timestamp on every run, so those two fields are blanked on both sides.
+    # The assertion is about behaviour, not entropy. sustena-core does the same.
+    assert _blank_host_fields(got["final_state"]) ==            _blank_host_fields(case["expect"]["final_state"]), f"{name}: final state differs"
+
+
+def _blank_host_fields(value):
+    if isinstance(value, dict):
+        return {
+            k: (None if k in ("id", "received_at") else _blank_host_fields(v))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_blank_host_fields(v) for v in value]
+    return value

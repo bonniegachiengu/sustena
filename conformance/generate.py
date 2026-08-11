@@ -29,6 +29,8 @@ from sustena.core.event_fold import FoldError, diff_to_mutations, fold_events  #
 from sustena.core.predicates import PredicateSyntaxError, evaluate_predicate, parse_predicate  # noqa: E402
 from sustena.core.state import StateAccessor, StatePathError, StateValueError  # noqa: E402
 
+from gen_council import (AGGREGATION_CASES, RESOLUTION_CASES,  # noqa: E402
+                         run_aggregation_case, run_resolution_case)
 from gen_operators import OPERATOR_CASES, run_operator_case  # noqa: E402
 
 CONFORMANCE_VERSION = 1
@@ -343,11 +345,32 @@ def main() -> int:
         ],
     }
 
+    council_doc = {
+        "conformance_version": CONFORMANCE_VERSION,
+        "slice": "council",
+        "generated_from": "sustena/core/council.py",
+        "note": "Recorded from the reference engine. See conformance/README.md.",
+        "aggregation_cases": [
+            {"name": name, "votes": [{"position": p, "confidence": c} for p, c in votes],
+             "expect": run_aggregation_case(votes)}
+            for name, votes in AGGREGATION_CASES
+        ],
+        "resolution_cases": [
+            {"name": name, "votes": votes, "votes_collected": collected,
+             "user_vote": user, "expired": expired,
+             "expect": run_resolution_case(votes, collected, user, expired)}
+            for name, votes, collected, user, expired in RESOLUTION_CASES
+        ],
+    }
+
     for filename, doc in (("state.json", state_doc), ("fold.json", fold_doc),
-                          ("rules.json", rules_doc), ("operators.json", operators_doc)):
+                          ("rules.json", rules_doc), ("operators.json", operators_doc),
+                          ("council.json", council_doc)):
         path = out_dir / filename
         path.write_text(json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8")
-        count = len(doc.get("cases") or doc.get("fold_cases", [])) + len(doc.get("diff_cases", []))
+        count = (len(doc.get("cases", [])) + len(doc.get("fold_cases", []))
+                 + len(doc.get("diff_cases", [])) + len(doc.get("aggregation_cases", []))
+                 + len(doc.get("resolution_cases", [])))
         print(f"  wrote {path.relative_to(REPO)}  ({count} cases)")
 
     return 0
