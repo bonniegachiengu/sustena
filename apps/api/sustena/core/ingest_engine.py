@@ -58,6 +58,19 @@ STATUS_INFORMATIONAL = "informational"
 # capture() actually returns, not a stored-row terminal state.
 STATUS_REJECTED = "rejected"
 
+# The same real-world transaction, notified twice by two DIFFERENT senders.
+#
+# Distinct from a plain duplicate capture (the identical message re-POSTed,
+# caught by dedup_key): this is a different message, correctly parsed, that
+# describes a fact already recorded. Bonnie's KCB and M-Pesa alerts genuinely
+# both fire for one transfer -- verified: both carry the same M-PESA code --
+# so without this the money was counted twice.
+#
+# Recorded as a real row rather than dropped: the raw text is retained like
+# every other capture, and the person can see why it moved no money a second
+# time. Excluded from needs_attention(), since nothing needs deciding.
+STATUS_DUPLICATE_FACT = "duplicate_fact"
+
 
 class IngestEngine:
     def __init__(self, sustain_engine: SustainEngine) -> None:
@@ -95,7 +108,9 @@ class IngestEngine:
                 outcome_json           TEXT,
                 reason                 TEXT,
                 resolved_at            TEXT,
-                resolved_by            TEXT
+                resolved_by            TEXT,
+                fact_key               TEXT,
+                duplicate_of           TEXT
             );
 
             CREATE TABLE IF NOT EXISTS capture_classification_history (
@@ -109,7 +124,31 @@ class IngestEngine:
                 PRIMARY KEY (sustain_id, counterparty_key)
             );
         """)
+        self._migrate_fact_key_columns()
+        self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ingest_fact_key "
+            "ON ingest_messages (sustain_id, fact_key)"
+        )
         self._db.commit()
+
+    def _migrate_fact_key_columns(self) -> None:
+        """
+        Add fact_key / duplicate_of to an ingest_messages table that predates
+        them.
+
+        CREATE TABLE IF NOT EXISTS never adds a column to a table that already
+        exists, so a database created before cross-source correlation would
+        otherwise keep the old shape and fail on INSERT — the same schema-drift
+        bug already hit once on egress_outbox. Additive and idempotent:
+        detection is PRAGMA table_info, not a failing SELECT (a failed SELECT
+        invalidates the surrounding transaction).
+        """
+        existing = {
+            row[1] for row in self._db.execute("PRAGMA table_info(ingest_messages)").fetchall()
+        }
+        for column in ("fact_key", "duplicate_of"):
+            if column not in existing:
+                self._db.execute(f"ALTER TABLE ingest_messages ADD COLUMN {column} TEXT")
 
     # ── Classification history ("purchase templates") ──────────────────────────
     # A human classifying a capture from the same merchant/counterparty twice
@@ -235,18 +274,93 @@ class IngestEngine:
         digest = hashlib.sha256(f"{sustain_id}\x00{source_id}\x00{raw_payload}".encode("utf-8")).hexdigest()
         return digest
 
-    # KNOWN, DISCLOSED, NOT FIXED (flagged 1 Aug 2026): this key does NOT
-    # catch the same real-world transaction arriving twice from two DIFFERENT
-    # sources -- e.g. a KCB-sender notification AND a genuine Safaricom
-    # MPESA-sender SMS about the identical transfer. source_id ("kcb" vs
-    # "mpesa") and raw_payload (different wording/sender template) both
-    # differ between the two notifications, so they hash to two distinct
-    # dedup_keys and both get captured and processed as separate income/spend
-    # events -- a real double-count risk for any transaction that genuinely
-    # triggers both a bank-side and a telco-side SMS. See transducer.py's own
-    # note beside _PARSERS for the fuller writeup and a sketch of what a real
-    # fix (cross-source correlation on amount + shared M-PESA ref) would need.
-    # Not fixed here -- flagged for a deliberate decision, not silently patched.
+    @staticmethod
+    def _fact_key(sustain_id: str, external_ref: str | None) -> str | None:
+        """
+        Identity of the FACT, not of the message. None when unavailable.
+
+        dedup_key fingerprints a message, so it cannot catch the same real
+        transaction notified twice by two different senders: a KCB alert and a
+        Safaricom M-PESA alert for one transfer differ in both source_id and
+        wording, hash differently, and were therefore both applied — the money
+        counted twice. Bonnie's phone genuinely receives both.
+
+        RECEPTOR/Ingest names the remedy exactly: cross-source correlation
+        needs "a key that is a property of the fact rather than of the
+        message". The M-PESA transaction code is precisely that. Verified
+        against the real texts: a KCB-sender paybill notification and the
+        Safaricom-sender confirmation of the same transfer both carry the same
+        code (UH1B91GYNW).
+
+        Deliberately keyed on the reference ALONE, not amount+ref:
+
+          - the code is already unique per transaction, so amount adds no
+            discriminating power;
+          - the two parsers extract amounts from differently-formatted text
+            ("Ksh 40000.00" vs "Ksh40,000.00"), so including it risks a
+            mismatch that would silently let the double-count back in.
+
+        Failing to match is the dangerous direction here; matching too eagerly
+        is not, because two genuinely distinct transactions never share an
+        M-PESA code.
+
+        Returns None when no reference was parsed, in which case correlation is
+        simply not attempted — an honest "cannot tell" rather than a guess from
+        amount and timing, which would suppress real repeat payments (a
+        standing order, two identical fares in one day).
+        """
+        ref = (external_ref or "").strip().upper()
+        if not ref:
+            return None
+        return hashlib.sha256(f"{sustain_id}\x00fact\x00{ref}".encode("utf-8")).hexdigest()
+
+    def _find_prior_fact(self, sustain_id: str, fact_key: str, exclude_message_id: str):
+        """
+        Return the earliest other message describing this same fact, if any.
+
+        Deliberately NOT filtered to already-applied rows. An earlier
+        notification can be sitting in needs_attention (an outbound payment
+        waiting for a pocket decision) — and if it is ignored here, the later
+        notification applies, the pending one stays queued, and classifying it
+        later double-counts anyway. Order-dependent correctness is not
+        correctness; the caller decides what to do using both statuses.
+
+        Rows already marked duplicate are excluded, so a third notification
+        chains to the original rather than to another duplicate.
+        """
+        return self._db.execute(
+            "SELECT * FROM ingest_messages "
+            "WHERE sustain_id = ? AND fact_key = ? AND id != ? AND status != ? "
+            "ORDER BY received_at ASC LIMIT 1",
+            (sustain_id, fact_key, exclude_message_id, STATUS_DUPLICATE_FACT),
+        ).fetchone()
+
+    def _supersede_pending_duplicate(self, pending_row, winner_id: str, external_ref: str | None) -> None:
+        """
+        Retire a queued notification whose transaction another message just
+        recorded.
+
+        Without this, one transfer could still be counted twice by a slower
+        route: the M-PESA alert lands first and needs a pocket decision, the
+        KCB alert lands second and applies automatically, and the queued one is
+        classified by hand a day later — applying the same money again.
+
+        The queued row is kept and linked, never deleted; it simply stops
+        asking for a decision that has already been made.
+        """
+        self._db.execute(
+            "UPDATE ingest_messages SET status = ?, duplicate_of = ?, reason = ? WHERE id = ?",
+            (
+                STATUS_DUPLICATE_FACT,
+                winner_id,
+                (
+                    f"Superseded: the same transaction (reference {external_ref}) "
+                    f"was recorded by another notification. No decision needed."
+                ),
+                pending_row["id"],
+            ),
+        )
+        self._db.commit()
 
     # ── Sources / staleness ─────────────────────────────────────────────────────
 
@@ -423,6 +537,67 @@ class IngestEngine:
         outcome_json: str | None = None
         reason = result.reason
 
+        # ── Cross-source correlation ──────────────────────────────────────────
+        # Runs after parsing (the reference only exists once parsed) and before
+        # anything applies. One real transfer fires both a KCB alert and a
+        # Safaricom M-PESA alert on Bonnie's phone; both parse correctly, both
+        # used to apply, and the money was counted twice.
+        #
+        # Recorded, not discarded: the raw text is retained like any other
+        # capture, linked to the message that already recorded the fact, so the
+        # audit trail shows both notifications and why only one moved money.
+        fact_key = self._fact_key(row["sustain_id"], result.external_ref)
+        if fact_key:
+            self._db.execute(
+                "UPDATE ingest_messages SET fact_key = ? WHERE id = ?",
+                (fact_key, message_id),
+            )
+            self._db.commit()
+
+            prior = self._find_prior_fact(row["sustain_id"], fact_key, message_id)
+
+            # A prior that is still awaiting a human decision has not recorded
+            # the fact yet. If THIS message can record it outright, let this one
+            # win and retire the queued one — otherwise the queued one gets
+            # classified later and the same money applies twice.
+            if (
+                prior is not None
+                and prior["status"] == STATUS_NEEDS_ATTENTION
+                and result.status == "mapped"
+            ):
+                self._supersede_pending_duplicate(prior, message_id, result.external_ref)
+                prior = None
+
+            if prior is not None:
+                self._db.execute(
+                    "UPDATE ingest_messages SET status = ?, parser_name = ?, "
+                    "external_ref = ?, parsed_fields_json = ?, reason = ?, "
+                    "duplicate_of = ? WHERE id = ?",
+                    (
+                        STATUS_DUPLICATE_FACT,
+                        result.parser_name,
+                        result.external_ref,
+                        json.dumps(result.parsed_fields or {}, default=str),
+                        (
+                            f"Same transaction already recorded from source "
+                            f"'{prior['source_id']}' (reference {result.external_ref}). "
+                            f"Kept for the record; not applied a second time."
+                        ),
+                        prior["id"],
+                        message_id,
+                    ),
+                )
+                self._db.commit()
+                logger.info(
+                    "[ingest] cross-source duplicate: %s from '%s' matches %s from '%s' (ref %s)",
+                    message_id[:8], row["source_id"], prior["id"][:8],
+                    prior["source_id"], result.external_ref,
+                )
+                updated = self._db.execute(
+                    "SELECT * FROM ingest_messages WHERE id = ?", (message_id,)
+                ).fetchone()
+                return self._to_response(updated, is_duplicate=True)
+
         if result.status == "mapped":
             op_result = await self._sustain_engine.execute_operator(
                 row["sustain_id"], result.operator_name, result.operator_params,
@@ -590,6 +765,9 @@ class IngestEngine:
             "operator_params": json.loads(row["operator_params_json"]) if row["operator_params_json"] else None,
             "outcome": json.loads(row["outcome_json"]) if row["outcome_json"] else None,
             "reason": row["reason"],
+            # Present when this message describes a transaction another message
+            # already recorded (the same transfer notified by two senders).
+            "duplicate_of": row["duplicate_of"] if "duplicate_of" in row.keys() else None,
             "resolved_at": row["resolved_at"],
             "resolved_by": row["resolved_by"],
         }

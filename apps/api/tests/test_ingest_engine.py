@@ -203,12 +203,32 @@ class TestDedupAndReplay:
 
     @pytest.mark.asyncio
     async def test_different_source_same_payload_is_a_distinct_message(self, ingest, engine, homestead_sid):
-        # Dedup key is (source_id, raw_payload) — a different device reporting
-        # the identical text is a genuinely different capture, not a replay.
+        """
+        A different device reporting the identical text is a distinct MESSAGE
+        but the same FACT.
+
+        This previously asserted is_duplicate is False, written when only
+        message-level dedup existed. That assumption is exactly what allowed
+        the double-count: identical text carries the identical M-PESA
+        transaction code, so it describes one transfer seen twice, and applying
+        it twice moves money that never moved. Cross-source correlation
+        (RECEPTOR: "a key that is a property of the fact rather than of the
+        message") now catches it.
+
+        Both halves still hold: it is stored as its own row with its own id —
+        never silently dropped — and it is recognised as already recorded.
+        """
         first = await ingest.capture("device-1", homestead_sid, RECEIVED)
+        balance_after_first = engine.get_state(homestead_sid)["finances"]["liquid"]["balance"]
+
         second = await ingest.capture("device-2", homestead_sid, RECEIVED)
-        assert second["is_duplicate"] is False
-        assert second["message_id"] != first["message_id"]
+
+        assert second["message_id"] != first["message_id"], "must be its own row"
+        assert second["is_duplicate"] is True, "same transaction code = same fact"
+        assert (
+            engine.get_state(homestead_sid)["finances"]["liquid"]["balance"]
+            == balance_after_first
+        ), "the same transfer must not be counted twice"
 
     @pytest.mark.asyncio
     async def test_same_source_different_payload_is_a_distinct_message(self, ingest, homestead_sid):
