@@ -102,6 +102,40 @@ For each, the options are **build-out**, **convert+wire**, or **quarantine** (mo
 
 ---
 
+## Migration status (updated 2026-08-12)
+
+Part E's phased plan, against reality:
+
+| Step | Status |
+|---|---|
+| 1. Full backup | Done — snapshot verified by restoring it, not just creating it. |
+| 2. Hygiene pass | Done. LICENSE (Apache-2.0), README, CONTRIBUTING, SECURITY, `.env.example`, ignore rules. |
+| 3. Backend unify + clean deploy | Deploy config **done** (live host is production-hardened). DB unify partly done — one event writer; routes vs engine still split (R2 #21). |
+| 4. Package the engine | Superseded by the Rust core. `sustena-core` is the packaged, portable engine. |
+| 5. Native installs on the packaged engine | Not started — waits on R2. |
+| 6. Legacy quarantine | Approved, not executed (R2 #33). |
+| 7. Frontend decomposition + TS + tests | Not started. |
+
+**Plus one step this plan did not anticipate: the repo left OneDrive.**
+Live files were being corrupted — 48 NUL bytes were found injected into the
+working `.env`, and the SQLite database had been eaten once before. The repo now
+lives at `C:\Users\DELL\dev\sustena`; the OneDrive copy is untouched as a
+fallback. This also removed the awkward nested root the hygiene section called
+out.
+
+**And a second: the public site's uptime was never what it appeared.** WSL2
+idles out and takes the cloudflared tunnel with it, while every health check
+kept reporting green — the checks watched the Windows backend, which was not the
+thing breaking. Fixed with a held-open WSL session and a watchdog that checks
+the real hostnames.
+
+**Phase R1 (Rust parity) is complete**, which is the substance of Decision 1:
+all five slices match the reference engine, proven by 118 conformance vectors
+replayed by both. Remaining article-vs-code work is tracked in
+`docs/R2_BACKLOG.md`, which supersedes the gap lists in this document.
+
+---
+
 ## PART E — Migration plan *(phased, reversible, backup-first)*
 1. **Full backup** of the repo to the vault (a complete snapshot, not just the map).
 2. **Hygiene pass** (Part A) — `.gitignore` + untrack artifacts + flatten root + contributor files. No logic change; tests stay green.

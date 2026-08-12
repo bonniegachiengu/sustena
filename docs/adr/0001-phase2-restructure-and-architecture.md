@@ -43,6 +43,27 @@
 
 ---
 
+## Implementation status (updated 2026-08-12)
+
+| Decision | Status |
+|---|---|
+| **1 — Rust portable core** | **R1 (parity) COMPLETE.** `sustena-core` matches the reference engine across state · event fold · rules · operators + gate · council, proven by 118 conformance vectors replayed by both engines. R2 (implementing the article specs) is next — see `docs/R2_BACKLOG.md`. |
+| **2 — One database layer** | Partly done. The dead second event writer is gone (one writer, one transaction, fails loudly). The routes still use SQLAlchemy while the engine uses sqlite3 — open, tracked as R2 #21. |
+| **3 — Clean deploy config** | **Done.** The live host now runs `ENVIRONMENT=production`. It required splitting a conflated flag: the naive flip would have removed the authenticated cockpit API that Orchie, Studio and Mycelium all depend on, breaking the phone app. Hardening and cockpit availability are now separate settings. |
+| **4 — Quarantine legacy** | Approved, **not yet executed** — tracked as R2 #33. |
+| **5 — Open-core licensing** | Apache-2.0 in place. The repository is currently **private** during cleanup; the articles and glossary are held back pending a pass to remove private, business and economy-layer material. |
+
+**How Decision 1 has held up.** It paid for itself before a single feature
+moved. Three defect classes are now *impossible* rather than merely fixed — the
+live-reference write, the two-evaluator divergence, and the gate failing open.
+The port also surfaced two genuine bugs in the live engine that 2,199 tests had
+not: state that did not own its data (replaying a log mutated the state it was
+rebuilt from), and a number-typing error. Neither came from reading code. Both
+came from making a second independent engine agree with the first — the
+disagreement is the signal.
+
+---
+
 ## Where these decisions are persisted (for posterity & reference)
 1. **This ADR** — `docs/adr/0001-phase2-restructure-and-architecture.md` (the canonical, contributor-facing record).
 2. **`docs/RESTRUCTURE_DESIGN.md`** — the full design + options + migration plan (this ADR records what was chosen from it).
