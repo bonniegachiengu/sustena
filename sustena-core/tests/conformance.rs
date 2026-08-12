@@ -534,3 +534,94 @@ fn admission_vectors() {
         }
     }
 }
+
+#[test]
+fn event_vectors() {
+    use sustena_core::event::{merge, CausalStamp, Event, Observation, Provenance};
+
+    fn build(v: &Value) -> Event {
+        Event {
+            id: v["id"].as_str().unwrap().to_string(),
+            name: "event.test.thing".into(),
+            t_event: v["t_event"].as_i64().unwrap(),
+            provenance: Provenance::Observed,
+            stamp: CausalStamp {
+                counter: v["counter"].as_u64().unwrap(),
+                node: v["node"].as_str().unwrap().to_string(),
+            },
+            causes: v["causes"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect())
+                .unwrap_or_default(),
+            mutations: vec![],
+        }
+    }
+
+    let doc = load("events.json");
+    assert_eq!(doc["phase"], "R2");
+
+    for case in doc["ordering_cases"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let events: Vec<Event> = case["events"].as_array().unwrap().iter().map(build).collect();
+        let want: Vec<&str> = case["expect"]["order"]
+            .as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+
+        let got = merge(events.clone());
+        let got_ids: Vec<&str> = got.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(got_ids, want, "{name}: order differs");
+
+        // Convergence: the result must not depend on the order they arrived in.
+        if case["expect"]["order_is_independent_of_input_order"].as_bool() == Some(true) {
+            let mut reversed = events;
+            reversed.reverse();
+            let other: Vec<String> = merge(reversed).iter().map(|e| e.id.clone()).collect();
+            assert_eq!(other, want, "{name}: replicas disagreed on order");
+        }
+    }
+
+    for case in doc["causality_cases"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let earlier = build(&case["earlier"]);
+        let later = build(&case["later"]);
+
+        assert_eq!(
+            earlier.happens_before(&later),
+            case["expect"]["happens_before"].as_bool().unwrap(),
+            "{name}: happens-before differs"
+        );
+        if case["expect"]["concurrent"].as_bool() == Some(true) {
+            assert!(earlier.concurrent_with(&later), "{name}: expected concurrency");
+        }
+    }
+
+    for case in doc["convergence_cases"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let obs: Vec<Observation<i64>> = case["observations"]
+            .as_array().unwrap().iter()
+            .map(|o| Observation {
+                value: o["value"].as_i64().unwrap(),
+                t_event: o["t_event"].as_i64().unwrap(),
+                id: o["id"].as_str().unwrap().to_string(),
+            })
+            .collect();
+
+        let joined = obs.iter().skip(1).fold(obs[0].clone(), |acc, o| acc.join(o));
+        assert_eq!(
+            joined.value,
+            case["expect"]["value"].as_i64().unwrap(),
+            "{name}: joined value differs"
+        );
+
+        // Every permutation must land on the same value — that IS the CRDT
+        // property, so it is checked rather than asserted in prose.
+        if case["expect"]["converges_under_every_permutation"].as_bool() == Some(true) {
+            let n = obs.len();
+            for start in 0..n {
+                let rotated: Vec<_> =
+                    (0..n).map(|i| obs[(start + i) % n].clone()).collect();
+                let out = rotated.iter().skip(1).fold(rotated[0].clone(), |a, o| a.join(o));
+                assert_eq!(out, joined, "{name}: a replica diverged");
+            }
+        }
+    }
+}

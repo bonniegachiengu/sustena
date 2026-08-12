@@ -48,6 +48,7 @@
 pub mod admission;
 pub mod council;
 pub mod error;
+pub mod event;
 pub mod fold;
 pub mod inverse;
 pub mod mutation;
@@ -60,6 +61,7 @@ pub mod state;
 
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
 pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalStatus, ResolutionInput, VoteChoice};
+pub use event::{dedupe, merge, order, CausalStamp, Event, Observation, Provenance};
 pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};
 pub use inverse::{invert, is_reversible, InverseError};

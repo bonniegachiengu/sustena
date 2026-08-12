@@ -2,7 +2,7 @@
 
 *The source of truth for Phase R2: implementing what the articles specify but the code does not yet do.*
 
-**Status: R1 (parity) complete. R2 in progress — 7 of 14 core items resolved, 2 held on a decision.**
+**Status: R1 (parity) complete. R2 in progress — 9 of 14 core items resolved.**
 
 > **Read this before opening an R2 slice.** Every item traces to an article. The
 > articles are the spec; the code catches up to them, never the reverse. Where
@@ -78,8 +78,8 @@ Ordered by dependency, not importance.
 | ~~14~~ | ~~State is untyped~~ — **DONE in Rust**: declared record type with bounds, load-time predicate binding, and organisational closure enforced at the gate. Opt-in per sustain. Python unchanged. | CELL | Python |
 | ~~15~~ | ~~No `inverse`~~ — **DONE in Rust**: patch-level inverse derived from the mutation record. Honest about the three shapes that are not invertible from a record alone. Python unchanged. | ENZYME | Python |
 | 16 | No **checked composition** of operator pathways | ENZYME | both — next |
-| 17 | Ordering is `seq`; articles specify **event-time convergence** | RECORD · GAIA | **HELD — awaiting Bonnie's decision** (architecture fork; shapes event storage permanently) |
-| 18 | No **substrate dedupe** — a repeated event id raises | RECORD | **HELD with #17** — both touch the event storage model; building one before the other decides is rework |
+| ~~17~~ | ~~Ordering is `seq`~~ — **DONE in Rust**: event-time ordering with Lamport `(t_event, id)` tie-break, causal stamps, and a converging LWW join. Python unchanged. | RECORD · GAIA | Python |
+| ~~18~~ | ~~No substrate dedupe~~ — **DONE in Rust**: uniform dedupe on the stable id, so at-least-once delivery gives exactly-once effect. Python unchanged. | RECORD | Python |
 
 ### Consistency
 
@@ -152,12 +152,16 @@ Held back with the economy layer per ADR-0001 Decision 5, pending legal review.
 
 ---
 
-## Two items that need a decision before they are built
+## What still needs a decision
 
-**#17 — event-time vs `seq` ordering.** The articles specify convergence on
-event time; the code orders by a per-sustain sequence number. This shapes the
-Rust data model, so getting it wrong means rewriting the core later. Flagged as
-CORE for that reason.
+**Nothing on the core list.** #17 was resolved by re-reading the articles: they
+already specify event-time convergence, so it was settled spec rather than an
+open fork.
+
+**Standing rule, from that exchange:** if the articles already answer a
+question, it is not an open decision — implement it and note it. Surface only
+genuinely open forks: ones the articles are silent on, or where reality clashes
+with the spec.
 
 **#35 and #13 are live security items** sitting in FOLLOW: logout does not
 revoke a session, and two operators make real outbound HTTP outside the egress

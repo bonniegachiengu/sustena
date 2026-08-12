@@ -1,0 +1,114 @@
+{
+  "conformance_version": 1,
+  "slice": "events",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Events and Time - Formal Execution.md, §III, §VI and §VII",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors. The reference engine orders by a per-sustain sequence number, which is correct on one device and cannot merge two. These record the article's model: order on event time with a replica-agnostic tie-break, dedupe on stable id, and a last-writer-wins join that converges.",
+  "ordering_cases": [
+    {
+      "name": "ordered_by_when_it_happened_not_when_it_arrived",
+      "why": "§I: the world happens before the system hears about it, by unequal delays. A fact sent at 14:02 can land after its neighbour sent at 14:05.",
+      "events": [
+        {"id": "b", "t_event": 1405, "node": "phone", "counter": 2},
+        {"id": "a", "t_event": 1402, "node": "phone", "counter": 1}
+      ],
+      "expect": {"order": ["a", "b"]}
+    },
+    {
+      "name": "a_tie_on_physical_time_breaks_identically_everywhere",
+      "why": "§VII: on physical event time alone two distinct observations with equal t_event leave neither dominating, and the operation stops commuting. Lamport's tie-break orders on (t_event, id).",
+      "events": [
+        {"id": "z", "t_event": 100, "node": "phone", "counter": 1},
+        {"id": "a", "t_event": 100, "node": "laptop", "counter": 1}
+      ],
+      "expect": {"order": ["a", "z"]}
+    },
+    {
+      "name": "two_offline_devices_converge_on_one_order",
+      "why": "The reason for event-time ordering at all: a phone and a laptop that were both offline must agree once they reconnect.",
+      "events": [
+        {"id": "p1", "t_event": 100, "node": "phone", "counter": 1},
+        {"id": "l1", "t_event": 200, "node": "laptop", "counter": 1},
+        {"id": "p2", "t_event": 300, "node": "phone", "counter": 2},
+        {"id": "l2", "t_event": 400, "node": "laptop", "counter": 2}
+      ],
+      "expect": {"order": ["p1", "l1", "p2", "l2"], "order_is_independent_of_input_order": true}
+    },
+    {
+      "name": "a_repeated_id_is_dropped_not_raised_on",
+      "why": "§VI: the same fact WILL arrive twice, because the only reliable delivery is retry. at-least-once delivery composed with idempotent apply gives exactly-once EFFECT.",
+      "events": [
+        {"id": "a", "t_event": 100, "node": "n", "counter": 1},
+        {"id": "a", "t_event": 100, "node": "n", "counter": 1},
+        {"id": "b", "t_event": 200, "node": "n", "counter": 2}
+      ],
+      "expect": {"order": ["a", "b"]}
+    },
+    {
+      "name": "delivering_everything_three_times_changes_nothing",
+      "why": "Exactly-once effect is the only thing anyone wanted; exactly-once delivery is not achievable.",
+      "events": [
+        {"id": "a", "t_event": 100, "node": "n", "counter": 1},
+        {"id": "b", "t_event": 200, "node": "n", "counter": 2},
+        {"id": "a", "t_event": 100, "node": "n", "counter": 1},
+        {"id": "b", "t_event": 200, "node": "n", "counter": 2},
+        {"id": "a", "t_event": 100, "node": "n", "counter": 1}
+      ],
+      "expect": {"order": ["a", "b"]}
+    }
+  ],
+  "causality_cases": [
+    {
+      "name": "a_declared_cause_outranks_a_clock",
+      "why": "§VII: physical timestamps do not order events across devices, because clocks disagree. The ordering that survives is happens-before.",
+      "earlier": {"id": "p", "t_event": 900, "node": "phone", "counter": 1},
+      "later": {"id": "c", "t_event": 50, "node": "laptop", "counter": 1, "causes": ["p"]},
+      "expect": {"happens_before": true}
+    },
+    {
+      "name": "same_node_order_implies_causality",
+      "why": "a → b if a and b are on the same node with a first.",
+      "earlier": {"id": "a", "t_event": 100, "node": "phone", "counter": 1},
+      "later": {"id": "b", "t_event": 200, "node": "phone", "counter": 2},
+      "expect": {"happens_before": true}
+    },
+    {
+      "name": "concurrency_is_a_real_answer",
+      "why": "Events unordered by happens-before are concurrent. That is a finding, not a gap — it is what makes a genuine conflict detectable.",
+      "earlier": {"id": "a", "t_event": 100, "node": "phone", "counter": 1},
+      "later": {"id": "b", "t_event": 100, "node": "laptop", "counter": 1},
+      "expect": {"happens_before": false, "concurrent": true}
+    }
+  ],
+  "convergence_cases": [
+    {
+      "name": "last_writer_wins_on_event_time",
+      "why": "§VII: a snapshot-valued dimension is a last-writer-wins register keyed on event time — a state-based CRDT.",
+      "observations": [
+        {"value": 10, "t_event": 100, "id": "a"},
+        {"value": 20, "t_event": 200, "id": "b"}
+      ],
+      "expect": {"value": 20}
+    },
+    {
+      "name": "replicas_converge_whatever_order_they_saw_things_in",
+      "why": "The join is commutative, associative and idempotent, so every replica lands on the same value regardless of arrival order.",
+      "observations": [
+        {"value": 1, "t_event": 100, "id": "a"},
+        {"value": 2, "t_event": 300, "id": "b"},
+        {"value": 3, "t_event": 200, "id": "c"}
+      ],
+      "expect": {"value": 2, "converges_under_every_permutation": true}
+    },
+    {
+      "name": "a_tie_resolves_the_same_way_on_every_replica",
+      "why": "Equal event times are broken by id, so convergence does not depend on who merged first.",
+      "observations": [
+        {"value": 1, "t_event": 100, "id": "a"},
+        {"value": 2, "t_event": 100, "id": "b"}
+      ],
+      "expect": {"value": 2, "converges_under_every_permutation": true}
+    }
+  ]
+}
