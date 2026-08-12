@@ -91,15 +91,6 @@ fn run_ops(initial: &Value, ops: &[Value]) -> (State, Vec<OpOutcome>) {
     (state, out)
 }
 
-/// Whole floats render as integers, matching how both engines emit them.
-fn num_to_value(v: f64) -> Value {
-    if v.fract() == 0.0 && v.abs() < 9.0e15 {
-        json!(v as i64)
-    } else {
-        json!(v)
-    }
-}
-
 fn wire(mutations: &[Mutation]) -> Value {
     Value::Array(mutations.iter().map(|m| m.to_wire()).collect())
 }
@@ -458,5 +449,85 @@ fn council_vectors() {
             case["expect"]["status"].as_str().unwrap(),
             "{name}: resolution differs from the reference"
         );
+    }
+}
+
+
+// ── R2: spec vectors ──────────────────────────────────────────────────────────
+//
+// These are AUTHORED FROM THE ARTICLES, not generated from the reference
+// engine, because the reference does not implement this behaviour yet (it has
+// only `refuse`). They record what the spec says, so the Rust core is measured
+// against the articles rather than against a gap.
+
+#[test]
+fn admission_vectors() {
+    use sustena_core::admission::{
+        admit_one, typecheck_constraint, ConstraintDecl, DeclError, Verdict,
+    };
+
+    let doc = load("admission.json");
+    assert_eq!(doc["phase"], "R2");
+
+    for case in doc["cases"].as_array().expect("cases array") {
+        let name = case["name"].as_str().unwrap();
+        let decl: ConstraintDecl =
+            serde_json::from_value(case["declaration"].clone()).expect("declaration parses");
+        let expect = &case["expect"];
+
+        let typechecked = typecheck_constraint(&decl);
+
+        if let Some(want_err) = expect["declaration_error"].as_str() {
+            let got = typechecked
+                .err()
+                .unwrap_or_else(|| panic!("{name}: expected the declaration to be rejected"));
+            let kind = match got {
+                DeclError::Unparseable { .. } => "unparseable",
+                DeclError::ClampOnNonInterval { .. } => "clamp_on_non_interval",
+                DeclError::ClampOnConserved { .. } => "clamp_on_conserved",
+            };
+            assert_eq!(kind, want_err, "{name}: rejected for a different reason");
+            continue;
+        }
+
+        let node = typechecked
+            .unwrap_or_else(|e| panic!("{name}: declaration should typecheck, got {e}"));
+        let verdict = admit_one(&decl, &node, &case["candidate"], &serde_json::Map::new());
+
+        match expect["verdict"].as_str().unwrap() {
+            "admit" => assert_eq!(verdict, Verdict::Admit, "{name}"),
+
+            "refused" => match verdict {
+                Verdict::Refused { rule, .. } => {
+                    assert_eq!(rule, expect["rule"].as_str().unwrap(), "{name}: wrong rule named")
+                }
+                other => panic!("{name}: expected a refusal, got {other:?}"),
+            },
+
+            "clamped" => match verdict {
+                Verdict::Clamped { rule, path, requested, committed } => {
+                    assert_eq!(rule, expect["rule"].as_str().unwrap(), "{name}");
+                    assert_eq!(path, expect["path"].as_str().unwrap(), "{name}");
+                    // Both values must survive: a clamp commits something
+                    // nobody asked for, and must report both every time.
+                    assert_eq!(requested, expect["requested"], "{name}: requested value lost");
+                    assert_eq!(committed, expect["committed"], "{name}: committed value wrong");
+                }
+                other => panic!("{name}: expected a clamp, got {other:?}"),
+            },
+
+            "deferred" => match verdict {
+                Verdict::Deferred(d) => {
+                    assert_eq!(d.rule, expect["rule"].as_str().unwrap(), "{name}");
+                    assert!(
+                        d.requires_readmission,
+                        "{name}: a deferral must be re-admitted at commit"
+                    );
+                }
+                other => panic!("{name}: expected a deferral, got {other:?}"),
+            },
+
+            other => panic!("{name}: unknown expected verdict '{other}'"),
+        }
     }
 }

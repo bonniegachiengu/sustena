@@ -30,7 +30,10 @@
 //! built clean; behaviour is copied.
 //!
 //! **R2 — specs.** Implement what the articles specify but the reference
-//! engine does not yet do. Not started; nothing here anticipates it.
+//! engine does not yet do. In progress; see `docs/R2_BACKLOG.md`. R2 behaviour
+//! is authored FROM the articles, so its vectors record the specified
+//! behaviour rather than the reference engine's — the reference does not have
+//! it yet. The R1 vectors must keep passing throughout.
 //!
 //! ## Slices
 //!
@@ -42,6 +45,7 @@
 //! | Operators | [`operator`] | R1 |
 //! | Council | [`council`] | R1 |
 
+pub mod admission;
 pub mod council;
 pub mod error;
 pub mod fold;
@@ -51,6 +55,7 @@ pub mod path;
 pub mod predicate;
 pub mod state;
 
+pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
 pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalStatus, ResolutionInput, VoteChoice};
 pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};

@@ -54,14 +54,35 @@ formatting differ in ways that say nothing about behaviour, and pinning the
 wording would make the contract about strings instead of semantics. Kind plus
 which operation failed is the real observable.
 
+## Two kinds of vector
+
+**Parity vectors (R1)** — *generated* from the reference engine and replayed by
+both. They answer: does the Rust core do what the Python engine does?
+
+**Spec vectors (R2)** — *authored from the articles* and replayed by Rust only.
+They answer: does the Rust core do what the specification says?
+
+R2 implements behaviour the reference engine does not have, so there is nothing
+to generate from. A spec vector names its article and section in
+`authored_from`, and each case carries a `why` explaining which part of the
+spec it pins. Reviewing one means checking it against the article, not against
+the code.
+
+The R1 parity vectors must keep passing throughout R2. New capability must not
+change existing behaviour.
+
 ## Layout
 
 ```
 conformance/
   generate.py           regenerates every vector file from the reference engine
   vectors/
-    state.json          the State primitive
-    fold.json           state = fold(events)
+    state.json          the State primitive          (parity)
+    fold.json           state = fold(events)          (parity)
+    rules.json          predicates and evaluation     (parity)
+    operators.json      guard/effect/gate/commit      (parity)
+    council.json        aggregation and resolution    (parity)
+    admission.json      refuse / clamp / defer        (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails

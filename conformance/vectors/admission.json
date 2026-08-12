@@ -1,0 +1,107 @@
+{
+  "conformance_version": 1,
+  "slice": "admission",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Constraint - Formal Execution.md, §IV and §VII",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors, not parity vectors. These record behaviour the articles specify and the reference Python engine does not have (it implements only `refuse`). Authored from the article, not generated. See conformance/README.md.",
+  "cases": [
+    {
+      "name": "satisfied_constraint_admits",
+      "why": "The ordinary path: nothing to decide.",
+      "declaration": {"id": "liquid", "expression": "finances.liquid.balance >= 0", "strategy": "refuse"},
+      "candidate": {"finances": {"liquid": {"balance": 5}}},
+      "expect": {"verdict": "admit"}
+    },
+    {
+      "name": "refuse_names_the_rule",
+      "why": "§VII: naming which law refused is the difference between an explanation and a shrug.",
+      "declaration": {"id": "liquid_non_negative", "expression": "finances.liquid.balance >= 0", "strategy": "refuse"},
+      "candidate": {"finances": {"liquid": {"balance": -1}}},
+      "expect": {"verdict": "refused", "rule": "liquid_non_negative"}
+    },
+    {
+      "name": "clamp_projects_onto_the_edge",
+      "why": "Π_A on one axis. Capping at the available balance IS the exact projection, because the per-dimension box of V is convex.",
+      "declaration": {"id": "floor", "expression": "finances.liquid.balance >= 0", "strategy": "clamp"},
+      "candidate": {"finances": {"liquid": {"balance": -40}}},
+      "expect": {
+        "verdict": "clamped",
+        "rule": "floor",
+        "path": "finances.liquid.balance",
+        "requested": -40,
+        "committed": 0
+      }
+    },
+    {
+      "name": "clamp_reports_what_was_asked_for_as_well_as_what_was_done",
+      "why": "§VII.3: a clamp commits something nobody asked for, and must be reported as such every time. The verdict is not representable without both values.",
+      "declaration": {"id": "cap", "expression": "spend.amount <= 100", "strategy": "clamp"},
+      "candidate": {"spend": {"amount": 250}},
+      "expect": {
+        "verdict": "clamped",
+        "rule": "cap",
+        "path": "spend.amount",
+        "requested": 250,
+        "committed": 100
+      }
+    },
+    {
+      "name": "clamp_on_a_non_interval_is_rejected_at_authoring_time",
+      "why": "§VII.1: V is not convex in general. On a non-convex A the minimiser may be non-unique, and 'project' stops being well-defined.",
+      "declaration": {"id": "cross", "expression": "finances.a >= finances.b", "strategy": "clamp"},
+      "expect": {"declaration_error": "clamp_on_non_interval"}
+    },
+    {
+      "name": "clamp_on_an_equality_is_rejected_at_authoring_time",
+      "why": "Equality pins a point rather than bounding an interval; projecting onto it would overwrite rather than cap.",
+      "declaration": {"id": "pinned", "expression": "finances.total == 100", "strategy": "clamp"},
+      "expect": {"declaration_error": "clamp_on_non_interval"}
+    },
+    {
+      "name": "clamp_on_a_conserved_dimension_is_rejected_at_authoring_time",
+      "why": "§VII.2: capping a transfer's outflow while leaving the inflow untouched CREATES MONEY — it satisfies C by violating D.",
+      "declaration": {
+        "id": "cap_transfer",
+        "expression": "finances.liquid.balance >= 0",
+        "strategy": "clamp",
+        "conserved_dimensions": ["finances.liquid"]
+      },
+      "expect": {"declaration_error": "clamp_on_conserved"}
+    },
+    {
+      "name": "an_exclusive_bound_refuses_rather_than_inventing_an_epsilon",
+      "why": "A strict inequality has no nearest admissible point. Refusing is honest; picking an arbitrary epsilon is not.",
+      "declaration": {"id": "strict", "expression": "finances.liquid.balance > 0", "strategy": "clamp"},
+      "candidate": {"finances": {"liquid": {"balance": -1}}},
+      "expect": {"verdict": "refused", "rule": "strict"}
+    },
+    {
+      "name": "defer_is_a_third_verdict",
+      "why": "§VII: the gate's codomain is not boolean. Sheridan & Verplank level 5 — executed only if the human approves.",
+      "declaration": {"id": "big_spend", "expression": "finances.liquid.balance >= 0", "strategy": "defer"},
+      "candidate": {"finances": {"liquid": {"balance": -1}}},
+      "expect": {"verdict": "deferred", "rule": "big_spend", "requires_readmission": true}
+    },
+    {
+      "name": "a_deferral_always_requires_readmission_at_commit",
+      "why": "Deferral makes a synchronous transition pending, so the state at approval need not be the state at proposal. Admitting once at proposal loses complete mediation.",
+      "declaration": {"id": "later", "expression": "finances.liquid.balance >= 100", "strategy": "defer"},
+      "candidate": {"finances": {"liquid": {"balance": 0}}},
+      "expect": {"verdict": "deferred", "rule": "later", "requires_readmission": true}
+    },
+    {
+      "name": "refuse_is_the_default_when_no_strategy_is_declared",
+      "why": "The safe choice when nothing more specific has been established.",
+      "declaration": {"id": "implicit", "expression": "finances.liquid.balance >= 0"},
+      "candidate": {"finances": {"liquid": {"balance": -1}}},
+      "expect": {"verdict": "refused", "rule": "implicit"}
+    },
+    {
+      "name": "an_unparseable_declaration_is_rejected_not_skipped",
+      "why": "A rule that cannot be read must never be silently dropped from enforcement — that is a gate failing open.",
+      "declaration": {"id": "broken", "expression": "this is (not ) valid", "strategy": "refuse"},
+      "expect": {"declaration_error": "unparseable"}
+    }
+  ]
+}
