@@ -49,6 +49,23 @@
 
 *Dependency order (from the capstone §9.1): Events & Time → DSL → Sustain-design → Operator → Constraint → Ingest → Monitor → (Curated UI ∥ Tenet → Operative → Multiparty); Editing after the operator path; Controller threads through from the first gate check onward.*
 
+### Delivery track — the Modeling Studio (A–F)
+
+*Ratified 2026-08-05, folded in from the retired `SUSTENA_WBD.md`. The layer order above says what to build; this says in what order it reaches a person. The phone collapses to the **capture edge**; the desktop Studio grows to cover **every** engine (Monitor / Control / Simulate / Edit / Network / Complexity) — the Capstone's "every engine in one frame". The `/devui` front end is database-first, the pattern the Curated-UI article identifies as what killed VOS: **rebuild the surface, keep the engine.***
+
+| | Phase | Covers |
+|---|---|---|
+| **A** | Authoring foundations | rich dimension types (file, url, list-of-records), Enzyme authoring, typed invariants, the config layer — **the Amber-generality track**: declare a structurally-unlike Sustain with zero engine changes |
+| **B** | Studio shell + visual structural editor + code hatch | `π : D → G` (= **EDIT-13**). Adopts the preserved slice-1 shell |
+| **C** | Agentic modeling assistant | generate-and-verify, **bounded by the types and the gate** (= OPV-23's proposal-distribution posture) |
+| **D** | **Operative layer PROPER** | the article's ten: utility vectors, DAG memes, gated fork+sim, council with declared weights, orchestrator, two attentions, Pareto frontier, Goodhart guard, **approval token**, M_self / M_world (= **all of M-OPV**; today's operatives are a stub of this) |
+| **E** | Capture edge | strip non-capture phone UI; wire the native listener/parser (= M-ING) |
+| **F** | The Library | the meme/artefact library (= OPV-5/6, M-PAWA/Arena) |
+
+**UI principles (Bonnie's design standard, ratified):** form follows function — novelty only when functional; simplify through **navigation, not clutter** (accordions, hidden sidebars, tabs, clear CTAs, pagination — not a wall of cards); **one view, one job** (a view is the answer to one question); progressive disclosure over mega-windows; **"why am I seeing this?" answerable on demand**; stunning, not dumbed down.
+
+**Gate-1, the acceptance milestone:** a stranger uses Sustena on real data for **30 days**. (M3 = declare Amber with zero engine changes; M4 = a non-technical person productive without Bonnie explaining anything.)
+
 ### Layer 1 — SUBSTRATE
 
 #### M-EVT · Events & Time  ✅ read
@@ -452,7 +469,18 @@
 | ARE-9 | **Two separated lifecycles, and the schema already anticipated them** — `product_total` / `pawa_total` as separate columns and `product_status` / `package_status` as separate sequences: `PLACED|PROCESSING|DELIVERING|DELIVERED` (rival, physical) vs `PLACED|INSTALLING|SANDBOXED|LIVE` (non-rival, digital) | IX | ⏸️ 🔨 **the schema is right**; the lifecycles do not run — **orders do not settle** (= backlog E6) |
 | ARE-10 | **Licence keys at order time** — `LIC-` + eight uppercase alphanumerics, stored and returned per non-free package item | IX | ⏸️ ⬜ Rust (✅ app-layer) |
 
-**Summary:** the economy layer is **⏸️ deferred wholesale**, and the article draws the deferral line itself (PAWA-13): the meter, ledger, treasury accounting and gating are buildable now; **issuing a real transferable token is a separate, later, human-authorized act**. What already exists is the **meter** (Slice 15, wired into `execute_operator`, coefficients honestly uncalibrated) and a real append-only `PawaLedger` — whose `charge()` runs the **superseded four-way split** and **has zero callers**. Three items are worth carrying forward even while deferred, because they are correctness rather than economics: **ARE-2** (publish is a second write path), **MYC-6** (a grant that mints rather than transfers makes Sybil registration profitable, and must be *declared*), and **MYC-5**'s conservation property (integer-floor remainder handling is what makes the split exactly conserving).
+##### Ratified decisions carried forward — NOT article-derived
+
+*Ratified 2026-08-04, folded in from the retired `SUSTENA_WBD.md`. These are **Bonnie's decisions**, not things the articles specify — kept separate from the tables above so the distinction stays legible. All ⏸️ with the economy layer.*
+
+| # | Decision | Rust status |
+|---|---|---|
+| RAT-1 | **Juul = a KES-pegged, fiat-collateralized stablecoin**, sitting behind the settlement adapter: reserves per VASP rules, **≥30% in segregated Kenyan bank accounts**, M-Pesa / bank redemption, with a migration path to the CBK digital shilling or a basket **behind the same switch**. Kenya now regulates this (VASP Regulations 2026 + a stablecoin regime), so there is a real regulated pathway. **This is the concrete form of PAWA-2's unit of account, and it is a legal commitment as much as an engineering one** — PAWA-13's "distinct, later, human-authorized act" governs it | ⏸️ ⬜ not started |
+| RAT-2 | **Governance — RFC + earned voting weight.** Contributors earn weight from merged contributions + Arena reputation + optionally staked pawa/Juul. RFC process: **propose → discuss → CouncilSession vote → finalize/anchor**, run by the Mycelium Foundation, with quorum and **graduated rights** (proposer / reviewer / maintainer). Community RFCs decide `sustena_core` changes. Wires into the existing CouncilSession / StakeholderSession machinery rather than a new mechanism — and per **CAP-17**, weight attaches to the **membership edge**, not the member | ⏸️ ⬜ not started (a governance doc is the missing artefact, not code) |
+| RAT-3 | **Discovery — registry first, DHT behind the same interface.** Build the resolution *interface* plus a fast central registry now; swap in the Kademlia-style DHT + gossip as a growth-track change **past roughly 1,000 members**, with Babychain anchoring above. The interface is the commitment; the backing store is not | ⏸️ ⬜ not started (sharpens **MYC-1**'s generic "addressing and discovery") |
+| RAT-4 | **Settlement — ship behind a swappable, mockable adapter.** Pawa/Juul go out behind an adapter to Ethereum standards (ERC-20 / rollup / finalizer) with the **on-chain layer mockable**, so the system is testable end-to-end before any chain exists and flips to a licensed backend **with no rewrite**. The architecture it adapts to is **CAP-16** (Local → Babychain → Ethereum finalizer); this row is the *build strategy* for reaching it | ⏸️ ⬜ not started |
+
+**Summary:** the economy layer is **⏸️ deferred wholesale**, and the article draws the deferral line itself (PAWA-13): the meter, ledger, treasury accounting and gating are buildable now; **issuing a real transferable token is a separate, later, human-authorized act**. What already exists is the **meter** (Slice 15, wired into `execute_operator`, coefficients honestly uncalibrated) and a real append-only `PawaLedger` — whose `charge()` runs the **superseded four-way split** and **has zero callers**. Three items are worth carrying forward even while deferred, because they are correctness rather than economics: **ARE-2** (publish is a second write path), **MYC-6** (a grant that mints rather than transfers makes Sybil registration profitable, and must be *declared*), and **MYC-5**'s conservation property (integer-floor remainder handling is what makes the split exactly conserving). **RAT-1–4** hold Bonnie's own ratified decisions on the peg, governance, discovery and the settlement adapter — deliberately tabled apart from the article-derived rows, because they are choices rather than specifications.
 
 ### Capstone / cross-cutting
 

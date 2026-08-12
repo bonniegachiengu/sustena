@@ -19,13 +19,12 @@ docs/SCOPE.md
 docs/Tasks & Notes.md
 docs/Ideas.md
 docs/SUSTENA_CORE.md
-docs/SUSTENA_WBD.md
 docs/BLOG_VOICE_SPEC.md
 docs/COMPLETE_AWARENESS_MAP.md
-# Retired trackers (ARTICLE_CODE_ALIGNMENT, ARTICLE_BUILD_LEDGER,
-# SUSTENA_FEATURE_TRACKER), superseded by docs/SUSTENA_UPGRADE_SPEC.md. Kept
-# locally for history; internal like the docs they replaced, so the whole
-# drawer is ignored rather than three paths re-listed.
+# Retired trackers, all superseded by docs/SUSTENA_UPGRADE_SPEC.md:
+# ARTICLE_CODE_ALIGNMENT, ARTICLE_BUILD_LEDGER, SUSTENA_FEATURE_TRACKER,
+# SUSTENA_WBD. Kept locally for history; internal like the docs they replaced,
+# so the whole drawer is ignored rather than four paths re-listed.
 docs/legacy/
 # GLOSSARY carries unreviewed economy/tokenomics material — see ADR-0001 D5.
 # Publish once cleaned, on the same phased track as the articles.
