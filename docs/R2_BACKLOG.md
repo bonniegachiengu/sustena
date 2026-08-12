@@ -2,7 +2,7 @@
 
 *The source of truth for Phase R2: implementing what the articles specify but the code does not yet do.*
 
-**Status: R1 (parity) complete. R2 in progress — 5 of 14 core items resolved.**
+**Status: R1 (parity) complete. R2 in progress — 7 of 14 core items resolved, 2 held on a decision.**
 
 > **Read this before opening an R2 slice.** Every item traces to an article. The
 > articles are the spec; the code catches up to them, never the reverse. Where
@@ -76,8 +76,8 @@ Ordered by dependency, not importance.
 | # | Gap | Article | Where |
 |---|---|---|---|
 | ~~14~~ | ~~State is untyped~~ — **DONE in Rust**: declared record type with bounds, load-time predicate binding, and organisational closure enforced at the gate. Opt-in per sustain. Python unchanged. | CELL | Python |
-| 15 | Operators have no `inverse` | ENZYME | both |
-| 16 | No **checked composition** of operator pathways | ENZYME | both |
+| ~~15~~ | ~~No `inverse`~~ — **DONE in Rust**: patch-level inverse derived from the mutation record. Honest about the three shapes that are not invertible from a record alone. Python unchanged. | ENZYME | Python |
+| 16 | No **checked composition** of operator pathways | ENZYME | both — next |
 | 17 | Ordering is `seq`; articles specify **event-time convergence** | RECORD · GAIA | **HELD — awaiting Bonnie's decision** (architecture fork; shapes event storage permanently) |
 | 18 | No **substrate dedupe** — a repeated event id raises | RECORD | **HELD with #17** — both touch the event storage model; building one before the other decides is rework |
 
@@ -86,7 +86,7 @@ Ordered by dependency, not importance.
 | # | Gap | Article | Where |
 |---|---|---|---|
 | 19 | Council keeps **two stores** (state-based and SQL) that can diverge | SLIME | Python |
-| 20 | Rollback registry is **in-memory** — snapshots lost on restart | Controller | Python |
+| ~~20~~ | ~~Rollback registry in-memory~~ — **DISSOLVED in Rust**: the inverse is *derived* from the event record, so there is no registry to lose. Python unchanged. | Controller | Python |
 | 21 | **Two database layers** — routes on SQLAlchemy, engine on sqlite3 | ADR-0001 D2 | Python |
 | 22 | `seed.py` **bypasses the engine** — half-made sustains, no genesis event | — | Python |
 

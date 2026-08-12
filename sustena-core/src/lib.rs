@@ -49,6 +49,7 @@ pub mod admission;
 pub mod council;
 pub mod error;
 pub mod fold;
+pub mod inverse;
 pub mod mutation;
 pub mod operator;
 pub mod path;
@@ -61,6 +62,7 @@ pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, 
 pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalStatus, ResolutionInput, VoteChoice};
 pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};
+pub use inverse::{invert, is_reversible, InverseError};
 pub use mutation::Mutation;
 pub use operator::{execute, Enforcement, Execution, OperatorResult, Registry};
 pub use principal::{effective_privilege, permitted, Denial, MembershipEdge, Memberships, Tier};
