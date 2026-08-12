@@ -42,6 +42,7 @@ pub use meta::{OperatorFn, OperatorMeta, OperatorResult, Registry};
 use crate::mutation::Mutation;
 use crate::principal::{permitted, Denial, Memberships, Tier};
 use crate::predicate;
+use crate::schema::{preserves_shape, Schema};
 use crate::state::State;
 
 /// One published event. The host assigns durable ordering (`seq`) and writes
@@ -76,6 +77,9 @@ pub struct Enforcement {
     pub enabled: bool,
     /// `(id, expression)` — evaluated against the mutated state before commit.
     pub invariants: Vec<(String, String)>,
+    /// The declared state space. When present, organisational closure is
+    /// enforced: an operator may change values, never the shape.
+    pub schema: Option<Schema>,
 }
 
 /// Who is acting, for the `permitted(α, o, Σ)` conjunct.
@@ -229,6 +233,29 @@ pub fn execute_as(
     // ── gate ─────────────────────────────────────────────────────────────────
     let candidate = working.snapshot();
 
+    // Organisational closure (CELL §V): schema(o(s)) = schema(s).
+    //
+    // A sustain is materially open — money and messages cross it constantly —
+    // and organisationally closed: an ordinary operator changes values inside
+    // the boundary, never what the boundary IS. Adding a member or adopting a
+    // child sustain is a different class of act, and belongs to a higher gate.
+    //
+    // Checked before the invariants, because a state of the wrong shape cannot
+    // be meaningfully judged against rules written for the right one.
+    if let Some(schema) = &enforcement.schema {
+        if let Err(err) = preserves_shape(state, &candidate, schema) {
+            return Execution {
+                result: OperatorResult::fail(
+                    format!("would change the sustain's shape, not just its values: {err}"),
+                    "organisational_closure",
+                ),
+                mutations: vec![],
+                events: vec![],
+                state: state.clone(),
+            };
+        }
+    }
+
     if enforcement.enabled {
         for (id, expr) in &enforcement.invariants {
             match predicate::check(expr, &candidate, params) {
@@ -321,6 +348,7 @@ mod tests {
                 ("pocket_allocated_non_negative".into(),
                  "ALL finances.pockets[*].allocated >= 0".into()),
             ],
+            schema: None,
         }
     }
 
@@ -475,12 +503,96 @@ mod tests {
         assert!(ex.committed());
     }
 
+    // ── organisational closure at the gate (R2 #14) ─────────────────────────
+
+    fn typed() -> Enforcement {
+        use crate::schema::{DimType, Schema};
+        use std::collections::BTreeMap;
+        let pocket = DimType::Record {
+            fields: BTreeMap::from([
+                ("allocated".into(), DimType::Number { lo: None, hi: None }),
+                ("spent".into(), DimType::Number { lo: None, hi: None }),
+                ("limit".into(), DimType::Number { lo: None, hi: None }),
+            ]),
+        };
+        let schema = Schema::new().declare(
+            "finances",
+            DimType::Record {
+                fields: BTreeMap::from([
+                    ("liquid".into(), DimType::Record {
+                        fields: BTreeMap::from([("balance".into(), DimType::Number { lo: None, hi: None })]),
+                    }),
+                    ("pockets".into(), DimType::Map { value: Box::new(pocket) }),
+                    ("income".into(), DimType::Any),
+                ]),
+            },
+        );
+        Enforcement { schema: Some(schema), ..armed() }
+    }
+
+    #[test]
+    fn closure_allows_an_ordinary_value_change() {
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &typed(), &homestead_state(), "budget.allocate",
+                         &params(&[("pocket_name", json!("food")), ("amount", json!(50.0)),
+                                   ("period", json!("monthly"))]));
+        assert!(ex.committed(), "money moving is a value change, not a shape change");
+    }
+
+    #[test]
+    fn closure_allows_a_new_pocket_because_pocket_names_are_values() {
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &typed(), &homestead_state(), "budget.add_pocket",
+                         &params(&[("pocket_name", json!("travel")), ("limit", json!(0.0))]));
+        assert!(ex.committed(), "the schema declared a map of pockets, and it still is one");
+    }
+
+    #[test]
+    fn closure_refuses_an_operator_that_reshapes_the_sustain() {
+        use crate::operator::meta::{OperatorMeta, Protocol};
+        let mut reg = Registry::default();
+        reg.register(OperatorMeta {
+            name: "test.reshape",
+            description: "Removes a declared dimension. Exists to prove the gate refuses it.",
+            constraints: vec![],
+            post_constraints: vec![],
+            side_effects: vec!["event.test.reshaped"],
+            pawa_cost: 0,
+            protocol: Protocol::Rpc,
+            min_privilege: 0,
+            run: |state, _p, events| {
+                // Replace the whole finances record with one missing `liquid`.
+                let _ = state.set("finances", json!({"pockets": {}, "income": {}}));
+                events.push(EmittedEvent { name: "event.test.reshaped".into(), payload: json!({}) });
+                OperatorResult::ok(json!({}))
+            },
+        });
+        let mut allow = allowed();
+        allow.push("test.reshape".to_string());
+
+        let ex = execute(&reg, &allow, &typed(), &homestead_state(), "test.reshape", &params(&[]));
+        assert!(!ex.committed(), "changing what the boundary IS belongs to a higher gate");
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("organisational_closure"));
+        assert_eq!(ex.state, homestead_state(), "a refusal changes nothing");
+    }
+
+    #[test]
+    fn closure_is_not_enforced_when_no_schema_is_declared() {
+        // Adoption is incremental: an untyped sustain behaves exactly as before.
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &armed(), &homestead_state(), "budget.allocate",
+                         &params(&[("pocket_name", json!("food")), ("amount", json!(50.0)),
+                                   ("period", json!("monthly"))]));
+        assert!(ex.committed());
+    }
+
     #[test]
     fn a_rule_that_will_not_compile_refuses_rather_than_failing_open() {
         let reg = Registry::default();
         let broken = Enforcement {
             enabled: true,
             invariants: vec![("broken".into(), "this is (not ) valid".into())],
+            schema: None,
         };
         let ex = execute(&reg, &allowed(), &broken, &homestead_state(), "budget.allocate",
                          &params(&[("pocket_name", json!("food")), ("amount", json!(1.0)),

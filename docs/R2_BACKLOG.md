@@ -2,7 +2,7 @@
 
 *The source of truth for Phase R2: implementing what the articles specify but the code does not yet do.*
 
-**Status: R1 (parity) complete. R2 in progress — 2 core items done.**
+**Status: R1 (parity) complete. R2 in progress — 5 of 14 core items resolved.**
 
 > **Read this before opening an R2 slice.** Every item traces to an article. The
 > articles are the spec; the code catches up to them, never the reverse. Where
@@ -75,11 +75,11 @@ Ordered by dependency, not importance.
 
 | # | Gap | Article | Where |
 |---|---|---|---|
-| 14 | **State is untyped** — free-form JSON, no type system | CELL | both |
+| ~~14~~ | ~~State is untyped~~ — **DONE in Rust**: declared record type with bounds, load-time predicate binding, and organisational closure enforced at the gate. Opt-in per sustain. Python unchanged. | CELL | Python |
 | 15 | Operators have no `inverse` | ENZYME | both |
 | 16 | No **checked composition** of operator pathways | ENZYME | both |
-| 17 | Ordering is `seq`; articles specify **event-time convergence** | RECORD · GAIA | both |
-| 18 | No **substrate dedupe** — a repeated event id raises | RECORD | both |
+| 17 | Ordering is `seq`; articles specify **event-time convergence** | RECORD · GAIA | **HELD — awaiting Bonnie's decision** (architecture fork; shapes event storage permanently) |
+| 18 | No **substrate dedupe** — a repeated event id raises | RECORD | **HELD with #17** — both touch the event storage model; building one before the other decides is rework |
 
 ### Consistency
 

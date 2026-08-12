@@ -311,6 +311,9 @@ fn operator_vectors() {
                         .collect()
                 })
                 .unwrap_or_default(),
+            // The R1 operator vectors predate typed state, so closure is not
+            // enforced for them — they must keep passing unchanged.
+            schema: None,
         };
 
         let mut state = case["initial"].clone();

@@ -54,6 +54,7 @@ pub mod operator;
 pub mod path;
 pub mod predicate;
 pub mod principal;
+pub mod schema;
 pub mod state;
 
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
@@ -64,6 +65,7 @@ pub use mutation::Mutation;
 pub use operator::{execute, Enforcement, Execution, OperatorResult, Registry};
 pub use principal::{effective_privilege, permitted, Denial, MembershipEdge, Memberships, Tier};
 pub use predicate::{check, parse_predicate, Predicate};
+pub use schema::{bind, preserves_shape, validate, DimType, Schema};
 pub use state::State;
 
 /// Version of the conformance contract this build satisfies.
