@@ -124,6 +124,12 @@ Ordered by dependency, not importance.
 | 31 | Streaming protocol is a no-op | SCOUT |
 | 32 | CRDT merge, Lamport ordering, quorum consensus — deferred | SLIME |
 
+### Naming
+
+| # | Gap | Article |
+|---|---|---|
+| 39 | **The physical code-rename has never been executed.** Pawa (line 11) states it as a live debt: *"In code the ratified names **Enzyme**, **Symbiont**, and **Embroidery** are still `operator`, `operative`, and `dsl` — aliases until the build-phase rename."* Retire Operator→**Enzyme**, Operative→**Symbiont**, DSL→**Embroidery**, and `operator-DAG`→**`Enzyme-DAG`** across ~500+ occurrences. The articles, the GLOSSARY and this WBD already use the ratified names; **only the code does not**, so every reader currently translates between two vocabularies. **Policy (standing, ratified):** aliases and re-export shims first, **gradual module-by-module**, **never a big-bang**, and **nothing merges without a green build** — locally *and* in CI. **Sequence it against the Rust port deliberately:** `sustena-core` is new code and can be born with the ratified names, which makes the Rust boundary the natural place to stop paying the translation cost. | Pawa (l. 11) · GLOSSARY |
+
 ### Housekeeping
 
 | # | Gap |
