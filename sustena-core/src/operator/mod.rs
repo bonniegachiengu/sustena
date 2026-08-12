@@ -40,6 +40,7 @@ use serde_json::{Map, Value};
 pub use meta::{OperatorFn, OperatorMeta, OperatorResult, Registry};
 
 use crate::mutation::Mutation;
+use crate::principal::{permitted, Denial, Memberships, Tier};
 use crate::predicate;
 use crate::state::State;
 
@@ -77,7 +78,37 @@ pub struct Enforcement {
     pub invariants: Vec<(String, String)>,
 }
 
-/// Run one operator end to end: guard → effect → gate → commit.
+/// Who is acting, for the `permitted(α, o, Σ)` conjunct.
+///
+/// `Unchecked` exists so that skipping authorization is a VISIBLE choice at the
+/// call site rather than a silent default. The Immune paper's audit is
+/// specifically about permissive defaults: a second write path whose gate was
+/// `check_gate=False` by default, adopted to preserve existing callers, and
+/// then exercised in-tree as a tool for reaching states the gate forbids. A
+/// bypass that reads as ordinary is the problem; one that has to be named is
+/// not.
+#[derive(Debug, Clone)]
+pub enum Authorization<'a> {
+    /// No principal model in force — the host has already decided.
+    Unchecked,
+    /// Check `permitted(α, o, Σ)` across the whole nesting path.
+    Principal {
+        id: &'a str,
+        memberships: &'a Memberships,
+        /// Outermost containing sustain first, target last.
+        path: &'a [String],
+    },
+}
+
+/// Run one operator end to end.
+///
+/// ```text
+///   auth → permitted → guard → effect → gate → commit
+/// ```
+///
+/// The order follows the Immune paper's extended admit(): authority is decided
+/// before the guard, because "may this principal act here" does not depend on
+/// state and should not cost an evaluation of it.
 pub fn execute(
     registry: &Registry,
     allowed: &[String],
@@ -85,6 +116,22 @@ pub fn execute(
     state: &Value,
     operator_name: &str,
     params: &Map<String, Value>,
+) -> Execution {
+    execute_as(
+        registry, allowed, enforcement, state, operator_name, params,
+        &Authorization::Unchecked,
+    )
+}
+
+/// [`execute`], with the principal named.
+pub fn execute_as(
+    registry: &Registry,
+    allowed: &[String],
+    enforcement: &Enforcement,
+    state: &Value,
+    operator_name: &str,
+    params: &Map<String, Value>,
+    authorization: &Authorization,
 ) -> Execution {
     let untouched = || Execution {
         result: OperatorResult::fail(
@@ -116,6 +163,23 @@ pub fn execute(
             }
         }
     };
+
+    // ── permitted(α, o, Σ) ───────────────────────────────────────────────────
+    // The conjunct the reference declares on every operator and reads nowhere.
+    if let Authorization::Principal { id, memberships, path } = authorization {
+        if let Err(denial) = permitted(memberships, id, path, meta.min_privilege as Tier) {
+            let rule = match denial {
+                Denial::NoEdge { .. } => "not_a_member",
+                Denial::InsufficientTier { .. } => "insufficient_privilege",
+            };
+            return Execution {
+                result: OperatorResult::fail(denial.to_string(), rule),
+                mutations: vec![],
+                events: vec![],
+                state: state.clone(),
+            };
+        }
+    }
 
     // ── guard ────────────────────────────────────────────────────────────────
     for guard in &meta.constraints {
@@ -323,6 +387,92 @@ mod tests {
         let off = Enforcement { enabled: false, ..armed() };
         let ex = execute(&reg, &allowed(), &off, &state, "test.force_negative", &params(&[]));
         assert!(ex.committed(), "with the gate disarmed this is allowed through");
+    }
+
+    // ── authorization at the gate (R2 #10) ──────────────────────────────────
+
+    fn memberships() -> crate::principal::Memberships {
+        use crate::principal::{MembershipEdge, Memberships, TIER_MEMBER, TIER_OBSERVER, TIER_OWNER};
+        let mut m = Memberships::new();
+        m.grant(MembershipEdge { principal: "bonnie".into(), sustain: "house".into(), tier: TIER_OWNER, skin: None });
+        m.grant(MembershipEdge { principal: "cira".into(), sustain: "house".into(), tier: TIER_MEMBER, skin: None });
+        m.grant(MembershipEdge { principal: "guest".into(), sustain: "house".into(), tier: TIER_OBSERVER, skin: None });
+        m
+    }
+
+    fn as_principal<'a>(id: &'a str, m: &'a crate::principal::Memberships, path: &'a [String]) -> Authorization<'a> {
+        Authorization::Principal { id, memberships: m, path }
+    }
+
+    #[test]
+    fn a_member_may_run_a_member_level_operator() {
+        let (reg, m) = (Registry::default(), memberships());
+        let path = vec!["house".to_string()];
+        let ex = execute_as(&reg, &allowed(), &armed(), &homestead_state(), "budget.allocate",
+                            &params(&[("pocket_name", json!("food")), ("amount", json!(10.0)),
+                                      ("period", json!("monthly"))]),
+                            &as_principal("cira", &m, &path));
+        assert!(ex.committed());
+    }
+
+    #[test]
+    fn an_observer_is_refused_before_the_guard_ever_runs() {
+        let (reg, m) = (Registry::default(), memberships());
+        let path = vec!["house".to_string()];
+        // The amount would pass the guard easily; authority is decided first.
+        let ex = execute_as(&reg, &allowed(), &armed(), &homestead_state(), "budget.allocate",
+                            &params(&[("pocket_name", json!("food")), ("amount", json!(10.0)),
+                                      ("period", json!("monthly"))]),
+                            &as_principal("guest", &m, &path));
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("insufficient_privilege"));
+        assert_eq!(ex.state, homestead_state(), "a refusal changes nothing");
+    }
+
+    #[test]
+    fn a_stranger_gets_a_different_answer_from_an_under_privileged_member() {
+        let (reg, m) = (Registry::default(), memberships());
+        let path = vec!["house".to_string()];
+        let ex = execute_as(&reg, &allowed(), &armed(), &homestead_state(), "budget.allocate",
+                            &params(&[("pocket_name", json!("food")), ("amount", json!(10.0)),
+                                      ("period", json!("monthly"))]),
+                            &as_principal("nobody", &m, &path));
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("not_a_member"),
+                   "'not a member here' and 'a member who may not do this' are different answers");
+    }
+
+    #[test]
+    fn nesting_shrinks_what_a_principal_may_do() {
+        use crate::principal::{MembershipEdge, Memberships, TIER_OBSERVER, TIER_OWNER};
+        let mut m = Memberships::new();
+        m.grant(MembershipEdge { principal: "epha".into(), sustain: "house".into(), tier: TIER_OBSERVER, skin: None });
+        m.grant(MembershipEdge { principal: "epha".into(), sustain: "habitat".into(), tier: TIER_OWNER, skin: None });
+        let reg = Registry::default();
+
+        let direct = vec!["habitat".to_string()];
+        let ex = execute_as(&reg, &allowed(), &armed(), &homestead_state(), "budget.allocate",
+                            &params(&[("pocket_name", json!("food")), ("amount", json!(10.0)),
+                                      ("period", json!("monthly"))]),
+                            &as_principal("epha", &m, &direct));
+        assert!(ex.committed(), "owner of the habitat, acting on the habitat");
+
+        let nested = vec!["house".to_string(), "habitat".to_string()];
+        let ex = execute_as(&reg, &allowed(), &armed(), &homestead_state(), "budget.allocate",
+                            &params(&[("pocket_name", json!("food")), ("amount", json!(10.0)),
+                                      ("period", json!("monthly"))]),
+                            &as_principal("epha", &m, &nested));
+        assert!(!ex.committed(), "adding a containing sustain can only shrink authority");
+    }
+
+    #[test]
+    fn unchecked_authorization_is_a_named_choice_not_a_silent_default() {
+        // execute() delegates to execute_as(.., Unchecked). The bypass exists,
+        // but it has a name — which is the whole point.
+        let (reg, _m) = (Registry::default(), memberships());
+        let ex = execute(&reg, &allowed(), &armed(), &homestead_state(), "budget.allocate",
+                         &params(&[("pocket_name", json!("food")), ("amount", json!(10.0)),
+                                   ("period", json!("monthly"))]));
+        assert!(ex.committed());
     }
 
     #[test]

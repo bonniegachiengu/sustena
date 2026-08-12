@@ -53,6 +53,7 @@ pub mod mutation;
 pub mod operator;
 pub mod path;
 pub mod predicate;
+pub mod principal;
 pub mod state;
 
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
@@ -61,6 +62,7 @@ pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};
 pub use mutation::Mutation;
 pub use operator::{execute, Enforcement, Execution, OperatorResult, Registry};
+pub use principal::{effective_privilege, permitted, Denial, MembershipEdge, Memberships, Tier};
 pub use predicate::{check, parse_predicate, Predicate};
 pub use state::State;
 

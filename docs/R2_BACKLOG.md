@@ -2,7 +2,7 @@
 
 *The source of truth for Phase R2: implementing what the articles specify but the code does not yet do.*
 
-**Status: R1 (parity) complete. R2 not yet started.**
+**Status: R1 (parity) complete. R2 in progress — 2 core items done.**
 
 > **Read this before opening an R2 slice.** Every item traces to an article. The
 > articles are the spec; the code catches up to them, never the reverse. Where
@@ -66,10 +66,10 @@ Ordered by dependency, not importance.
 | # | Gap | Article | Where |
 |---|---|---|---|
 | 9 | Gate still fails open in Python (Rust already refuses) | TOLERANCE | Python |
-| 10 | `min_privilege` declared on every operator, **never read** | ENZYME · TOLERANCE | both |
-| 11 | Only `refuse` is built — **clamp-to-A** and **defer** are not | LAW | both |
-| 12 | `simulate.run_path` advances a fork with **no gate** | TOLERANCE | Python |
-| 13 | `api.get` / `api.post` make **real outbound calls** outside the egress boundary | TOLERANCE | Python |
+| ~~10~~ | ~~`min_privilege` never read~~ — **DONE in Rust** (edge-based privilege, monotone across the holon path, enforced at the gate). Python unchanged. | ENZYME · TOLERANCE | Python |
+| ~~11~~ | ~~Only `refuse` is built~~ — **DONE in Rust** (refuse / clamp / defer, with the paper's three clamp safety rules enforced at authoring time). Python unchanged. | LAW | Python |
+| 12 | `simulate.run_path` advances a fork with **no gate** | TOLERANCE | Python — *structurally absent in Rust: there is one execution path, so a fork cannot skip it* |
+| 13 | `api.get` / `api.post` make **real outbound calls** outside the egress boundary | TOLERANCE | Python — *structurally absent in Rust: the core has no network* |
 
 ### The primitives
 
