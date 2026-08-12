@@ -1,0 +1,538 @@
+# SUSTENA — RUST BUILD · WBD + TRACKER
+
+*The single source of truth for building **all** Sustena features (every technical article) in Rust. This is both the Work-Breakdown Document (what to build) and the live tracker (what's done / pending). It supersedes the earlier "upgrade the Python app in place" framing and folds in the scattered trackers (R2_BACKLOG, ledgers).*
+
+**Angle:** the engine is being rebuilt as a portable **Rust core** (`sustena-core`), verified against conformance vectors. **R1** re-laid the existing Python behaviour in Rust at parity; **R2** builds the article specs the Python code never had. This document is the full remaining breakdown, article by article, through to the whole system.
+
+> ★ Direction confirmed by Bonnie, 2026-08-12: *"continue with rust build for all sustena features in the technical articles."* The original spec's §0 First Principle (upgrade Python in place, stay in WSL, no rebuild) is **superseded** — recorded for history, not deleted. The Python app stays **live and untouched** as the reference until the Rust core ships.
+
+---
+
+## Status legend
+
+- ✅ **done** — built in Rust and passing conformance vectors (R1 parity or R2 spec)
+- 🔨 **in progress**
+- ⬜ **pending** — on the plan, not started
+- ⏸️ **deferred** — held with the economy layer (ADR-0001 D5, pending legal) or genuinely-later on engineering grounds
+- **✅ app-layer** — built and live in the Python reference, not yet in the Rust core (real, but not portable yet)
+
+*Build note: **all 18 technical articles have now been fully read and extracted** — the completeness checklist at the end is all ✓ and this WBD is feature-complete as a breakdown. What remains is the building.*
+
+---
+
+## Status snapshot (the tracker headline)
+
+| Layer | Module | Article | Rust status |
+|---|---|---|---|
+| Substrate | **Events & Time** | Events and Time · RECORD/GAIA | ✅ mostly (fold, typed events, event-time order, Lamport tie-break, dedupe) · ⬜ vector clocks, `causes` on the record |
+| Definition | **Sustain design (S)** | Sustain · CELL | ✅ typed state, organisational closure, composition ⊕/ρ · ⬜ V as a region, viability kernel, boundary/firewall |
+| Definition | **Operator (T)** | Operator · ENZYME | ✅ guards, post-conditions, derived inverse, privilege · 🔨 checked composition (next) |
+| Definition | **Constraint engine (V)** | Constraint · LAW/TOLERANCE | ✅ one evaluator, refuse/clamp/defer, gate refuses on unparseable · ⬜ the firewall F |
+| Definition | **DSL** | DSL · GENOME | ⬜ mostly pending (arithmetic, bracket indexing, full authoring surface) |
+| Definition | **Immune / security** | Immune · TOLERANCE | 🔨 the gate half ✅ (no-bypass, fail-closed) · ⬜ self/non-self, memory, tolerance |
+| Boundary | **Ingest** | Ingest · RECEPTOR | ✅ app-layer (transducer, ParseRule data, dedupe, secret filter) · ⬜ in Rust |
+| Cognition | **Monitor** | Monitor · PERCEPT | ⬜ **NOT STARTED** (Kalman/EWMA/CUSUM, belief, domain detection) — SPINE |
+| Cognition | **Tenet (simulate + optimise)** | Tenet · Temporal Decision | ⬜ **NOT STARTED** (only forward sim ported) — SPINE |
+| Cognition | **Operative** | Operative · SCOUT | 🔨 the gate half ✅ (sandbox-under-gate, privilege, defer) · ⬜ the whole agent layer, incl. the approval token |
+| Cognition | **Multiparty** | Multiparty · SLIME | 🔨 substrate ✅ (event-time, dedupe, LWW join, holon invariant) · ⬜ quorum, consensus, Signal, router |
+| Surface | **Curated UI** | Curated UI · PERCEPT | ✅ app-layer (typed widgets, β, compose(r), knapsack, effect-capture) · ⬜ in Rust; type-checker off the load path |
+| Surface | **Editing engine** | Editing · SLOPE | ⬜ migration predicate ✅ app-layer · **no version history at all** — nothing to roll back to |
+| Governance | **Controller** | Controller | ⬜ **NOT STARTED** (execute/rollback/council exist; no decision-math) — SPINE |
+| Economy | **Pawa · Mycelium · Arena** | Pawa · MYCELIUM · ARENA | ⏸️ deferred (meter ✅ app-layer; ledger has zero callers; publish is a second write path) |
+| Cross-cutting | **Capstone** | Capstone · GAIA | ✅ the assembly map — 4 of the gate's 6 duties banked structurally in Rust |
+
+*(Legend for the three SPINE flags: the master spec's operational spine is Monitor→Tenet→Controller. **All three are not started** — they are the system's observe / simulate-optimise / govern-decide depth, and the highest-attention gap on this document.)*
+
+---
+
+## The WBD — by layer, in dependency order
+
+*Dependency order (from the capstone §9.1): Events & Time → DSL → Sustain-design → Operator → Constraint → Ingest → Monitor → (Curated UI ∥ Tenet → Operative → Multiparty); Editing after the operator path; Controller threads through from the first gate check onward.*
+
+### Layer 1 — SUBSTRATE
+
+#### M-EVT · Events & Time  ✅ read
+*Article: `3B1B — Events and Time - Formal Execution.md` (RECORD · GAIA). The append-only log everything folds over; state = fold(events).*
+
+| # | Feature (from the article) | § | Rust status |
+|---|---|---|---|
+| EVT-1 | **Event record** `⟨id, type, payload, t_event, t_ingest, source, causes⟩` — immutable, append-only, ordered | I | 🔨 partial — id/type/payload/event-time present; **t_ingest split, `source` provenance, `causes` causal-parent graph pending** |
+| EVT-2 | **Stable intrinsic `id`** (M-Pesa code, not minted UUID) | I·V | ✅ (dedupe keys on the stable id) |
+| EVT-3 | **Dot-protocol `type`** `event.<domain>.<type>` (3+ segments); dispatch on declared type, never raw payload | I | ✅ (carried from the Python contract) |
+| EVT-4 | **State = fold(apply, s0, L)** — reproducibility; incrementality (cache == rebuild is a testable law) | II | ✅ (R1 event-fold; `rebuild==get_state` proven) |
+| EVT-5 | **Two clocks + skew** `= t_ingest − t_event ≥ 0`; skew is normal/unbounded/heavy-tailed; **negative skew surfaced, never clamped**; backfill marked `provenance='legacy'` | III | ⬜ pending (t_ingest + provenance not yet on the Rust record) |
+| EVT-6 | **Watermarks** `W(τ)` monotone; perfect vs heuristic; **per-window lateness policy** ∈ {drop, late-fire, accumulate-and-retract}; no window closes by wall-clock hope | IV | ⬜ **not started** |
+| EVT-7 | **Exactly-once EFFECT** = at-least-once delivery ∘ idempotent apply; **uniform dedupe on the stable id at the substrate** (repeat = no-op, never raise) | V | ✅ (R2 #18 uniform dedupe) |
+| EVT-8 | **Causal order** — happens-before; **Lamport logical clock**; **vector clocks** for concurrency detection (biconditional, O(n)); `t_event` ≠ causal clock, both needed | VI | 🔨 partial — Lamport `(t_event,id)` tie-break done (R2 #17); **vector clocks / concurrency detection + `causes` graph pending** |
+| EVT-9 | **Convergence theorem** — snapshot dim `x=(v,τ)`, LWW register on total order `(τ,id)`; join-semilattice → **invariant under permutation & repetition** (order-independent replay; strong eventual consistency) | VII | ✅ (R2 #17 converging LWW join) |
+| EVT-10 | **Dimension kind declared** (snapshot vs accumulating) → LWW attaches automatically and **delta-accumulation on a snapshot dim is a type error**; honest limit: LWW scoped to observations, contested edits → §4B merge-CRDTs | VII→DSL | ⬜ pending (ties to M-DSL + M-MUL) |
+| EVT-11 | **Periods** — half-open `[a,b)` windows partition time; **RFC-5545 `RRULE` recurrence** + `DTSTART;TZID` anchored to a **zone id** (not a fixed offset); one period primitive, many consumers | VIII | ⬜ **not started** (Python had ad-hoc calendar only) |
+| EVT-12 | **Replay + checkpointing** `(s_k,k)`, cost O(n−k), always discardable | IX | 🔨 partial — full replay (rebuild) done; **checkpoints pending** |
+| EVT-13 | **Purity of `apply`** — no ambient clock / randomness / I/O | IX | ✅ structural — the Rust core is pure; identity + time come from the host |
+| EVT-14 | **External effects journaled as their own events** (decision-event + fact-of-sent event; apply never sends; no re-fire on replay) | IX | 🔨 partial — egress prepare/confirm exists (Python); Rust journaling model pending |
+| EVT-15 | **General replay** consumed by **Tenet** (stand in a future) and **Editing** (replay under D′) | IX | ⬜ pending (blocks M-TEN, M-EDIT) |
+
+**Summary:** the *convergence core* — fold, event-time LWW, dedupe, purity — is ✅ in Rust (the hardest part, already done). Pending: the two-clock split + provenance/causal graph, **watermarks & lateness policy**, **periods/recurrence (RRULE)**, checkpoints, dimension-kind typing, and general replay for Tenet/Editing.
+
+### Layer 2 — DEFINITION
+
+#### M-SUS · Sustain design (S)  ✅ read
+*Article: `3B1B — Sustain - Formal Execution.md` (CELL). The one recursive object `Σ = ⟨B, S, V, T, ⊕⟩`. (Naming: Enzyme=operator, Symbiont=operative, Embroidery=dsl — canonical terms, code aliases until rename.)*
+
+| # | Feature (from the article) | § | Rust status |
+|---|---|---|---|
+| SUS-1 | **`Σ = ⟨B, S, V, T, ⊕⟩`** — the single recursive object; components of a Sustain are Sustains; no privileged top. Closes Phase 0 = ⟨S,T⟩ | I | 🔨 partial — S,V,T,⊕ present; **B (μ) partial** |
+| SUS-2 | **S = typed state space** — product of named typed domains (record type, not JSON blob); path projection `π_p`; partial-state = projection onto subspace (enables modular/parallel eval) | II | ✅ (R2 #14 typed record state) |
+| SUS-3 | **Type-checked predicates** — guard/invariant/postcondition referencing an undeclared dimension is a **load-time type error** (`bind(predicate_ast, schema)→errors`) | II | ✅ (predicate AST bound to schema at load) |
+| SUS-4 | **Five required S properties** — serializable, addressable, composable, evolvable (schema versions without invalidating Enzymes), deterministic | II | 🔨 partial — serializable/addressable/composable ✅; **evolvable (schema versioning) → M-EDIT** |
+| SUS-5 | **State = fold** `s(t)=fold(events[0..t])`; monoid homomorphism/catamorphism; reproducibility, incrementality (cache==rebuild law), time-travel; ops replace_root/set/append/remove; `FoldError` never silent | III | ✅ (R1 fold; rebuild==get_state proven) |
+| SUS-6 | **Patch-level vs semantic events** — patch replay can't diverge from what the Enzyme did; semantic layer addable later without migration (named debt) | III | 🔨 patch-level ✅; semantic layer ⬜ (needed by M-EDIT replay-under-D′) |
+| SUS-7 | **B = boundary ⟨scope, μ⟩** — μ a **membership predicate** deciding what the Sustain owns; private-vs-shared is structural (where a var sits relative to B), not a permissions bolt-on | IV | ⬜ pending — today only a flat `owner_ids`; **full μ not built** |
+| SUS-8 | **Autopoietic closure law** — `∀o∈T,∀s: μ_{o(s)}=μ_s ∧ schema(o(s))=schema(s)`; Enzymes change values inside B, never B itself; changing B is a distinct **higher gate** (add member, adopt child) | IV | 🔨 partial — schema-closure enforced at gate (R2 #14); the separate boundary-change gate ⬜ |
+| SUS-9 | **V = viable region** — box of per-dim intervals ∩ cross-dimension constraints; **a region, not a boolean list** → measurable / projectable / intersectable / searchable (VI–VIII need this); `in_region(s,V)` | V | 🔨 partial — invariants + gate ✅ (M-CON); **region as first-class object (measure/project/search ops) ⬜** |
+| SUS-10 | **Viab_T(V) = viability kernel** — states from which *some* legal-move sequence keeps s∈V **forever**; greatest fixed point by descending iteration `D_{k+1}=Φ(D_k)`; the only honest target for "keep alive"; limits: exponential in dims (needs sampled/receding-horizon approx), finite-horizon `Viab^H` is an optimistic superset | VI | ⬜ **NOT STARTED** (no impl anywhere) |
+| SUS-11 | **Lyapunov control** — `W(s)=d(s,V)`; pick Enzyme minimizing `W(o(s))`; descent ≥α ⇒ re-enter in ⌈W/α⌉ steps; weights `w` declared (not buried); inside V secondary objective = **kernel margin**; rollback = declared inverse to lower-W state | VII | ⬜ **NOT STARTED** — shared with M-CTL (Controller decision-math) |
+| SUS-12 | **⊕ composition + ρ roll-up** — `S_P = own × ∏children × A`; aggregate `⊗_a` must be a **commutative monoid** (sum/min/max/count ok; avg → carry (sum,count), divide at end); computed fresh, never persisted | VIII | ✅ (Slice 7 + R2 composition/rollup) |
+| SUS-13 | **Roll-up rules** — ρ is a function not a variable (no stale total, no reconciliation); **missing ≠ zero** (excluded + named); **nested viability** (whole viable ⟺ every level viable); **holon law** — parent value is a *fold over* members, never an *overwrite* (structural via monoid) | VIII | ✅ (excluded+named, is_self parent-fold, holon-by-construction) |
+| SUS-14 | **Per-rule authority, advisory by default** — binding aggregate invariant refuses a child transition only on a **newly-caused** breach (person-first: already-breached parent doesn't block a non-worsening child action) | VIII | ✅ (R2 `_check_parent_binding_gate`, authority default advisory) |
+| SUS-15 | **Determinism + canonical hash** — Enzymes pure (non-determinism captured into the event); `H(s)=hash(canonical(s))` makes verification a comparison; `fold(log)==cache` fails loudly on divergence | IX | 🔨 purity ✅ structural; **canonical-serialization hash `H(s)` ⬜** |
+| SUS-16 | **Domain declaration (Cynefin)** — `domain: R→{clear,complicated,complex,chaotic}` **per region** of S; disorder = failure-mode to detect/surface; domain is a *reading* (Monitor detects shift via CUSUM); justified by Ashby requisite variety + Conant-Ashby "good regulator = model" | X | ⬜ **NOT STARTED** (declared in old spec §4D.6, absent from code) |
+| SUS-17 | **Goodhart guard** — for every un-optimised dimension `d∉U` (U=∪ Symbiont utility dims), auto-emit a bound invariant into V so un-scored dims are gated structurally, not by review habit | XI | ⬜ **NOT STARTED** |
+
+**Summary:** the core — typed S, fold, load-time predicate binding, composition/roll-up with the holon law + person-first authority — is ✅ in Rust. **Not started:** the viability kernel `Viab_T(V)`, Lyapunov homeostatic control (shared with Controller), the Cynefin domain field, the Goodhart guard, canonical-hash verification, and the full μ membership boundary. Region-as-first-class-object and schema-versioning (evolvable) are partial (→ M-CON, M-EDIT).
+
+#### M-OP · Operator (T)  ✅ read
+*Article: `3B1B — Operator - Formal Execution.md` (ENZYME). The guarded transition; the whole registry IS T. Guard→effect→emit.*
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| OP-1 | **Enzyme = ⟨guard g, effect e, emission ε⟩** — partial map `dom(o)={(s,p):g_o}`; partiality is where the law lives; **every effect must emit** (keeps state=fold honest) | I | ✅ (R1 operators; emit mandatory) |
+| OP-2 | **Hoare triple `{g} e {Q}`** — pre/postcondition; refusal computed on a **copy**, judged, *then* committed (nothing durable until Q passes) | II | ✅ (R2 gate checks post on candidate) |
+| OP-3 | **Weakest-precondition obligation** `g ⟹ wp(e,Q)` — static author-time claim the guard is strong enough; flag an Enzyme whose Q its guard can't guarantee | II | ⬜ not built (static check; dynamic ✅) |
+| OP-4 | **Determinism spectrum** pure/bounded/impure; **capture every non-deterministic input into the event** so replay sees recorded not fresh | III | ✅ structural — Rust core pure; identity+time from host (captured) |
+| OP-5 | **Checked composition** `post(A) ⊨ guard(B)` at authoring time; composite guard `g_A ∧ wp(e_A,g_B)`; 3-valued **entailed/refuted/undecided**; decidable on the Embroidery fragment or via SMT | IV | 🔨 in progress (R2 #16) |
+| OP-6 | **Declared inverses** — `e_{o⁻¹}(e_o(s))=s` + `image(e_o)⊆dom(o⁻¹)`; reversible subset `T_r`; **generic patch-level inverse** from recorded `{op,path,old,new}`; ties to Controller (exact W restoration) | V | ✅ (R2 #15 patch-level inverse from the record) |
+| OP-7 | **Effective guard** `ĝ = g_o ∧ ⋀ invariants(e_o(s)) ∧ permitted(actor)` — three distinct refusals: **not now / not ever / not you** (never collapse to "denied") | VI | ✅ — all three terms in Rust (guard ✅, invariants-of-result ✅, privilege ✅ R2 #10) |
+| OP-8 | **Reference monitor** — complete mediation (every access checked, unbypassable), fail-safe defaults, least privilege; `e_o(s)∈V` in every gate ⇒ **V is an induction invariant** | VI | ✅ **structural win** — Rust core has one execution path, so complete mediation holds by construction (Python's was opt-in/bypassable) |
+| OP-9 | **T = the transition model** `⟨S,T⟩` labelled transition system; reachability/viability/control/simulation/planning all defined over T | VII | ✅ |
+| OP-10 | **Closure + completeness** — Enzymes preserve boundary+schema (autopoiesis); any mutation without an event is **forced into the log** (`event.system.unlogged_state_change`) | VII | ✅ structural (one write path); boundary-change higher-gate ⬜ (→ M-SUS B) |
+| OP-11 | **Price of a move** — declared `cost(o)` (gas-style, up front) vs **metered ⟨compute,storage⟩** (odometer, after); **compute = work not wall-clock** (reproducible); guard is metered; refused = zero | VIII | ⏸️ economy-deferred (Python meter exists; Rust metering rides the economy layer) |
+
+**Summary:** the Enzyme core is ✅ in Rust, and the effective guard is **more complete than Python** — Rust makes complete mediation *structural* (one path) and enforces privilege (the "not you" term). **Pending:** checked composition (in progress), the static `wp` entailment, and metering (economy-deferred). Python's audited gaps (opt-in gate, unread privilege, no inverse) are exactly what Rust closed by construction.
+
+#### M-CON · Constraint engine (V binding)  ✅ read
+*Article: `3B1B — Constraint - Formal Execution.md` (LAW). The gate that makes V binding; the induction that keeps V true. (Tolerance/self–non-self layer is M-IMM.)*
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| CON-1 | **Three predicate families** — **state** `C:S→bool` (A=∩C_i=V), **transition** `D:S×S→bool` (over the pair), **boundary/firewall** `F(φ,s)` (flow across B); none reduces to another; composition = **conjunction only** (monotone, no priority/override) | I | 🔨 state C ✅; **transition D ⬜**; **firewall F ⬜** |
+| CON-2 | **The gate** `admit(o,s) ⟺ g_o(s) ∧ o(s)∈A ∧ D(s,o(s))` (+ `⋀F(φ,s)`); effect on a copy → judge candidate → commit only if admitted | II | ✅ (single-state part; D/F pending) |
+| CON-3 | **The induction** — `s_0∈A` + every change admitted ⟹ `s_k∈A ∀k`; **one skip deletes the theorem** → complete mediation mandatory | III | ✅ **structural** (Rust: one write path) |
+| CON-4 | **Safety vs liveness** (Schneider) — a monitor enforces **exactly safety, never liveness**; "stays in V" ✅, "a move always exists" ✗ → needs the viability kernel (CON-10) | III | ✅ understood; kernel ⬜ |
+| CON-5 | **Complete mediation / reference monitor** — always invoked, tamper-proof, small; **fail-safe defaults** (a constraint that fails to compile must NOT silently pass); economy of mechanism; least privilege | IV | ✅ — **Rust closed fail-open** (R2 #8: unreadable rule refuses) + one path |
+| CON-6 | **Three strategies: refuse / clamp / defer** — clamp = projection `Π_A(s')` (only convex/interval constraints; **never clamp a conserved quantity**; report asked+did); defer = proposal, **re-admitted at commit** (verdict 4-valued) | V | ✅ **Rust win** (R2 #11 + 3 clamp safety rules; Python had refuse only) |
+| CON-7 | **Conservation as a transition constraint** — `|SUM(after[q])−SUM(before[q])| ≤ tolerance`, refuse; money = integer minor units, tolerance 0; "shadow of a sameness," not a target | VI | ⬜ **NOT built** (needs transition constraints D) |
+| CON-8 | **Holon-path composition** `admissible_global = ⋀_{H∈path} admit_H` along the membership DAG; monotone, order-independent, name-the-refuser; advisory-by-default, binding on **newly-caused** breach | VII | 🔨 one parent edge ✅ (R2); **full `⋀_H` over the DAG ⬜** |
+| CON-9 | **Total, impoverished evaluator** — every predicate terminates, side-effect-free, deterministic (no `eval()`); static undecidable (Rice) → 3-valued entailed/refuted/undecided; **aggregates SUM/COUNT/AVG/MIN/MAX** over wildcard = same as roll-up ρ; scope-indexing + compiled caching | IX | ✅ **Rust unified the two evaluators** (R2 #4, aggregates on both paths); scope-indexing ⬜ |
+| CON-10 | **Strong form** — substitute `Viab_T(V)` for A so admittance implies a surviving next move (safety→liveness-content); expensive, depends on honesty of T, horizon-limited optimistic | VIII | ⬜ **NOT started** (= SUS-10) |
+
+**Summary:** the gate is ✅ and **better than Python in three ways** — refuse/clamp/defer, one unified evaluator with aggregates, and no fail-open, all structural in Rust. **Real gaps:** **transition constraints D** (rate-limit, monotonicity, **conservation of money — currently inexpressible**), **firewall constraints F** (flows across B, blocked on μ), the **full holon-path DAG**, and the **strong viability-kernel form**.
+
+#### M-DSL · DSL (Embroidery / Genome)  ✅ read
+*Article: `3B1B — DSL - Formal Execution.md` (GENOME). The one language a Sustain is written in; a definition **denotes** ⟨S,T,V⟩ — compile or refuse, never partial.*
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| DSL-1 | **Compiler pipeline** text→lex→parse→AST→resolve→type-check→lower→⟨S,T,V⟩; `C: Text⇀Σ` = `Ok(Σ)` or `Err({ε})`, **never a partial Sustain** | I | 🔨 lex/parse/resolve/lower ✅; type-check ⬜ |
+| DSL-2 | **Denotational semantics** — `⟦state_schema⟧=S`, `⟦invariant⟧=set`, `⟦operator⟧=⟨g,e,ε⟩`; **compositional** (no hidden control flow → licenses gate short-circuit/scope-index/candidate-eval); a definition is a **value**; the real argument against `eval()` | II | ✅ (immutable AST, no eval) |
+| DSL-3 | **Grammar** — context-free BNF; precedence = grammar depth; ~LL(1); **small = a commitment** (buys totality, decidable entailment, economy, computable MDL) | III | ✅ (ported predicate grammar) |
+| DSL-4 | **Name resolution** `Γ⊢p:τ` (wildcard resolves through a container); quantifier scoping `Γ⊕fields(τ_item)` right-biased; resolver + evaluator must agree; **undeclared path = load-time error naming the path** | IV | ✅ (bound to schema at load) |
+| DSL-5 | **Type judgments `Γ⊢e:τ`** — comparison requires **same type + ordered**; "well-typed programs can't go wrong"; **the gate has no 4th outcome for "rule broken"** → without typing, a mistyped rule arrives as a *refusal* (can't tell a violated law from a broken document) | V | ⬜ **NOT built — the key DSL gap** ("one tree-walk away"); today a type error surfaces as a false constraint violation |
+| DSL-6 | **★ Exactly ONE language** — two evaluators = the language stops denoting (`SUM` = a sum in an invariant, an error in a guard); Deutsch discrete-alphabet universality; Landin many-surfaces-one-core | X | ✅ **Rust win** (R2 #4 unified the evaluators — Python had 2 implementations + 3 syntaxes) |
+| DSL-7 | **Lowering** `lower: Def→⟨S,T,V,s0,operatives⟩`; **genesis event** (seeded state emitted AS an event → `state=fold` from instant 0); total on well-typed input | VI | ✅ (instantiate + genesis) |
+| DSL-8 | **Parameterized `Def(θ)`** — typed function into Sustains, **checked once**, instantiated freely (substitution lemma); vs textual `{{token}}` (no theorem; survives as literal) | VII | 🔨 instantiate ✅; typed-param checking ⬜ |
+| DSL-9 | **Typed overlay `ρ`** — well-typed iff every path is a declared dim of that type; overlays compose (monoid); **lets you hand a person the *overlay*, never the definition** (Curated UI safety) | VIII | ⬜ not built — today `{{placeholder}}` substitution (unbound token = literal, caused the `role_in_family` bug) |
+| DSL-10 | **Holon path type-checked as one program** — a parent's binding rule must type-check against child dims + declared roll-up dims; catches an aggregate over a missing dim / summing a string, at author time | IX | ⬜ not started |
+| DSL-11 | **Totality + decidability** — no recursion/unbounded loop/user-function; quantifiers **bounded over declared finite containers**; type-check decidable; "does o preserve c" undecidable (Rice) → 3-valued | X | ✅ structural (total evaluator) |
+| DSL-12 | **Whole-spec validator** (author-time) — bind Enzyme refs, Symbiont names, aggregate declarations, `ui_schema` widget names, `access_policy` at load; `imports` + enforced versioning declared, unbuilt | VI | 🔨 partial (user-authored path ✅; disk-load ⬜; imports/versioning ⬜) |
+| DSL-13 | **Enzymes authored in Embroidery** — guards + effects declared in the DSL, not code (today a spec declares *which* Enzymes, never their guard/effect — `⟦operator⟧` is a name lookup) | §4F | ⬜ **not started** (large) |
+| DSL-14 | **Friendlier surface syntax** — many surfaces over one AST (safe only once DSL-6 holds); JSON is the only surface today | X | ⬜ not started (correctly last) |
+| DSL-15 | **Description-length / lift proposal (MDL)** — count how often a pattern recurs across Genomes; `ΔL(π)=n(L(body)−L(call))−L(def)`; **lift when ΔL>0** (over typed ASTs, human-confirmed, owes the migration predicate); learning = compression (same op as Symbiont memes) | XI | ⬜ not started (the `parse_rule` lift is the pattern, on a different artifact class) |
+
+**Summary:** the front end (parse, resolve, lower, one unified evaluator) is ✅ — and Rust's single evaluator satisfies the article's hard "exactly one language" rule (DSL-6, a Python gap closed). **Key gaps:** the **type-checker `Γ⊢e:τ`** (DSL-5), the **typed overlay** (DSL-9), the whole-spec validator, holon-path joint typing, **Enzymes authored in the DSL** (DSL-13), and the MDL lift-proposal loop.
+
+#### M-IMM · Immune / security (TOLERANCE)  ✅ read
+*Article: `3B1B — Immune - Formal Execution.md` (TOLERANCE). Security is **not a module** — it's a property of B and the gate. Mediation, authority, detection across the recursive Sustain.*
+
+**Key result: Sustena is "architecturally correct, evaluationally incomplete" — and Rust closes most of the evaluation gaps structurally. Article's build order: gate unconditional + fail-closed → principal term → grant-as-transfer → sign catalogue → detection LAST.**
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| IMM-1 | **Full admit()** `auth(α) ∧ permitted(α,o,Σ) ∧ g_o(s) ∧ o(s)∈V ∧ D(s,o(s)) ∧ ⋀F(φ,s)` — **six independent refusals** (not known / not you / not now / not ever / not that way / not across this wall); auth ≠ permitted | I | 🔨 guard/result/privilege ✅; auth (login) app-layer ✅; **D, F ⬜** (=M-CON) |
+| IMM-2 | **Defence in depth = ⊕** `admit* = ⋀_{H∈path} admit_H` (monotone, person-first) — no separate layering construct | I | 🔨 one edge ✅; full path ⬜ (=CON-8) |
+| IMM-3 | **Complete mediation / reference monitor** — always invoked, tamper-proof, small; one unmediated path **deletes** the induction | II | ✅ **structural win** — Rust one write path (closes Python's opt-in gate + second write path) |
+| IMM-4 | **Fail-closed, not fail-open** — an uncompilable invariant/post_constraint must **refuse or defer, never silently skip** (Python's fail-open, newly named in this article) | II | ✅ (R2 #8 — Rust refuses an unreadable rule) |
+| IMM-5 | **Authentication** — PBKDF2-HMAC-SHA256 (260k iters, per-user salt, constant-time), JWT with `token_version` = **real revocation** | IV | ✅ app-layer (users.py) — solid, not core-engine |
+| IMM-6 | **Authorization = per-membership-edge privileges** (authority on the relationship, not the person) + **`skins`** (named RBAC bundles); `min_privilege` = the per-action binding | IV | 🔨 **`min_privilege` now enforced** (R2 #10 edge-based, monotone across the holon path) — Python's inert model is REAL in Rust; **`skins`/RBAC bundles ⬜** |
+| IMM-7 | **Approval token** `guard ∧ (effect_class=sandbox ∨ valid_token(approve(o,principal)))`; today "human decides" holds by **incapacity, not mediation**; **confused-deputy risk** once Symbionts can write → pass authority *with* the request (capability) | IV | ⬜ not started (app-layer propose→confirm is a seed) |
+| IMM-8 | **Verdict set {Admit, Refuse, Clamp, Defer}** — **Defer = the tolerance mechanism**; over-refusal → users build a bypass, so over-refusal is a *security* failure | VI | ✅ (R2 #11 refuse/clamp/defer) |
+| IMM-9 | **Anti-over-refusal** — advisory-by-default, binding refuses only on **newly-caused** breach (stops a breached parent freezing all children) | VI | ✅ (R2 `_check_parent_binding_gate`) |
+| IMM-10 | **Fixed vs learned rules** — `R_fixed` = non-authorable pre-gate ordered first (the OTP secret filter); `R_learned` = ParseRules with `trust`+`provenance`, gated adoption (self-match + regression) | V | 🔨 OTP pre-gate + ParseRules app-layer ✅; `trust`-as-decision-input ⬜; **least-privilege operator allow-list on the learned tier ⬜** |
+| IMM-11 | **Layered controls = independence of failure** (not count) — the 3 OTP layers share **one** detector (10 hand-synced regexes) → add a **different-kind** structural detector | III | ⬜ (app-layer) |
+| IMM-12 | **Detection over the log** — anomaly/negative-selection; **base-rate limit** (output must be *attention* not *denial* → route to Defer); **heartbeats** = declared expectation checked deterministically (no base-rate problem) | VII | ⬜ **NOT started, correctly LAST** (a detector over an unmediated system reports a hole it can't close) |
+| IMM-13 | **Forged credentials** — Sybil (grant must be a **transfer, not a mint**), unsigned Arena artefacts (**content hash + signature**; integrity ≠ authenticity ≠ quality) | VIII | ⏸️ economy-deferred |
+
+**Summary:** the security *shape* is right, and Rust closed most *evaluation* gaps structurally — complete mediation (one path), fail-closed, refuse/clamp/defer, enforced privilege all ✅. **Pending:** transition/flow constraints (=M-CON), the approval token + `skins`/RBAC, the learned-tier allow-list, a second-kind OTP detector, and detection/heartbeats (built **last**). Sybil-grant + Arena-signing are economy-deferred.
+
+### Layer 3 — BOUNDARY
+
+#### M-ING · Ingest & external integrations (RECEPTOR)  ✅ read
+*Article: `3B1B — Ingest - Formal Execution.md` (RECEPTOR). B seen from outside: a total transducer with the gate behind it. Once past it, a sensor reading and a hand-typed spend are the same kind of thing.*
+
+**Status: heavily built (Slices 5/11/13/14 — transducer, parse rules, one door, egress). Key gaps: heartbeats, device-as-Sustain, intrinsic-id key.**
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| ING-1 | **Boundary as sensor** `τ:R→C` / `σ:E→R`; a transducer produces a **candidate `C≠S`**, not state; **no ingest write path** (same gate + fold as an internal write) | I·VI | ✅ structural (capture→execute_operator) |
+| ING-2 | **Total τ, five-way result** `Mapped | ParsedUnmapped | Informational | Unparsed | Rejected`; **"I don't know" is a value, not a drop**; fail-safe default = **surface, not drop** | II | ✅ app-layer (transducer.py, deterministic) |
+| ING-3 | **Secret pre-gate** — `secret(r)` **first, before persistence**; content-based; **fixed, non-authorable**; two independent impls (device + server) | III | ✅ app-layer (before INSERT + device twin) — the IMM-10 R_fixed |
+| ING-4 | **Sender-strict dispatch** — source decided by the **sender**, never the wording (`argmax textual-fit` forbidden) | IV | ✅ app-layer (`_PARSERS_BY_SOURCE`) |
+| ING-5 | **Idempotent intake** — at-least-once ∘ idempotent = exactly-once **effect**; key `⟺ same fact`; **intrinsic id (txn code) first**, text-hash fallback (a UUID partitions by *arrivals* — always wrong); duplicate = no-op | V | 🔨 substrate dedupe ✅ (R2 #18); **intrinsic-id-as-key ⬜** |
+| ING-6 | **One write path** `commit(Mapped)=execute_operator`; mapped-but-invalid is **quarantined (named rule), never forced**; message id stamped on the event | VI | ✅ (Rust one path; refusal quarantines) |
+| ING-7 | **Parse rules as declared primitives** — `Γ⊢r` (pattern compiles ∧ status=mapped ⟹ operator∈Registry ∧ params⊆declared); ordered first-match; examples = regression corpus | VII | ✅ app-layer (parse_rule.py, 22 shapes as data) |
+| ING-8 | **★ Liveness / staleness / heartbeats** — `staleness>θ(c)`, `θ=Percentile_p(gaps)`; **heartbeats convert a statistical detector into a deterministic one** (`≤h+δ`); never guess a cadence; seen when it *speaks*, not when it parses | VIII | 🔨 staleness partial ✅; **θ-learned ⬜; HEARTBEATS ⬜ — the residue of the week-long outage** |
+| ING-9 | **Device-as-Sustain** `Σ_dev` (connectivity/battery/**queue_depth**/t_last_ack); staleness = ordinary invariant; **queue_depth = the leading health metric**; a liveness invariant is evaluated by the **receiving** Sustain (a dead device can't self-report) | IX | ⬜ not started (ingest_sources is a plain table) |
+| ING-10 | **Ack + transactional outbox** — ack = **durably committed**; retry backoff+jitter; queue-depth reporting | V·IX | 🔨 effectively ack-on-commit ✅; no ack state machine / backoff / queue-depth ⬜ |
+| ING-11 | **Egress asymmetry** — can't make someone else's receiver idempotent → **irreversibility declared**, no blind auto-retry; **human gate** (approval token = a term inside `admit()`) | X | 🔨 egress human-gated ✅ (Slice 11); irreversibility flag + approval-token-in-admit ⬜ (=IMM-7) |
+| ING-12 | **Cross-source correlation** — one transfer → two senders' SMS → two candidates; needs a fact-based key (amount + shared M-PESA ref) | IV | ⬜ disclosed, not fixed (double-counts) |
+| ING-13 | **`t_event` at the boundary** — lift the SMS's own date/time into event time (today only `received_at`, so skew isn't computable) | VIII | ⬜ (= EVT-5) |
+
+**Summary:** Ingest is among the most-built modules — transducer, five-way result, secret pre-gate, sender-strict dispatch, single door, parse-rules-as-data, human-gated egress all ✅. **Residue: heartbeats** (would have caught the outage), **device-as-Sustain** (queue-depth), the **intrinsic-id dedup key**, cross-source correlation, and the approval-token term.
+
+### Layer 4 — COGNITION
+
+#### M-MON · Monitor  ✅ read  ★ SPINE (observe)
+*Article: `3B1B — Monitor - Formal Execution.md` (PERCEPT). Observe true state under noise; escalate only when the math demands. CUSUM is the formal Monitor→Controller boundary.*
+
+**Status: NOT STARTED (R2 lists it FOLLOW #23–25). Completes the operational spine with Tenet + Controller.**
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| MON-1 | **Observability** — `is_observable()` (observability matrix rank = n); partial when rank<n → distribution not point; **"unmeasured state is ungoverned state"** | I | ⬜ not started |
+| MON-2 | **Kalman filter** — optimal estimate under noise (predict/update, gain K); show `x_hat` not raw | II | ⬜ (FOLLOW #23; see fit caveat MON-11) |
+| MON-3 | **Three pillars** — Metrics `(name,value,t,labels)`; Logs (ordered append-only); Traces (span DAG; `Span`, `TraceCollector`) | III | 🔨 Logs ✅ (=EVT); Metrics/Traces ⬜ |
+| MON-4 | **Stream processing** — tumbling/sliding/session windows; `SlidingWindowAggregator` (count/rate/by_type/error_rate); watermarks + late-event policy | IV | ⬜ (watermarks = EVT-6) |
+| MON-5 | **EWMA smoothing** `α·y+(1−α)·EWMA`, half-life ≈0.693/α; per-widget α | V | ⬜ not started |
+| MON-6 | **CUSUM detector** — `S⁺/S⁻` sums; fires on **persistent** shift; `classify()`→CRITICAL/WARNING (→Controller) vs INFO (stay); **the formal Monitor→Controller boundary** | VI | ⬜ **NOT STARTED** (FOLLOW #23) |
+| MON-7 | **Preattentive visual encoding** — map data dims → hue/size/motion/orientation/brightness; `WidgetVisualEncoder`; Tufte data-ink | VII | ⬜ (surface; R2 #25 widget-checker no call site) |
+| MON-8 | **Belief state (POMDP)** — `BeliefStateTracker`: Kalman point-mass on observation, `predict_forward`+`widen` on silence; `SENSOR_SILENT` past threshold | VIII | ⬜ not started |
+| MON-9 | **MonitorEngine** — per-sustain filters/detectors/trackers; `ingest()` pipeline **Kalman→EWMA→CUSUM + belief + Controller.escalate on WARNING+**; `render_widget()`, `tick()` | IX | ⬜ **NOT STARTED** (FOLLOW #24) |
+| MON-10 | **★ Urgency = distance-to-V** — `urgency(s)=d(s,V)`; **Monitor computes it**; consumed by Curated UI (salience) + Controller (escalation); ungameable (no second notion of "important") | Add. | 🔨 placeholder only — today a single `pct` (Slice 0); real distance-to-V ⬜ (= CTL-7, M-UI) |
+| MON-11 | **Sustena-native form (fit caveat)** — Kalman/observability assume a continuous linear ODE; Sustena state is discrete/event-sourced → native form is **distance-to-V on the fold, with CUSUM/EWMA over that series** (same boundary, no ODE) | Add. | ⬜ — the form to build |
+| MON-12 | **Watching metered, looking spends a budget** — surfacing spends a working-memory slot (~4) + pawa; the CUSUM crossing is economic, not only statistical | Add. | ⏸️ economy-adjacent |
+| MON-13 | **Frequency-domain change (harmonics)** — read the fold in the frequency domain (DFT over a windowed series) to separate a genuine shift from an expected cycle | Add. | ⬜ not started |
+
+**Summary:** Monitor is **unbuilt** (R2 FOLLOW) — the Kalman→EWMA→CUSUM pipeline, belief tracking, observability, traces, the preattentive encoder, the MonitorEngine. **Key native target = MON-11:** *distance-to-V on the fold, with CUSUM/EWMA over it* — which is also the Controller's urgency input (CTL-7) and the Curated UI's salience. Completes the spine: **Monitor observes, Tenet models, Controller decides.**
+
+#### M-TEN · Tenet — simulate + optimise  ✅ read  ★ SPINE
+*Article: `3B1B — Tenet - Formal Execution.md` (Temporal Decision Architecture). Invert from a chosen future to the next optimal action. (Value function written **J**; **V** reserved for viability.)*
+
+**Status: the FORWARD deterministic simulator exists (R1); the entire stochastic / backward / optimise layer is NOT STARTED — one of the two missing spine modules.**
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| TEN-1 | **Transition model `T: S×A→Δ(S)`** — a **probability distribution** over next states (MDP), not a single state | I·II | ⬜ — today T is deterministic; no `Δ(S)` |
+| TEN-2 | **Inversion point** `IP: S→{0,1}` — a precise target-state predicate that makes the inversion computable | III | ⬜ not started |
+| TEN-3 | **Scenario ensemble** `Ω={best, base, worst}` — each a `TransitionModel(p_…)`; `SimulateForward(s_0, T(ω), steps)` | IV | ⬜ not started (single deterministic path only) |
+| TEN-4 | **Backward induction (Bellman)** `J_t(s)=max_a[R+γΣP(s'|s,a)J_{t+1}(s')]` → value `J` + complete policy `π` (optimal action ∀ state×time) | V | ⬜ **NOT STARTED — the mathematical heart** |
+| TEN-5 | **Invariant actions** `I(s_0)={a: π_A(s_0)=π_B(s_0)=π_C(s_0)}` — optimal across all scenarios = unconditional priorities | VI | ⬜ not started |
+| TEN-6 | **Decision nodes** `D={s: ∃ω_i,ω_j π_i(s)≠π_j(s)}` — where the optimal action diverges across scenarios | VII | ⬜ not started |
+| TEN-7 | **Dead drops** — pre-committed `δ(D_i)=a*` chosen now under clarity; `ExecuteAtNode` falls back to `π(state)` off-node | VIII | ⬜ not started |
+| TEN-8 | **Signal functions** `σ_k: S^t→{0,1}` over the trajectory; `Monitor(history,signals)` fires → `TRIGGER Inversion` (HMM-style latent-scenario inference) | IX | ⬜ not started (couples to M-MON) |
+| TEN-9 | **Temporal pincer** — forward execution ∥ periodic backward recompute (reassess, update scenario probs, rerun BackwardInduct, refresh dead-drops, recalibrate signals) | X | ⬜ not started |
+| TEN-10 | **Fork runs under the gate** — every simulated step passes the same `admit` gate; the sandbox is bounded by the household's own law | Add. | ✅ (R1 `simulate()` enforces the gate) |
+| TEN-11 | **Pawa is the efficiency axis** — `Pawa(π,s)=Σ pawa(o,θ,s̃)`; `score(π)=Σ wᵢuᵢ(sim(π)) − λ·Pawa(π,s)` (optimal includes efficient) | Add. | 🔨 partial (per-branch pawa exists; ⏸️ full score ties to economy) |
+| TEN-12 | **Bellman = optimal control** — discrete case of min-accumulated-cost / stationary-action, **shared with the Controller (§3)** (Lyapunov/Pontryagin) | Add. | ⬜ (shared with M-CTL) |
+
+**Summary:** apart from the forward deterministic simulator + fork-under-gate (✅ R1), **all of Tenet is unbuilt** — stochastic transitions, scenario ensembles, backward induction/policy, invariant actions, decision nodes, dead drops, signal-triggered re-inversion, the temporal pincer. **The single largest not-started module**, sharing its optimal-control core with the Controller. Its 4th sub-module (S/T "fundamental forces") = M-SUS (S) + M-OP (T), already built.
+
+#### M-OPV · Operative (Symbiont)  ✅ read
+*Article: `3B1B — Operative - Formal Execution.md` (SCOUT). Agents over the **same** ⟨S,T⟩, differing only in `u_i`. "A shared world, N preferences, a search, a sandbox, an aggregation rule, and a lock the agents do not hold."*
+
+**Status: the most-built module after Sustain-design — in PYTHON. In Rust: the gate half exists (sandbox-under-same-gate, privilege); the agent layer itself is unbuilt.**
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| OPV-1 | **`ω = ⟨u, Π, attention, M_self, M_world, dom⟩`** + **sharing constraint** `∀i,j: S_i=S_j ∧ T_i=T_j`; Prop 1 **no private move**, Prop 2 adding an agent only **re-ranks** `R(s)`, never enlarges it | I | ⬜ not started (no operative object in Rust) |
+| OPV-2 | **Default set** `Ω_default = {Orchie} ∪ {Mentor, Protégé, Attaché, Curator, Navigator}`; Corollary 1 — six by default add **no capability and no risk** | I | ⬜ (Python ships 5 of 6; **Orchie has no class** — Note Correction 1) |
+| OPV-3 | **Utility is a VECTOR** `u_i:S→ℝ^m`; Pareto frontier `𝒫(X)`; scalarisation recovers only the **convex hull** → non-convex options no weight vector can ever select; `Δu_i(o,s)` is transition-shaped | II | ⬜ **not started** (Python's `OperativeVote.utility` is a scalar *confidence*, not a utility over S) |
+| OPV-4 | **Strategy `Π` = operator-DAG** ⟨N,E,entry,exit⟩, conditional topological walk, `$dot.path` injection, cycle guard; **Prop 3 — a strategy adds structure, not capability** | III | ⬜ (✅ app-layer: `operative_graph.py` is Π in production, every node in the registry) |
+| OPV-5 | **Meme = four kinds** — Model `S×T→Δ(S)` / Strategy (DAG) / Resource (∈S) / Network (edge in ⊕); Dawkins-Campbell condition: **copyable, variable, differentially retained**; Popper–Deutsch criticizability (anti-rational meme = one that escapes criticism) | III | ⬜ **not started** (graph specs are hand-authored static JSON, no provenance, no library) |
+| OPV-6 | **Learning = search over meme space** `M(t+1)=retain(select_{u,Viab}(vary(M(t))))`; steps on **results, not a clock**; **No Free Lunch** ⇒ libraries are per-operative and per-Sustain, provenance is part of a meme's meaning | IV | ⬜ **not started** (no vary/select/retain anywhere) |
+| OPV-7 | **Two attentions, inside EVERY operative** `⟨narrow, broad⟩`, both non-empty; narrow returns a **score**, broad returns a **re-framing trigger**; a council of one-attention agents is a **council of half-minds** | V | ⬜ (shape exists in Python by convention: cheap `should_evaluate()` scan vs expensive `evaluate()` — undeclared) |
+| OPV-8 | **Attention meter = breadth × depth × resolution** over the ⊕ tree; `pawa(a)=κ_a·b·d·ρ ≤ B_att`; **iso-cost** — deep-and-narrow and broad-and-shallow are the same spend; **the working set is attention's footprint** (scan priced here, hold is §4H's K≈4) | V | ⏸️ metering rides the economy layer; **κ_a has no measurement wired to it** (Note) |
+| OPV-9 | **One duality at three scales** ℓ0 inside an operative / ℓ1 operative↔sub-operatives / ℓ2 **Orchie ↔ Council**; the two quantifiers (A) over agents and (B) over scales both hold — **reading (B) as licence to violate (A) rebuilds the half-mind council** | VI | ⬜ not started |
+| OPV-10 | **Sub-operative = ⊕, not a new primitive** — `Σ_ω = (⊕_j Σ_ω'_j) ⊕ Σ_ω^own`, `V_ω'` within `V_ω`, admittance composes along the holon path; **Corollary 2 — depth adds conjuncts and cost, never power** | VI | 🔨 the ⊕/admit-along-path machinery ✅ in Rust; **the agent-layer instance ⬜** (Python's sub-operatives are graph *file paths*, so ⊕ here is named, not structural) |
+| OPV-11 | **`M_self` is a Sustain; `M_world ≈ Σ̂`** — Conant–Ashby: a good regulator **is** a model; Sustena's M_world starts **declared** (only the residual is learned) — easier and more brittle, "wrong in ways it cannot notice"; **one M_world per household = the Tenet**, forked per councillor | VII | ⬜ **not started** (neither object exists; the shared-model correlation is not measurable) |
+| OPV-12 | **Forks buy independence of SAMPLING, not of ASSUMPTIONS** — every fork forks one shared M_world, so residual correlation presents as **unanimity**; effective N < headcount by an amount nobody inside can measure | VII·XIII | ⬜ (the qualification cannot be represented until M_world exists) |
+| OPV-13 | **Chaos bounds the simulator** — `H* ≈ (1/λ)·ln(ε/|δ0|)`, **logarithmic in precision**; a simulator **must report the horizon** over which its output is meaningful; past H* it is compute spent on noise | VIII | ⬜ **not started** (= M-TEN; no horizon reporting) |
+| OPV-14 | **Self-organised criticality** — `P(s)∝s^-τ`; `τ≤2 ⇒ E[s]` diverges, `τ≤3 ⇒ Var[s]` diverges ⇒ **"expected loss" is not a usable summary near criticality**; three detectors: **branching ratio σ̂ (a read over the log's `causes`)**, tail shape (Clauset MLE, not a log-log eyeball), **critical slowing down** (variance + lag-1 autocorr — the Monitor's own CUSUM/EWMA moments) | VIII | ⬜ **not started**; the cheapest detector (σ̂) needs `causes` on the event record (= EVT-1/EVT-8) |
+| OPV-15 | **Scenario ensemble** — `vary` applied to **initial conditions**: sample declared perturbations, fork, simulate under the **same** admit, return the **Pareto front + H\***; the bridge from complicated-domain optimisation to **complex-domain probing** | VIII | ⬜ **not started** (= M-TEN) |
+| OPV-16 | **Suited domains** `dom_i ⊆ {clear, complicated, complex, chaotic}`; `match(i,s)`, mismatch ⇒ **abstain**; **coverage condition** `⋃dom_i` must cover all four or **surface the gap** rather than route to the least-bad scorer; *disorder* is a detection target | IX | ⬜ **not started**; ⚠ **name collision waiting** — Python's `operatives.<n>.domain` is a *subject-matter tag list*, NOT the Cynefin axis; reusing the key makes one inexpressible |
+| OPV-17 | **Sandbox = fork + simulate under the SAME gate**, tagged `effect_class = sandbox`; ungated simulation makes the fork a **second write path** — "a gate with a simulation bypass is a gate with a bypass" | X | ✅ **structural in Rust** — one execution path, so a fork cannot skip the gate (Python's council rides the ungated `simulate_run_path` — Note Correction 3) |
+| OPV-18 | **The score** `score_i = Δu_i + β·1[∀k: s̃_k ∈ Viab_T(V)] + γ·ΔReach_H` — viability is a **trajectory** property, not an endpoint; `γ=0` **refuses every beaver dam** | X | ⬜ **not started** (no Viab, no Reach) |
+| OPV-19 | **Runway = the viability kernel with a clock** `R(s)=min{k: s_k∉V}` under the null policy; `Viab_T(V)={s: ∃ admitted policy with R=∞}`; runway is **cheap** (one policy, forward scan) and an **under-estimate in a declared direction** — report the bound with its sign | X | ⬜ **not started** — but the **cheapest §X term to make real** once V is a region (Python's `burn_rate_analysis` computes a *rate*, not an exit time) |
+| OPV-20 | **Positioning `ΔReach_H`** under a **declared measure μ** (never raw cardinality); horizon-limited ⇒ **under**-estimate, biasing against long-horizon positioning; in a chaotic regime bounded by **H\*, not by budget** | X | ⬜ **not started** |
+| OPV-21 | **The Symbiont's mind = the machinery already built, named** — ten **appraisal axes** (Joy/Sadness/Fear/Anger/Disgust/Anxiety/Envy/Ennui/Embarrassment/Nostalgia) as components `u_ik` with a distinguished evaluation context; OCC + Lazarus core relational themes; **Russell's caution — the ten names are an interface, not natural kinds**; **an emotion is an appraisal with a sign and a weight, not a quale** | XI | ⬜ (adds no object; becomes measurable once `u_i` is a vector) |
+| OPV-22 | **Where the mind analogy BREAKS — build neither** — (1) an appraisal axis **has no write path**: it can make a move look good, never make it; the gate does not read the mood; (2) **an agent that IS one emotion is the half-mind council** — invert the casting: N whole minds carrying the full vector, differing in weights | XI | ✅ (1) structural in Rust — scoring cannot reach the write path; (2) a design rule to honour when OPV-1 is built |
+| OPV-23 | **LLM = a proposal distribution** `π ~ g(·|ctx)`, accepted iff `verify_sandbox(π)`; Metropolis–Hastings / AlphaGo posture — **correctness does not depend on g, only efficiency does**; "the model was confident" is not an argument | XII | ⬜ (Python's `_call_claude` is a **method call, not an element of T** — Note Correction 4: as written the gate *could not* mediate it) |
+| OPV-24 | **LLM admissibility + policy** — `allowed(llm.*,κ) ⟹ (∄o∈T covering κ) ∨ (perf(o,κ)<θ_κ)` with **θ_κ declared**; per-task-class `policy(κ)=⟨allow, B_κ juul, model, maxtok⟩`; guard is an **ordinary §4E constraint**; **deactivation is a policy, not a switch — the fallback edge must be declared** or deactivation is an outage; `maxtok` is the enforceable per-call cap (a budget without one is overshot by exactly one call) | XII | ⏸️ economy-deferred (the guard itself is one more predicate on the existing seam) |
+| OPV-25 | **Council = social choice** — Arrow's wall; the **declared escape** is cardinal interpersonally-weighted utilities (Sen/Harsanyi) with **declared `w_i`**, `w_human = 0.51`; **U ranks, it does not decide** — compute and present **𝒫**, the human's residual chooses within it | XIII | 🔨 weighted aggregation + resolution ✅ in Rust (R1 council); **vector u, Pareto frontier, DSL-declared weights ⬜** (Python's weights are hardcoded) |
+| OPV-26 | **Condorcet needs independence** — correlated councillors give the comfort of a large N with the accuracy of a small one ⇒ **each councillor gets its own fork**; mitigations: declare the model's fidelity claim, let councillors differ in M_world where they legitimately should | XIII | ⬜ (✅ app-layer: `_create_sandbox()` forks per councillor with a unique `fork_id`) |
+| OPV-27 | **Goodhart guard** — `O=⋃supp(u_i)`, `U=dim(S)\O`; **no agent's score changes when U moves** — damage there is *unobserved by every scoring function*; the fix is **NOT another operative** (that just makes a smaller U) but an **invariant in V enforced by the gate** | XIV | ⬜ **not started** (= SUS-17; cannot start before `u_i` exists to take a support of) |
+| OPV-28 | **Orchestrator = sparse mixture-of-experts gate** `top-k(softmax(α·relevance + η·Δû + ζ·match))`; sparsity matters because evaluating an operative forks state and is metered; **relevance (subject) and match (Cynefin) are different axes — conflating them makes one inexpressible** | XV | ⬜ **not started** (Python's `is_relevant()` is a hard 0/1 tag intersection) |
+| OPV-29 | **Orchie's three duties** — **route** sparsely, **hold the whole** (domain reading + criticality signal), **present the frontier not the winner**; showing only the top-ranked option silently re-collapses the vector — "a presentation bug with the consequences of an architecture bug" | XV | ⬜ not started |
+| OPV-30 | **The approval token INSIDE admit()** — `admit ⟺ §4E ∧ (effect_class=sandbox ∨ valid_token(approve(o, principal)))`; `τ=⟨hash(o,θ), principal, proposal_id, nonce, expiry⟩` — **bound to (o,θ)** (else it approves a *shape* of act), **single-use** (at-least-once delivery makes a replayable approval one you gave once and spent twice), **expiring with re-admission at commit** | XVI | 🔨 **defer + re-admission ✅** (R2 #11); **the bound single-use token ⬜** (grep-0 in Python) |
+| OPV-31 | **The trace invariant** `∀ live e: ∃ e_sim ≺ e_vote ≺ e_approve ≺ e, τ(e_approve)=τ(e)` — **prefix-closed ⇒ a safety property** (Alpern–Schneider) ⇒ **in the enforceable class**, so it can be structural rather than promised; depth cannot be used to get around it (Corollary 2) | XVI | ⬜ **not started** (the strongest single unbuilt safety property in the module) |
+
+**Summary:** in Rust the *gate half* of this module is ✅ and better than Python — the sandbox cannot bypass the gate (structural, one path), privilege is enforced, defer+re-admission ships. **The agent layer itself is entirely unbuilt in Rust**, and the article's audit is that Python's is real but shallow: strategy-DAGs, per-councillor forks and confidence-weighted aggregation are genuine; `u_i` (a vector), `M_self`/`M_world`, learning, attention, suited domains, the Pareto frontier, the MoE router, the Goodhart guard and the **approval token** are all absent. Two items are *cheap and high-value once V is a region*: **runway** (OPV-19) and the **branching-ratio criticality read** (OPV-14, a read over `causes`). One trap is recorded: the **`domain` key collision** (OPV-16).
+
+#### M-MUL · Multiparty  ✅ read
+*Article: `3B1B — Multiparty - Formal Execution.md` (SLIME). Compose person-holons into shared wholes using only local information — and never erase the node.*
+
+**Status: the convergence substrate is ✅ in Rust (event-time, dedupe, LWW join). The distributed-coordination layer above it — quorum, consensus, routing — is unbuilt everywhere.**
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| MUL-1 | **Node + population** `n_i=⟨s_i, N(i), act_i⟩`; **no node ever sees P** — coordinated global state from **local information exchange only**; `act_i` is the node's own gated Enzyme set — *"a composed body may ask, price, aggregate, and refuse, but the move itself is always taken by the node"* | I | 🔨 the gated-move-per-node half ✅ (Rust gate); the population/neighbourhood object ⬜ |
+| MUL-2 | **Quorum sensing / threshold commitment** `c_i = Σ_{j∈N(i)} σ_j e^{-λd(i,j)}`, `commit = 1[c_i>θ]`; mean-field `ẋ = -x + f(βx)` ⇒ a genuine **phase transition** at β\* | II | ⬜ **not started** |
+| MUL-3 | **Two different quorums — confusing them is the classic error** — §II's is a **count against a threshold** (does a body form at all); §V's is an **intersecting majority** (what a formed body may ratify). Neither substitutes for the other | II·V | ⬜ (recorded as a design trap) |
+| MUL-4 | **Excitable media = the Signal primitive** — RESTING→EXCITED→REFRACTORY; FitzHugh–Nagumo; **the refractory term is load-bearing**: it makes the wave directional and stops a relayed message re-exciting its sender; no broadcaster required | III | ⬜ **not started** |
+| MUL-5 | **Lamport happens-before + logical clock** — `a→b ⇒ C(a)<C(b)`; tie-break by node id gives a **total order every node computes identically from local data alone** | IV | ✅ (R2 #17 — `(t_event, id)` total order + causal stamps) |
+| MUL-6 | **Read the implication one way only** — `C(a)<C(b)` does **not** mean a influenced b; the scalar clock manufactures an order over genuinely concurrent events and then cannot say which those were. **Vector clocks** recover it at O(k) metadata | IV | 🔨 **concurrency is detected** in Rust (`concurrent_with`, via `causes` + same-node counter); **full vector clocks ⬜** (= EVT-8) |
+| MUL-7 | **FLP impossibility** — no deterministic protocol guarantees consensus under full asynchrony with one faulty node; every real system buys around it with **timeouts or randomisation, never magic** | V | ⬜ (a design bound to respect, not code) |
+| MUL-8 | **Quorum agreement / Paxos** — overlapping majorities so two conflicting decisions cannot both ratify; PREPARE→PROMISE→ACCEPT→ACCEPTED | V | ⬜ **not started** |
+| MUL-9 | **Byzantine bound** `k ≥ 3f+1` — the price of trusting a body whose parts might betray it; plain quorum is the working default at household scale, **the bound is the limit to remember before the federation includes anyone you don't fully trust** | V | ⬜ (design limit, recorded) |
+| MUL-10 | **CRDTs — join-semilattice, LUB merge**: commutative ∧ associative ∧ idempotent ⟺ **arrival order, duplication and retry cannot change the result** ⇒ strong eventual consistency; CAP tax: partition ⇒ availability + eventual convergence, the right call for a household that must work offline | VI | ✅ **LWW register done** (R2 #17 — three laws asserted, every permutation checked); **the wider CRDT family (G-counter, sets) ⬜** |
+| MUL-11 | **The holon invariant IS the merge** — because the group value is a **merge over member entries** and never an overwrite, the member's own number survives every aggregation **by construction**. "Not a policy sitting on top of the merge. It *is* the merge." | VI | ✅ structural (R1/Slice-7 roll-up is a fold over members; parent never overwrites) |
+| MUL-12 | **Division of labour — why a node spends itself** — kin selection `rb > c`; **ESS**: stability is a checkable property of the assignment, not a hope about members; costly signalling; role assignment as `min Σcost s.t. coverage, rb>c, redundancy≥ρ`. **An assignment violating `rb>c` is not merely unfair, it is unstable and will be defected out of** | VII | ⬜ **not started** |
+| MUL-13 | **Physarum conductance-adaptive routing** `Q_ij = (D_ij/L_ij)(p_i−p_j)`, `dD/dt = f(|Q|) − D` — flow thickens a channel, unused channels decay; entirely local feedback; provably solves shortest path. **This is Mycelium**: money, tasks, compute and storage routed by reinforcing what carries load | VIII | ⬜ **not started** (= M-PAWA/Mycelium) |
+| MUL-14 | **Disaggregation with hysteresis** — aggregate at `θ↑`, disperse at `θ↓ < θ↑` so the body doesn't flicker; the gap is the design parameter, bought with responsiveness. On dispersal CRDT state settles and each node carries its portion home — **the composition is destroyed; the members are not. Departure removes an edge, never a node** | IX | 🔨 `unlink_child` ✅ (removes the link, child keeps its state); **hysteresis thresholds ⬜** |
+
+**Summary:** the module's *substrate* is ✅ and was built early — Lamport ordering, the total order, dedupe, the LWW join with all three laws checked, and the holon invariant as a structural property of the merge. **Everything above the substrate is unbuilt anywhere**: threshold commitment, the Signal relay, Paxos/quorum, vector clocks, role assignment, and the Physarum router. The article's own note is that Multiparty "rides the pieces that already exist rather than replacing them" — which is now literally true of the Rust core's convergence layer.
+
+### Layer 5 — SURFACE
+
+#### M-UI · Curated UI engine  ✅ read
+*Article: `3B1B — Curated UI - Formal Execution.md` (PERCEPT). A view is a **computed value**, not a stored page; attention is a budget and selection is a knapsack.*
+
+**Status: mostly BUILT — in Python, and the article corrects the old audit on all four headline items. In Rust: not started (a surface module). One precise gap: the widget type-checker is not on the load path.**
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| UI-1 | **Widget as a typed declaration** `w = ⟨id, render, inputs, emits, event_class|unit, cost, description⟩`; `Γ ⊢ w` — every `inputs` path walked against the declared `state_schema`, every `emits` name in the registry, must declare `event_class` **or** `unit`; reports **all** errors rather than raising on the first | I | ⬜ Rust (✅ app-layer: `curated_ui.py::validate_widget_schema`) |
+| UI-2 | **★ The type-checker is not on the load path** — `validate_all_widget_schemas()` is called only from tests; `sustain_engine.py` does not import `curated_ui` at all. *"A check that is called somewhere is not a monitor."* **The highest-value small change in the module** | I | ⬜ **the module's sharpest gap** (= backlog #25) |
+| UI-3 | **The binding table β : (EventClass ∪ Unit) → 𝒫(W)** — keyed on **event class, never on Enzyme name**; a formal **inversion** of the old operator→widget `ui_schema`; additive, so the old binding is untouched | II | ⬜ Rust (✅ app-layer) |
+| UI-4 | **`compose(r)`, `r = ⟨state, query, device⟩`** — a view is computed fresh per call and **never stored**; reads state/events/rollup/needs-attention and **writes nothing**; an event-bound widget becomes a candidate only if its class appears in the recent window | III | ⬜ Rust (✅ app-layer; ⚠ `limit=25` hard-codes the meaning of "recently" — a widget whose event scrolled out cannot be summoned) |
+| UI-5 | **Honest empty-slate suppression** — a card **withdraws itself** rather than render an unexplained `0`; the grounding condition is enforced *before* any ranking | III | ⬜ Rust (✅ app-layer — and it came from live use) |
+| UI-6 | **Salience `score(w) = α·urgency + λ·relevance`** — urgency dominant by design | IV | ⬜ Rust (✅ app-layer) |
+| UI-7 | **★ Urgency is a proxy, with a named blind spot** — `spent/allocated`, deliberately reusing the Monitor's Slice-0 signal because CUSUM/EWMA don't exist; **`allocated ≤ 0` returns 0.0, so an unfunded pocket can never be urgent**; unmapped captures pinned at `1.1` — a policy living in a module constant | IV·X | ⬜ (blocked on M-MON; = backlog #23) |
+| UI-8 | **A budget is the right model** — Miller/Cowan bounded working memory; Hick–Hyman (choice time grows with log options) and Fitts as the interaction costs; attention as a capacity pool that is **allocated and spent** | V | ⬜ Rust (✅ app-layer, `DEFAULT_BUDGET = 4`, Cowan-cited in source) |
+| UI-9 | **Selection is a 0/1 knapsack** — NP-hard (Karp), solved by a genuine DP: integer costs, scores scaled ×1000, descending capacity loop, `keep[i][c]` table **and a backtrack reconstruction**; returns **both `selected` and `excluded`** with scores and reasons | VI | ⬜ Rust (✅ app-layer — verified genuine, not a sort dressed up) |
+| UI-10 | **Progressive disclosure as an FSM** `δ` — state is the accumulated `known` map, transitions are answers, `required_params_satisfiable` decides F | VII | ⬜ Rust (🔨 app-layer: `infer()` *is* a δ but **hand-rolled per flow** — no abstraction a new flow can inherit) |
+| UI-11 | **Effect-first capture `ℐ : ε → (o, θ)`** — deterministic, no LLM, no `eval`; **θ from the Enzyme's real `inspect.signature`** so never more fields than it declares; pocket names matched against the Sustain's own live state; a hint that eliminates *every* candidate is treated as **no hint**; history may pre-fill but **never silently and never skips the confirm** | VIII | ⬜ Rust (✅ app-layer — `infer()` never writes; confirm calls `execute_operator`) |
+| UI-12 | **Bounded generation** — a generated view constrained to the declared schema (the LLM proposes, the schema disposes) | IX | ⬜ **absent entirely** |
+| UI-13 | **`WidgetVisualEncoder` — salience computed then NOT rendered as salience** — the engine ranks under a budget and hands the result to a renderer that **draws everything alike**; the last mile (rank as a pre-attentive visual difference, per Treisman feature-integration) is missing | X | ⬜ **not started** (grep-confirmed absent) |
+| UI-14 | **What the budget does not buy** — a budget bounds *what is shown*, not whether the underlying state is understood; and **two widget notions coexist** (`curated_widgets` with typed `emits` vs `ui_schema`'s untyped `ctas` display strings) — the one-language-two-implementations divergence at the UI layer | X | ⬜ (= backlog #36, 4 render systems) |
+| UI-15 | **Coverage** — only `homestead.json` declares `curated_widgets`; every other spec honestly composes to *"no curated widgets declared for this sustain yet"* | Note | ⬜ (honest empty state, not a defect) |
+
+**Summary:** the article's headline correction stands: **this module was specced as mostly-unbuilt and is mostly-built** — typed widgets, β keyed on event class, `compose(r)` as a pure computed value, a genuine knapsack, and deterministic effect-first capture all exist in Python. Nothing is in Rust yet (it is a surface module, correctly sequenced after the engine). The three real gaps are **UI-2 (the type-checker off the load path — the cheapest fix in the module)**, **UI-13 (salience never rendered as salience)** and **UI-7's urgency blind spot**, which is blocked on M-MON.
+
+#### M-EDIT · Editing engine  ✅ read
+*Article: `3B1B — Editing - Formal Execution.md` (SLOPE). Change the definition while it runs — the meta-operator, one level above the Enzyme.*
+
+**Status: the CENTRAL safety property is BUILT in Python — the migration predicate is real. The sharpest gap is that a definition edit is an in-place overwrite: there is no history, so there is nothing to roll back to.**
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| EDIT-1 | **The definition is a value** `D = ⟨schema, Inv, T_decl, …⟩` — editable, versionable, diffable; an edit is a **meta-operator** on D, subject to its own gate | I | 🔨 D exists as a persisted spec; **as a first-class editable value ⬜** |
+| EDIT-2 | **The typed edit taxonomy `e`** — AddDim / DropDim / RetypeDim / AddInv / DropInv / TightenInv / LoosenInv / AddEnzyme / … each with its own safety class | II | ⬜ **not started anywhere** — `update_definition` rebuilds a whole candidate spec and **diffs nothing**, so it cannot tell a DropInv from an AddInv |
+| EDIT-3 | **The migration predicate** — an edit is safe iff **every live instance's actual current state** satisfies every candidate invariant; returns the **witness set** `{sustain_id, invariant_id, expression, reason}` | III | ⬜ Rust (✅ **app-layer, genuinely** — `check_definition_edit_safety`; refuses with *"this edit would strand N live sustain(s) outside their viable region"*) |
+| EDIT-4 | **Fail-safe on an uncompilable candidate** — a candidate invariant that **fails to compile** is reported as a violation against **every** live instance rather than skipped | III | ⬜ Rust (✅ app-layer — the §4E principle applied at the right place) |
+| EDIT-5 | **Refusal vs error, in the return type** — a refusal is an *expected everyday outcome returned as data*; a `ValueError` is a programmer/input error and is *raised*. The Embroidery distinction (a fact about the household vs a fact about the document) honoured in the signature | III | ⬜ Rust (✅ app-layer, documented in the method's own docstring) |
+| EDIT-6 | **The safe-change asymmetry** — **loosening is free by proposition** (a weaker V cannot strand a state already inside a stronger one); tightening must be checked | IV | ⬜ **not exploited** — without EDIT-2 there is no `e` to classify, so **every edit pays the full `|inst| × |Inv|` scan**, including a pure loosening |
+| EDIT-7 | **Versions, inverses and the algebra of rollback** — `D_n`, `e⁻¹`, and the **3-valued rollback** Total / Partial / Unavailable over an append-only definition DAG | V | ⬜ **THE SHARPEST GAP** — `UPDATE sustain_templates SET spec_json=?, version=?` is an **in-place overwrite that destroys the previous definition**. The counter increments; nothing is versioned; there is no `D_{n-1}` and therefore no `e⁻¹` (= backlog #26/#27) |
+| EDIT-8 | **Edit authority — the gate on the definition** — an edit is admitted through `admit()` with its own authority term, not checked inline | VI | ⬜ (Python checks `owner_user_id` **inline** — ownership, not authority; same shape as the missing approval token, and *"the two should be built together"*) |
+| EDIT-9 | **The new definition governs immediately** — after a successful update, every live instance's spec cache is invalidated, because *"a version bump that doesn't reach the gate is a version bump that lies"* | VI | ⬜ Rust (✅ app-layer — `self._specs.pop(...)` per live instance) |
+| EDIT-10 | **Typing on the authoring path** — compile every invariant against the candidate schema and **raise on the first bad one**; reject unknown dimension types, duplicate dimension names, an `authority` outside {binding, advisory}, and an Enzyme name absent from the registry | VI | 🔨 ✅ app-layer (a partial `Γ ⊢ D'`, confined to UI-built specs); **Rust: the schema/authority half ✅ (R2 #14, admission), the whole-definition check ⬜** |
+| EDIT-11 | **Replay under `D′`, and the limit that blocks it** — patch replay is **D-independent by construction**, so it cannot answer "what would this history mean under the new definition"; needs the **semantic** reducer | VII | ⬜ **not started** (= SUS-6; the ingredients exist — parameters are in the Enzyme log — the reducer does not) |
+| EDIT-12 | **Expand–Migrate–Contract** — the three-phase safe schema change (add the new shape, move the data, remove the old) | VIII | ⬜ **not started**; `μ` (the migration function) has **no representation** — today's discipline is *refuse if unsafe*, not *migrate* |
+| EDIT-13 | **`π : D → G` — the definition as an editable graph** | IX | ⬜ **not started** (the Studio Edit zone is inspect-only; JSON + a form are the surfaces) |
+| EDIT-14 | **⚠ The embryo's fence, and two holes in it** — `edit.operator_spec` fences `_EDITABLE_FIELDS` and explicitly immutabilises name/constraints/fn/protocol (the fence does a type system's work, honestly). But it **permits editing `pawa_cost` and `license_tier` at runtime, free, with no authority check** — *"changing an Enzyme's price currently costs less than using it. That is §VI backwards"* — and it mutates the **in-memory registry**, so the change is process-local and lost on restart | Note | ⬜ (Python-side; recorded as a real defect) |
+| EDIT-15 | **⚠ `edit.state_patch`'s `remove` sets the path to `None` rather than deleting** — under a typed schema that is **a type violation deposited into state** for something downstream to trip over | Note | ⬜ (Python-side; Rust's typed state + organisational closure would refuse the shape change) |
+| EDIT-16 | **⚠ The live example of why edits must be typed** — `NetworkZone.jsx:47`: when `owner_ids` holds the unsubstituted token `"{{owner_ids}}"`, `?.[0]` indexes the **string** and yields `"{"`, which is truthy so the `|| 'owner'` fallback never fires — **`"{"` is posted as the `user_id` that provisions child sustains**. A defect in the definition becomes wrong ownership on real children, nothing refused, nothing logged | Note | ⬜ **a real bug sitting in the tree today**; two independent checks would each have caught it (typed overlay, typed edit taxonomy) |
+
+**Summary:** the article's correction is that the *central* safety property — the migration predicate — is **genuinely built**, with fail-safe-on-uncompilable and cache invalidation done right. What is missing is everything about **history**: no typed edit `e`, no `μ`, and above all **no versioning** — the update overwrites the previous definition, so rollback has nothing to roll back to. Edit authority is checked inline rather than through the gate, and should be built with the approval token. Rust holds the pieces this will stand on (typed schema, organisational closure, the derived inverse) but the editing layer itself is not started.
+
+### Layer 6 — GOVERNANCE
+
+#### M-CTL · Controller — govern / decide  ✅ read  ★ SPINE
+*Article: `3B1B — Controller - Formal Execution.md`. The cybernetic feedback loop closed through a human; where the person decides. Supervisory control at Sheridan levels 5–6.*
+
+**Status: NOT STARTED — the article's own note: "the current code ships neither the table nor the four functions." Execute/rollback/council exist; none of the governance decision-math.**
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| CTL-1 | **Feedback control system** `C=⟨Plant, Sensor, Governor, Actuator⟩`; loop `e=r−y, u=G(e), y'=P(y,u)` — the DESCRIBE→…→OBSERVE loop closed through a human | I | ⬜ not started |
+| CTL-2 | **Lyapunov stability / `is_stable_intervention`** `V(s)=‖s_desired−s_actual‖²`, valid iff `V_after ≤ V_before` — the **formal definition of a good decision**; rollback = restore lower-V | II | ⬜ **NOT STARTED** (= SUS-11, M-TEN) |
+| CTL-3 | **OODA loop** state machine — OBSERVE (Monitor) → ORIENT (Council + Simulator + score) → **DECIDE (surface, human authorizes)** → ACT; **human enters at DECIDE**; faster OODA wins → minimal pre-oriented prompts | III | ⬜ not started (defer/proposal is a seed of DECIDE) |
+| CTL-4 | **Sheridan automation levels** — `AUTOMATION_LEVEL` table (ROUTINE→execute+notify [6]; FINANCIAL/CRITICAL/IOT_WRITE/ROLLBACK→execute-if-approved [5]); `route_action()` gates on it | IV | ⬜ **NOT STARTED** |
+| CTL-5 | **Holarchic hierarchy + escalation** — recursive `Sustain⟨…,children⟩`; invariant (local constraints ∧ consistent with parent); **`holarchy_escalation` propagates a violation upward until it reaches a human who can act** | V | 🔨 composition/roll-up ✅ (M-SUS); **the upward escalation-to-human path ⬜** |
+| CTL-6 | **Cyber-physical / IoT bridge** `CPS=⟨cyber, physical, interface⟩`; `mqtt_bridge()` turns a device signal into a typed event → constraint check → escalate/record | VI | ⬜ not started (Python had an IoT stub only) |
+| CTL-7 | **Governance SNR (Shannon)** — maximize `SNR_gov`; **`should_surface(e)=Sheridan≤5 ∧ urgency≥θ`**; **`compute_urgency = base × lyapunov × time_pressure`** (Lyapunov-derived, not heuristic) | VII | ⬜ **NOT STARTED** (today urgency is a single `pct` — see M-MON) |
+| CTL-8 | **Persistent-panel invariant** — `I(p)=H(state|absent)−H(state|present)`; unconditionally-high-info panels always shown (console, health, IoT, sessions); `PANEL_POLICY` ALWAYS vs WHEN_ACTIVE | VIII | ⬜ not started (surface/UI) |
+| CTL-9 | **The full Controller loop** — observe → orient (rank by urgency) → filter by SNR → decide (surface, await, validate Lyapunov) → act (execute, record, holarchy-propagate) | IX | ⬜ not started |
+| CTL-10 | **Control is metered** — worth = Lyapunov gain net of pawa; cheaper equal-gain intervention wins | Add. | ⏸️ economy-deferred |
+| CTL-11 | **Frequency-domain stability (damping)** — Lyapunov descent alone permits an oscillating over-corrector; keep the loop damped (poles in the unit circle) so corrections settle, not ring | Add. | ⬜ not started |
+| CTL-12 | **Potential + action** — `W(s)=d(s,V)` a potential well; viable path minimizes accumulated cost; Lyapunov descent = greedy one-step, **Tenet backward induction = the full optimal-control solution** | Add. | ⬜ (= M-TEN) |
+
+**Summary:** the Controller's governance decision-math is **entirely unbuilt** — the Lyapunov stability check, urgency/SNR surfacing, the Sheridan automation table, the OODA loop, holarchy-escalation-to-a-human, the IoT bridge, persistent panels. Underneath, only composition/roll-up (M-SUS ✅) and the defer→proposal→human-approval seed (M-CON) exist. **The second missing spine module**, sharing its optimal-control core with Tenet.
+
+### Economy (deferred)
+
+#### M-PAWA · Pawa & Juul economy  ✅ read  ⏸️
+*Articles: `3B1B — Pawa - Formal Execution.md` (the meter, then the gas), `3B1B — Mycelium - Formal Execution.md` (the network as a Sustain), `3B1B — Arena - Formal Execution.md` (the market as a Sustain). **Held with the economy layer** per ADR-0001 D5, pending legal counsel — but captured in full, because the meter half is already live and the boundary between "buildable now" and "a later human-authorized act" is drawn in the article itself.*
+
+**Status: ⏸️ deferred. The pawa METER is built and wired (Python, Slice 15) — the article's own Correction says so. Everything downstream of the meter — the gas, the ledger's use, the treasury, the market's settlement — is unbuilt.**
+
+##### Pawa — the meter and the coin
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| PAWA-1 | **`pawa(o,θ,s) = κ_c·compute + κ_s·storage`** — the meter of one Enzyme run; **metering, not estimating**: measure on real runs and record `⟨operator, ts, compute, storage, sustain, principal⟩` | 1 | ⏸️ ✅ app-layer (Slice 15; κ declared and **explicitly uncalibrated**; wall-clock deliberately excluded so the reading is reproducible) |
+| PAWA-2 | **Juul as the unit of account** — `balance ← balance − pawa`, admitted only if `balance ≥ pawa`; **a utility token by design**, defined by *use*, deliberately clear of investment-contract hallmarks (the gas-token posture, written into the design) | 2 | ⏸️ ⬜ not started |
+| PAWA-3 | **The out-of-pawa gate clause** — `admit = guard ∧ constraints ∧ token_ok ∧ balance ≥ pawa` — one more conjunct on the existing seam | 2 | ⏸️ ⬜ not started (the seam exists in Rust; the clause does not) |
+| PAWA-4 | **Pawa as a fitness term** `Pawa(π,s) = Σ pawa(o)` accumulated **in the sandbox, live state untouched**; `score(π) = Σ w·u(sim(π)) − λ·Pawa(π,s)` — efficiency ranked **before** commit | 3 | ⏸️ 🔨 the simulator accumulates per-branch pawa (Slice 15 step 2 ✅ app-layer); the **fitness term in a scorer ⬜** (= M-TEN) |
+| PAWA-5 | **Contribution as a programmable flow** — `licence ∈ {Free, Royalty(rate, payee)}`; a run debits `pawa(o)` from the user **and** transfers `r` user→contributor; an optional declared **treasury slice** on royalty runs bridges the private economy and the public commons | 4 | ⏸️ ⬜ not started |
+| PAWA-6 | **The treasury is itself a Sustain** `Σ_T` — `allocate`/`grant`/`disburse` Enzymes, a **reserve floor and category caps in `V_T`**, the protocol fee fraction φ_p, a periodic budget; **every disbursement rides the same enforcing gate and approval token** | 5 | ⏸️ ⬜ not started (a clean instance of the recursion — the treasury is admitted like any Enzyme and simulated like any strategy) |
+| PAWA-7 | **Genesis** `g : principals → Juul` — the starting distribution, declared in the open once and auditable forever; the ledger begins with `g` and every later balance is a **fold of transfers over it** | 6.1 | ⏸️ ⬜ not started |
+| PAWA-8 | **Monetary policy — issuance denominated in work** — new Juul enters by **rewarding hosts who serve pawa**; the schedule (fixed / decaying / target-rate) is a **declared, revisable parameter** changed only through governance | 6.2 | ⏸️ ⬜ not started |
+| PAWA-9 | **Many hosts, one meter** — the decentralized network needs no new machinery: **Multiparty** carries membership and consensus, **Events-&-Time merge semantics** carry cross-host state. *"A global meter over a coordinated membership with well-defined merge is the whole of what a world computer needs at this layer."* | 6.3 | ⏸️ 🔨 the **merge half is ✅ in Rust** (R2 #17/#18 — event-time, dedupe, LWW convergence); membership/consensus ⬜ (= M-MUL) |
+| PAWA-10 | **Incentive alignment + security from the same meter** — out-of-pawa gating stops runaway work at the gate; **pricing-via-processing makes Sybil strategies uneconomic** (Dwork–Naor); the efficiency term rewards lean strategies | 6.4 | ⏸️ ⬜ not started |
+| PAWA-11 | **Governance — the parameters are declared Sustains** — κ_c, κ_s, φ_p, φ_r, fee rates, the issuance schedule, the treasury budget: **a parameter change is an Enzyme**, admitted through `admit` with its approval token, recorded, auditable by replay | 6.5 | ⏸️ ⬜ not started |
+| PAWA-12 | **The migration path — single host outward** — (1) single host, (2) federated, (3) open. *"The meter, the unit of account, the efficiency term and the royalty flow are defined once, on a single host, and extend outward without redefinition."* | 6.6 | ⏸️ ⬜ (the path is the plan, and step 1's meter is done) |
+| PAWA-13 | **★ The honest line, stated once** — the **software** (meter, ledger, treasury accounting, licence/royalty settlement, out-of-pawa gating, parameter governance) is buildable now on a single host, before any coin is public. **Issuing a real, public, transferable token is a distinct, later, human-authorized act with legal and financial weight** | 6.7 | ⏸️ **this line is exactly ADR-0001 D5's boundary**, written by the article itself |
+
+##### Mycelium — the network as a Sustain
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| MYC-1 | **The network is a Sustain** `Σ_net` — not a new kind of thing; addressing and discovery over it | I·II | ⏸️ ⬜ not started (⚠ Python's `NETWORK_TREASURY_ID = "sustena.network_treasury"` carries Bonnie's own TODO to rename to `sustena.mycelium.treasury`) |
+| MYC-2 | **Propagation — gossip + publish/subscribe** | III | ⏸️ ⬜ (✅ app-layer *in-process* only: `events.py` enforces the dot protocol and dispatches hierarchical wildcard subscriptions — real topic pub/sub, one process) |
+| MYC-3 | **Membership and health** | IV | ⏸️ ⬜ not started |
+| MYC-4 | **What routes, and the law that separates it** — the Physarum router applied to money, tasks, compute, storage | V·VIII | ⏸️ ⬜ not started (= MUL-13) |
+| MYC-5 | **Treasury and settlement — the two-type royalty split** — a **pawa charge** splits `70/15/5/5/5` and a **licence sale** splits `80/10/3/2/5` across contributor / treasury / validator / proposer / referrer; **integer-floor arithmetic assigns the remainder deterministically so the split is exactly conserving** — a rounding leak would be a conservation-invariant violation | VI | ⏸️ 🔨 **the shipped `PawaLedger.charge` still runs the earlier four-way 70/20/5/5**, and has **zero callers** (= backlog E1/E2) |
+| MYC-6 | **★ Grants are mints, and the distinction is not pedantic** — a **transfer** (Σ Δ = 0) is bounded by the treasury and self-limiting; a **mint** (Σ Δ = +100) is unbounded, inflates the unit, and **makes Sybil registration directly profitable**. Both are legitimate designs; **only one of them is legitimate *undeclared*** | VI | ⏸️ ⬜ (the Onboarding Grant's kind must be declared before it ships) |
+| MYC-7 | **A commons with a subsidy** — the fee funds the commons that the fee is taken on | VII | ⏸️ ⬜ not started |
+| MYC-8 | **Two surfaces, one network** — Mycelium (orchestrator, laptop, full complexity) and Orchie (curated, phone) are **two projections of the same object, differing only in budget** | IX | 🔨 ✅ app-layer as UI surfaces; the *network* reading ⬜ |
+| MYC-9 | **Foundation and Institute as network-scale Symbionts** — their niche happens to be the whole graph; **nothing else about them is different**. The no-special-power rule is a **structural claim** (complete mediation), not a governance promise — *"a mother tree with override privileges would not be a forest; it would be a plantation"* | X·XI | ⏸️ ⬜ (the structural claim is already true in Rust: one path, no bypass) |
+
+##### Arena — the market as a Sustain
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| ARE-1 | **The Arena is a Sustain**; **artefact taxonomy** `kind ∈ {operative, operator, spore, widget}` | I·II | ⏸️ ⬜ Rust (✅ app-layer: `arena_packages` with the four kinds, spec_json, author, version, tags) |
+| ARE-2 | **★ Publish is an Enzyme, not an upload** — today it is a **route**, i.e. **a second write path into `S_arena`** — the exact failure complete mediation forbids | III | ⏸️ ⬜ **not started** (the Capstone records this as a *seventh gate duty*) |
+| ARE-3 | **Pricing — metering, charging, and the free tier** | IV | ⏸️ ⬜ not started |
+| ARE-4 | **Trust, reputation and adverse selection** — the **unravelling** (Akerlof): without a quality signal the market degrades to lemons; four countermeasures and how each is defeated; **what a trust score has to be** to survive | V | ⏸️ ⬜ **not started** — `trust_score` is a **dead constant** (Float default 0.0), used only to `ORDER BY` (= backlog E5) |
+| ARE-5 | **Delisting is not deletion, and that is correct** | V.4 | ⏸️ ⬜ not started |
+| ARE-6 | **Selection dynamics** — artefacts compete and are differentially retained (the Arena is §III's meme selection at market scale) | VI | ⏸️ ⬜ not started (`download_count` is likewise a dead constant) |
+| ARE-7 | **No Free Lunch ⇒ per-niche ranking** — a single global ranking is provably wrong; libraries are per-niche by necessity | VII | ⏸️ ⬜ not started (ranking is a single global `ORDER BY trust_score DESC`) |
+| ARE-8 | **Market design — biological markets; what matching theory does and does not give** | VIII | ⏸️ ⬜ not started |
+| ARE-9 | **Two separated lifecycles, and the schema already anticipated them** — `product_total` / `pawa_total` as separate columns and `product_status` / `package_status` as separate sequences: `PLACED|PROCESSING|DELIVERING|DELIVERED` (rival, physical) vs `PLACED|INSTALLING|SANDBOXED|LIVE` (non-rival, digital) | IX | ⏸️ 🔨 **the schema is right**; the lifecycles do not run — **orders do not settle** (= backlog E6) |
+| ARE-10 | **Licence keys at order time** — `LIC-` + eight uppercase alphanumerics, stored and returned per non-free package item | IX | ⏸️ ⬜ Rust (✅ app-layer) |
+
+**Summary:** the economy layer is **⏸️ deferred wholesale**, and the article draws the deferral line itself (PAWA-13): the meter, ledger, treasury accounting and gating are buildable now; **issuing a real transferable token is a separate, later, human-authorized act**. What already exists is the **meter** (Slice 15, wired into `execute_operator`, coefficients honestly uncalibrated) and a real append-only `PawaLedger` — whose `charge()` runs the **superseded four-way split** and **has zero callers**. Three items are worth carrying forward even while deferred, because they are correctness rather than economics: **ARE-2** (publish is a second write path), **MYC-6** (a grant that mints rather than transfers makes Sybil registration profitable, and must be *declared*), and **MYC-5**'s conservation property (integer-floor remainder handling is what makes the split exactly conserving).
+
+### Capstone / cross-cutting
+
+#### M-CAP · The whole machine  ✅ read
+*Article: `3B1B — Capstone - Formal Execution.md` (GAIA). The assembly — one object, seventeen times. Not a module to build: the argument that the others compose, plus the seams where leverage concentrates.*
+
+**Status: this section is the assembly view. Its build content is the SEAMS — and the gate seam is where Rust has already banked the largest structural wins.**
+
+| # | Feature | § | Rust status |
+|---|---|---|---|
+| CAP-1 | **The primitive restated; the module map — one object, seventeen times** — every article is `Σ = ⟨B,S,V,T,⊕⟩` at a different scale | I·II | ✅ the premise the Rust core is built on |
+| CAP-2 | **The recursion theorem + the four lifts** — the construction, the theorem, and the fixpoint "stated without mysticism", with **two honest caveats** on it | III | 🔨 ⊕/ρ ✅ in Rust; the theorem is the design's justification, not code |
+| CAP-3 | **The six-layer frame** — Substrate (Events&Time) → Definition (Sustain, Enzyme, Constraint, Embroidery) → Boundary (Ingest) → Cognition (Monitor, Tenet, Symbiont, Multiparty) → Surface (Curated UI, Editing) → Governance (Controller) | IV | ✅ **this WBD's own layering** |
+| CAP-4 | **The dependency order** `Events&Time → Embroidery → Sustain → Enzyme → Constraint → Ingest → Monitor → (Curated UI ∥ Tenet → Symbiont → Multiparty)`; **Editing after the Enzyme path**; **the Controller is NOT a late layer — it threads through from the first gate check onward** | IV | ✅ **the Rust build order followed it**: fold → state → rules → operators+gate → council |
+| CAP-5 | **Mycelium, Arena and Immune are not a seventh layer** — Mycelium and Arena are Σ at larger scales; **Immune is a property of the Boundary and Definition layers**, not a member of any | IV | ✅ (recorded — this is why M-IMM's items land inside the gate) |
+| CAP-6 | **The trace — the composition proof** — one M-Pesa message end to end, **every engine appearing exactly once**, using only machinery the specs already contain. *"The trace is the argument: if any step required machinery no spec provides, the series would have a hole"* | V | ✅ the trace runs today in Python (capture → τ → dedupe → gate → fold → compose) |
+| CAP-7 | **★★ SEAM 1 — the gate has SIX duties** — (1) admit operators to live state, (2) enforce invariants and post-conditions, (3) **check the approval token**, (4) **replay sandboxed simulations under the same rules**, (5) **gate edit authority**, (6) **mediate the boundary firewall F**. *"The single highest-leverage object in the design. Build it once, and six obligations across five sections are discharged"* | VI.1 | 🔨 **Rust has 1 ✅, 2 ✅, 4 ✅ (structural — one path), and 3 partially (defer + re-admission)**. Missing: **3's bound token**, **5 edit authority**, **6 the firewall F** |
+| CAP-8 | **Two further gate duties the later articles found** (flagged as assembly, not §9.3 canon) — (7) the **LLM task-class budget** is an ordinary constraint, one more predicate on the same seam; (8) **`publish` is a route, not an Enzyme**, so the seam has a **market-side duty** too | VI.1 | ⬜ both not started (7 ⏸️ economy-deferred; 8 = ARE-2) |
+| CAP-9 | **★ SEAM 2 — fork+sim is used three ways** — Tenet's scenario replay, the Symbiont sandbox, and Editing's simulate-before-commit. **One mechanism, three consumers, and the correctness condition is that all three run under the same gate** — which is exactly where the Python code diverges | VI.2 | ✅ **structural in Rust** — there is one execution path, so all three consumers must ride it (this is the concrete form of backlog #12) |
+| CAP-10 | **SEAM 3 — the log sits under three things at once** — state (as a fold), definitions (as versioned history), audit (what happened, when, from whom); and per TOLERANCE it is **immune memory**: the substrate on which *this has happened before* and *this has never happened before* both become answerable | VI.3 | 🔨 state-as-fold ✅; **definitions-as-versioned-history ⬜ (= EDIT-7)**; audit/immune-memory reads ⬜ |
+| CAP-11 | **SEAM 4 — Embroidery is the single declaration source** — S dimensions, V invariants, guards and effects, utilities and weights, widget schemas and bindings, connectors, domains. *"One place to say what is true — which is the only way the type-checker can be one type-checker"* | VI.4 | 🔨 Rust has **one** predicate parser/evaluator and a typed schema (R2 #14) — the property this seam is about; the **authoring language ⬜** (= M-DSL) |
+| CAP-12 | **SEAM 5 — provenance threads the whole length** — device tokens → event principals → approval decisions. *"Break the thread anywhere and the audit becomes a list of assertions"* | VI.5 | 🔨 event `provenance` ✅ (R2 #17 legacy marker) + principals ✅ (R2 #10); **device tokens → approval decisions ⬜** |
+| CAP-13 | **Behaviour varies by domain — the domain × engine matrix** (Observe/Model/Learn/Respond × clear/complicated/complex/chaotic); **domain detection is a Monitor function** (a shift is a regime change — what CUSUM exists to catch); **disorder is a first-class reading**, surfaced as *confidence over the domain estimate* | VII | ⬜ **not started** (= SUS-16, OPV-16) |
+| CAP-14 | **★ The honest tension at assembly scale** — *"Most of Sustena is complicated-domain machinery… a household and a business are complex systems."* The complex row is deliberately **not** the complicated row with more compute; Ashby: variety by **nesting** grows combinatorially where variety by **enumeration** runs out — *"the load-bearing reason the primitive is recursive"* | VII·IX.3 | ✅ recorded as the design's own stated limit |
+| CAP-15 | **Two surfaces, one truth** — Mycelium and Orchie are **projections of the same object differing only in budget** | VIII.1 | ⬜ Rust (✅ app-layer) |
+| CAP-16 | **Settlement: Local → Babychain → finalizer** — each Sustain executes locally and almost all activity stays there; a **Babychain** aggregates and **anchors periodically**, committing the **state-root hash** (optionally with a validity proof) rather than the transactions; *"Ethereum as finalizer does not run the system; it finalises its truth"* | VIII.2 | ⏸️ economy-deferred |
+| CAP-17 | **Governance — local defines, global enforces** — a DAO is a Sustain with embedded consensus; **CouncilSession** for a single-human Sustain, **StakeholderSession** added when interests are genuinely in tension; **authority attaches to the membership EDGE, not the member**; a **skin** is a named bundle of edge privileges (RBAC); bounds: FLP, and `k ≥ 3f+1` | VIII.3 | ✅ **edge-authority + skins built in Rust (R2 #10)**; StakeholderSession ⬜; consensus ⬜ (= M-MUL) |
+| CAP-18 | **Foundation and Institute — the no-special-power rule is structural** — complete mediation, no bypass. *"A privileged-Symbiont exception is not a feature with a risk; it is the deletion of the property that makes the rest of the argument true"* | VIII.4 | ✅ **structural in Rust** (one path, no privileged bypass) |
+| CAP-19 | **The thesis, made precise** — *"Any system that can be described can be modeled, simulated, and optimized before execution"*; the loop **DESCRIBE → MODEL → SIMULATE → OPTIMISE → EXECUTE → OBSERVE**, closed, forever | IX.1 | 🔨 DESCRIBE/EXECUTE ✅; **SIMULATE partial, OPTIMISE ⬜, OBSERVE ⬜** (= M-TEN, M-MON, M-CTL) |
+| CAP-20 | **Why one recursive primitive is the economical route** — the argument is about **interfaces, and it is countable** | IX.3 | ✅ the justification for the whole build |
+
+**Summary:** the Capstone is not a module to build but the **map of where leverage concentrates**, and it names the two seams Rust has already banked: **the gate** (four of six duties discharged, structurally) and **fork+sim under one gate** (a bypass is not expressible). The remaining gate duties are the **bound approval token** (OPV-30), **edit authority** (EDIT-8) and the **firewall F** (CON-1) — and the article adds two more found later: the **LLM policy predicate** and **publish-as-an-Enzyme** (ARE-2). The build order this WBD follows is the article's own (CAP-4), including its two insistences: **Editing comes after the Enzyme path**, and **the Controller is not a late layer**. CAP-14 is the honest frame for everything: most of the machinery is complicated-domain, most households are complex, and the matrix (CAP-13) is how the design faces that rather than papering over it.
+
+
+---
+
+## Completeness checklist — every technical article mapped
+
+**All 18 ✓ — every technical article has been fully read and its features extracted into the WBD above. The breakdown is complete.**
+
+- ✓ Events and Time → M-EVT
+- ✓ Sustain → M-SUS
+- ✓ Operator → M-OP
+- ✓ Constraint → M-CON
+- ✓ Immune → M-IMM
+- ✓ DSL → M-DSL
+- ✓ Ingest → M-ING
+- ✓ Monitor → M-MON
+- ✓ Tenet → M-TEN
+- ✓ Operative → M-OPV
+- ✓ Multiparty → M-MUL
+- ✓ Curated UI → M-UI
+- ✓ Editing → M-EDIT
+- ✓ Controller → M-CTL
+- ✓ Pawa → M-PAWA
+- ✓ Mycelium → M-PAWA
+- ✓ Arena → M-PAWA
+- ✓ Capstone → M-CAP
+
+---
+
+## New gaps found by the final eight reads
+
+*Not on `R2_BACKLOG.md`. Recorded here so the backlog can absorb them on its next pass; each is marked ★ or ⚠ in its own module above.*
+
+| # | Gap | Module | Why it matters |
+|---|---|---|---|
+| N1 | **The approval token is grep-0** — `approval_token`, `valid_token`, `effect_class` appear nowhere. The token must be **bound to `(o,θ)`, single-use and expiring**; the trace invariant `sim ≺ vote ≺ approve ≺ live` is prefix-closed, so it is a **safety property and can be structural** | OPV-30/31, EDIT-8, CAP-7 | The gate's third duty. One object discharges obligations in three articles |
+| N2 | **`publish` is a route, not an Enzyme** — a **second write path into the Arena**, the exact failure complete mediation forbids | ARE-2, CAP-8 | A seventh gate duty the Capstone found after §9.3 |
+| N3 | **A definition edit destroys its predecessor** — `UPDATE … SET spec_json` is an in-place overwrite. The version counter increments; nothing is versioned. Sharper than backlog #26: there is no `D_{n-1}`, so `e⁻¹` and 3-valued rollback have **nothing to roll back to** | EDIT-7 | Blocks the whole rollback algebra |
+| N4 | **`edit.operator_spec` lets `pawa_cost` and `license_tier` be changed at runtime, free, with no authority check** — and mutates the in-memory registry, so the change is process-local and lost on restart | EDIT-14 | *Changing an Enzyme's price costs less than using it* |
+| N5 | **`edit.state_patch`'s `remove` writes `None` instead of deleting** — under a typed schema that deposits a type violation into state | EDIT-15 | Rust's organisational closure would refuse it |
+| N6 | **Live bug — `NetworkZone.jsx:47`** — `owner_ids?.[0]` on the unsubstituted token `"{{owner_ids}}"` indexes the *string* and yields `"{"`, which is truthy, so the fallback never fires and `"{"` is posted as the `user_id` provisioning child sustains | EDIT-16 | Wrong ownership on real children today; nothing refused, nothing logged |
+| N7 | **The `domain` key collision** — `operatives.<n>.domain` is a subject-matter tag list; the article's `dom` is the **Cynefin axis**. Reusing the key makes one of them inexpressible | OPV-16, CAP-13 | Cheap to avoid now, expensive after specs ship |
+| N8 | **A grant that mints is not a grant that transfers** — a transfer conserves and is treasury-bounded; a mint is unbounded and **makes Sybil registration directly profitable**. Both are legitimate; *only one is legitimate undeclared* | MYC-6 | ⏸️ economy, but it is a correctness property, not a pricing choice |
+| N9 | **`compose(r)`'s recency window is a hard-coded `limit=25`** — a widget whose triggering event has scrolled out cannot be summoned at all | UI-4 | A policy living in a call argument |
+| N10 | **Urgency returns 0.0 when `allocated ≤ 0`** — an **unfunded pocket can never be urgent**, which is backwards | UI-7 | Rides on M-MON; worth fixing at the proxy meanwhile |
+
+**Two cheap, high-value items** surfaced that are *not* new gaps but are newly costed: **runway** (`R(s)=min{k: s_k∉V}` — one policy, one forward scan, OPV-19) and the **branching-ratio criticality read** (σ̂ is a read over the log's `causes`, OPV-14). Both become available the moment V is a region and `causes` is on the event record.
+
+---
+
+*Created 2026-08-12 as the frame; **completed 2026-08-12** — all 18 technical articles read and extracted. Historical source: `Projects/SUSTENA_UPGRADE_SPEC.md` (the Python-upgrade synthesis). Python engine stays live+untouched as the reference until Rust ships.*

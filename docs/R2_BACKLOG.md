@@ -181,4 +181,38 @@ boundary. Both are real today on the live host. Pull forward on request.
 
 ---
 
-*Last updated: 2026-08-12, at R1 completion.*
+---
+
+## ⚠️ Whole-system reconciliation (2026-08-12) — checked against SUSTENA_UPGRADE_SPEC.md
+
+This backlog covers the **foundation + walking skeleton** well. But the master spec (`SUSTENA_UPGRADE_SPEC.md`, §9.1) defines a three-module **operational spine — Monitor / Tenet / Controller** — and **two of the three are not yet tracked here.** Added below as pending so the backlog is comprehensive.
+
+### 🔴 SPINE — missing from the list above; required before "whole system" is true
+
+| # | Gap | Article | Where |
+|---|---|---|---|
+| T1 | **Tenet optimisation engine (§4)** — backward-induction/Bellman, best/base/worst scenario ensembles, invariant-action extraction, decision-node detection, dead-drops, temporal pincer. Today only the deterministic **forward** simulator exists (ported in R1). | Tenet / Temporal Decision Architecture | new |
+| G1 | **Controller decision-math (§3)** — Lyapunov distance-to-V urgency, `should_surface` (SNR filter), `is_stable_intervention`, Sheridan `AUTOMATION_LEVEL` dispatch, OODA loop, holarchy escalation. Today: execute + rollback + council exist; **none of the governance decision-math.** | Controller / The Expanse | new |
+
+### 🟡 Confirm coverage (built in Python — verify the Rust plan carries them, core vs app-layer)
+
+- **Curated UI `compose(r)` / attention budget (§4H)** — built in Python (ORCHIE).
+- **Ingest transducer / parse-rules (§4K)** — built in Python.
+
+**Caveat (honest):** T1 and G1 were never in the walking skeleton either — not built in Python, not "dropped" by Rust; they are the spec's *next depth*. The risk is only that treating this backlog as "the whole system" would silently omit the simulate-optimise (Tenet) and govern-decide (Controller) depth the master spec puts at the centre.
+
+### 🔵 Ten further gaps found by the full article reads — see the WBD
+
+The completed WBD (`SUSTENA_UPGRADE_SPEC.md`) records **N1–N10**, found by reading the
+last eight technical articles in full. They are not duplicated here; the WBD's
+*"New gaps found by the final eight reads"* table is the live list. The three worth
+knowing about before opening the next slice:
+
+- **N1 — the approval token is grep-0.** One object discharges obligations in three
+  articles (Operative §XVI, Editing §VI, Capstone §VI.1). The trace invariant is
+  prefix-closed, so it can be **structural rather than promised**.
+- **N2 — `publish` is a route, not an Enzyme**: a second write path into the Arena.
+- **N3 — a definition edit destroys its predecessor.** Sharper than #26: rollback has
+  nothing to roll back *to*.
+
+*Last updated: 2026-08-12 — whole-system reconciliation added (Monitor is tracked as FOLLOW #23–25; Tenet §4 and Controller §3 added as T1/G1); N1–N10 cross-referenced from the completed WBD.*
