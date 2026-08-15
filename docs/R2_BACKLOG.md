@@ -16,9 +16,9 @@
 | | |
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
-| Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices |
-| Conformance vectors | **118**, replayed by both engines |
-| Rust tests | 44 unit + 7 conformance suites |
+| Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval cases** (rust-only, divergence recorded) |
+| Rust tests | **128 unit · 14 conformance tests** across 2 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -206,6 +206,41 @@ This backlog covers the **foundation + walking skeleton** well. But the master s
 - **Ingest transducer / parse-rules (§4K)** — built in Python.
 
 **Caveat (honest):** T1 and G1 were never in the walking skeleton either — not built in Python, not "dropped" by Rust; they are the spec's *next depth*. The risk is only that treating this backlog as "the whole system" would silently omit the simulate-optimise (Tenet) and govern-decide (Controller) depth the master spec puts at the centre.
+
+### ✅ N1 — the approval token — SHIPPED IN RUST (2026-08-12)
+
+`sustena-core/src/approval.rs`, grounded in **Operative §XVI** and **Capstone §VI.1 duty 3**.
+
+The gate clause is now the article's, in full:
+
+```text
+admit(o,s) ⟺ g_o(s) ∧ o(s)∈A ∧ D(s,o(s))
+             ∧ (effect_class = sandbox ∨ valid_token(approve(o, principal)))
+```
+
+Three things are **unrepresentable** rather than guarded against:
+
+- **A live effect with no approval.** `EffectClass::Live` *carries* the token —
+  the variant that would spell "live, unapproved" does not exist.
+- **An approval that skipped simulation or the vote.** `ApprovalToken` has
+  private fields and no public constructor; the only route is
+  `Simulated → Voted → approve()`, each stage consuming the previous **by
+  value**. That is OPV-31's trace invariant enforced by move semantics rather
+  than by a runtime scan something could forget to run.
+- **A token matching the wrong act.** The binding is kept structurally
+  (operator + the real parameters, compared by equality), not as a digest, so
+  there is no collision surface to find.
+
+**Divergence, recorded not silent:** Python has no approval token
+(`approval_token` / `valid_token` / `effect_class` are grep-0, re-confirmed).
+`conformance/vectors/approval.json` carries an explicit `rust-ahead-of-python`
+block, and a test asserts it still exists. These become parity vectors unchanged
+if the reference catches up.
+
+**Left open, deliberately, and named:** `execute_admitted` now takes nine
+arguments. The fix is a context struct carrying registry/allowed/enforcement —
+a real API refactor touching every call site, and not something to do as a side
+effect of this slice.
 
 ### 🔵 Ten further gaps found by the full article reads — see the WBD
 

@@ -1,0 +1,261 @@
+{
+  "conformance_version": 1,
+  "slice": "approval",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Operative - Formal Execution.md, §XVI (The Token Inside the Gate); Capstone §VI.1 duty 3",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors, not parity vectors. Authored from the article, not generated from the reference engine.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-12",
+    "statement": "The reference Python engine has NO approval token. `approval_token`, `valid_token` and `effect_class` are grep-0 in apps/api/sustena/ — re-confirmed at the time of writing, and independently recorded by the Operative article's own Sustena Note. So `replayed_by` is [\"rust\"] alone, and that is a deliberate, documented divergence rather than a silent one.",
+    "python_behaviour_today": "In Python, 'the human decides' holds by structural incapacity plus a single human-mediated route (core/advisory.py cannot act; accept_suggestion() routes through execute_operator; egress needs a separate confirm_egress). Same destination, different mechanism, narrower coverage — it is policy plus incapacity, not complete mediation.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. Nothing here is Rust-specific: the behaviour is the article's.",
+    "not_a_divergence_in": "R1 behaviour. Every pre-existing vector runs with effect_class = unchecked and is byte-identical to before this slice."
+  },
+  "trace_cases": [
+    {
+      "name": "the_only_route_to_a_token_is_sim_then_vote_then_approve",
+      "why": "§XVI's trace invariant: ∀ live e: ∃ e_sim ≺ e_vote ≺ e_approve ≺ e. It is prefix-closed, hence a safety property, hence enforceable — so it is built as structure. In Rust the stages consume each other by value and ApprovalToken has no public constructor, so a skipped stage is not expressible. This case records the behaviour a host in another language must reproduce.",
+      "chain": {"proposal_id": "prop-1", "sandbox_committed": true, "vote": "PASSED"},
+      "expect": {"token_minted": true}
+    },
+    {
+      "name": "a_refused_simulation_cannot_be_voted_on",
+      "why": "A simulation the gate refused has nothing to approve. The chain stops at the first stage.",
+      "chain": {"proposal_id": "prop-2", "sandbox_committed": false, "vote": "PASSED"},
+      "expect": {"token_minted": false, "error": "SandboxRefused"}
+    },
+    {
+      "name": "only_a_passed_proposal_can_be_approved",
+      "why": "The council advises; a proposal still in voting is not a decision.",
+      "chain": {"proposal_id": "prop-3", "sandbox_committed": true, "vote": "IN_VOTING"},
+      "expect": {"token_minted": false, "error": "NotPassed"}
+    },
+    {
+      "name": "a_deadline_passing_is_not_an_approval",
+      "why": "DEFERRED means the deadline passed with no human decision. Never an auto-approval — the one place a timeout must not become a yes.",
+      "chain": {"proposal_id": "prop-4", "sandbox_committed": true, "vote": "DEFERRED"},
+      "expect": {"token_minted": false, "error": "NotPassed"}
+    },
+    {
+      "name": "a_failed_proposal_cannot_be_approved",
+      "why": "The council produced no votes at all.",
+      "chain": {"proposal_id": "prop-5", "sandbox_committed": true, "vote": "FAILED"},
+      "expect": {"token_minted": false, "error": "NotPassed"}
+    }
+  ],
+  "validation_cases": [
+    {
+      "name": "a_token_admits_the_exact_act_it_was_given_for",
+      "why": "The ordinary path.",
+      "token": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "principal": "bonnie", "nonce": 1, "expiry": 100
+      },
+      "attempt": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "acting_principal": "bonnie", "now": 50
+      },
+      "expect": {"valid": true}
+    },
+    {
+      "name": "an_approval_binds_to_an_act_not_a_shape_of_act__amount",
+      "why": "§XVI, verbatim: 'yes, pay the rent' must not admit a different amount to a different payee. This is the case the whole binding exists for.",
+      "token": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "principal": "bonnie", "nonce": 1, "expiry": 100
+      },
+      "attempt": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 90000.0},
+        "acting_principal": "bonnie", "now": 50
+      },
+      "expect": {"valid": false, "error": "WrongParams"}
+    },
+    {
+      "name": "an_approval_binds_to_an_act_not_a_shape_of_act__payee",
+      "why": "The other half of the same sentence.",
+      "token": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "principal": "bonnie", "nonce": 1, "expiry": 100
+      },
+      "attempt": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "someone_else", "amount": 15000.0},
+        "acting_principal": "bonnie", "now": 50
+      },
+      "expect": {"valid": false, "error": "WrongParams"}
+    },
+    {
+      "name": "a_token_for_one_operator_does_not_admit_another",
+      "why": "Same parameters, different act. 'WrongAct' and 'WrongParams' are separate answers because they call for different things from the person.",
+      "token": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "principal": "bonnie", "nonce": 1, "expiry": 100
+      },
+      "attempt": {
+        "operator": "budget.allocate",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "acting_principal": "bonnie", "now": 50
+      },
+      "expect": {"valid": false, "error": "WrongAct"}
+    },
+    {
+      "name": "one_persons_approval_does_not_admit_anothers_act",
+      "why": "The token names who approved. Another member's authority to act is not authority to spend this approval.",
+      "token": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "principal": "bonnie", "nonce": 1, "expiry": 100
+      },
+      "attempt": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "acting_principal": "cira", "now": 50
+      },
+      "expect": {"valid": false, "error": "WrongPrincipal"}
+    },
+    {
+      "name": "expiry_is_inclusive",
+      "why": "A boundary worth pinning: at exactly the expiry the approval still holds.",
+      "token": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "principal": "bonnie", "nonce": 1, "expiry": 100
+      },
+      "attempt": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "acting_principal": "bonnie", "now": 100
+      },
+      "expect": {"valid": true}
+    },
+    {
+      "name": "an_expired_approval_is_refused",
+      "why": "§XVI: expiring, with re-admission at commit — the state at approval time need not be the state at commit time.",
+      "token": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "principal": "bonnie", "nonce": 1, "expiry": 100
+      },
+      "attempt": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "acting_principal": "bonnie", "now": 101
+      },
+      "expect": {"valid": false, "error": "Expired"}
+    },
+    {
+      "name": "parameter_order_is_not_part_of_the_act",
+      "why": "The binding is over the parameter MAP, not its serialisation. Two hosts that order keys differently must reach the same verdict, or the token is an artefact of how a request was written down.",
+      "token": {
+        "operator": "budget.spend",
+        "params": {"pocket_name": "rent", "amount": 15000.0},
+        "principal": "bonnie", "nonce": 1, "expiry": 100
+      },
+      "attempt": {
+        "operator": "budget.spend",
+        "params": {"amount": 15000.0, "pocket_name": "rent"},
+        "acting_principal": "bonnie", "now": 50
+      },
+      "expect": {"valid": true}
+    }
+  ],
+  "single_use_cases": [
+    {
+      "name": "an_approval_is_single_use",
+      "why": "§XVI: delivery is at-least-once and the record dedupes on stable ids, so a replayable approval is one you gave once and spent twice.",
+      "nonce": 7,
+      "already_spent": [],
+      "redemptions": 2,
+      "expect": {"outcomes": ["ok", "AlreadySpent"]}
+    },
+    {
+      "name": "a_ledger_restored_from_the_host_still_refuses_a_replay",
+      "why": "A process restart is not a way to spend an approval twice. Single-use is a property of the record, not of one process's memory.",
+      "nonce": 7,
+      "already_spent": [7],
+      "redemptions": 1,
+      "expect": {"outcomes": ["AlreadySpent"]}
+    },
+    {
+      "name": "distinct_approvals_do_not_collide",
+      "why": "Spending one approval must not invalidate an unrelated one.",
+      "nonce": 8,
+      "already_spent": [7],
+      "redemptions": 1,
+      "expect": {"outcomes": ["ok"]}
+    }
+  ],
+  "gate_cases": [
+    {
+      "name": "a_live_effect_with_a_matching_approval_commits",
+      "why": "The whole clause, end to end, through the real gate.",
+      "state": {"finances": {"liquid": {"balance": 1000.0}, "pockets": {}, "income": {"monthly_total": 0.0, "sources": []}}},
+      "operator": "budget.allocate",
+      "params": {"pocket_name": "food", "amount": 250.0, "period": "monthly"},
+      "effect_class": "live",
+      "token": {"operator": "budget.allocate", "params": {"pocket_name": "food", "amount": 250.0, "period": "monthly"}, "principal": "bonnie", "nonce": 1, "expiry": 100},
+      "now": 50,
+      "expect": {"committed": true, "balance_after": 750.0}
+    },
+    {
+      "name": "an_unapproved_live_effect_is_not_a_move",
+      "why": "§XVI's closing form: an unapproved live effect is not blocked, penalised, or flagged for review — there is no admitted operator application that produces it. In Rust it is not even expressible (EffectClass::Live carries the token), so this case records the ONLY reachable near-miss: an approval that does not match the act.",
+      "state": {"finances": {"liquid": {"balance": 1000.0}, "pockets": {}, "income": {"monthly_total": 0.0, "sources": []}}},
+      "operator": "budget.allocate",
+      "params": {"pocket_name": "food", "amount": 900.0, "period": "monthly"},
+      "effect_class": "live",
+      "token": {"operator": "budget.allocate", "params": {"pocket_name": "food", "amount": 250.0, "period": "monthly"}, "principal": "bonnie", "nonce": 1, "expiry": 100},
+      "now": 50,
+      "expect": {"committed": false, "rule": "approval_token", "state_unchanged": true}
+    },
+    {
+      "name": "a_sandbox_effect_needs_no_approval",
+      "why": "effect_class = sandbox satisfies the disjunction on its own. Operative §X's fork-and-replay.",
+      "state": {"finances": {"liquid": {"balance": 1000.0}, "pockets": {}, "income": {"monthly_total": 0.0, "sources": []}}},
+      "operator": "budget.allocate",
+      "params": {"pocket_name": "food", "amount": 250.0, "period": "monthly"},
+      "effect_class": "sandbox",
+      "expect": {"committed": true, "balance_after": 750.0}
+    },
+    {
+      "name": "a_sandbox_effect_is_exempt_from_the_token_not_from_the_gate",
+      "why": "The sandbox is bounded by exactly the household's own law: a fork can never reach a state the real Sustain would refuse. Exempting simulation from the INVARIANTS is how a fork becomes a second write path.",
+      "state": {"finances": {"liquid": {"balance": 100.0}, "pockets": {"food": {"allocated": 10.0, "spent": 0.0, "limit": 0.0}}, "income": {"monthly_total": 0.0, "sources": []}}},
+      "operator": "test.force_negative",
+      "params": {},
+      "effect_class": "sandbox",
+      "expect": {"committed": false, "rule": "enforcement_gate", "state_unchanged": true}
+    },
+    {
+      "name": "a_refused_call_does_not_burn_the_approval",
+      "why": "Being turned back by a guard should leave the person free to fix the state and use the same approval. The nonce is spent at commit and nowhere else.",
+      "state": {"finances": {"liquid": {"balance": 1000.0}, "pockets": {}, "income": {"monthly_total": 0.0, "sources": []}}},
+      "operator": "budget.allocate",
+      "params": {"pocket_name": "food", "amount": 5000.0, "period": "monthly"},
+      "effect_class": "live",
+      "token": {"operator": "budget.allocate", "params": {"pocket_name": "food", "amount": 5000.0, "period": "monthly"}, "principal": "bonnie", "nonce": 3, "expiry": 100},
+      "now": 50,
+      "expect": {"committed": false, "state_unchanged": true, "nonce_spent_after": false}
+    },
+    {
+      "name": "a_replayed_live_effect_is_refused_and_changes_nothing",
+      "why": "The same approval, delivered twice. The first commits; the second must not.",
+      "state": {"finances": {"liquid": {"balance": 1000.0}, "pockets": {}, "income": {"monthly_total": 0.0, "sources": []}}},
+      "operator": "budget.allocate",
+      "params": {"pocket_name": "food", "amount": 250.0, "period": "monthly"},
+      "effect_class": "live",
+      "token": {"operator": "budget.allocate", "params": {"pocket_name": "food", "amount": 250.0, "period": "monthly"}, "principal": "bonnie", "nonce": 9, "expiry": 100},
+      "now": 50,
+      "run_twice": true,
+      "expect": {"committed": true, "balance_after": 750.0, "second_committed": false, "second_rule": "approval_token"}
+    }
+  ]
+}

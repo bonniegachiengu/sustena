@@ -83,7 +83,24 @@ conformance/
     operators.json      guard/effect/gate/commit      (parity)
     council.json        aggregation and resolution    (parity)
     admission.json      refuse / clamp / defer        (spec, R2)
+    events.json         event-time order, dedupe, LWW (spec, R2)
+    approval.json       the approval token in the gate (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
 loudly rather than silently passing against the wrong expectations.
+
+## Recorded divergences
+
+A spec vector may carry a `divergence` block naming a place where the two
+engines deliberately differ. The rule is that a divergence is **documented or
+it is a bug** — nothing silently differs.
+
+- **`approval.json` — rust-ahead-of-python.** The reference engine has no
+  approval token at all (`approval_token`, `valid_token` and `effect_class` are
+  grep-0 in `apps/api/sustena/`). In Python "the human decides" holds by
+  structural incapacity plus a single human-mediated route, not by complete
+  mediation. These cases become parity vectors unchanged if the reference ever
+  catches up; nothing in them is Rust-specific.
+  `tests/conformance_approval.rs` asserts the block still exists, so the
+  divergence cannot stop being documented without a test failing.

@@ -39,6 +39,7 @@ use serde_json::{Map, Value};
 
 pub use meta::{OperatorFn, OperatorMeta, OperatorResult, Registry};
 
+use crate::approval::{Binding, EffectClass, NonceLedger};
 use crate::mutation::Mutation;
 use crate::principal::{permitted, Denial, Memberships, Tier};
 use crate::predicate;
@@ -137,6 +138,47 @@ pub fn execute_as(
     params: &Map<String, Value>,
     authorization: &Authorization,
 ) -> Execution {
+    let mut ledger = NonceLedger::new();
+    execute_admitted(
+        registry, allowed, enforcement, state, operator_name, params,
+        authorization, &EffectClass::Unchecked, &mut ledger,
+    )
+}
+
+/// The full `admit()` — [`execute_as`] with the approval clause of Operative
+/// §XVI closing over it.
+///
+/// ```text
+/// admit(o,s) ⟺ g_o(s) ∧ o(s)∈A ∧ D(s,o(s))
+///              ∧ (effect_class = sandbox ∨ valid_token(approve(o, principal)))
+/// ```
+///
+/// The token is checked in two places, and the split is deliberate. Binding,
+/// principal and expiry are checked **before** the operator body runs — no
+/// reason to compute an effect nobody approved. The nonce is spent **at
+/// commit**, after the gate has passed, because a refused call must not consume
+/// an approval: being turned back by an invariant should leave the person free
+/// to fix the state and try the same approval again.
+///
+/// A live effect with no approval cannot be requested — see [`EffectClass`].
+//
+// Nine arguments is two too many, and the fix is a context struct carrying
+// registry/allowed/enforcement — which would touch `execute`, `execute_as` and
+// every call site. That is a deliberate API refactor, not something to do as a
+// side effect of the token slice, so it is named here and left for its own
+// change rather than quietly tolerated.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_admitted(
+    registry: &Registry,
+    allowed: &[String],
+    enforcement: &Enforcement,
+    state: &Value,
+    operator_name: &str,
+    params: &Map<String, Value>,
+    authorization: &Authorization,
+    effect: &EffectClass,
+    nonces: &mut NonceLedger,
+) -> Execution {
     let untouched = || Execution {
         result: OperatorResult::fail(
             format!("Operator '{operator_name}' is not available on this sustain."),
@@ -178,6 +220,43 @@ pub fn execute_as(
             };
             return Execution {
                 result: OperatorResult::fail(denial.to_string(), rule),
+                mutations: vec![],
+                events: vec![],
+                state: state.clone(),
+            };
+        }
+    }
+
+    // ── valid_token(approve(o, principal)) ───────────────────────────────────
+    // Operative §XVI's conjunct. Sandbox and Unchecked pass straight through;
+    // a live effect is admitted only by an approval bound to THIS act.
+    //
+    // Placed beside authority rather than at the end: like `permitted`, it does
+    // not depend on state, so there is no reason to run an effect for it to
+    // judge. Expiry is re-checked here at commit time, which is the point of
+    // it — the state at approval time need not be the state now.
+    if let EffectClass::Live { token, now } = effect {
+        let acting = match authorization {
+            Authorization::Principal { id, .. } => Some(*id),
+            Authorization::Unchecked => None,
+        };
+        let attempted = Binding::new(operator_name, params);
+        if let Err(err) = token.validate(&attempted, acting, *now) {
+            return Execution {
+                result: OperatorResult::fail(err.to_string(), "approval_token"),
+                mutations: vec![],
+                events: vec![],
+                state: state.clone(),
+            };
+        }
+        // Cheap pre-check so a known-spent approval never runs an effect. The
+        // authoritative spend is at commit, below.
+        if nonces.is_spent(token.nonce()) {
+            return Execution {
+                result: OperatorResult::fail(
+                    crate::approval::TokenError::AlreadySpent { nonce: token.nonce() }.to_string(),
+                    "approval_token",
+                ),
                 mutations: vec![],
                 events: vec![],
                 state: state.clone(),
@@ -318,6 +397,21 @@ pub fn execute_as(
     }
 
     // ── commit ───────────────────────────────────────────────────────────────
+    // The approval is spent here and nowhere else. Everything above this line
+    // can refuse, and a refusal must leave the approval unspent — being turned
+    // back by an invariant should leave the person free to fix the state and
+    // use the same approval, not burn it.
+    if let EffectClass::Live { token, .. } = effect {
+        if let Err(err) = nonces.redeem(token) {
+            return Execution {
+                result: OperatorResult::fail(err.to_string(), "approval_token"),
+                mutations: vec![],
+                events: vec![],
+                state: state.clone(),
+            };
+        }
+    }
+
     Execution {
         result,
         mutations: working.mutations().to_vec(),
@@ -584,6 +678,165 @@ mod tests {
                          &params(&[("pocket_name", json!("food")), ("amount", json!(50.0)),
                                    ("period", json!("monthly"))]));
         assert!(ex.committed());
+    }
+
+    // ── the approval token at the gate (Operative §XVI · N1) ────────────────
+
+    use crate::approval::{ApprovalToken, EffectClass, NonceLedger, Simulated};
+    use crate::council::ProposalStatus;
+
+    fn allocate_params() -> Map<String, Value> {
+        params(&[("pocket_name", json!("food")), ("amount", json!(250.0)),
+                 ("period", json!("monthly"))])
+    }
+
+    /// The only route: simulate → vote → approve.
+    fn approved(op: &str, p: &Map<String, Value>, who: &str, nonce: u64, expiry: u64) -> ApprovalToken {
+        Simulated::from_sandbox("prop-1", Binding::new(op, p), Ok(()))
+            .expect("the sandbox run committed")
+            .voted(ProposalStatus::Passed)
+            .expect("the council passed it")
+            .approve(who, nonce, expiry)
+    }
+
+    fn run_live(token: &ApprovalToken, now: u64, nonces: &mut NonceLedger,
+                op: &str, p: &Map<String, Value>) -> Execution {
+        execute_admitted(
+            &Registry::default(), &allowed(), &armed(), &homestead_state(), op, p,
+            &Authorization::Unchecked, &EffectClass::Live { token, now }, nonces,
+        )
+    }
+
+    #[test]
+    fn a_live_effect_with_a_matching_approval_commits() {
+        let t = approved("budget.allocate", &allocate_params(), "bonnie", 1, 100);
+        let mut nonces = NonceLedger::new();
+        let ex = run_live(&t, 50, &mut nonces, "budget.allocate", &allocate_params());
+        assert!(ex.committed());
+        assert_eq!(ex.state["finances"]["liquid"]["balance"], json!(750.0));
+    }
+
+    #[test]
+    fn an_approval_for_a_different_amount_does_not_admit_this_one() {
+        // "Yes, allocate 250" must not admit 900. This is the whole reason the
+        // token binds to (o, θ) rather than to o.
+        let t = approved("budget.allocate", &allocate_params(), "bonnie", 1, 100);
+        let mut nonces = NonceLedger::new();
+        let other = params(&[("pocket_name", json!("food")), ("amount", json!(900.0)),
+                             ("period", json!("monthly"))]);
+        let ex = run_live(&t, 50, &mut nonces, "budget.allocate", &other);
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("approval_token"));
+        assert_eq!(ex.state, homestead_state(), "a refusal changes nothing");
+    }
+
+    #[test]
+    fn an_approval_is_spent_once_and_the_replay_is_refused() {
+        let t = approved("budget.allocate", &allocate_params(), "bonnie", 7, 100);
+        let mut nonces = NonceLedger::new();
+
+        let first = run_live(&t, 50, &mut nonces, "budget.allocate", &allocate_params());
+        assert!(first.committed());
+
+        let replay = run_live(&t, 50, &mut nonces, "budget.allocate", &allocate_params());
+        assert!(!replay.committed(), "at-least-once delivery must not spend one approval twice");
+        assert_eq!(replay.result.constraint_violated.as_deref(), Some("approval_token"));
+        assert_eq!(replay.state, homestead_state());
+    }
+
+    #[test]
+    fn an_expired_approval_is_refused_at_commit() {
+        let t = approved("budget.allocate", &allocate_params(), "bonnie", 1, 100);
+        let mut nonces = NonceLedger::new();
+        let ex = run_live(&t, 101, &mut nonces, "budget.allocate", &allocate_params());
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("approval_token"));
+    }
+
+    #[test]
+    fn a_refused_call_does_not_burn_the_approval() {
+        // Turned back by the operator's own guard: the person should be free to
+        // fix the state and use the same approval, not have it consumed.
+        let big = params(&[("pocket_name", json!("food")), ("amount", json!(5000.0)),
+                           ("period", json!("monthly"))]);
+        let t = approved("budget.allocate", &big, "bonnie", 3, 100);
+        let mut nonces = NonceLedger::new();
+
+        let ex = run_live(&t, 10, &mut nonces, "budget.allocate", &big);
+        assert!(!ex.committed(), "5000 > 1000 balance");
+        assert!(!nonces.is_spent(3), "a refusal must leave the approval unspent");
+    }
+
+    #[test]
+    fn a_sandbox_effect_needs_no_approval_but_still_meets_the_whole_gate() {
+        let mut nonces = NonceLedger::new();
+        let reg = Registry::default();
+
+        // No token, and it runs.
+        let ok = execute_admitted(&reg, &allowed(), &armed(), &homestead_state(),
+                                  "budget.allocate", &allocate_params(),
+                                  &Authorization::Unchecked, &EffectClass::Sandbox, &mut nonces);
+        assert!(ok.committed(), "a sandboxed effect is exempt from the token, not from the gate");
+
+        // ...but the invariants still bind inside the sandbox: a fork can never
+        // reach a state the real Sustain would refuse.
+        let state = json!({"finances":{"liquid":{"balance":100.0},
+                                       "pockets":{"food":{"allocated":10.0,"spent":0.0,"limit":0.0}},
+                                       "income":{"monthly_total":0.0,"sources":[]}}});
+        let refused = execute_admitted(&reg, &allowed(), &armed(), &state,
+                                       "test.force_negative", &params(&[]),
+                                       &Authorization::Unchecked, &EffectClass::Sandbox, &mut nonces);
+        assert!(!refused.committed());
+        assert_eq!(refused.result.constraint_violated.as_deref(), Some("enforcement_gate"));
+    }
+
+    #[test]
+    fn one_persons_approval_does_not_admit_anothers_act() {
+        let t = approved("budget.allocate", &allocate_params(), "bonnie", 1, 100);
+        let m = memberships();
+        let path = vec!["house".to_string()];
+        let mut nonces = NonceLedger::new();
+        let ex = execute_admitted(
+            &Registry::default(), &allowed(), &armed(), &homestead_state(),
+            "budget.allocate", &allocate_params(),
+            &as_principal("cira", &m, &path),
+            &EffectClass::Live { token: &t, now: 50 }, &mut nonces,
+        );
+        assert!(!ex.committed(), "cira may allocate, but bonnie's approval is not hers to spend");
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("approval_token"));
+    }
+
+    #[test]
+    fn authority_is_still_decided_before_the_approval() {
+        // A perfectly good approval does not make an observer an actor. The two
+        // conjuncts are independent, and both must hold.
+        let t = approved("budget.allocate", &allocate_params(), "guest", 1, 100);
+        let m = memberships();
+        let path = vec!["house".to_string()];
+        let mut nonces = NonceLedger::new();
+        let ex = execute_admitted(
+            &Registry::default(), &allowed(), &armed(), &homestead_state(),
+            "budget.allocate", &allocate_params(),
+            &as_principal("guest", &m, &path),
+            &EffectClass::Live { token: &t, now: 50 }, &mut nonces,
+        );
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("insufficient_privilege"));
+        assert!(!nonces.is_spent(1), "refused before the approval was ever reached");
+    }
+
+    #[test]
+    fn unchecked_preserves_r1_behaviour_exactly() {
+        // Every vector recorded before this slice runs through here.
+        let mut nonces = NonceLedger::new();
+        let ex = execute_admitted(
+            &Registry::default(), &allowed(), &armed(), &homestead_state(),
+            "budget.allocate", &allocate_params(),
+            &Authorization::Unchecked, &EffectClass::Unchecked, &mut nonces,
+        );
+        let baseline = execute(&Registry::default(), &allowed(), &armed(), &homestead_state(),
+                               "budget.allocate", &allocate_params());
+        assert_eq!(ex.committed(), baseline.committed());
+        assert_eq!(ex.state, baseline.state);
     }
 
     #[test]

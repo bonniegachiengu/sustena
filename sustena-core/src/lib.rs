@@ -44,8 +44,10 @@
 //! | Rules | [`predicate`] | R1 |
 //! | Operators | [`operator`] | R1 |
 //! | Council | [`council`] | R1 |
+//! | Approval token | [`approval`] | R2 |
 
 pub mod admission;
+pub mod approval;
 pub mod council;
 pub mod error;
 pub mod event;
@@ -60,13 +62,19 @@ pub mod schema;
 pub mod state;
 
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
+pub use approval::{
+    ApprovalToken, Binding, EffectClass, NonceLedger, Simulated, TokenError, TraceError, Voted,
+};
 pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalStatus, ResolutionInput, VoteChoice};
 pub use event::{dedupe, merge, order, CausalStamp, Event, Observation, Provenance};
 pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};
 pub use inverse::{invert, is_reversible, InverseError};
 pub use mutation::Mutation;
-pub use operator::{execute, Enforcement, Execution, OperatorResult, Registry};
+pub use operator::{
+    execute, execute_admitted, execute_as, Authorization, Enforcement, Execution, OperatorResult,
+    Registry,
+};
 pub use principal::{effective_privilege, permitted, Denial, MembershipEdge, Memberships, Tier};
 pub use predicate::{check, parse_predicate, Predicate};
 pub use schema::{bind, preserves_shape, validate, DimType, Schema};
