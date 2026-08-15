@@ -1,0 +1,246 @@
+{
+  "conformance_version": 1,
+  "slice": "editing",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Editing - Formal Execution.md, §II (the typed edit taxonomy), §III (the migration predicate), §IV (the safe-change asymmetry) and §VI (edit authority — the gate on the definition); Capstone §VI.1 duty 5",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors, not parity vectors. Authored from the article, not generated from the reference engine. The gate under test is admit(e, ⟨D,s⟩) ⟺ tok(α,e) ∧ ⊢e(D) ok ∧ Safe(e,μ) ∧ applicable(e,D).",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-12",
+    "statement": "PARTIAL, and the parts differ — worth stating precisely rather than as one blanket claim.",
+    "term_by_term": {
+      "tok(α,e)": "RUST-AHEAD. Python checks `existing[\"owner_user_id\"] != owner_user_id` INLINE inside update_definition — that is ownership, not authority, and it never reaches admit(). No edit token exists; §VI's 'authority does not lift from below' has no representation, and a shared definition has no council-mint requirement at all.",
+      "⊢e(D) ok": "RUST-AHEAD in scope. Python's _validate_definition_spec compiles every invariant against the candidate schema and raises on the first bad one — real, but confined to specs built through the UI, and it is not the whole-definition judgment over guards and widget bindings.",
+      "Safe(e,μ)": "AT PARITY IN SHAPE, for μ = id. Python's check_definition_edit_safety genuinely implements §III: it enumerates live instances, evaluates every candidate invariant against each instance's actual current state, and returns a witness set of {sustain_id, invariant_id, expression, reason}. It also reports an uncompilable candidate as a violation against every instance rather than skipping it. This slice matches that behaviour; it does not exceed it.",
+      "applicable(e,D)": "RUST-AHEAD. Python has no typed edit `e` at all — update_definition rebuilds a whole candidate spec from patch-or-current values and diffs nothing, so it cannot tell a DropInv from an AddInv, and §IV's free case is paid for on every edit."
+    },
+    "when_python_catches_up": "The Safe() cases are already behaviour Python exhibits and could be replayed there today if the reference grew a vector harness for definitions. The rest become parity vectors unchanged.",
+    "not_a_divergence_in": "R1 behaviour. This slice adds a new module and touches no existing gate path."
+  },
+  "authority_cases": [
+    {
+      "name": "the_owner_of_an_unshared_definition_may_edit_it",
+      "why": "The ordinary single-actor path. An object-level actor and a meta-level actor may coincide only here.",
+      "governance": {"kind": "sole_owner", "owner": "bonnie"},
+      "authority": {"kind": "owner", "principal": "bonnie"},
+      "expect": {"minted": true}
+    },
+    {
+      "name": "someone_who_does_not_hold_the_definition_gets_no_token",
+      "why": "Holding the definition is what a sole-owner mint is FOR.",
+      "governance": {"kind": "sole_owner", "owner": "bonnie"},
+      "authority": {"kind": "owner", "principal": "cira"},
+      "expect": {"minted": false, "error": "NotTheOwner"}
+    },
+    {
+      "name": "a_shared_definition_cannot_be_edited_by_one_actor",
+      "why": "§VI's load-bearing point: authority does not lift from below. V↑ is defined over the instances, so one move in Σ↑ can affect every instance at once while a move in any single Σ affects one. Permission to spend from a pocket is not permission to redefine what a pocket is.",
+      "governance": {"kind": "shared"},
+      "authority": {"kind": "owner", "principal": "bonnie"},
+      "expect": {"minted": false, "error": "SharedNeedsCouncil"}
+    },
+    {
+      "name": "a_shared_definition_is_edited_by_a_council_decision",
+      "why": "An object-level transition needs one actor; a meta-level transition needs a quorum. 'Changing the rules is harder than following them' as a structural property, not a convention.",
+      "governance": {"kind": "shared"},
+      "authority": {"kind": "council", "proposal_id": "prop-1", "status": "PASSED", "quorum_met": true},
+      "expect": {"minted": true, "proposal_id": "prop-1"}
+    },
+    {
+      "name": "a_council_that_did_not_pass_mints_nothing",
+      "why": "The council advises and decides; a proposal still in voting is not a decision.",
+      "governance": {"kind": "shared"},
+      "authority": {"kind": "council", "proposal_id": "p", "status": "IN_VOTING", "quorum_met": true},
+      "expect": {"minted": false, "error": "CouncilDidNotPass"}
+    },
+    {
+      "name": "a_deferred_proposal_is_not_a_meta_level_approval",
+      "why": "A deadline passing is not a decision — the same rule the operator-level approval token holds to.",
+      "governance": {"kind": "shared"},
+      "authority": {"kind": "council", "proposal_id": "p", "status": "DEFERRED", "quorum_met": true},
+      "expect": {"minted": false, "error": "CouncilDidNotPass"}
+    },
+    {
+      "name": "quorum_is_required_and_is_the_composition_point",
+      "why": "Quorum ARITHMETIC belongs to Multiparty (§4B, M-MUL) and is not built. Refusing when quorum is not asserted makes the dependency a compile-time obligation the host cannot skip, rather than a check this module pretends to perform.",
+      "governance": {"kind": "shared"},
+      "authority": {"kind": "council", "proposal_id": "p", "status": "PASSED", "quorum_met": false},
+      "expect": {"minted": false, "error": "QuorumNotMet"}
+    }
+  ],
+  "token_binding_cases": [
+    {
+      "name": "a_token_for_one_edit_does_not_admit_another",
+      "why": "The token binds to an edit, not to a right to edit. Approving 'add this floor' must not admit 'drop that ceiling'.",
+      "approved": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "attempted": {"kind": "DropInv", "id": "floor"},
+      "acting": "bonnie", "now": 10,
+      "expect": {"valid": false, "error": "WrongEdit"}
+    },
+    {
+      "name": "a_token_admits_the_exact_edit_it_was_given_for",
+      "why": "The ordinary path.",
+      "approved": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "attempted": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "acting": "bonnie", "now": 10,
+      "expect": {"valid": true}
+    },
+    {
+      "name": "the_same_kind_with_a_different_expression_is_a_different_edit",
+      "why": "Binding to the KIND would approve a shape of edit. 'Yes, add a floor at zero' must not admit a floor at fifty.",
+      "approved": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "attempted": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 50"},
+      "acting": "bonnie", "now": 10,
+      "expect": {"valid": false, "error": "WrongEdit"}
+    },
+    {
+      "name": "expiry_is_inclusive",
+      "why": "A boundary worth pinning.",
+      "approved": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "attempted": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "acting": "bonnie", "now": 100,
+      "expect": {"valid": true}
+    },
+    {
+      "name": "an_edit_approval_expires",
+      "why": "The definition at approval time need not be the definition now.",
+      "approved": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "attempted": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "acting": "bonnie", "now": 101,
+      "expect": {"valid": false, "error": "Expired"}
+    }
+  ],
+  "gate_cases": [
+    {
+      "name": "an_applicable_well_typed_non_stranding_edit_is_admitted",
+      "why": "All four terms hold.",
+      "definition": {"invariants": [], "operators": ["edit.state_patch"]},
+      "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "instances": [{"id": "a", "level": 5.0}],
+      "effect": "live", "now": 10,
+      "expect": {"admitted": true, "invariants_after": 1}
+    },
+    {
+      "name": "dropping_an_invariant_that_does_not_exist_is_not_a_loosening",
+      "why": "applicable(e,D). It is not a weaker rule, it is a confused edit — and only a typed taxonomy can tell the difference.",
+      "definition": {"invariants": [], "operators": []},
+      "edit": {"kind": "DropInv", "id": "nope"},
+      "instances": [],
+      "effect": "live", "now": 10,
+      "expect": {"admitted": false, "error": "NotApplicable"}
+    },
+    {
+      "name": "adding_a_dimension_that_already_exists_is_refused",
+      "why": "applicable(e,D), structural family.",
+      "definition": {"invariants": [], "operators": []},
+      "edit": {"kind": "AddDim", "name": "moisture"},
+      "instances": [],
+      "effect": "live", "now": 10,
+      "expect": {"admitted": false, "error": "NotApplicable"}
+    },
+    {
+      "name": "retiring_an_operator_that_was_never_declared_is_refused",
+      "why": "applicable(e,D), transitional family. The allow-list is data in this core, so T is genuinely editable and genuinely checkable.",
+      "definition": {"invariants": [], "operators": []},
+      "edit": {"kind": "RetireOp", "name": "budget.allocate"},
+      "instances": [],
+      "effect": "live", "now": 10,
+      "expect": {"admitted": false, "error": "NotApplicable"}
+    },
+    {
+      "name": "an_invariant_over_an_undeclared_dimension_is_a_typing_error",
+      "why": "⊢e(D) ok. Typing is the 'not ever' — a fact about the document, decided before anything about the instances.",
+      "definition": {"invariants": [], "operators": []},
+      "edit": {"kind": "AddInv", "id": "bad", "expression": "nutrients.level >= 0"},
+      "instances": [],
+      "effect": "live", "now": 10,
+      "expect": {"admitted": false, "error": "NotWellTyped"}
+    },
+    {
+      "name": "retiring_a_dimension_invalidates_an_invariant_that_never_mentioned_the_edit",
+      "why": "The reason typing is whole-definition and not a diff: RetireDim touches one line and can invalidate rules written long ago that never mentioned it. There is no local check.",
+      "definition": {"invariants": [["floor", "moisture.level >= 0"]], "operators": []},
+      "edit": {"kind": "RetireDim", "name": "moisture"},
+      "instances": [],
+      "effect": "live", "now": 10,
+      "expect": {"admitted": false, "error": "NotWellTyped"}
+    },
+    {
+      "name": "an_invariant_that_will_not_parse_is_a_typing_error_not_a_skip",
+      "why": "Fail-safe defaults. Skipping an unreadable rule is how a gate fails open.",
+      "definition": {"invariants": [], "operators": []},
+      "edit": {"kind": "AddInv", "id": "broken", "expression": "this is (not ) valid"},
+      "instances": [],
+      "effect": "live", "now": 10,
+      "expect": {"admitted": false, "error": "NotWellTyped"}
+    },
+    {
+      "name": "an_edit_that_would_strand_a_live_instance_is_refused_and_names_it",
+      "why": "Safe(e,μ) — o(s) ∈ A, a fact about the things that exist. The witness set names the instance AND the rule: a refusal that cannot say which is an alarm, not a diagnosis.",
+      "definition": {"invariants": [], "operators": []},
+      "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "instances": [{"id": "ok", "level": 5.0}, {"id": "bad", "level": -3.0}],
+      "effect": "live", "now": 10,
+      "expect": {"admitted": false, "error": "WouldStrand", "stranded": [{"instance_id": "bad", "invariant_id": "floor"}]}
+    },
+    {
+      "name": "the_same_edit_succeeds_once_the_instance_is_back_inside_the_region",
+      "why": "The refusal is about the state of the world, not about the edit. Fix the instance and the identical edit is admitted.",
+      "definition": {"invariants": [], "operators": []},
+      "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "instances": [{"id": "a", "level": 0.0}],
+      "effect": "live", "now": 10,
+      "expect": {"admitted": true, "invariants_after": 1}
+    },
+    {
+      "name": "loosening_is_free_and_skips_the_scan",
+      "why": "§IV's asymmetry, and the concrete payoff of having a typed `e`: a weaker V cannot strand a state already inside a stronger one, so a DropInv is admitted even against an instance that violates a DIFFERENT surviving rule — that instance was already outside, and this edit did not put it there. The reference engine pays the |inst| × |Inv| scan here because it has no `e` to classify.",
+      "definition": {"invariants": [["floor", "moisture.level >= 0"], ["ceiling", "moisture.level <= 10"]], "operators": []},
+      "edit": {"kind": "DropInv", "id": "ceiling"},
+      "instances": [{"id": "already_bad", "level": -1.0}],
+      "effect": "live", "now": 10,
+      "expect": {"admitted": true, "invariants_after": 1}
+    },
+    {
+      "name": "a_sandbox_edit_needs_no_authority",
+      "why": "Asking whether an edit would be safe is not permission to make it. Sandbox satisfies the authority term and nothing else.",
+      "definition": {"invariants": [], "operators": []},
+      "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "instances": [{"id": "a", "level": 5.0}],
+      "effect": "sandbox",
+      "expect": {"admitted": true, "invariants_after": 1}
+    },
+    {
+      "name": "a_sandbox_edit_is_exempt_from_authority_not_from_the_other_three_terms",
+      "why": "Exempting the sandbox from the migration predicate is how a preview becomes a second write path.",
+      "definition": {"invariants": [], "operators": []},
+      "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "instances": [{"id": "bad", "level": -5.0}],
+      "effect": "sandbox",
+      "expect": {"admitted": false, "error": "WouldStrand"}
+    },
+    {
+      "name": "an_edit_the_token_does_not_cover_is_refused_before_anything_else_runs",
+      "why": "tok(α,e) is decided first: no reason to type-check an edit this actor may not make.",
+      "definition": {"invariants": [], "operators": []},
+      "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "token_for": {"kind": "DropInv", "id": "elsewhere"},
+      "instances": [],
+      "effect": "live", "now": 10,
+      "expect": {"admitted": false, "error": "Unauthorized"}
+    }
+  ],
+  "induction_case": {
+    "name": "only_gated_edits_keep_every_definition_in_V_up",
+    "why": "The meta-Sustain proposition: admit(e,·) IS §4E's gate on Σ↑, so §4E's induction applies unchanged — starting from a well-typed definition under which every instance is viable, and admitting only gated edits, EVERY definition the system ever holds has that property. Walked step by step rather than asserted.",
+    "definition": {"invariants": [], "operators": ["edit.state_patch"]},
+    "instances": [{"id": "a", "level": 5.0}],
+    "edits": [
+      {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      {"kind": "AddOp", "name": "budget.summary"},
+      {"kind": "AddInv", "id": "ceiling", "expression": "moisture.level <= 10"}
+    ],
+    "expect": {"all_admitted": true, "invariants_after": 2, "operators_after": 2, "in_v_up_at_every_step": true}
+  }
+}

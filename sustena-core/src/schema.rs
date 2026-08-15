@@ -97,6 +97,18 @@ impl Schema {
         self
     }
 
+    /// Drop a top-level dimension. The inverse of [`Schema::declare`], and what
+    /// `RetireDim` needs (see [`crate::editing`]).
+    pub fn without(mut self, name: &str) -> Self {
+        self.dimensions.remove(name);
+        self
+    }
+
+    /// The top-level dimension names, in declaration order.
+    pub fn top_level(&self) -> impl Iterator<Item = &str> {
+        self.dimensions.keys().map(|k| k.as_str())
+    }
+
     /// Does the schema declare this dot-path?
     ///
     /// A wildcard or index segment steps *into* a list or open map, so it does

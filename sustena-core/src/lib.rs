@@ -45,10 +45,12 @@
 //! | Operators | [`operator`] | R1 |
 //! | Council | [`council`] | R1 |
 //! | Approval token | [`approval`] | R2 |
+//! | Edit authority | [`editing`] | R2 |
 
 pub mod admission;
 pub mod approval;
 pub mod council;
+pub mod editing;
 pub mod error;
 pub mod event;
 pub mod fold;
@@ -66,6 +68,10 @@ pub use approval::{
     ApprovalToken, Binding, EffectClass, NonceLedger, Simulated, TokenError, TraceError, Voted,
 };
 pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalStatus, ResolutionInput, VoteChoice};
+pub use editing::{
+    admit_edit, safe, typecheck, AuthorityError, CouncilMint, Definition, Edit, EditAdmission,
+    EditAuthority, EditEffect, EditError, EditToken, Governance, Instance, Migration, Stranded,
+};
 pub use event::{dedupe, merge, order, CausalStamp, Event, Observation, Provenance};
 pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};

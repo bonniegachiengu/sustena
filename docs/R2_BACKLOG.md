@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval cases** (rust-only, divergence recorded) |
-| Rust tests | **128 unit · 14 conformance tests** across 2 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval** and **26 editing** cases (divergences recorded) |
+| Rust tests | **149 unit · 19 conformance tests** across 3 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -241,6 +241,53 @@ if the reference catches up.
 arguments. The fix is a context struct carrying registry/allowed/enforcement —
 a real API refactor touching every call site, and not something to do as a side
 effect of this slice.
+
+### ✅ EDIT-8 — edit authority, the meta-gate — SHIPPED IN RUST (2026-08-12)
+
+`sustena-core/src/editing.rs`, grounded in **Editing §VI** and **Capstone §VI.1
+duty 5**. Built on the N1 token shipped the same day.
+
+```text
+admit(e, ⟨D,s⟩) ⟺ tok(α,e) ∧ ⊢e(D) ok ∧ Safe(e,μ) ∧ applicable(e,D)
+```
+
+The meta-Sustain proposition is the point: Σ↑ has state 𝒟, Enzymes the edit
+taxonomy, and `V↑ = {D' : ⊢D' ok ∧ ∀i: μ(sᵢ) ∈ V_D'}`. `admit(e,·)` **is**
+§4E's gate on Σ↑, so §4E's induction applies unchanged — a conformance vector
+walks it rather than asserting it.
+
+**Authority does not lift from below**, structurally:
+
+- `EditEffect` has **no `Unchecked` variant**. The operator gate needed one for
+  R1 parity; the meta-gate is new, so no bypass had to be preserved and none
+  exists.
+- `EditToken::mint` **refuses** a `Governance::Shared` definition from any
+  single actor. The only other route is a `CouncilMint` — private fields,
+  constructible only from a decision that **passed AND met quorum**.
+- *Permission to spend from a pocket is not permission to redefine what a
+  pocket is* — a compile-time fact, not a convention.
+
+**The M-MUL composition point, made honest:** quorum *arithmetic* (who counted,
+against what threshold) belongs to Multiparty and is unbuilt. `CouncilMint`
+takes `quorum_met` and **refuses when false**, so the dependency is an
+obligation the host cannot skip silently rather than a check this module
+pretends to perform.
+
+**Also closed by this slice:** EDIT-2 (the typed taxonomy), EDIT-3 (μ = id),
+EDIT-4 (fail-safe on an uncompilable candidate), EDIT-6 (loosening skips the
+scan — the concrete payoff of a typed `e`), EDIT-10 (whole-definition typing).
+
+**Scope, named:** `Safe(e, μ)` is built for **μ = id** only. A real migration
+function has no representation anywhere — that is **EDIT-12**
+(expand–migrate–contract), and `Migration` names it rather than stubbing it.
+`ModifyOp` and the peripheral family are absent because guards and effects are
+Rust fns in this core, not data.
+
+**Divergence — partial, term by term.** `tok(α,e)` and `applicable(e,D)` are
+rust-ahead. **`Safe(e,μ)` is at parity in shape** — the reference genuinely
+implements §III, witness set and all — and a test asserts the vector keeps
+saying so, because claiming the whole module as rust-ahead would overstate the
+gap.
 
 ### 🔵 Ten further gaps found by the full article reads — see the WBD
 

@@ -85,6 +85,7 @@ conformance/
     admission.json      refuse / clamp / defer        (spec, R2)
     events.json         event-time order, dedupe, LWW (spec, R2)
     approval.json       the approval token in the gate (spec, R2)
+    editing.json        the meta-gate on the definition (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -104,3 +105,13 @@ it is a bug** — nothing silently differs.
   catches up; nothing in them is Rust-specific.
   `tests/conformance_approval.rs` asserts the block still exists, so the
   divergence cannot stop being documented without a test failing.
+
+- **`editing.json` — rust-ahead-of-python, but only PARTLY, and the file says
+  which parts.** Of the meta-gate's four terms, `tok(α,e)` and
+  `applicable(e,D)` are genuinely rust-ahead (the reference checks
+  `owner_user_id` inline — ownership, not authority — and has no typed edit at
+  all). But **`Safe(e,μ)` is at parity in shape**: the reference's
+  `check_definition_edit_safety` really does implement §III, witness set
+  included. Claiming the whole module as rust-ahead would overstate the gap, so
+  the divergence is recorded term by term and a test asserts the `Safe` entry
+  still says `AT PARITY`.
