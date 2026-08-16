@@ -197,6 +197,10 @@ pub struct Driven {
 #[derive(Debug)]
 pub struct MonitorEngine {
     order: Vec<String>,
+    /// **The escalation path** (Controller §V: *"the escalation path IS the
+    /// holarchy"*). Validated at construction since this engine shipped;
+    /// retained from 2026-08-16, when CTL-5 gave it something to walk.
+    parents: BTreeMap<String, String>,
     regions: BTreeMap<String, Region>,
     watches: BTreeMap<String, Watch>,
     monitors: BTreeMap<String, SignalMonitor>,
@@ -256,6 +260,7 @@ impl MonitorEngine {
             remaining = held;
         }
 
+        let mut parents = BTreeMap::new();
         let mut regions = BTreeMap::new();
         let mut watches = BTreeMap::new();
         let mut monitors = BTreeMap::new();
@@ -273,10 +278,13 @@ impl MonitorEngine {
                 );
             }
             histories.insert(d.sustain_id.clone(), Vec::new());
+            if let Some(p) = d.parent {
+                parents.insert(d.sustain_id.clone(), p);
+            }
             regions.insert(d.sustain_id, d.region);
         }
 
-        Ok(Self { order, regions, watches, monitors, histories })
+        Ok(Self { order, parents, regions, watches, monitors, histories })
     }
 
     /// One sustain, for the common case.
@@ -287,6 +295,30 @@ impl MonitorEngine {
     /// Every watched sustain, parents first.
     pub fn sustains(&self) -> &[String] {
         &self.order
+    }
+
+    /// The next level up, or `None` at a root.
+    ///
+    /// The links are acyclic by construction — [`MonitorEngine::flatten_holarchy`]
+    /// refuses a cycle — which is what makes walking this chain terminate.
+    pub fn parent_of(&self, sustain_id: &str) -> Option<&str> {
+        self.parents.get(sustain_id).map(String::as_str)
+    }
+
+    /// A **nano-sustain** (§V's base case): no declared children.
+    pub fn is_nano(&self, sustain_id: &str) -> bool {
+        self.regions.contains_key(sustain_id)
+            && !self.parents.values().any(|p| p == sustain_id)
+    }
+
+    /// This sustain's own declared region — the `V` its `C(s)` is measured
+    /// against.
+    pub fn region_of(&self, sustain_id: &str) -> Option<&Region> {
+        self.regions.get(sustain_id)
+    }
+
+    pub fn watches(&self, sustain_id: &str) -> bool {
+        self.regions.contains_key(sustain_id)
     }
 
     /// How many observations this sustain has accumulated.

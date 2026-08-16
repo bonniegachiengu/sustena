@@ -1,0 +1,126 @@
+{
+  "conformance_version": 1,
+  "slice": "holarchy",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Controller - Formal Execution.md, §V (The Holarchic Sustain Hierarchy — Koestler 1967; the holarchy invariant; 'the escalation path IS the holarchy')",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for upward escalation. No escalation graph is built here: the path is the MonitorEngine's parent chain, validated when the engine was constructed and walked for the first time by this slice.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-16",
+    "statement": "escalat*, holarchy, nano_sustain, propagate_up, upward and validate_holarchy are all grep-0 in apps/api/sustena/. But the honest statement of this gap needs THREE directions kept apart, because the reference has two of them and calling the module rust-ahead without saying so would badly overstate it. (1) DOWNWARD AUTHORITY exists: a parent's aggregate invariant declared `binding` really does refuse a child's ok→not-ok transition (Slice 7's per-rule authority). (2) UPWARD INFORMATION exists: compute_rollup aggregates child state into the parent. (3) UPWARD ESCALATION — an unresolved violation climbing until it finds a level that can ACT — is the one that does not, and it is what §V is about.",
+    "the_two_greppable_near_misses_named_because_they_are_REAL": {
+      "holon (83 hits)": "Not a false positive at all — the reference has a genuine, shipped holon composition system: sustain_composition, link_child, unlink_child, provision_declared_children, compute_rollup. The holarchy §V describes EXISTS in Python. What is missing is not the tree; it is the walk up it carrying a violation.",
+      "get_parent (10) / parent_of (2)": "Also real. get_parent returns the composition link record, which is exactly the edge this slice's escalation walks. The reference can already answer 'who is above this?' — nothing has ever asked it on behalf of an unresolved breach."
+    },
+    "term_by_term": {
+      "the holarchy / recursive Sustain⟨…,children⟩ (§V)": "AT PARITY. sustain_composition is the tree, link_child builds it, get_parent walks one edge of it. This slice consumes an equivalent structure rather than introducing one.",
+      "nano-sustain (|children| = 0)": "AT PARITY in substance — the reference can tell a leaf from a parent through its own link table; it simply has no name for it. `is_nano` here is a name for something already true there.",
+      "roll-up ρ": "AT PARITY, and pointed the same way. compute_rollup carries child values upward. It answers 'what is the total'; escalation answers 'who can do something about this'. Same direction, different cargo.",
+      "the holarchy invariant C(s) ∧ s ⊆ parent(s)": "PARTLY RUST-AHEAD. The reference evaluates each sustain's own invariants (the C(s) clause, at parity in shape). The recursive validation across levels, and the parent-consistency clause, are grep-0 there.",
+      "holarchy_escalation (upward propagation)": "RUST-AHEAD. grep-0, and it is the whole slice. Nothing in the reference takes an unresolved violation and asks the next level up whether it can act.",
+      "escalating INTO a human": "RUST-AHEAD, and it needed CTL-3 first: there was no DECIDE surface to escalate into until the OODA machine existed."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "A full, live holon system that a real household runs on: six habitats linked under a homestead, roll-up computed over them, and a per-rule authority model deliberately chosen with the household in mind. That model is the interesting part, and the codebase states it in a comment rather than leaving it implicit: 'the parent OBSERVES its children, it never VETOES them' is the default, with `binding` as the opt-in exception. So the reference already reasons carefully about what flows between levels — downward as authority, upward as aggregates. The direction it has never modelled is a violation travelling upward looking for someone who can act, which is a third thing: not the parent reaching down, and not a number rolling up.",
+    "the_interpretation_disclosed": "§V writes the invariant as C(s) = True ∧ s.s ⊆ parent(s).s and never defines ⊆. Inventing a containment relation would be putting words in the article's mouth, so what is implemented is the reading available through the machinery that exists: a child must also satisfy its parent's region on the dimensions the parent bounds. That is a real, checkable sense of 'consistent with its parent's state' — recorded here as an interpretation rather than presented as the article's own definition.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. The composition half is already there, so catching up means adding the walk, not the tree.",
+    "not_a_divergence_in": "R1 behaviour. Additive; consumes the MonitorEngine's already-validated parent links and introduces no second source of truth for the tree."
+  },
+  "fixture": {
+    "why": "§V's own worked example — a soil sensor inside a garden inside a homestead. The sensor has the strictest moisture floor (30) because it is the thing actually measuring; the levels above it bound the same dimension more loosely, which is what lets the two clauses of the invariant fail independently.",
+    "holarchy": [
+      {"id": "homestead", "parent": null, "moisture_floor": 0.0},
+      {"id": "garden", "parent": "homestead", "moisture_floor": 0.0},
+      {"id": "soil_sensor", "parent": "garden", "moisture_floor": 30.0}
+    ],
+    "capacities": {
+      "soil_sensor": "a sensor can measure, not irrigate",
+      "garden": "no unallocated water budget at this level",
+      "homestead": "budget.allocate"
+    }
+  },
+  "path_cases": [
+    {
+      "name": "the_parent_chain_is_the_escalation_path",
+      "why": "★ §V: 'The escalation path IS the holarchy.' No escalation graph is built — the links were validated when the MonitorEngine was constructed, and this slice is the first thing to walk them. Before it they were checked and discarded.",
+      "expect": {"soil_sensor": "garden", "garden": "homestead", "homestead": null}
+    },
+    {
+      "name": "a_nano_sustain_is_the_base_case",
+      "why": "§V's |children| = 0. A name for the leaf, so escalation can say where a breach originated rather than only where it landed.",
+      "expect": {"soil_sensor": true, "garden": false, "homestead": false}
+    },
+    {
+      "name": "an_escalation_cannot_be_started_from_a_non_breach",
+      "why": "★ Breach::from_ingested returns None unless the reading really crossed the Monitor→Controller boundary. There is no constructor taking a severity and a sentence, so nobody can manufacture an escalation and walk it up someone else's holarchy.",
+      "moisture": 90.0,
+      "expect": {"breach": null}
+    },
+    {
+      "name": "escalating_from_an_unwatched_sustain_is_refused",
+      "why": "A sustain outside the engine has no place in the holarchy, so there is no chain to climb and no honest answer to give.",
+      "expect": {"error": "UnknownSustain"}
+    }
+  ],
+  "climb_cases": [
+    {
+      "name": "a_nano_sustain_breach_climbs_to_the_level_that_can_act",
+      "why": "★★ THE PROOF OF VALUE, and §V's own sentence made executable: 'A nano-sustain soil sensor breaching its moisture threshold is an event — if unresolved, it escalates to the garden sustain, then to Homestead.' The sensor cannot water itself; the garden has no budget to spend; the homestead can authorise it. The breach travels to the level that can act, which is ultimately the level with a human at it.",
+      "origin": "soil_sensor", "moisture": 0.0,
+      "expect": {"acted_at": "homestead", "levels_climbed": 2, "route": ["soil_sensor", "garden", "homestead"]}
+    },
+    {
+      "name": "every_level_that_passed_it_on_said_why",
+      "why": "★ Capacity::CannotAct REQUIRES a reason. A level that absorbs a breach without explanation is exactly the failure §V exists to prevent — something went wrong at a depth nobody was watching, and nothing said so. The acting level declines nothing, so its hop carries no reason.",
+      "expect": {"declined_count": 2, "acting_level_declined": null}
+    },
+    {
+      "name": "a_level_that_can_act_stops_the_climb_immediately",
+      "why": "Escalation is not broadcast. If the origin itself can act, nothing above it is disturbed — the whole point of a holarchy is that most things are handled where they happen.",
+      "capable": "soil_sensor",
+      "expect": {"acted_at": "soil_sensor", "levels_climbed": 0, "path_len": 1}
+    },
+    {
+      "name": "reaching_the_root_unresolved_is_an_answer_not_an_error",
+      "why": "★ The loudest thing this system can say, and therefore the one most important not to return as Err — a caller could `?` that away into a log line. ExhaustedAtRoot comes back as a normal outcome, carrying the full path and every level's stated reason for passing it on.",
+      "capacities": "none",
+      "expect": {"outcome": "ExhaustedAtRoot", "root": "homestead", "path_len": 3, "describe_contains": "no level able to act"}
+    },
+    {
+      "name": "the_observation_carries_the_origins_severity_not_the_acting_levels",
+      "why": "★ Provenance. A homestead decision about a soil sensor has to be about the sensor — the observation handed to the acting level's OODA loop carries the ORIGIN's severity, and the path carries every level it came through.",
+      "expect": {"severity_matches_origin": true, "still_escalates": true}
+    }
+  ],
+  "invariant_cases": [
+    {
+      "name": "the_invariant_holds_when_every_level_is_inside_its_own_region",
+      "why": "The ordinary case: C(s) true everywhere, every child within its parent's bounds.",
+      "moisture": 50.0,
+      "expect": {"holds": true, "violations": 0}
+    },
+    {
+      "name": "a_local_breach_is_reported_at_its_own_level",
+      "why": "★ The two clauses are SEPARATE and this shows it: the sensor's own floor is 30 and it reads 10, so C(s) fails — while the garden's floor is 0, so the parent clause still holds. A check that conflated them would report the wrong level.",
+      "soil_sensor": 10.0, "garden": 50.0,
+      "expect": {"holds": false, "violating_level": "soil_sensor", "local_ok": false, "consistent_with_parent": true, "w": 20.0}
+    },
+    {
+      "name": "the_parent_clause_can_fail_on_its_own",
+      "why": "★ The other half, doing work the first cannot: a level comfortably inside its OWN region and outside its parent's. Without this clause the invariant would be nothing more than 'every level checks itself', which is not a holarchy property at all.",
+      "household_floor": 100.0, "pocket_floor": 10.0, "pocket_value": 50.0,
+      "expect": {"local_ok": true, "consistent_with_parent": false, "holds": false}
+    },
+    {
+      "name": "a_root_has_no_parent_clause_to_satisfy",
+      "why": "None rather than true: there is nothing above it to agree with, which is different from agreeing with something.",
+      "expect": {"consistent_with_parent": null, "holds": true}
+    },
+    {
+      "name": "a_level_with_no_supplied_state_is_skipped_not_passed",
+      "why": "★ 'We did not look' and 'we looked and it was fine' are different claims. A level with no supplied state simply does not appear in the report, rather than appearing as passing — a report that conflated them would be the quiet kind of wrong.",
+      "supply": ["garden"],
+      "expect": {"levels_reported": 1, "reported": "garden"}
+    }
+  ]
+}

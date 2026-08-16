@@ -60,6 +60,7 @@
 //! | Signal fns · temporal pincer | [`pincer`] | R2 |
 //! | OODA loop state machine | [`ooda`] | R2 |
 //! | MonitorEngine — owns the chain | [`monitor`] | R2 |
+//! | Holarchic escalation | [`holarchy`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -72,6 +73,7 @@ pub mod ensemble;
 pub mod error;
 pub mod event;
 pub mod fold;
+pub mod holarchy;
 pub mod inverse;
 pub mod kernel;
 pub mod migrate;
@@ -140,6 +142,10 @@ pub use version::{
 pub use ensemble::{
     DeadDrop, DeadDropBook, DecisionNode, Ensemble, EnsembleAnalysis, EnsembleError, InvariantSet,
     ModelTemplate, Prob, Resolution, RewardBasis, Scenario,
+};
+pub use holarchy::{
+    escalate, validate_holarchy, Breach, Capacity, Escalation, EscalationOutcome, HolarchyError,
+    HolarchyReport, Hop, LevelCheck, Levels,
 };
 pub use monitor::{
     Driven, Ingested, MonitorEngine, MonitorError, SustainWatch,

@@ -100,6 +100,7 @@ conformance/
     pincer.json         σ over S^t · forward ∥ backward   (spec, R2)
     ooda.json           OBSERVE→ORIENT→DECIDE→ACT       (spec, R2)
     monitor.json        the per-sustain MonitorEngine    (spec, R2)
+    holarchy.json       a breach climbs to who can act   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -341,3 +342,25 @@ it is a bug** — nothing silently differs.
   Two further rows (**MON-8** belief tracker, **MON-7** preattentive encoder)
   and `tick()` are named as separate work rather than stubbed, because an empty
   placeholder field reads as built-and-idle rather than absent.
+
+- **`holarchy.json` — rust-ahead-of-python, and the slice most able to
+  overstate itself.** `escalat*`, `holarchy` and `validate_holarchy` are
+  grep-0 — but `holon` returns **83 hits and they are not false positives**.
+  The reference has a genuine, shipped holon system (`sustain_composition`,
+  `link_child`, `get_parent`, `compute_rollup`) that a real household runs on.
+  So the block keeps **three directions apart**: (1) **downward authority**
+  exists — a `binding` aggregate invariant really does refuse a child's
+  transition; (2) **upward information** exists — roll-up carries child values
+  up; (3) **upward escalation** — an unresolved violation climbing until it
+  finds a level that can *act* — is the one that does not, and is what §V is
+  about. **Three terms are recorded AT PARITY** (the tree, the nano-sustain
+  base case, roll-up), because claiming the module would misdescribe a system
+  that already has most of it. **Counterweight, asserted by a test:** the
+  reference states its own authority model in a comment — *"the parent
+  OBSERVES its children, it never VETOES them"* — so it already reasons
+  carefully about what flows between levels. Escalation is a **third thing**:
+  not the parent reaching down, and not a number rolling up. The file also
+  **discloses one interpretation**: §V writes the invariant as
+  `C(s) ∧ s ⊆ parent(s)` and never defines `⊆`, so the implemented reading —
+  a child must also satisfy its parent's region on the dimensions the parent
+  bounds — is recorded as an interpretation rather than as the article's own.
