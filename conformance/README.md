@@ -87,6 +87,7 @@ conformance/
     approval.json       the approval token in the gate (spec, R2)
     editing.json        the meta-gate on the definition (spec, R2)
     constraints.json    D(s,s') — rate/monotone/conservation (spec, R2)
+    compose.json        checked composition of pathways (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -125,3 +126,14 @@ it is a bug** — nothing silently differs.
   land or neither does), which is a different guarantee: it does not check that
   the debit and credit are **equal**, and it covers one operator rather than
   every step. A test asserts that note stays.
+
+- **`compose.json` — rust-ahead-of-python.** The reference engine has no
+  compose-time check: it chains Enzymes dynamically, so an illegal chain is found
+  by running it and watching a later step refuse. The counterweight is recorded
+  too — `OperativeGraph` *does* validate at load time that every node names a
+  registered operator, which checks a step **exists**, not that it can **follow**
+  the one before it. A second note records that the *undecided* region is shared
+  rather than a Rust shortfall: entailment is undecidable in general (Church,
+  1936), and the difference is that Rust returns a verdict and carries
+  `runtime_guard_required` where Python has no verdict at all. A test asserts
+  both notes stay.

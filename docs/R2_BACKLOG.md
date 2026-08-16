@@ -2,7 +2,7 @@
 
 *The source of truth for Phase R2: implementing what the articles specify but the code does not yet do.*
 
-**Status: R1 (parity) complete. R2 in progress — 9 of 14 core items resolved.**
+**Status: R1 (parity) complete. R2 in progress — 10 of 14 core items resolved.**
 
 > **Read this before opening an R2 slice.** Every item traces to an article. The
 > articles are the spec; the code catches up to them, never the reverse. Where
@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint** cases (divergences recorded) |
-| Rust tests | **177 unit · 28 conformance tests** across 4 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose** cases (divergences recorded) |
+| Rust tests | **201 unit · 34 conformance tests** across 5 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -77,7 +77,7 @@ Ordered by dependency, not importance.
 |---|---|---|---|
 | ~~14~~ | ~~State is untyped~~ — **DONE in Rust**: declared record type with bounds, load-time predicate binding, and organisational closure enforced at the gate. Opt-in per sustain. Python unchanged. | CELL | Python |
 | ~~15~~ | ~~No `inverse`~~ — **DONE in Rust**: patch-level inverse derived from the mutation record. Honest about the three shapes that are not invertible from a record alone. Python unchanged. | ENZYME | Python |
-| 16 | No **checked composition** of operator pathways | ENZYME | both — next |
+| ~~16~~ | ~~No **checked composition** of operator pathways~~ — **DONE in Rust** (`compose.rs`, 2026-08-12): Hoare sequencing with a three-valued ⊨, `wp` pullback, and a `Pathway` that cannot be constructed around a refuted link. Python unchanged. | ENZYME | Python |
 | ~~17~~ | ~~Ordering is `seq`~~ — **DONE in Rust**: event-time ordering with Lamport `(t_event, id)` tie-break, causal stamps, and a converging LWW join. Python unchanged. | RECORD · GAIA | Python |
 | ~~18~~ | ~~No substrate dedupe~~ — **DONE in Rust**: uniform dedupe on the stable id, so at-least-once delivery gives exactly-once effect. Python unchanged. | RECORD | Python |
 
@@ -241,6 +241,51 @@ if the reference catches up.
 arguments. The fix is a context struct carrying registry/allowed/enforcement —
 a real API refactor touching every call site, and not something to do as a side
 effect of this slice.
+
+### ✅ #16 — checked composition of Enzyme pathways — SHIPPED IN RUST (2026-08-12)
+
+`sustena-core/src/compose.rs`, grounded in **Operator §IV** (Hoare sequencing).
+
+```text
+post(A) ⊨ guard(B)                       when two Enzymes may chain at all
+g_{A;B} = g_A ∧ wp(e_A, g_B)             guard pulled back through A's effect
+e_{A;B} = e_B ∘ e_A                      function composition (associative)
+ε_{A;B} = ε_A · ε_B                      concatenation in the free monoid E*
+```
+
+**The point: illegal-chain discovery moves from RUN time to WRITE time.** Python
+chains dynamically, so a bad chain is found by running it and watching step three
+refuse. And the property is **structural**, not a validation pass:
+`compose(A,B) -> Result<Composed, Rejected>` means a refuted chain yields no
+composite value, and `Pathway::try_chain` has **no constructor that takes steps on
+trust** — a broken recipe cannot be *held*, not merely rejected on save.
+
+**Three-valued ⊨, stated as such.** `Refuted` is the strictly stronger claim that
+`post ∧ guard` is unsatisfiable — not "we failed to prove it", which is
+`Undecided`. That distinction is what licenses refusing to build a chain rather
+than warning about it, and a boundary pair of vectors pins it: `x <= 0` then
+`x >= 0` touches at a point and is **undecided**; `x < 0` then `x >= 0` is
+**refuted**.
+
+**Decidable fragment:** conjunctions of path-vs-literal interval constraints.
+Everything else — OR, NOT, quantifiers, `!=`, params — returns `Undecided` with
+`runtime_guard_required` and a reason. **No SMT solver** was pulled in; a
+dependency-free core is what lets this crate ship to a phone.
+
+**`wp`, and the honest limit.** Effects are Rust functions, so `wp` is computable
+only where an operator declares an `EffectSummary`: unchanged path (guard passes
+through), `SetTo` (constant-folds), `ShiftBy` (moves the literal, staying in the
+fragment). Where none is declared, `wp` is **not computed** and the composite
+carries the runtime obligation instead of implying it was discharged.
+
+**Divergence — rust-ahead, with the counterweight.** Python has no compose-time
+check at all. But `OperativeGraph` *does* validate at load time that every node
+names a registered operator — real, and worth not erasing: it checks a step
+**exists**, not that it can **follow**. Both notes are asserted by a test.
+
+**Partially advances #16's neighbour, OP-3:** `wp` now exists, but using it as an
+author-time check on a *single* Enzyme's `g ⟹ wp(e,Q)` needs an `EffectSummary`
+on `OperatorMeta` — a separate change to every operator declaration.
 
 ### ✅ CON-1 / CON-7 — transition constraints `D(s,s')` + conservation — SHIPPED IN RUST (2026-08-12)
 

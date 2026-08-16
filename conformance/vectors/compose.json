@@ -1,0 +1,254 @@
+{
+  "conformance_version": 1,
+  "slice": "compose",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Operator - Formal Execution.md, §IV (Checked Composition)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for Hoare-checked composition of Enzyme pathways: post(A) ⊨ guard(B), with the composite's guard, effect and emission all derived. Authored from the article, not generated from the reference engine.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-12",
+    "statement": "The reference engine has no compose-time check of any kind. It chains Enzymes DYNAMICALLY — OperativeGraph.run walks a node graph at execution time, and simulate.run_path steps a fork — so an illegal chain is discovered by running it and watching a later step refuse. There is no `entails`, no `wp`, no notion of post(A) ⊨ guard(B); the only `compose` in the tree is curated_ui.compose, which is the unrelated UI view-composer.",
+    "what_python_does_have_and_why_it_is_not_this": "OperativeGraph DOES validate at load time that every node names an operator present in OPERATOR_REGISTRY, and it carries a max_steps cycle guard. Both are real and worth not erasing — but they check that a step EXISTS, not that a step can FOLLOW the one before it. A graph whose every node resolves and whose third node's guard can never be satisfied loads clean and fails at run time, which is exactly the discovery this slice moves earlier.",
+    "the_undecided_region_is_shared_not_a_gap": "Neither engine decides entailment in general — it is undecidable (Church, 1936). The difference is that Rust now returns a three-valued verdict and carries `runtime_guard_required` when it cannot prove the implication, where Python has no verdict at all. An SMT solver would shrink the undecided region and is deliberately not pulled in; a dependency-free core is what lets this crate ship to a phone.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Composition is a new, additive module and touches no existing gate path."
+  },
+  "entailment_cases": [
+    {
+      "name": "a_stronger_post_entails_a_weaker_guard",
+      "why": "The ordinary admissible chain: leaving the balance at or above 100 establishes 'at or above 50'.",
+      "post": ["finances.liquid.balance >= 100"],
+      "guard": ["finances.liquid.balance >= 50"],
+      "expect": {"verdict": "entailed"}
+    },
+    {
+      "name": "a_weaker_post_is_undecided_not_refuted",
+      "why": "The distinction the three-valued verdict exists for. A balance of 100 satisfies both, so the chain CAN run — it just is not proven to. Reporting this as refuted would reject a chain that works.",
+      "post": ["finances.liquid.balance >= 10"],
+      "guard": ["finances.liquid.balance >= 50"],
+      "expect": {"verdict": "undecided"}
+    },
+    {
+      "name": "disjoint_intervals_are_refuted_because_the_chain_can_never_run",
+      "why": "Refuted is the STRONGER claim: post ∧ guard is unsatisfiable, so no state satisfies both. That is what licenses refusing to build the chain at all rather than merely warning about it.",
+      "post": ["stock.units <= 0"],
+      "guard": ["stock.units >= 1"],
+      "expect": {"verdict": "refuted", "detail_contains": "stock.units"}
+    },
+    {
+      "name": "touching_at_a_closed_boundary_is_not_refuted",
+      "why": "post: x <= 0, guard: x >= 0. The single point x = 0 satisfies both, so the chain can run and must not be rejected. Off-by-one on interval openness would silently break working recipes.",
+      "post": ["x <= 0"],
+      "guard": ["x >= 0"],
+      "expect": {"verdict": "undecided"}
+    },
+    {
+      "name": "an_open_boundary_that_only_touches_is_refuted",
+      "why": "post: x < 0, guard: x >= 0. Now nothing satisfies both. The pair of cases pins the boundary arithmetic exactly.",
+      "post": ["x < 0"],
+      "guard": ["x >= 0"],
+      "expect": {"verdict": "refuted"}
+    },
+    {
+      "name": "a_conjunction_narrows_the_interval",
+      "why": "Conjunctions of interval constraints are the decidable fragment, so an AND of bounds must intersect rather than be taken one at a time.",
+      "post": ["x >= 10", "x <= 20"],
+      "guard": ["x >= 5"],
+      "expect": {"verdict": "entailed"}
+    },
+    {
+      "name": "an_empty_guard_is_established_by_anything",
+      "why": "Nothing is required, so nothing needs establishing. skip is the identity of the algebra.",
+      "post": [],
+      "guard": [],
+      "expect": {"verdict": "entailed"}
+    },
+    {
+      "name": "an_equality_post_entails_a_range_containing_it",
+      "why": "== is the degenerate interval [k,k].",
+      "post": ["x == 7"],
+      "guard": ["x >= 5"],
+      "expect": {"verdict": "entailed"}
+    },
+    {
+      "name": "an_equality_post_outside_the_range_is_refuted",
+      "why": "The same degenerate interval, disjoint.",
+      "post": ["x == 2"],
+      "guard": ["x >= 5"],
+      "expect": {"verdict": "refuted"}
+    }
+  ],
+  "fragment_boundary_cases": [
+    {
+      "name": "disjunction_is_undecided",
+      "why": "Outside the decidable fragment. The rule is that anything outside it is reported undecided and NEVER guessed — a false 'entailed' would let a broken chain save, and a false 'refuted' would reject a working one.",
+      "post": ["balance >= 1 OR balance <= 0"], "guard": ["balance >= 0"],
+      "expect": {"verdict": "undecided"}
+    },
+    {
+      "name": "negation_is_undecided",
+      "post": ["NOT balance >= 1"], "guard": ["balance >= 0"],
+      "why": "Same rule.",
+      "expect": {"verdict": "undecided"}
+    },
+    {
+      "name": "quantifiers_are_undecided",
+      "post": ["ALL finances.pockets[*].allocated >= 0"], "guard": ["balance >= 0"],
+      "why": "Bounded quantifiers are in the LANGUAGE but not in this slice's decidable fragment. Honest about which.",
+      "expect": {"verdict": "undecided"}
+    },
+    {
+      "name": "not_equal_is_undecided_because_it_is_not_an_interval",
+      "post": ["balance != 3"], "guard": ["balance >= 0"],
+      "why": "'!=' punches a hole in the line, which is not an interval — so it falls outside the fragment rather than being approximated.",
+      "expect": {"verdict": "undecided"}
+    },
+    {
+      "name": "a_param_comparison_is_undecided",
+      "post": ["balance >= params.floor"], "guard": ["balance >= 0"],
+      "why": "params are not known at compose time. This is precisely a runtime obligation, and is carried as one.",
+      "expect": {"verdict": "undecided"}
+    }
+  ],
+  "wp_cases": [
+    {
+      "name": "wp_through_an_untouched_path_is_the_guard_itself",
+      "why": "The common case: A and B touch different parts of state, so B's guard passes through unchanged. This is what makes wp computable at all in a core where effects are opaque functions.",
+      "effect": [["other.thing", {"shift_by": 1}]],
+      "guard": "balance >= 50",
+      "expect": {"result": "condition", "expr": "balance >= 50"}
+    },
+    {
+      "name": "wp_through_a_shift_moves_the_literal",
+      "why": "balance' = balance − 30, so (balance' >= 50) ⟺ (balance >= 80). The pullback stays a comparison, so it stays inside the fragment and needs no arithmetic the language does not have.",
+      "effect": [["balance", {"shift_by": -30}]],
+      "guard": "balance >= 50",
+      "expect": {"result": "condition", "expr": "balance >= 80"}
+    },
+    {
+      "name": "wp_through_a_set_constant_folds_to_always",
+      "why": "If A sets the value, the guard's truth is decided at compose time.",
+      "effect": [["balance", {"set_to": 100}]],
+      "guard": "balance >= 50",
+      "expect": {"result": "always"}
+    },
+    {
+      "name": "wp_through_a_set_constant_folds_to_never",
+      "why": "The other half — and this is what turns a chain from undecided into refused.",
+      "effect": [["balance", {"set_to": 0}]],
+      "guard": "balance >= 50",
+      "expect": {"result": "never"}
+    },
+    {
+      "name": "wp_through_an_opaque_change_is_reported_not_guessed",
+      "why": "A change by a param cannot be pulled back — the language has no arithmetic, so 'balance − params.amount >= k' is not expressible. Inventing a weakest precondition for an effect nobody described would be a false claim about when the chain is safe.",
+      "effect": [["balance", "opaque"]],
+      "guard": "balance >= 50",
+      "expect": {"result": "error"}
+    }
+  ],
+  "compose_cases": [
+    {
+      "name": "a_valid_chain_composes_with_every_part_derived",
+      "why": "ε_{A;B} = ε_A · ε_B in order, cost is the sum of the parts, and post(A;B) = post(B). Nothing about the composite is declared; all of it is derived.",
+      "a": {"name": "budget.record_income", "post": ["finances.liquid.balance >= 100"], "emits": ["event.finances.income_recorded"], "cost": 3},
+      "b": {"name": "budget.allocate", "guard": ["finances.liquid.balance >= 50"], "post": ["finances.pockets.food.allocated >= 0"], "emits": ["event.finances.pocket_allocated"], "cost": 2},
+      "expect": {
+        "composed": true,
+        "name": "budget.record_income;budget.allocate",
+        "emits": ["event.finances.income_recorded", "event.finances.pocket_allocated"],
+        "cost": 5,
+        "post": ["finances.pockets.food.allocated >= 0"]
+      }
+    },
+    {
+      "name": "a_refuted_chain_yields_no_composite_at_all",
+      "why": "The structural form of 'a recipe whose third step can never fire should be impossible to save': compose returns Result, so there is no Composed value to hold for a dead chain.",
+      "a": {"name": "consume_all", "post": ["stock.units <= 0"]},
+      "b": {"name": "ship_one", "guard": ["stock.units >= 1"]},
+      "expect": {"composed": false, "from": "consume_all", "to": "ship_one"}
+    },
+    {
+      "name": "an_undecided_chain_composes_but_carries_the_runtime_guard",
+      "why": "The third verdict, honoured: compose, but say so. Silently composing without the flag would be a false claim of proof.",
+      "a": {"name": "a", "post": ["finances.liquid.balance >= 10"]},
+      "b": {"name": "b", "guard": ["finances.liquid.balance >= 50"]},
+      "expect": {"composed": true, "runtime_guard_required": true, "reason_nonempty": true}
+    },
+    {
+      "name": "no_effect_summary_means_the_next_guard_stays_a_runtime_obligation",
+      "why": "wp needs to know what A does. Where A declares nothing, B's guard is carried rather than claimed discharged — even when ⊨ itself was entailed.",
+      "a": {"name": "a", "post": ["finances.liquid.balance >= 100"]},
+      "b": {"name": "b", "guard": ["finances.liquid.balance >= 50"]},
+      "expect": {"composed": true, "runtime_guard_required": true, "reason_contains": "effect summary"}
+    },
+    {
+      "name": "a_declared_effect_that_touches_nothing_relevant_discharges_the_guard",
+      "why": "Entailed AND wp computable: the composite needs no runtime check, and says so by leaving the flag clear.",
+      "a": {"name": "a", "post": ["finances.liquid.balance >= 100"], "effect": []},
+      "b": {"name": "b", "guard": ["finances.liquid.balance >= 50"]},
+      "expect": {"composed": true, "runtime_guard_required": false}
+    },
+    {
+      "name": "wp_puts_the_pulled_back_guard_into_the_composite",
+      "why": "g_{A;B} = g_A ∧ wp(e_A, g_B). Spending 30 then requiring 50 means requiring 80 up front — which is a fact about the chain that neither step states on its own.",
+      "a": {"name": "spend_30", "effect": [["balance", {"shift_by": -30}]]},
+      "b": {"name": "spend_50", "guard": ["balance >= 50"]},
+      "expect": {"composed": true, "guard_contains": "balance >= 80"}
+    },
+    {
+      "name": "a_set_that_can_never_satisfy_the_next_guard_rejects_the_chain",
+      "why": "wp reaching `never` is a second, independent route to rejection — the entailment check alone would have said undecided here, because A declares no post at all.",
+      "a": {"name": "zero_it", "effect": [["balance", {"set_to": 0}]]},
+      "b": {"name": "needs_funds", "guard": ["balance >= 50"]},
+      "expect": {"composed": false, "detail_contains": "can never hold"}
+    }
+  ],
+  "algebra_cases": [
+    {
+      "name": "chaining_is_associative",
+      "why": "Function composition is associative and E* is a free monoid, so (A;B);C and A;(B;C) must agree. The article calls this the one concrete thing the categorical reading earns — so it is checked, not assumed.",
+      "steps": [
+        {"name": "a", "emits": ["e1"], "cost": 1, "post": ["x >= 100"]},
+        {"name": "b", "emits": ["e2"], "cost": 2, "post": ["x >= 50"]},
+        {"name": "c", "emits": ["e3"], "cost": 4, "post": ["x >= 10"]}
+      ],
+      "expect": {"both_bracketings_agree": true, "emits": ["e1", "e2", "e3"], "cost": 7}
+    }
+  ],
+  "pathway_cases": [
+    {
+      "name": "a_good_pathway_saves_and_carries_the_whole_chain",
+      "why": "The end-to-end shape a stored recipe takes.",
+      "steps": [
+        {"name": "a", "emits": ["e1"], "cost": 1, "post": ["x >= 100"]},
+        {"name": "b", "emits": ["e2"], "cost": 2, "guard": ["x >= 50"], "post": ["x >= 20"]},
+        {"name": "c", "emits": ["e3"], "cost": 4, "guard": ["x >= 10"]}
+      ],
+      "expect": {"saved": true, "steps": ["a", "b", "c"], "emits": ["e1", "e2", "e3"], "cost": 7}
+    },
+    {
+      "name": "a_pathway_cannot_be_built_around_a_refuted_link",
+      "why": "THE headline property. A Pathway has no constructor that takes steps on trust, so holding one means every link was checked — a broken recipe is not rejected on save, it cannot be held.",
+      "steps": [
+        {"name": "a", "post": ["x >= 100"]},
+        {"name": "b", "guard": ["x <= 0"]},
+        {"name": "c"}
+      ],
+      "expect": {"saved": false}
+    },
+    {
+      "name": "an_empty_pathway_is_refused",
+      "why": "There is no identity recipe to save.",
+      "steps": [],
+      "expect": {"saved": false, "error": "Empty"}
+    },
+    {
+      "name": "a_single_step_is_a_pathway",
+      "why": "The base case of the fold.",
+      "steps": [{"name": "only", "cost": 9}],
+      "expect": {"saved": true, "steps": ["only"], "cost": 9}
+    }
+  ]
+}

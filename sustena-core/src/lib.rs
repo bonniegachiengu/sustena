@@ -47,9 +47,11 @@
 //! | Approval token | [`approval`] | R2 |
 //! | Edit authority | [`editing`] | R2 |
 //! | Transition constraints | [`transition`] | R2 |
+//! | Checked composition | [`compose`] | R2 |
 
 pub mod admission;
 pub mod approval;
+pub mod compose;
 pub mod council;
 pub mod editing;
 pub mod error;
@@ -68,6 +70,10 @@ pub mod transition;
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
 pub use approval::{
     ApprovalToken, Binding, EffectClass, NonceLedger, Simulated, TokenError, TraceError, Voted,
+};
+pub use compose::{
+    compose, entails, wp, Change, Composed, EffectSummary, Entailment, Pathway, PathwayError,
+    Rejected, Step, WpResult,
 };
 pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalStatus, ResolutionInput, VoteChoice};
 pub use editing::{
