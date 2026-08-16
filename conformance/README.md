@@ -95,6 +95,7 @@ conformance/
     controller.json     Lyapunov · Sheridan · SNR · loop (spec, R2)
     kernel.json         Viab_T(V) + runway R(s)          (spec, R2)
     tenet.json          T:S×A→Δ(S) + backward induction  (spec, R2)
+    ensemble.json       Ω · invariant actions · D · δ   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -232,3 +233,27 @@ it is a bug** — nothing silently differs.
   records **one departure from the article** — §V writes the value function as
   `V`, which collides with `V` = the viable region, and the Additions rename it
   to `J`; implemented per the Additions and recorded rather than done silently.
+
+- **`ensemble.json` — rust-ahead-of-python.** The reference has no ensemble
+  layer: `ensemble`, `invariant_action`, `decision_node`, `dead_drop`,
+  `pre_commit`, `best_case`, `worst_case` and `Schelling` are all grep-0 — and
+  this layer is downstream of TEN-4, so there is no per-scenario policy because
+  there is no policy at all. The block **names the greppable false positive**:
+  `scenario` returns *two* hits and neither is this. Both are Slice 9's
+  Simulator "scenario tree", a tree of branches a human authored by hand over
+  the *deterministic* forward simulator — same word, different object. A branch
+  there is a sequence of operators someone chose to try; a scenario here is a
+  declared assignment of **probabilities** to `T`.
+  **Counterweight, asserted by a test:** the Simulator panel is real, shipped
+  and used, and a person can build several branches and eyeball them side by
+  side. The precise reason that is not this: eyeballing branches compares
+  **outcomes**, the ensemble compares **policies**. *"Which of these plans looks
+  best"* is answerable by hand; *"which action is optimal no matter which of
+  these worlds I am in"* is not, because it needs each world solved separately
+  and the answers intersected. **One term is recorded AT PARITY** — the
+  Additions' *"the fork runs under the gate"* is genuinely satisfied in Python
+  today, so claiming the whole module rust-ahead would overstate the gap. The
+  block also states **a limit the method itself cannot remove**: invariance
+  holds only over the *declared* scenarios, which is a property of Shell/Wack's
+  practice rather than a Rust shortfall — what is encoded is that the claim
+  cannot be made without its scope.

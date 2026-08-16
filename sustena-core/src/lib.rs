@@ -55,6 +55,7 @@
 //! | Controller decision-math | [`controller`] | R2 |
 //! | Viability kernel · runway | [`kernel`] | R2 |
 //! | Tenet — T:S×A→Δ(S), Bellman | [`tenet`] | R2 |
+//! | Scenario ensembles · dead drops | [`ensemble`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -63,6 +64,7 @@ pub mod controller;
 pub mod council;
 pub mod detect;
 pub mod editing;
+pub mod ensemble;
 pub mod error;
 pub mod event;
 pub mod fold;
@@ -126,6 +128,10 @@ pub use schema::{bind, preserves_shape, validate, DimType, Schema};
 pub use state::State;
 pub use version::{
     PathRollback, PreImage, Rollback, VersionDag, VersionError, VersionNode,
+};
+pub use ensemble::{
+    DeadDrop, DeadDropBook, DecisionNode, Ensemble, EnsembleAnalysis, EnsembleError, InvariantSet,
+    ModelTemplate, Prob, Resolution, RewardBasis, Scenario,
 };
 pub use tenet::{
     backward_induct, rewards_from_region, BellmanSpec, Distribution, InversionPoint, Outcome,

@@ -305,6 +305,14 @@ impl Plan {
         self.policy.get(t)?.get(state).map(|s| s.as_str())
     }
 
+    /// Every state this plan has a value for at `t`.
+    ///
+    /// Needed by the ensemble layer, which takes the **union** across scenarios
+    /// rather than trusting one policy's view of the space.
+    pub fn states_at(&self, t: usize) -> impl Iterator<Item = &str> {
+        self.j.get(t).into_iter().flat_map(|m| m.keys().map(String::as_str))
+    }
+
     /// **The window this plan is about.**
     ///
     /// A policy computed to `H` is meaningful over `H` and no further. Carried

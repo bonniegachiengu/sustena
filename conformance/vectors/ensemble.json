@@ -1,0 +1,211 @@
+{
+  "conformance_version": 1,
+  "slice": "ensemble",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Tenet - Formal Execution.md, §IV (Simulating Three Futures — a scenario is an assignment of probabilities to T), §VI (Invariant Actions), §VII (Decision Nodes), §VIII (Dead Drops)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the scenario ensemble and everything read off the disagreement between per-scenario policies. Authored from the articles, not generated from the reference engine.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-16",
+    "statement": "The reference engine has no ensemble layer. ensemble, invariant_action, decision_node, dead_drop, pre_commit, best_case, worst_case, monte_carlo and Schelling are all grep-0 in apps/api/sustena/. This layer is downstream of TEN-4, which was itself grep-0 last slice — there is no per-scenario policy in the reference because there is no policy at all.",
+    "the_greppable_false_positive_named_so_nobody_re_derives_it": "`scenario` returns TWO hits and NEITHER is this. Both are Slice 9's Simulator 'scenario tree' (core/sustain_engine.py:1898, devui.py:1007) — a tree of what-if branches a HUMAN authored by hand, run through the deterministic forward simulator. Same word, different object: a branch there is a sequence of operators someone chose to try, and a scenario here is a declared assignment of PROBABILITIES to T. The reference's tree has no probabilities in it at all, so it cannot be run three ways and compared. Recorded because a reviewer grepping 'scenario', finding two hits in a file called sustain_engine, could reasonably conclude the feature exists.",
+    "term_by_term": {
+      "Ω = {ω_A, ω_B, ω_C} (§IV)": "RUST-AHEAD. The reference has one future, and it is not a future — it is a deterministic replay of a chosen operator list. Nothing anywhere assigns a probability to a transition.",
+      "π_ω per scenario (§VI premise)": "RUST-AHEAD, and blocked upstream: this needs backward induction, which was grep-0 until the previous slice. You cannot intersect policies that do not exist.",
+      "I(s₀) invariant actions (§VI)": "RUST-AHEAD. grep-0. The reference's simulate.score ranks ONE branch against a goal metric; there is no notion of an action being robust ACROSS futures, because there is only ever one.",
+      "D decision nodes (§VII)": "RUST-AHEAD. grep-0. Divergence between policies is not expressible where there is a single policy.",
+      "δ(D_i) dead drops (§VIII)": "RUST-AHEAD. grep-0. Nothing in the reference records a decision taken in advance for a state not yet reached. Its Council proposals are decided at the moment they are raised, which is the opposite arrangement.",
+      "the fork runs under the gate (Additions)": "AT PARITY, and worth stating so the gap is not overstated. The reference's simulate() genuinely enforces the admit gate on every simulated step — that Addition is satisfied in Python today. It is the sandbox's SAFETY that is at parity; what is missing is everything about comparing several of them."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The Simulator panel is real, shipped and used: fork the state, run a branch, score the terminal state, promote it to reality if it holds up. A person can build several branches by hand and eyeball them side by side, which is genuine decision support and is how most planning tools work. What it cannot do is the specific thing §VI and §VII are for. Eyeballing branches compares OUTCOMES; the ensemble compares POLICIES. The question 'which of these three plans looks best' is answerable by hand. The question 'which action is optimal no matter which of these three worlds I am actually in' is not, because it requires solving each world separately and intersecting the answers — and a human comparing branches has no way to notice that two futures agree at s₀ and disagree three steps later at a state neither branch happened to visit.",
+    "an_honest_limit_this_layer_cannot_remove": "Invariance is only ever over the DECLARED scenarios. An action invariant across {best, base, worst} is unconditional with respect to those three and says nothing about a fourth nobody wrote down. This is not a Rust shortfall — it is a property of the method, and Shell/Wack's own practice makes the same assumption. What is encoded is that the claim cannot be made without its scope: InvariantSet carries the scenario names and has no accessor returning the actions alone. Also carried: each per-scenario sweep is horizon-limited over the enumerated space exactly as TEN-4's is, and an ensemble of horizon-limited answers is still horizon-limited.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. The ensemble is a new additive module over tenet.rs and touches no existing gate path. It runs backward_induct unmodified, once per scenario."
+  },
+  "fixture": {
+    "why": "A small venture, following §IV's own generalisation (the Additions moved the worked example to a venture — no named household). Runway in months. From `s0` it can raise or cut burn; a raise either lands or does not; from `denied` it can pivot — which costs real cash and may not work — or wind down. The fixture's job is a SHAPE, not a story: `s0` must be a state every future agrees on and `denied` must be one they split on. Both are asserted rather than assumed.",
+    "states": {"s0": 6.0, "raised": 18.0, "denied": 3.0, "lean": 9.0, "scaled": 24.0, "dead": 0.0},
+    "dimension": "runway",
+    "template": [
+      {"state": "s0", "action": "fundraise", "outcomes": [["raised", "param:p_funding"], ["denied", "one_minus:p_funding"]]},
+      {"state": "s0", "action": "cut_burn", "outcomes": [["lean", "fixed:1.0"]]},
+      {"state": "raised", "action": "scale", "outcomes": [["scaled", "fixed:1.0"]]},
+      {"state": "raised", "action": "hold", "outcomes": [["raised", "fixed:1.0"]]},
+      {"state": "denied", "action": "pivot", "outcomes": [["lean", "param:p_growth"], ["dead", "one_minus:p_growth"]]},
+      {"state": "denied", "action": "wind_down", "outcomes": [["dead", "fixed:1.0"]]},
+      {"state": "lean", "action": "grind", "outcomes": [["lean", "fixed:1.0"]]},
+      {"state": "lean", "action": "pitch_again", "outcomes": [["raised", "param:p_funding"], ["denied", "one_minus:p_funding"]]},
+      {"state": "scaled", "action": "hold", "outcomes": [["scaled", "fixed:1.0"]]},
+      {"state": "dead", "action": "hold", "outcomes": [["dead", "fixed:1.0"]]}
+    ],
+    "scenarios": [
+      {"name": "best", "params": {"p_funding": 0.85, "p_growth": 0.80}},
+      {"name": "base", "params": {"p_funding": 0.55, "p_growth": 0.55}},
+      {"name": "worst", "params": {"p_funding": 0.25, "p_growth": 0.30}}
+    ],
+    "base_scenario": "base",
+    "inversion_point": ["runway >= 24"],
+    "terminal_reward": 1000.0,
+    "gamma": 0.9,
+    "horizon": 4,
+    "rewards": {
+      "why": "Three costs, each load-bearing rather than decorative — a fixture whose rewards are all zero proves nothing, as the previous slice found the hard way.",
+      "denied|pivot": -300.0,
+      "s0|cut_burn": -40.0,
+      "lean|grind": -5.0,
+      "raised|hold": -5.0,
+      "each_cost_explained": {
+        "denied|pivot": "Pivoting burns cash. Without a real cost, any chance of `lean` dominates certain `dead` under every scenario, they all agree, and there is no divergence to find.",
+        "s0|cut_burn": "Cutting burn costs momentum. Without a cost it merely DELAYS the same raise by one step, so it ties with fundraise under the discount and s0 stops being invariant for an uninteresting reason.",
+        "lean|grind": "Grinding is not free. Breaks a tie with pitch_again.",
+        "raised|hold": "Sitting on a raise has a holding cost. Without it `hold` and `scale` are exactly equal at `raised` and the argmax breaks ALPHABETICALLY — a fixture that would silently change if an action were renamed."
+      }
+    }
+  },
+  "ensemble_cases": [
+    {
+      "name": "a_scenario_is_a_probability_assignment_pushed_through_one_structure",
+      "why": "★ The §IV reading this module is built on. What is declared is named probabilities (p_funding=0.85), not a model; the model is what you get pushing that belief through the transition structure. This matters beyond tidiness: the three futures then differ ONLY in their numbers over identical structure, which is the premise the whole comparison rests on. Three separately-built models could differ in which edges exist, and a divergence between them would then be an authoring slip rather than a fact about uncertainty.",
+      "expect": {
+        "parameters": ["p_funding", "p_growth"],
+        "same_actions_across_scenarios": true,
+        "best_p_raised": 0.85,
+        "worst_p_raised": 0.25,
+        "worst_p_denied": 0.75
+      }
+    },
+    {
+      "name": "an_unbound_parameter_is_named_not_defaulted",
+      "why": "A missing probability is a missing belief. Defaulting it to anything — 0.5 most temptingly — would invent the belief and then optimise against it, which is the same failure the previous slice refused when it declined to normalise a distribution.",
+      "binds": ["p_funding"],
+      "expect": {"error": "UnboundParameter", "parameter": "p_growth"}
+    },
+    {
+      "name": "an_incoherent_scenario_cannot_be_swept",
+      "why": "p_funding = 1.4 makes the two branches sum to 1.4 and -0.4. Refused at instantiation by Distribution::new — the SAME rule that refuses a hand-written incoherent distribution, not a second check written here. A scenario that is not a probability assignment never becomes a model.",
+      "p_funding": 1.4,
+      "expect": {"error": "IncoherentScenario"}
+    },
+    {
+      "name": "a_one_scenario_ensemble_is_refused",
+      "why": "★ The vacuous-robustness guard. With a single future EVERY action is trivially invariant and NO state is ever a decision node — a robustness claim that cannot fail and therefore says nothing, and one that reads strongest precisely when it is worth least. Refused structurally rather than warned about.",
+      "expect": {"error": "TooFewScenarios"}
+    },
+    {
+      "name": "the_base_must_be_one_of_the_declared_scenarios",
+      "why": "The base is what a dead drop falls back to when no pre-commitment fires, so it is designated rather than inferred — best/BASE/worst is Shell-Wack's structure and the middle one is what you act from absent a reason not to. A fallback chosen by the engine would be an undeclared policy decision.",
+      "expect": {"error": "UnknownBase"}
+    },
+    {
+      "name": "every_scenario_gets_its_own_policy_and_the_window_is_carried",
+      "why": "This is TEN-4 run |Ω| times, unchanged — the ensemble composes that slice rather than being a second optimiser. And an ensemble of horizon-limited answers is still horizon-limited, so the window travels with the analysis.",
+      "expect": {"scenario_names": ["best", "base", "worst"], "horizon": 4}
+    }
+  ],
+  "invariant_cases": [
+    {
+      "name": "an_action_optimal_in_all_three_futures_is_invariant",
+      "why": "★ §VI, and half the proof of value. Even the worst funding odds (0.25) make raising better than cutting burn from s0, so `fundraise` is what you do regardless of which world you are in. That is an unconditional priority — the thing you can act on today without resolving any uncertainty first.",
+      "t": 0, "state": "s0",
+      "expect": {"the_one": "fundraise", "over": ["best", "base", "worst"]}
+    },
+    {
+      "name": "the_invariant_claim_cannot_be_quoted_without_its_scope",
+      "why": "★ The honest limit, encoded rather than footnoted. Invariance holds over the DECLARED scenarios and says nothing about a fourth nobody wrote down. InvariantSet carries the names and has no accessor returning the actions alone, so 'this action is invariant' full stop is unspellable.",
+      "t": 0, "state": "s0",
+      "expect": {"describe_contains": "says nothing about futures not declared"}
+    },
+    {
+      "name": "the_invariant_set_is_empty_where_the_scenarios_split",
+      "why": "The complement of §VI is §VII: no invariant action IS the definition of a decision node, so the two readings are one computation seen from either side.",
+      "t": 0, "state": "denied",
+      "expect": {"is_empty": true, "describe_contains": "decision node"}
+    },
+    {
+      "name": "the_invariant_set_is_at_most_one_action",
+      "why": "§VI writes I as a set and its own pseudocode intersects SINGLETONS (candidates ∩= {π(s₀)}), so I is empty or one action — never a list to choose from. Checked at every state and time rather than argued, so nobody builds a picker over what is structurally at most one item.",
+      "expect": {"max_size_everywhere": 1}
+    }
+  ],
+  "decision_node_cases": [
+    {
+      "name": "a_decision_node_is_where_the_optimal_action_diverges",
+      "why": "★ §VII, and the other half of the proof of value. At `denied` the best future says pivot and the worst says wind down — this is exactly where scenario uncertainty becomes consequential, and where information is worth waiting for. Note the node carries WHAT each scenario wants, not merely that they disagree: the disagreement is the actionable part and is what a dead drop is written against.",
+      "t": 0, "state": "denied",
+      "expect": {
+        "is_decision_node": true,
+        "best": "pivot",
+        "base": "wind_down",
+        "worst": "wind_down",
+        "proposed_count": 2
+      }
+    },
+    {
+      "name": "a_decision_node_is_horizon_dependent",
+      "why": "★ FOUND BY RUNNING THE FIXTURE, NOT BY PREDICTING IT. `denied` splits the scenarios at t=0 and t=1 and NOT at t=2 or t=3: close enough to the end of the window a pivot cannot repay its cost under ANY declared future, so even the best one winds down and they agree again. Recorded because it means 'is this a decision node?' is a question about a state AND a time — asked time-free it has an answer that is true somewhere and false elsewhere.",
+      "state": "denied",
+      "expect": {"node_at": [0, 1], "not_node_at": [2, 3], "invariant_at_2": "wind_down"}
+    },
+    {
+      "name": "the_state_the_scenarios_agree_on_is_not_a_node",
+      "why": "The negative case, kept so the test cannot pass by calling everything a decision node.",
+      "t": 0, "state": "s0",
+      "expect": {"is_decision_node": false}
+    },
+    {
+      "name": "identical_futures_cannot_disagree",
+      "why": "Two scenarios with the same numbers are the same model twice, so D is empty. The degenerate check that proves divergence is being read from the policies rather than from the fact that several were run.",
+      "expect": {"decision_nodes": 0}
+    }
+  ],
+  "dead_drop_cases": [
+    {
+      "name": "a_dead_drop_fires_at_its_node",
+      "why": "★ §VIII. The decision at `denied` is taken NOW, under clarity — while there is time to think about it — and it answers when the node arrives. Schelling's point: a decision made in advance is more reliable than one made in the moment under pressure.",
+      "t": 0, "state": "denied", "condition": "runway >= 3", "action": "pivot",
+      "expect": {"was_pre_committed": true, "action": "pivot"}
+    },
+    {
+      "name": "a_drop_whose_guard_does_not_hold_falls_back_and_names_itself",
+      "why": "§VIII's ExecuteAtNode falls through to π when no drop applies. Two things are pinned: the fallback is the DECLARED base scenario rather than a guess or an average, and the drop that declined is NAMED. A pre-commitment that quietly did not fire is worse than none — the person believes a decision is already made.",
+      "t": 0, "state": "denied", "condition": "runway >= 12", "action": "pivot",
+      "expect": {"resolution": "Policy", "from_scenario": "base", "declined": ["d_rich"]}
+    },
+    {
+      "name": "a_suggestion_is_never_dressed_as_a_pre_commitment",
+      "why": "★ With no drop registered the base policy answers — and the Resolution says so. The two are never blended into one recommendation, because 'you decided this in advance' and 'this is what the middle scenario suggests' carry very different weight, and that difference IS the mechanism.",
+      "t": 0, "state": "denied",
+      "expect": {"resolution": "Policy", "from_scenario": "base", "was_pre_committed": false}
+    },
+    {
+      "name": "a_drop_on_a_state_the_scenarios_agree_about_is_refused",
+      "why": "There is nothing to pre-decide where every declared future agrees — the answer is already unconditional. Registering one there is either a misunderstanding of the analysis or a drop aimed at the wrong state, and both are obvious now and expensive at the node.",
+      "t": 0, "state": "s0", "action": "fundraise",
+      "expect": {"error": "NotADecisionNode"}
+    },
+    {
+      "name": "a_drop_naming_an_action_the_model_does_not_admit_is_refused",
+      "why": "Pre-committing to something that cannot be done there is a decision that will fail exactly when it is relied on. Checked while checking is cheap — the §VIII argument applied to the pre-commitment itself.",
+      "t": 0, "state": "denied", "action": "scale",
+      "expect": {"error": "InadmissibleAction", "admissible_contains": "pivot"}
+    },
+    {
+      "name": "a_hedge_is_allowed_and_flagged",
+      "why": "★ The one thing deliberately NOT refused. A person may pre-commit to a third action none of the declared futures argued for — that is human judgment, and the analysis does not get a veto over it. What they may not do is make it invisible: is_hedge() marks any action no scenario proposed, so a hedge cannot be mistaken for a result the optimiser produced.",
+      "expect": {"hedge_flag_matches_whether_any_scenario_proposed_it": true}
+    },
+    {
+      "name": "a_duplicate_dead_drop_is_refused",
+      "why": "Two pre-commitments under one id is an ambiguous decision, which is the thing pre-commitment exists to eliminate.",
+      "expect": {"error": "DuplicateDeadDrop"}
+    }
+  ],
+  "reward_basis_cases": [
+    {
+      "name": "a_region_derived_reward_is_itself_scenario_dependent",
+      "why": "Worth stating because it is easy to assume R is shared. §V's literal reading has only T varying — but when R comes from the region, R(s,a) = W(s) − E[W(s')] takes the expectation over THIS scenario's own probabilities, so a pessimistic future scores the same action worse. That is the honest reading, not a quirk, and RewardBasis makes the choice between the two explicit rather than implied.",
+      "expect": {"sweeps_under_every_scenario": true, "horizon": 4}
+    }
+  ]
+}
