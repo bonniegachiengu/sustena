@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel** cases (divergences recorded) |
-| Rust tests | **321 unit · 74 conformance tests** across 11 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel**, **16 tenet** cases (divergences recorded) |
+| Rust tests | **337 unit · 91 conformance tests** across 12 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -193,11 +193,13 @@ boundary. Both are real today on the live host. Pull forward on request.
 
 This backlog covers the **foundation + walking skeleton** well. But the master spec (`SUSTENA_UPGRADE_SPEC.md`, §9.1) defines a three-module **operational spine — Monitor / Tenet / Controller** — and **two of the three are not yet tracked here.** Added below as pending so the backlog is comprehensive.
 
-### 🔴 SPINE — missing from the list above; required before "whole system" is true
+### 🔨 SPINE — **all three cores now shipped in Rust** (2026-08-16)
+
+**Monitor ✅ · Tenet 🔨 · Controller ✅.** The spine the master spec puts at the centre is no longer a gap: `region.rs` + `detect.rs` (Monitor), `tenet.rs` (Tenet), `controller.rs` (Controller), with `kernel.rs` underneath all three. What remains in T1/G1 are the layers that **compose** these cores — ensembles, OODA, holarchy escalation — not the cores themselves.
 
 | # | Gap | Article | Where |
 |---|---|---|---|
-| T1 | **Tenet optimisation engine (§4)** — backward-induction/Bellman, best/base/worst scenario ensembles, invariant-action extraction, decision-node detection, dead-drops, temporal pincer. Today only the deterministic **forward** simulator exists (ported in R1). | Tenet / Temporal Decision Architecture | new |
+| 🔨 T1 | ~~**Tenet optimisation engine (§4)**~~ — **the optimiser core is DONE in Rust** (`tenet.rs`, 2026-08-16): the stochastic transition `T: S×A→Δ(S)` (TEN-1) and **backward induction** with a complete policy `π` (TEN-4), including the **CTL-12 join** — with `R(s,a)=W(s)−E[W(s')]` the `H=1` sweep IS the Controller's greedy Lyapunov step, checked by a vector rather than asserted. The sharp case is `backward_induction_takes_a_worse_first_step_for_a_better_end`: a horizon buys what a greedy rule structurally cannot reach. **Still open: scenario ensembles (TEN-3), invariant actions (TEN-5), decision nodes (TEN-6), dead drops (TEN-7), the temporal pincer (TEN-10)** — all of which compose this core rather than change it. Python unchanged (the deterministic **forward** simulator from R1 is now expressible as `Distribution::certain`, a special case rather than a competitor). | Tenet / Temporal Decision Architecture | Python |
 | 🔨 G1 | ~~**Controller decision-math (§3)**~~ — **the core is DONE in Rust** (`controller.rs`, 2026-08-12): Lyapunov distance-to-V urgency, `should_surface` (the SNR filter), `is_stable_intervention`, and the Sheridan `AUTOMATION_LEVEL` dispatch — plus **the loop closing through a human**, walked end to end by a conformance vector (Monitor → Controller → approval token → gate). **Still open: the OODA state machine and holarchy escalation**, which compose these functions rather than changing them. Python unchanged. | Controller / The Expanse | Python |
 
 ### 🟡 Confirm coverage (built in Python — verify the Rust plan carries them, core vs app-layer)
@@ -489,4 +491,4 @@ knowing about before opening the next slice:
 - **N3 — a definition edit destroys its predecessor.** Sharper than #26: rollback has
   nothing to roll back *to*.
 
-*Last updated: 2026-08-12 — whole-system reconciliation added (Monitor is tracked as FOLLOW #23–25; Tenet §4 and Controller §3 added as T1/G1); N1–N10 cross-referenced from the completed WBD.*
+*Last updated: 2026-08-16 — **T1 optimiser core shipped** (`tenet.rs`: TEN-1 stochastic transition + TEN-4 backward induction, 16 unit · 17 conformance). The operational spine now reads **Monitor ✅ · Tenet 🔨 · Controller ✅**; what is left in T1/G1 composes these cores rather than changing them.*

@@ -1,0 +1,154 @@
+{
+  "conformance_version": 1,
+  "slice": "tenet",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Tenet - Formal Execution.md, §II (T: S×A→Δ(S)), §III (the inversion point IP), §V (backward induction) + the Additions (the V→J rename); 3B1B — Controller - Formal Execution.md, §II + Additions (W(s)=d(s,V), the CTL-12 join)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the optimiser core: the stochastic transition model and backward induction. Authored from the articles, not generated from the reference engine.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-16",
+    "statement": "The reference engine has no optimiser. backward_induct, bellman, argmax, discount, stochastic, expectation, Delta(S), markov and value_function are all grep-0 in apps/api/sustena/. The two near-misses are false positives and are named here so nobody re-greps and mistakes them for a hit: every occurrence of 'gamma' is the typing judgment 'Gamma |- r' from the parse-rule slice, and every 'policy' is child_policy or access_policy — an allow-list, not a control policy.",
+    "term_by_term": {
+      "T: S×A→Δ(S)": "RUST-AHEAD. The reference's simulate.run_path applies each step to a forked state and yields ONE next state. The codomain is S, not Δ(S) — a point mass by signature, so a distribution is not merely unimplemented there but inexpressible in the same way conservation was for the single-state evaluators.",
+      "backward induction": "RUST-AHEAD. grep-0. The reference simulates FORWARD from step 0 and stops. Nothing sweeps from a terminal condition back toward the present, which is the whole content of §V.",
+      "the policy π": "RUST-AHEAD. The reference returns a score for the one path it was handed. There is no π — no map from state to best action, and no notion of an action being best at t=1 and different at t=2.",
+      "the inversion point IP": "RUST-AHEAD as a terminal CONDITION. The reference has goal metrics (_SCORERS), which is a related idea pointed the other way: a metric ranks a state you already reached; IP is the boundary the sweep starts from.",
+      "γ, R, H as declared fields": "RUST-AHEAD, and this is the same discipline as the region weights and the CUSUM parameters rather than a new one. A discount rate is a claim about how much a household values later over sooner, and it belongs where it can be argued with."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "simulate.fork → run_path → score is real, shipped, and wired to a real panel. It forks state, applies a proposed sequence, and scores the terminal state against a named goal metric (minimize_budget_deviation, maximize_savings_rate, maximize_liquid_balance). That is genuine decision SUPPORT and it is not nothing — it is the thing that answers 'is this plan any good?'. What it cannot do is answer 'what is the best plan?'. It evaluates a sequence a human already wrote; it does not search over sequences. And because run_path is deterministic there is no distribution to take an expectation over, so even a search built on top of it would optimise a world with no uncertainty in it.",
+    "the_ctl12_join_is_not_a_divergence": "Worth stating separately so it is not read as more rust-ahead surface than it is. is_stable_intervention (CTL-2, shipped last slice) and backward_induct are ONE mechanism, not two: with R(s,a) = W(s) − E[W(s')], the H=1 sweep's argmax J IS the greedy argmin W. A vector below checks that they choose the same action rather than asserting it, so the claim is falsifiable. What the longer horizon buys is the ability to accept a WORSE first step for a better end — the case the greedy rule structurally cannot see.",
+    "a_departure_from_the_article_recorded_rather_than_made_silently": "§V writes the value function as V, which collides with V = the viable region everywhere else in the series — including in the very Lyapunov term this module joins to. The Additions rename it to J and this module follows the Additions. One letter, one meaning. Named here for the same reason the Monitor's CUSUM ordering and the Controller's Lyapunov target were: the article was corrected, not copied.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Tenet is a new additive module and touches no existing gate path. Distribution::certain is the deterministic reference case expressed IN the general model rather than beside it, so the existing forward-simulation behaviour is a special case rather than a competitor."
+  },
+  "space": {
+    "why": "The proof-of-value space. From `start` there is a quick path that dead-ends in a `trap` and a slower path through `slow` that reaches the `goal`. The region floor is a minimum operating float of 100, so `slow` (60) genuinely dips BELOW V — it is a worse first step, not merely a smaller number. That is what makes the greedy rule refuse it.",
+    "region": {"intervals": [["balance", 100.0, null]], "weights": {"balance": 1.0}},
+    "states": {"start": 100.0, "quick": 120.0, "trap": 121.0, "slow": 60.0, "goal": 500.0},
+    "w_derived": {"start": 0.0, "quick": 0.0, "trap": 0.0, "slow": 40.0, "goal": 0.0},
+    "model": [
+      {"from": "start", "action": "dash", "to": "quick"},
+      {"from": "start", "action": "build", "to": "slow"},
+      {"from": "quick", "action": "coast", "to": "trap"},
+      {"from": "trap", "action": "coast", "to": "trap"},
+      {"from": "slow", "action": "finish", "to": "goal"},
+      {"from": "goal", "action": "hold", "to": "goal"}
+    ],
+    "inversion_point": ["balance >= 500"],
+    "terminal_reward": 500.0,
+    "gamma": 0.9,
+    "rewards_from_region": {
+      "why": "R(s,a) = W(s) − E[W(s')], the expected Lyapunov improvement. Derived from the region rather than hand-written, which is what makes the H=1 case genuinely the Controller's rule and not a lookalike.",
+      "start|dash": 0.0, "start|build": -40.0,
+      "quick|coast": 0.0, "trap|coast": 0.0,
+      "slow|finish": 40.0, "goal|hold": 0.0
+    }
+  },
+  "distribution_cases": [
+    {
+      "name": "a_distribution_that_does_not_sum_to_one_is_refused_not_normalised",
+      "why": "THE structural choice of §II. Normalising would invent probabilities nobody declared, in the one input the whole optimisation reads as evidence about the world. Refusing says 'you have not told me what you think happens' instead of guessing on the household's behalf.",
+      "outcomes": [["quick", 0.5], ["slow", 0.2]],
+      "expect": {"error": "NotADistribution", "total": 0.7}
+    },
+    {
+      "name": "a_negative_probability_is_refused",
+      "why": "Not a distribution, and the arithmetic would silently produce a value that looks like a number.",
+      "outcomes": [["quick", 1.3], ["slow", -0.3]],
+      "expect": {"error": "BadProbability"}
+    },
+    {
+      "name": "the_deterministic_case_is_a_point_mass",
+      "why": "The R1 forward simulator, expressed IN the model rather than beside it. The reference's behaviour becomes a special case of this one — which is the difference between extending an engine and forking it.",
+      "certain": "quick",
+      "expect": {"is_deterministic": true, "outcomes": [["quick", 1.0]]}
+    },
+    {
+      "name": "a_genuine_distribution_spreads_the_expectation",
+      "why": "The thing a point mass cannot do. A 70/30 split between a safe landing and one below the float carries 30% of the shortfall into the reward, so the action is scored as partly bad rather than as either fine or ruinous.",
+      "outcomes": [["quick", 0.7], ["slow", 0.3]],
+      "expectation_of": "w",
+      "expect": {"expectation": 12.0}
+    }
+  ],
+  "sweep_cases": [
+    {
+      "name": "backward_induction_takes_a_worse_first_step_for_a_better_end",
+      "why": "★ THE PROOF OF VALUE, and the reason this module exists. At H=1 the sweep picks `dash` — it is the only move that does not immediately dip below the float, and the greedy Lyapunov rule agrees. At H=3 it picks `build`: accepting W going 0→40 now, because from `slow` the goal is reachable and from `quick` it is not. The greedy rule cannot see this, not because it is tuned badly but because a one-step rule has nowhere to put the information.",
+      "horizon": 3, "gamma": 0.9, "from": "start",
+      "expect": {"action_at_t0": "build", "value_at_t0": 360.5}
+    },
+    {
+      "name": "at_h_equals_one_bellman_reproduces_the_lyapunov_choice",
+      "why": "★ THE CTL-12 JOIN, checked rather than asserted. With R from the region, the H=1 argmax J must equal the Controller's greedy argmin W(o(s)). If these ever disagree, one of the two modules is wrong — and this vector is what would say so.",
+      "horizon": 1, "gamma": 0.9, "from": "start",
+      "expect": {"action_at_t0": "dash", "agrees_with_greedy_lyapunov": true}
+    },
+    {
+      "name": "a_longer_horizon_can_change_the_first_move",
+      "why": "The same state, the same model, the same rewards — and a different answer, because the window changed. This is why Plan carries its horizon rather than implying forever.",
+      "gamma": 0.9, "from": "start", "horizons": [1, 3],
+      "expect": {"action_at_h1": "dash", "action_at_h3": "build", "differ": true}
+    },
+    {
+      "name": "gamma_zero_is_pure_myopia",
+      "why": "γ=0 discards the future entirely, so a long horizon collapses to the greedy choice. The discount rate is doing real work and a vector shows it — a parameter nobody can observe changing is a parameter nobody can argue with.",
+      "horizon": 3, "gamma": 0.0, "from": "start",
+      "expect": {"action_at_t0": "dash"}
+    },
+    {
+      "name": "value_propagates_backward_discounted",
+      "why": "The mechanism itself, at the one state where it is cleanly visible. J[3][goal] is the terminal reward; each step back multiplies by γ. 500 → 450 → 405 → 364.5.",
+      "horizon": 3, "gamma": 0.9, "state": "goal",
+      "expect": {"j": [364.5, 405.0, 450.0, 500.0]}
+    },
+    {
+      "name": "the_policy_is_complete_for_every_state_at_every_time",
+      "why": "§V's π is a COMPLETE policy — every state, every t — not a single recommended path. The distinction matters when the world does not go the way the plan assumed: a path is useless off-path, a policy is not.",
+      "horizon": 3, "gamma": 0.9,
+      "expect": {"action_defined_for_all_states_at_all_t": true}
+    },
+    {
+      "name": "the_most_likely_path_is_a_reading_aid_not_the_policy",
+      "why": "Following π along the highest-probability branch gives a person something to look at, and the naming keeps it from being mistaken for the plan itself.",
+      "horizon": 3, "gamma": 0.9, "from": "start",
+      "expect": {"path": ["start", "slow", "goal", "goal"]}
+    }
+  ],
+  "terminal_condition_cases": [
+    {
+      "name": "the_terminal_condition_is_the_inversion_point",
+      "why": "§III. J[H] is R_terminal exactly where IP holds and 0 elsewhere — the sweep is built from the future, so what counts as 'arrived' is the only thing it starts with.",
+      "horizon": 2, "gamma": 0.9,
+      "expect": {"j_at_h": {"goal": 500.0, "start": 0.0, "quick": 0.0, "trap": 0.0, "slow": 0.0}}
+    },
+    {
+      "name": "the_viability_kernel_can_be_the_terminal_condition",
+      "why": "★ The interesting reading, and the reason SUS-10 had to land first. 'Worth reaching' becomes 'from here you can keep going' — the inversion point IS the kernel, so the optimiser aims at survivability rather than at a number someone picked.",
+      "inversion_point": "kernel",
+      "expect": {"terminal_value_tracks_kernel_membership": true}
+    },
+    {
+      "name": "a_state_with_no_admissible_action_carries_its_value_rather_than_scoring_zero",
+      "why": "Terminal by absence. Scoring it 0 would be a different claim — that standing there is worthless — when the model only says nobody declared a move. Carrying the value states the absence instead of filling it.",
+      "expect": {"carries_forward": true}
+    }
+  ],
+  "refusal_cases": [
+    {
+      "name": "outcomes_outside_the_enumerated_space_are_refused",
+      "why": "A dangling edge would be silently treated as worth 0 — a claim about the world nobody made, and the pessimistic direction is no safer than the optimistic one. The same discipline as the kernel's opaque-move refusal.",
+      "dangling_to": "nowhere",
+      "expect": {"error": "DanglingOutcomes"}
+    },
+    {
+      "name": "the_parameters_are_checked_at_authoring_time",
+      "why": "γ outside [0,1], a non-finite reward, or a horizon of 0 are caught before a sweep runs rather than producing a plan that looks like a plan.",
+      "cases": [
+        {"gamma": 1.5, "expect": "BadGamma"},
+        {"horizon": 0, "expect": "ZeroHorizon"}
+      ]
+    }
+  ]
+}

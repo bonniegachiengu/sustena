@@ -94,6 +94,7 @@ conformance/
     detect.json         EWMA + CUSUM over the W series   (spec, R2)
     controller.json     Lyapunov · Sheridan · SNR · loop (spec, R2)
     kernel.json         Viab_T(V) + runway R(s)          (spec, R2)
+    tenet.json          T:S×A→Δ(S) + backward induction  (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -211,3 +212,23 @@ it is a bug** — nothing silently differs.
   kernels are exponential (so the exact form runs over an enumerated space), and
   `Viab^H` is a superset and therefore optimistic (so it is a separate type that
   cannot claim to be a guarantee). A test asserts both stay stated.
+
+- **`tenet.json` — rust-ahead-of-python.** The reference engine has no optimiser:
+  `backward_induct`, `bellman`, `argmax`, `discount`, `stochastic`, `expectation`
+  and `markov` are all grep-0. The block **names the two greppable false
+  positives** so nobody re-greps and mistakes them for hits — every `gamma` is
+  the typing judgment `Γ ⊢ r` from the parse-rule slice, and every `policy` is
+  `child_policy`/`access_policy`, an allow-list rather than a control policy.
+  **Counterweight, asserted by a test:** `simulate.fork → run_path → score` is
+  real, shipped and wired to a panel — it forks state, applies a proposed
+  sequence and scores the result against a named goal metric. That answers *"is
+  this plan any good?"*; what it cannot answer is *"what is the best plan?"* It
+  evaluates a sequence a human already wrote rather than searching over
+  sequences, and because `run_path` is deterministic there is no distribution to
+  take an expectation over. A second note records that **the CTL-12 join is not
+  extra divergence surface**: `is_stable_intervention` and `backward_induct` are
+  one mechanism, and a vector *checks* that the `H = 1` sweep picks the same
+  action as the greedy Lyapunov step rather than asserting it. The block also
+  records **one departure from the article** — §V writes the value function as
+  `V`, which collides with `V` = the viable region, and the Additions rename it
+  to `J`; implemented per the Additions and recorded rather than done silently.
