@@ -62,10 +62,12 @@
 //! | MonitorEngine — owns the chain | [`monitor`] | R2 |
 //! | Holarchic escalation | [`holarchy`] | R2 |
 //! | Population · quorum sensing | [`population`] | R2 |
+//! | Consensus — quorum · Paxos | [`consensus`] | R2 |
 
 pub mod admission;
 pub mod approval;
 pub mod compose;
+pub mod consensus;
 pub mod controller;
 pub mod council;
 pub mod detect;
@@ -102,6 +104,10 @@ pub use approval::{
 pub use compose::{
     compose, entails, wp, Change, Composed, EffectSummary, Entailment, Pathway, PathwayError,
     Rejected, Step, WpResult,
+};
+pub use consensus::{
+    propose, Accepted, Body, ByzantineBound, ConsensusError, Decision, Ledger, Promise,
+    ProposalNumber, Round, RoundOutcome, RoundPhase,
 };
 pub use controller::{
     compute_urgency, is_stable_intervention, route, should_rollback, AutomationTable,

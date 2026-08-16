@@ -1,0 +1,141 @@
+{
+  "conformance_version": 1,
+  "slice": "consensus",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Multiparty - Formal Execution.md, §V (Consensus Without a Coordinator — FLP 1985; Paxos, Lamport 1998; the Byzantine Generals bound, Lamport/Shostak/Pease 1982)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the machinery, not the deliberation layer. §V is explicit: 'Consensus is the machinery; the session is what runs on it.'",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-16",
+    "statement": "paxos, consensus, acceptor, overlapping, byzantine, FLP and ballot are all grep-0 in apps/api/sustena/. The reference has no coordinator-free agreement protocol and no safety property: nothing prevents two conflicting proposals both passing, because nothing was ever built to.",
+    "★_the_counterweight_is_the_deliberation_layer_and_canon_names_it": "CouncilSession is real, shipped, and running in a household — and §V itself says what it is: 'The deliberation layer above the protocol is the CouncilSession — Symbionts advise, the human decides. Consensus is the machinery; the session is what runs on it.' Its resolve() tallies operative YES votes and then defers to user_vote: 2+ YES notifies the human, and the HUMAN's vote passes it or overrides it. So it is not a weak consensus protocol — it is a correct implementation of a DIFFERENT layer, one canon places above this one. Calling it a gap in the protocol would misread the architecture; the honest statement is that the layer it runs on did not exist until now.",
+    "the_three_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "proposer (12 hits)": "Every one is parse_rule_proposer.py — the Phase 3D ML rule proposer, whose own docstring says no generative AI is wired. A Paxos proposer and a parse-rule proposer share a noun and nothing else.",
+      "majority (3 hits)": "Plain English: 'the overwhelming majority of sustains', 'the majority of real bank SMS'. Not a quorum.",
+      "quorum (1 hit)": "The same canned MockClaudeClient status string the Signal slice already named ('council quorum met'). Mock prose."
+    },
+    "term_by_term": {
+      "FLP (MUL-7)": "RUST-AHEAD as an ENCODED CONSTRAINT rather than as code. There is nothing to implement — FLP is an impossibility result. What is built is the honesty it demands: propose() returns a Round whose Failed variant is a normal outcome, and nothing retries, because retrying is the timeout-or-randomisation §V says must be bought and it is bought outside core where there is a clock.",
+      "overlapping majorities (MUL-8)": "RUST-AHEAD. grep-0. And this is where the safety property lives: Body::new refuses 2q ≤ k, so a body from which two disjoint quorums could be drawn cannot be constructed.",
+      "the Paxos protocol (MUL-8)": "RUST-AHEAD. No acceptor, no proposal number, no prepare/accept. The reference's votes are cast once against a proposal; Paxos's acceptors carry a promise and a prior acceptance forward, which is the mechanism the re-choosing property rests on.",
+      "any later round re-chooses the same v": "RUST-AHEAD, and it is the property the whole protocol exists for. Not expressible in the reference: a second council proposal has no way to discover what a first one decided, because nothing carries an acceptance.",
+      "the Byzantine bound (MUL-9)": "RECORDED, NOT BUILT — and 'rust-ahead' would be the wrong word for the protocol itself. This is not a BFT protocol; ByzantineBound::THIS_BUILD_TOLERATES_BYZANTINE is a false a test asserts. What is built is the ARITHMETIC of the bound, because §V calls it 'the design limit to remember' and a limit you cannot compute is not one you can remember.",
+      "CouncilSession / StakeholderSession": "AT PARITY for what it is. The deliberation layer is real in Python and deliberately not rebuilt here."
+    },
+    "★_the_loop_this_closes": "editing.rs's CouncilMint has carried a comment since the EDIT-8 slice: 'Quorum arithmetic — who counted, against what threshold, under which overlapping-majority rule — is Multiparty's, and is not built. So quorum_met is supplied by the caller and refused when false.' That comment is now false, and the code says so: CouncilMint::from_consensus takes a Decision, which has private fields, no public constructor, and is obtainable only from a Ledger where acceptors genuinely accepted — from a Body whose quorum size could not have been declared without satisfying 2q > k. A shared definition's rule-change quorum is DERIVED, not asserted. from_decision's bool is kept for a host whose consensus lives elsewhere, and is now one path among two rather than the only one.",
+    "the_honest_limit_stated_plainly": "SAFETY is guaranteed; LIVENESS is not, and cannot be. FLP is not a gap to be closed later — it is a proof that the thing it forbids is impossible. Any future retry loop, timeout or randomised backoff is a purchase made outside this module, and this module's job is to be correct when it succeeds and honest when it does not.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive. The one change to an existing module is a NEW constructor on CouncilMint; from_decision is untouched, so every editing vector keeps passing unchanged."
+  },
+  "fixture": {
+    "why": "Five nodes with a majority of three — the smallest body where a quorum can be drawn two different ways and still be forced to overlap. {a,b,c} and {c,d,e} share exactly `c`, and one shared acceptor is all the safety property needs, which is precisely why 2q > k suffices.",
+    "nodes": ["a", "b", "c", "d", "e"],
+    "quorum_size": 3,
+    "first_quorum": ["a", "b", "c"],
+    "second_quorum": ["c", "d", "e"]
+  },
+  "safety_cases": [
+    {
+      "name": "a_quorum_that_need_not_overlap_is_refused",
+      "why": "★★ THE SAFETY PROPERTY, made unspellable rather than checked. Two quorums of 2 drawn from 5 nodes can be disjoint, so each could ratify a different value — the one thing §V's safety rests on not happening. Refused at construction, so the configuration cannot be run rather than being run carefully.",
+      "quorum_size": 2,
+      "expect": {"error": "QuorumsNeedNotOverlap", "message_contains": "each ratify a different value"}
+    },
+    {
+      "name": "a_majority_is_the_smallest_quorum_that_overlaps",
+      "why": "⌊k/2⌋+1, and 3 is genuinely the floor for 5 — 2 was refused above, so this is the boundary and not an arbitrary default.",
+      "expect": {"quorum_size": 3, "overlaps": true}
+    },
+    {
+      "name": "an_empty_body_cannot_agree_on_anything",
+      "why": "A body with no members would trivially satisfy any quorum rule and ratify anything. Refused rather than treated as vacuously agreeing.",
+      "expect": {"error": "EmptyBody"}
+    }
+  ],
+  "protocol_cases": [
+    {
+      "name": "a_value_is_chosen_when_a_quorum_accepts_it",
+      "why": "§V's protocol, run once. The Decision names exactly which acceptors accepted — the quorum, identified, which is what makes it derivable rather than assertable downstream.",
+      "value": "solar", "quorum": ["a", "b", "c"],
+      "expect": {"chosen": "solar", "accepted_by": 3, "adopted_another_value": false}
+    },
+    {
+      "name": "nothing_is_chosen_before_a_quorum_accepts",
+      "why": "Promises are not acceptances, and two of three is not a quorum. Both halves matter: a protocol that treated PREPARE as commitment would choose values nobody accepted.",
+      "expect": {"after_prepare": null, "after_two_accepts": null}
+    },
+    {
+      "name": "a_later_round_re_chooses_the_same_value",
+      "why": "★★ THE PROOF OF VALUE, and the heart of §V. A second proposer wants something different and CANNOT have it: overlap guarantees its quorum contains an acceptor already holding v, and the 'v = highest-numbered accepted value seen' rule makes it adopt v. Two proposers race; one value survives.",
+      "first": {"value": "solar", "quorum": ["a", "b", "c"], "round": 1},
+      "second": {"value": "diesel", "quorum": ["c", "d", "e"], "round": 2},
+      "expect": {"second_own_value": "diesel", "second_chose": "solar", "adopted_another_value": true, "still_chosen": "solar"}
+    },
+    {
+      "name": "the_overlap_is_what_forces_it_and_the_quorums_share_exactly_one_node",
+      "why": "★ Not a coincidence of the fixture. {a,b,c} ∩ {c,d,e} = {c} — exactly one shared acceptor, and that is enough. Checked by counting which promises in the second round carry a prior acceptance: exactly one does, and it is `c`. The safety property is not statistical.",
+      "expect": {"shared_nodes": 1, "carrying_promises": 1, "carrier": "c"}
+    },
+    {
+      "name": "re_choosing_is_produced_by_the_protocol_not_remembered_by_the_ledger",
+      "why": "★ It would be easy to latch a chosen value and hand it back, and that would prove nothing. The ledger holds no 'final' field — decision() recomputes from acceptor state every time — so the re-choosing property is something the protocol produces rather than something a cache asserts.",
+      "expect": {"recomputed_stable": true}
+    }
+  ],
+  "flp_cases": [
+    {
+      "name": "a_round_can_fail_at_prepare_and_that_is_a_normal_outcome",
+      "why": "★★ MUL-7. A higher-numbered proposer took the promises first, so this round gets nowhere — and that is the protocol behaving CORRECTLY under FLP, not something going wrong. Returning Err would let a caller `?` a lost race into a crash, which would read a correct protocol as a broken one.",
+      "blocking_round": 9, "attempt_round": 2, "quorum": ["a", "b", "c"],
+      "expect": {"succeeded": false, "phase": "Prepare", "proposed": null, "chosen": null, "reason_contains": "higher number"}
+    },
+    {
+      "name": "a_round_can_fail_at_accept_when_a_higher_number_arrives_mid_round",
+      "why": "The other failure point: promises granted, then swept before ACCEPT. Safety holds — nothing is chosen — while liveness is exactly what was lost.",
+      "expect": {"all_refused": true, "chosen": null}
+    },
+    {
+      "name": "nothing_here_retries",
+      "why": "★ §V: every real system buys its way around FLP 'with timeouts or randomization — never magic'. Both need a clock, and core has none. So a failed round comes back as a failed round with its round number unchanged, and the host decides whether to try again — the purchase is made where the clock is.",
+      "expect": {"round_number_unchanged": true}
+    },
+    {
+      "name": "a_round_sent_to_fewer_than_a_quorum_is_refused",
+      "why": "Not a failure outcome but a caller error: proposing to a sub-quorum could never choose anything, so it is refused rather than reported as an honest loss.",
+      "sent_to": 2,
+      "expect": {"error": "QuorumTooSmall"}
+    },
+    {
+      "name": "a_non_member_cannot_be_asked",
+      "why": "A body is who is in it. An outsider's promise would count toward a quorum it is not part of.",
+      "expect": {"error": "NotAMember"}
+    }
+  ],
+  "byzantine_cases": [
+    {
+      "name": "the_byzantine_bound_is_computable_and_this_build_does_not_meet_it",
+      "why": "★ MUL-9. §V calls k ≥ 3f+1 'the design limit to remember before the federation includes anyone you don't fully trust' — and a limit you cannot compute is not one you can remember. So the arithmetic is built and the protocol is not: Paxos survives a node that STOPS, not one that LIES, and THIS_BUILD_TOLERATES_BYZANTINE is a false a test asserts.",
+      "expect": {"tolerates_byzantine": false, "bft_would_tolerate": 1, "would_admit_1": true, "would_admit_2": false, "nodes_required_for_2": 7}
+    },
+    {
+      "name": "a_household_sized_body_is_the_working_default",
+      "why": "§V: 'For Sustena's scale — a household, a small crew, a handful of nodes — plain quorum/Paxos is the working default.' Three people, a quorum of two, and a BFT tolerance of zero traitors — which is the honest reading of a body whose members trust each other.",
+      "nodes": ["bonnie", "cira", "epha"],
+      "expect": {"quorum_size": 2, "bft_would_tolerate": 0}
+    }
+  ],
+  "loop_closed_cases": [
+    {
+      "name": "a_council_mint_derives_its_quorum_from_a_real_decision",
+      "why": "★★ THE LOOP CLOSED. EDIT-8's CouncilMint took quorum_met as a caller-asserted bool, with a comment naming Multiparty as the composition point that was 'not built'. Now from_consensus takes a Decision — private fields, no public constructor, obtainable only from a ledger where acceptors genuinely accepted, drawn from a body whose quorum size could not have been declared without satisfying 2q > k. A shared definition's rule-change quorum is computed, not trusted.",
+      "expect": {"mint_succeeds": true, "proposal_id": "edit-1"}
+    },
+    {
+      "name": "a_mint_still_refuses_a_proposal_that_did_not_pass",
+      "why": "★ Deriving the quorum does not weaken the other clause, and OverriddenByUser is the sharpest case: a real quorum genuinely accepted the value, and the HUMAN said no. The machinery agreed; the deliberation layer above it overrode. Canon's ordering — 'Symbionts advise, the human decides' — survives contact with a protocol that could have ratified without them.",
+      "status": "OverriddenByUser",
+      "expect": {"error": "CouncilDidNotPass"}
+    }
+  ]
+}

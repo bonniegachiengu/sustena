@@ -102,6 +102,7 @@ conformance/
     monitor.json        the per-sustain MonitorEngine    (spec, R2)
     holarchy.json       a breach climbs to who can act   (spec, R2)
     population.json     N(i) · c>θ · cascade · bifurcation (spec, R2)
+    consensus.json      quorum · Paxos · FLP · 3f+1       (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -385,3 +386,25 @@ it is a bug** — nothing silently differs.
   **two honest limits**: the mean-field `β*` is not predicted (the transition is
   *observed* on the declared graph), and neighbourhoods here are symmetric
   though §I permits any subset.
+
+- **`consensus.json` — rust-ahead-of-python, and the counterweight is a
+  DIFFERENT LAYER that canon names.** `paxos`, `acceptor`, `overlapping`,
+  `byzantine` and `FLP` are grep-0. But `CouncilSession` is real and running,
+  and §V itself says what it is: *"the deliberation layer above the protocol
+  [...] consensus is the machinery; the session is what runs on it."* Its
+  `resolve()` tallies operative votes and then defers to `user_vote` — the
+  human passes or overrides. So it is **not a weak consensus protocol**; it is
+  a correct implementation of the layer canon places *above* this one, and
+  calling it a gap would misread the architecture. Three false positives are
+  named, including `proposer` (12 hits — all `parse_rule_proposer.py`, the ML
+  rule proposer). **Two terms are deliberately not "rust-ahead":** FLP is an
+  **impossibility result**, so what is built is the honesty it demands (a
+  failed round is a normal outcome; nothing retries, because retrying needs a
+  clock core does not have); and the Byzantine bound is **recorded, not built**
+  — `THIS_BUILD_TOLERATES_BYZANTINE` is a `false` a test asserts, with only the
+  `k ≥ 3f+1` arithmetic supplied, because §V calls it *"the design limit to
+  remember"* and a limit you cannot compute is not one you can remember.
+  **★ The file also records a loop closed:** EDIT-8's `CouncilMint` carried a
+  comment saying quorum arithmetic *"is not built"*; that comment is now false,
+  and `from_consensus` derives the quorum from a `Decision` that cannot exist
+  without one.

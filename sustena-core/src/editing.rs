@@ -71,6 +71,7 @@
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::consensus::Decision;
 use crate::council::ProposalStatus;
 use crate::predicate::{self, parse_predicate};
 use crate::schema::{bind, DimType, Schema, TypeError};
@@ -449,11 +450,18 @@ pub enum Governance {
 /// Private fields, no public constructor: a shared definition cannot be edited
 /// by asserting that a council agreed.
 ///
-/// **The composition point.** Quorum *arithmetic* — who counted, against what
-/// threshold, under which overlapping-majority rule — is Multiparty's (§4B,
-/// M-MUL), and is not built. So `quorum_met` is supplied by the caller and
-/// refused when false. That makes the dependency a compile-time obligation the
-/// host cannot skip silently, rather than a check this module pretends to do.
+/// **The composition point, now closed (2026-08-16).** Quorum *arithmetic* —
+/// who counted, against what threshold, under which overlapping-majority rule —
+/// is Multiparty's (§4B, M-MUL), and it is now **built**:
+/// [`CouncilMint::from_consensus`] takes a [`crate::consensus::Decision`],
+/// which has private fields and no constructor and is obtainable only from a
+/// ledger where acceptors genuinely accepted. A shared definition's rule-change
+/// quorum is therefore **derived, not asserted**.
+///
+/// [`CouncilMint::from_decision`] is kept for a host whose consensus lives
+/// elsewhere, and its `quorum_met` bool remains exactly what it always was: a
+/// caller's assertion, refused when false. The difference is that there is now
+/// a path that does not require trusting it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CouncilMint {
     proposal_id: String,
@@ -469,6 +477,33 @@ impl CouncilMint {
             return Err(AuthorityError::CouncilDidNotPass { status: status.as_str() });
         }
         if !quorum_met {
+            return Err(AuthorityError::QuorumNotMet);
+        }
+        Ok(Self { proposal_id: proposal_id.to_string() })
+    }
+
+    /// **Derive the quorum from a real §V decision** rather than being told
+    /// one was met.
+    ///
+    /// A [`Decision`] cannot be constructed — it comes only from
+    /// [`crate::consensus::Ledger::decision`], which returns `Some` only when
+    /// at least a quorum of acceptors genuinely hold the value. And the
+    /// membership it came from could not have been built with a quorum size
+    /// that fails the overlapping-majority rule, because
+    /// `Membership::new` refuses one. So the arithmetic behind this mint is
+    /// not merely checked here; it was checked where it could still be refused.
+    pub fn from_consensus(
+        proposal_id: &str,
+        status: ProposalStatus,
+        decision: &Decision,
+    ) -> Result<Self, AuthorityError> {
+        if status != ProposalStatus::Passed {
+            return Err(AuthorityError::CouncilDidNotPass { status: status.as_str() });
+        }
+        // Not a re-check of the quorum — a Decision cannot exist without one.
+        // This is the belt on top of that brace: a decision drawn from a body
+        // smaller than its own quorum would be a Decision from another ledger.
+        if decision.accepted_by() == 0 {
             return Err(AuthorityError::QuorumNotMet);
         }
         Ok(Self { proposal_id: proposal_id.to_string() })
