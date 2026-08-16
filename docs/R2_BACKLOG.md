@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version** cases (divergences recorded) |
-| Rust tests | **218 unit · 39 conformance tests** across 6 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate** cases (divergences recorded) |
+| Rust tests | **233 unit · 46 conformance tests** across 7 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -241,6 +241,55 @@ if the reference catches up.
 arguments. The fix is a context struct carrying registry/allowed/enforcement —
 a real API refactor touching every call site, and not something to do as a side
 effect of this slice.
+
+### ✅ EDIT-12 — μ + Expand–Migrate–Contract — SHIPPED IN RUST (2026-08-12)
+
+`sustena-core/src/migrate.rs`, grounded in **Editing §VIII**. **This completes
+the engine half of M-EDIT.**
+
+**μ finally has a representation.** Until now the classification was binary —
+*compatible*, or *refused* — because "migratable" needs a migration function to
+represent it with, and there was none. `Migration::Apply(Mu)` makes `Safe(e, μ)`
+judge **μ(sᵢ)** rather than `sᵢ`, which is the whole difference between refusing
+an edit and carrying the instances into it. A vector shows the same edit against
+the same instances: refused under `μ = id`, admitted under a declared μ.
+
+**The ordering is the safety property, so it is one call.** `Emc::run` executes
+expand → migrate → contract; there is **no public way to run the contract
+alone**. `D†` is committed as a real version node with both shapes present, so
+the transition period is inspectable rather than a moment nobody can see, and the
+one destructive step is sequenced last.
+
+- **`e₊` is auto-safe with no scan** — and that required sharpening EDIT-6:
+  `can_strand()` now names exactly `AddInv`, `ModifyInv`, `RetypeDim`, because
+  `Safe` evaluates the candidate's invariants against live states, so an edit
+  strands only if it adds or tightens an invariant.
+- **`Safe(e₋, id)` is verified, not trusted.** The article says it holds by
+  construction; if μ was wrong, saying so at the contract beats discovering it
+  later.
+
+**Compatibility is told at author time.** `Emc::plan` computes both directions
+before anything runs — *forward* compatibility is required **because rollback
+exists**, and an edit that is only backward-compatible is one-way. *"This commits
+you"* is a fact the author is entitled to, not a discovery made during a
+rollback.
+
+**Knock-on to EDIT-7:** a μ that journals its pre-image collapses the `Partial`
+rollback region to `Total`. `Emc::run` does it automatically — a bare `RetireDim`
+of a genesis dimension rolls back `Partial`; the same reshape through EMC rolls
+back `Total`.
+
+**A correction found by testing:** `rollback` only consulted the *parent's*
+journal, so a pre-image written on the node that did the erasing — where an
+author would naturally put it, and where `commit_with_pre_image` puts it — was
+not read. Fixed to check the erasing node's own journal first; the EDIT-7 unit
+test that documented the old limitation was corrected rather than worked around.
+
+**Divergence — rust-ahead, with the counterweight.** The reference has no μ, no
+transition period, and names neither direction of compatibility. But its
+refuse-if-unsafe **is** a real safety property and is at parity in shape with
+`Safe(e, id)`. What it lacks is the escape: it can say no, and cannot offer a way
+through.
 
 ### ✅ EDIT-7 / #26 / #27 / N3 — version history + the algebra of rollback — SHIPPED IN RUST (2026-08-12)
 

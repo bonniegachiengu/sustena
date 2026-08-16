@@ -89,6 +89,7 @@ conformance/
     constraints.json    D(s,s') — rate/monotone/conservation (spec, R2)
     compose.json        checked composition of pathways (spec, R2)
     version.json        definition DAG + rollback algebra (spec, R2)
+    migrate.json        μ + Expand–Migrate–Contract      (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -148,3 +149,11 @@ it is a bug** — nothing silently differs.
   records that **neither** engine can restore what was genuinely forgotten
   (μ is not injective; Fagin 2007). The difference is that this one says so, with
   Δ naming the dimensions. A test asserts both notes stay.
+
+- **`migrate.json` — rust-ahead-of-python.** The reference engine has no
+  migration function: its classification is binary — compatible, or refused —
+  because "migratable" needs a μ to represent it with. No transition period
+  exists, and neither direction of compatibility is named. The counterweight
+  recorded alongside: refuse-if-unsafe **is** a real safety property, at parity
+  in shape with `Safe(e, id)`. What the reference lacks is the escape — it can
+  say no, and cannot offer a way through. A test asserts that note stays.

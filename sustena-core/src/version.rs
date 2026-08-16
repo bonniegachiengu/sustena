@@ -320,9 +320,15 @@ impl VersionDag {
         // The document is restored. Now the honest half: can the instances be?
         let mut unrestorable = Vec::new();
         if let Some(dimension) = edit.forgets() {
-            // Looked up from the journal or recovered from the log; only if
-            // neither has it is the value genuinely gone.
-            if self.recover_default(parent_id, dimension).is_none() {
+            // Three places to look, in the order an author would expect:
+            //  1. THIS node's own journal — the edit that did the erasing is
+            //     where a pre-image naturally belongs, and where
+            //     `commit_with_pre_image` puts it;
+            //  2. an ancestor's journal;
+            //  3. the log itself — the `AddDim` that introduced the dimension.
+            // Only if none of the three has it is the value genuinely gone.
+            let journalled_here = node.pre_image.dimension_defaults.contains_key(dimension);
+            if !journalled_here && self.recover_default(parent_id, dimension).is_none() {
                 unrestorable.push(dimension.to_string());
             }
         }
@@ -558,7 +564,8 @@ mod tests {
     #[test]
     fn an_explicit_pre_image_upgrades_partial_to_total() {
         // The paid version: storage bought exactness for a genesis dimension
-        // the log could not account for.
+        // the log could not account for. The journal is read from the node that
+        // DID the erasing — which is where an author would put it.
         let mut d = dag();
         d.commit_with_pre_image(
             "v2", "v1",
@@ -566,11 +573,10 @@ mod tests {
             PreImage::new().recording("moisture", json!({"level": 0})),
             "bonnie", 200,
         ).unwrap();
-        // The journal lives on the node whose parent we search from, so record
-        // it where the walk will find it.
-        assert_eq!(d.rollback("v2").unwrap().delta(), ["moisture"],
-                   "a pre-image on the CHILD is not what the parent walk reads");
+        assert!(d.rollback("v2").unwrap().is_total(),
+                "the pre-image on the erasing node makes μ⁻¹ a lookup");
 
+        // ...and an ancestor's journal is read too.
         let mut d2 = dag();
         d2.commit_with_pre_image(
             "v1b", "v1",
@@ -580,7 +586,7 @@ mod tests {
         ).unwrap();
         d2.commit("v2b", "v1b", Edit::RetireDim { name: "moisture".into() }, "bonnie", 200).unwrap();
         assert!(d2.rollback("v2b").unwrap().is_total(),
-                "with the pre-image in the ancestry, μ⁻¹ is a lookup");
+                "with the pre-image in the ancestry, μ⁻¹ is still a lookup");
     }
 
     /// The structural claim: `Total` has no Δ field, so the lie is unspellable.

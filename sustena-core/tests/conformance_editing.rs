@@ -272,7 +272,7 @@ fn editing_gate_vectors() {
             other => panic!("{name}: unknown effect {other}"),
         };
 
-        let out = admit_edit(&definition, &edit, &instances, Migration::Identity, &effect);
+        let out = admit_edit(&definition, &edit, &instances, &Migration::Identity, &effect);
         let expect = &case["expect"];
 
         assert_eq!(
@@ -320,7 +320,7 @@ fn editing_induction_vector() {
     // Σ↑ starts inside V↑.
     assert!(typecheck(&d).is_ok(), "{name}: the starting definition must be well-typed");
     assert!(
-        sustena_core::safe(&d, &instances, Migration::Identity).is_ok(),
+        sustena_core::safe(&d, &instances, &Migration::Identity).is_ok(),
         "{name}: every instance must start viable"
     );
 
@@ -328,7 +328,7 @@ fn editing_induction_vector() {
         let edit = edit_of(spec);
         let token = owner_token(edit.clone());
         let out = admit_edit(
-            &d, &edit, &instances, Migration::Identity,
+            &d, &edit, &instances, &Migration::Identity,
             &EditEffect::Live { token: &token, now: 10 },
         );
         assert!(out.admitted(), "{name}: {:?} was refused: {:?}", spec, out.verdict);
@@ -338,7 +338,7 @@ fn editing_induction_vector() {
         // induction: the property is re-established at each step, not assumed.
         assert!(typecheck(&d).is_ok(), "{name}: ⊢D ok must hold at every step");
         assert!(
-            sustena_core::safe(&d, &instances, Migration::Identity).is_ok(),
+            sustena_core::safe(&d, &instances, &Migration::Identity).is_ok(),
             "{name}: instances must stay viable at every step"
         );
     }

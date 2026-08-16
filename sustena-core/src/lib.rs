@@ -49,6 +49,7 @@
 //! | Transition constraints | [`transition`] | R2 |
 //! | Checked composition | [`compose`] | R2 |
 //! | Version history | [`version`] | R2 |
+//! | Migration (μ, EMC) | [`migrate`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -59,6 +60,7 @@ pub mod error;
 pub mod event;
 pub mod fold;
 pub mod inverse;
+pub mod migrate;
 pub mod mutation;
 pub mod operator;
 pub mod path;
@@ -87,6 +89,7 @@ pub use event::{dedupe, merge, order, CausalStamp, Event, Observation, Provenanc
 pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};
 pub use inverse::{invert, is_reversible, InverseError};
+pub use migrate::{Applied, Compatibility, Emc, EmcVersionIds, MigrateError, Mu, StateMove};
 pub use mutation::Mutation;
 pub use operator::{
     execute, execute_admitted, execute_as, Authorization, Enforcement, Execution, OperatorResult,

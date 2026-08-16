@@ -328,27 +328,44 @@ impl Edit {
     /// cannot strand a state already inside a stronger one — so only edits that
     /// tighten or reshape need the `|inst| × |Inv|` scan. The reference engine
     /// pays for the scan on every edit because it has no `e` to classify.
+    ///
+    /// Only three kinds can strand, and the reason is exact: `Safe` evaluates
+    /// the *candidate's invariants* against live instance states, so an edit
+    /// strands only if it **adds or tightens an invariant**, or changes what a
+    /// value means. Adding or retiring a dimension, dropping an invariant, and
+    /// adding or retiring an operator all leave every existing state exactly as
+    /// admissible as it was.
+    ///
+    /// This is what makes Expand–Migrate–Contract's `e₊` **auto-safe with no
+    /// check** (§VIII) rather than merely cheap — see [`crate::migrate`].
     pub fn can_strand(&self) -> bool {
-        !matches!(self, Edit::DropInv { .. } | Edit::AddOp { .. })
+        matches!(
+            self,
+            Edit::AddInv { .. } | Edit::ModifyInv { .. } | Edit::RetypeDim { .. }
+        )
     }
 }
 
 /// The migration function μ.
 ///
-/// Only `Identity` is built. §III classifies every edit as *compatible*,
-/// *migratable* or *rejected*; `Identity` decides the first and the third.
-/// "Migratable" has no representation because there is no migration function to
-/// represent it with — that is EDIT-12, and naming it here is the honest form
-/// of not having it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// §III classifies every edit as *compatible*, *migratable* or *rejected*.
+/// `Identity` decides the first and the third; [`Migration::Apply`] is the
+/// **migratable** case, and it is what turns today's discipline from
+/// *refuse-if-unsafe* into *migrate* (EDIT-12, shipped 2026-08-12 —
+/// see [`crate::migrate`]).
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Migration {
     /// `μ = id`. The instance is judged exactly as it stands.
     #[default]
     Identity,
+    /// A declared μ. `Safe(e, μ)` judges **`μ(sᵢ)`**, not `sᵢ` — which is the
+    /// whole difference between refusing an edit and carrying the instances
+    /// into it.
+    Apply(crate::migrate::Mu),
 }
 
 /// One instance, as the migration predicate needs it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Instance {
     pub id: String,
     pub state: Value,
@@ -616,15 +633,32 @@ pub fn typecheck(d: &Definition) -> Result<(), Vec<TypeError>> {
 pub fn safe(
     candidate: &Definition,
     instances: &[Instance],
-    migration: Migration,
+    migration: &Migration,
 ) -> Result<(), Vec<Stranded>> {
-    let Migration::Identity = migration;
     let empty = serde_json::Map::new();
     let mut stranded = Vec::new();
 
     for instance in instances {
+        // `Safe(e, μ) ⟺ ∀i: μ(sᵢ) ∈ V_D'` — the check is on the MIGRATED
+        // state. Judging `sᵢ` when a μ was declared would refuse edits the
+        // migration was written precisely to make safe.
+        let judged = match migration {
+            Migration::Identity => instance.state.clone(),
+            Migration::Apply(mu) => match mu.apply(&instance.state) {
+                Ok(s) => s,
+                Err(why) => {
+                    stranded.push(Stranded {
+                        instance_id: instance.id.clone(),
+                        invariant_id: "<migration>".to_string(),
+                        expression: "μ".to_string(),
+                        reason: format!("migration could not be applied: {why}"),
+                    });
+                    continue;
+                }
+            },
+        };
         for (id, expression) in &candidate.invariants {
-            match predicate::check(expression, &instance.state, &empty) {
+            match predicate::check(expression, &judged, &empty) {
                 Err(e) => stranded.push(Stranded {
                     instance_id: instance.id.clone(),
                     invariant_id: id.clone(),
@@ -674,7 +708,7 @@ pub fn admit_edit(
     definition: &Definition,
     edit: &Edit,
     instances: &[Instance],
-    migration: Migration,
+    migration: &Migration,
     effect: &EditEffect,
 ) -> EditAdmission {
     let refuse = |candidate: Definition, err: EditError| EditAdmission {
@@ -761,7 +795,7 @@ mod tests {
     fn the_owner_of_an_unshared_definition_may_edit_it() {
         let e = Edit::AddInv { id: "floor".into(), expression: "moisture.level >= 0".into() };
         let t = owner_token(e.clone());
-        let out = admit_edit(&definition(), &e, &instances(&[("a", 5.0)]), Migration::Identity, &live(&t, 10));
+        let out = admit_edit(&definition(), &e, &instances(&[("a", 5.0)]), &Migration::Identity, &live(&t, 10));
         assert!(out.admitted(), "{:?}", out.verdict);
         assert_eq!(out.candidate.invariants.len(), 1);
     }
@@ -795,7 +829,7 @@ mod tests {
             .expect("a passed, quorate council decision mints the token");
         assert_eq!(t.proposal_id(), Some("prop-1"));
 
-        let out = admit_edit(&definition(), &e, &instances(&[("a", 5.0)]), Migration::Identity, &live(&t, 10));
+        let out = admit_edit(&definition(), &e, &instances(&[("a", 5.0)]), &Migration::Identity, &live(&t, 10));
         assert!(out.admitted());
     }
 
@@ -839,11 +873,11 @@ mod tests {
     fn a_sandbox_edit_needs_no_authority_but_still_meets_every_other_term() {
         let e = Edit::AddInv { id: "floor".into(), expression: "moisture.level >= 0".into() };
 
-        let ok = admit_edit(&definition(), &e, &instances(&[("a", 5.0)]), Migration::Identity, &EditEffect::Sandbox);
+        let ok = admit_edit(&definition(), &e, &instances(&[("a", 5.0)]), &Migration::Identity, &EditEffect::Sandbox);
         assert!(ok.admitted(), "no token needed to ask whether an edit would be safe");
 
         // ...and it is still refused when it would strand an instance.
-        let bad = admit_edit(&definition(), &e, &instances(&[("a", -5.0)]), Migration::Identity, &EditEffect::Sandbox);
+        let bad = admit_edit(&definition(), &e, &instances(&[("a", -5.0)]), &Migration::Identity, &EditEffect::Sandbox);
         assert!(!bad.admitted(), "the sandbox answers honestly, it does not answer yes");
     }
 
@@ -853,7 +887,7 @@ mod tests {
     fn dropping_an_invariant_that_does_not_exist_is_not_a_loosening() {
         let e = Edit::DropInv { id: "nope".into() };
         let t = owner_token(e.clone());
-        let out = admit_edit(&definition(), &e, &[], Migration::Identity, &live(&t, 1));
+        let out = admit_edit(&definition(), &e, &[], &Migration::Identity, &live(&t, 1));
         assert!(matches!(out.verdict, Err(EditError::NotApplicable { .. })));
     }
 
@@ -861,7 +895,7 @@ mod tests {
     fn adding_a_dimension_that_already_exists_is_refused() {
         let e = Edit::AddDim { name: "moisture".into(), ty: DimType::Any, default: json!({}) };
         let t = owner_token(e.clone());
-        let out = admit_edit(&definition(), &e, &[], Migration::Identity, &live(&t, 1));
+        let out = admit_edit(&definition(), &e, &[], &Migration::Identity, &live(&t, 1));
         assert!(matches!(out.verdict, Err(EditError::NotApplicable { .. })));
     }
 
@@ -869,7 +903,7 @@ mod tests {
     fn retiring_an_operator_that_was_never_declared_is_refused() {
         let e = Edit::RetireOp { name: "budget.allocate".into() };
         let t = owner_token(e.clone());
-        let out = admit_edit(&definition(), &e, &[], Migration::Identity, &live(&t, 1));
+        let out = admit_edit(&definition(), &e, &[], &Migration::Identity, &live(&t, 1));
         assert!(matches!(out.verdict, Err(EditError::NotApplicable { .. })));
     }
 
@@ -879,7 +913,7 @@ mod tests {
     fn an_invariant_over_an_undeclared_dimension_is_a_typing_error() {
         let e = Edit::AddInv { id: "bad".into(), expression: "nutrients.level >= 0".into() };
         let t = owner_token(e.clone());
-        let out = admit_edit(&definition(), &e, &[], Migration::Identity, &live(&t, 1));
+        let out = admit_edit(&definition(), &e, &[], &Migration::Identity, &live(&t, 1));
         assert!(matches!(out.verdict, Err(EditError::NotWellTyped(_))), "{:?}", out.verdict);
     }
 
@@ -890,7 +924,7 @@ mod tests {
         let d = definition().with_invariant("floor", "moisture.level >= 0");
         let e = Edit::RetireDim { name: "moisture".into() };
         let t = owner_token(e.clone());
-        let out = admit_edit(&d, &e, &[], Migration::Identity, &live(&t, 1));
+        let out = admit_edit(&d, &e, &[], &Migration::Identity, &live(&t, 1));
         assert!(matches!(out.verdict, Err(EditError::NotWellTyped(_))), "{:?}", out.verdict);
     }
 
@@ -898,7 +932,7 @@ mod tests {
     fn an_invariant_that_will_not_parse_is_a_typing_error_not_a_skip() {
         let e = Edit::AddInv { id: "broken".into(), expression: "this is (not ) valid".into() };
         let t = owner_token(e.clone());
-        let out = admit_edit(&definition(), &e, &[], Migration::Identity, &live(&t, 1));
+        let out = admit_edit(&definition(), &e, &[], &Migration::Identity, &live(&t, 1));
         assert!(matches!(out.verdict, Err(EditError::NotWellTyped(_))));
     }
 
@@ -909,7 +943,7 @@ mod tests {
         let e = Edit::AddInv { id: "floor".into(), expression: "moisture.level >= 0".into() };
         let t = owner_token(e.clone());
         let out = admit_edit(&definition(), &e, &instances(&[("ok", 5.0), ("bad", -3.0)]),
-                             Migration::Identity, &live(&t, 1));
+                             &Migration::Identity, &live(&t, 1));
         match out.verdict {
             Err(EditError::WouldStrand(v)) => {
                 assert_eq!(v.len(), 1, "only the failing instance is a witness");
@@ -925,7 +959,7 @@ mod tests {
     fn the_same_edit_succeeds_once_the_instance_is_back_inside_the_region() {
         let e = Edit::AddInv { id: "floor".into(), expression: "moisture.level >= 0".into() };
         let t = owner_token(e.clone());
-        let out = admit_edit(&definition(), &e, &instances(&[("a", 0.0)]), Migration::Identity, &live(&t, 1));
+        let out = admit_edit(&definition(), &e, &instances(&[("a", 0.0)]), &Migration::Identity, &live(&t, 1));
         assert!(out.admitted(), "the boundary itself is inside the region");
     }
 
@@ -940,7 +974,7 @@ mod tests {
         let e = Edit::DropInv { id: "ceiling".into() };
         assert!(!e.can_strand());
         let t = owner_token(e.clone());
-        let out = admit_edit(&d, &e, &instances(&[("already_bad", -1.0)]), Migration::Identity, &live(&t, 1));
+        let out = admit_edit(&d, &e, &instances(&[("already_bad", -1.0)]), &Migration::Identity, &live(&t, 1));
         assert!(out.admitted(), "a weaker V cannot strand a state already inside a stronger one");
     }
 
@@ -948,7 +982,7 @@ mod tests {
     fn a_no_instance_definition_is_editable_freely() {
         let e = Edit::AddInv { id: "floor".into(), expression: "moisture.level >= 0".into() };
         let t = owner_token(e.clone());
-        let out = admit_edit(&definition(), &e, &[], Migration::Identity, &live(&t, 1));
+        let out = admit_edit(&definition(), &e, &[], &Migration::Identity, &live(&t, 1));
         assert!(out.admitted(), "nothing exists to strand");
     }
 
@@ -968,11 +1002,11 @@ mod tests {
             Edit::AddInv { id: "ceiling".into(), expression: "moisture.level <= 10".into() },
         ] {
             let t = owner_token(e.clone());
-            let out = admit_edit(&d, &e, &live_instances, Migration::Identity, &live(&t, 1));
+            let out = admit_edit(&d, &e, &live_instances, &Migration::Identity, &live(&t, 1));
             assert!(out.admitted(), "{:?}", out.verdict);
             d = out.candidate;
             assert!(typecheck(&d).is_ok(), "⊢D ok holds at every step");
-            assert!(safe(&d, &live_instances, Migration::Identity).is_ok(), "instances stay viable");
+            assert!(safe(&d, &live_instances, &Migration::Identity).is_ok(), "instances stay viable");
         }
         assert_eq!(d.invariants.len(), 2);
         assert_eq!(d.operators.len(), 2);
@@ -983,7 +1017,7 @@ mod tests {
         let d = definition();
         let e = Edit::AddInv { id: "floor".into(), expression: "moisture.level >= 0".into() };
         let t = owner_token(e.clone());
-        let out = admit_edit(&d, &e, &instances(&[("bad", -3.0)]), Migration::Identity, &live(&t, 1));
+        let out = admit_edit(&d, &e, &instances(&[("bad", -3.0)]), &Migration::Identity, &live(&t, 1));
         assert!(!out.admitted());
         // The candidate is returned for display, but D itself is a separate
         // value the caller still holds, unchanged.

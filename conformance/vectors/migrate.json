@@ -1,0 +1,148 @@
+{
+  "conformance_version": 1,
+  "slice": "migrate",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Editing - Formal Execution.md, §III (the migration predicate), §IV (the safe-change asymmetry) and §VIII (Expand–Migrate–Contract)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the migration function μ and the Expand–Migrate–Contract sequence. Authored from the article, not generated from the reference engine.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-12",
+    "statement": "This is the last piece of M-EDIT, and the reference engine has none of it.",
+    "term_by_term": {
+      "μ has a representation": "RUST-AHEAD. The reference has no migration function at all. Its classification is binary — compatible, or refused — because 'migratable' needs a μ to represent it with. Its own discipline is REFUSE-IF-UNSAFE, never migrate: check_definition_edit_safety returns {'status': 'refused', 'blocked_by': [...]} and stops there.",
+      "Safe(e, μ) judges μ(sᵢ)": "RUST-AHEAD, and it is the difference that matters. The reference evaluates candidate invariants against each instance's state AS IT STANDS. With a declared μ the check is on the MIGRATED state — which is what turns an edit that would be refused into one the instances are carried into.",
+      "Expand–Migrate–Contract": "RUST-AHEAD. No transition period exists in the reference: an edit is one destructive step or it is refused. There is no D†, so there is no moment where both shapes coexist.",
+      "backward/forward compatibility": "RUST-AHEAD. Neither direction is named or computed anywhere in the reference, so 'this commits you' cannot be surfaced at author time because there is nothing that knows it."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The reference's refuse-if-unsafe IS a real safety property and is at parity in shape with Safe(e, id) — recorded as such in editing.json. What it lacks is the escape: it can say NO, and it cannot offer a way through. That is the whole of EDIT-12.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Migration is a new additive module; Migration::Identity remains the default and every prior vector runs unchanged under it."
+  },
+  "mu_cases": [
+    {
+      "name": "mu_moves_a_value_into_the_new_shape",
+      "why": "μ at last has a representation. The copy leaves the old shape in place, which is what makes the transition period safe.",
+      "moves": [{"copy": ["legacy.level", "moisture.level"]}],
+      "state": {"legacy": {"level": 5}},
+      "expect": {"ok": true, "after": {"legacy": {"level": 5}, "moisture": {"level": 5}}}
+    },
+    {
+      "name": "mu_backfills_a_default",
+      "why": "A new dimension needs a value in every live instance, and the declared default is where it comes from.",
+      "moves": [{"fill": ["moisture.level", 0]}],
+      "state": {},
+      "expect": {"ok": true, "after": {"moisture": {"level": 0}}}
+    },
+    {
+      "name": "a_missing_source_is_an_error_not_a_silent_skip",
+      "why": "Quietly doing nothing for an instance that does not have what the migration assumed is exactly how a half-migrated estate happens — and nobody notices until something reads it.",
+      "moves": [{"copy": ["nowhere.at.all", "moisture.level"]}],
+      "state": {"legacy": {"level": 5}},
+      "expect": {"ok": false, "error": "SourceMissing"}
+    }
+  ],
+  "safe_cases": [
+    {
+      "name": "safe_now_judges_the_migrated_state_not_the_original",
+      "why": "THE point of EDIT-12, in one case. The same edit against the same instances: refused under μ = id, admitted under a declared μ. Refuse-if-unsafe becomes migrate.",
+      "candidate_invariants": [["floor", "moisture.level >= 0"]],
+      "instances": [{"id": "a", "state": {"legacy": {"level": 5}}}],
+      "expect": {"under_identity": "refused", "under_mu": "admitted"},
+      "mu": [{"copy": ["legacy.level", "moisture.level"]}]
+    },
+    {
+      "name": "a_mu_that_does_not_deliver_is_still_refused",
+      "why": "μ is an escape from refusal, not an exemption from the check. A migration that leaves an instance outside V_D' is reported exactly as before.",
+      "candidate_invariants": [["floor", "moisture.level >= 100"]],
+      "instances": [{"id": "a", "state": {"legacy": {"level": 5}}}],
+      "expect": {"under_identity": "refused", "under_mu": "refused"},
+      "mu": [{"copy": ["legacy.level", "moisture.level"]}]
+    }
+  ],
+  "asymmetry_cases": [
+    {
+      "name": "only_three_kinds_can_strand",
+      "why": "§IV's asymmetry, made exact: `Safe` evaluates the candidate's invariants against live states, so an edit strands only if it ADDS or TIGHTENS an invariant, or changes what a value means. This is what makes e₊ AUTO-SAFE WITH NO CHECK rather than merely cheap.",
+      "can_strand": ["AddInv", "ModifyInv", "RetypeDim"],
+      "cannot_strand": ["AddDim", "RetireDim", "DropInv", "AddOp", "RetireOp"]
+    },
+    {
+      "name": "expand_must_be_a_weakening",
+      "why": "Expand–Migrate–Contract only works if the new shape is added BESIDE the old, never instead of it. An e₊ that could strand is refused at plan time, before anything runs.",
+      "expand": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"},
+      "expect": {"planned": false, "error": "ExpandIsNotAWeakening"}
+    }
+  ],
+  "sequence_cases": [
+    {
+      "name": "the_three_phases_run_in_order_and_every_instance_arrives",
+      "why": "D --e₊--> D† --μ--> D† --e₋--> D'. One call, because the ordering IS the safety property.",
+      "reshape": {"old": "legacy", "new": "moisture"},
+      "instances": [
+        {"id": "a", "state": {"legacy": {"level": 5}}},
+        {"id": "b", "state": {"legacy": {"level": 9}}}
+      ],
+      "expect": {"ran": true, "transitional_version": "v2", "final_version": "v3", "migrated_levels": [5, 9]}
+    },
+    {
+      "name": "the_transition_period_is_recorded_not_collapsed",
+      "why": "D† is a real version node with BOTH shapes present, so the transition period is inspectable rather than a moment nobody can see. The destructive step is sequenced last, and only then is the old shape gone.",
+      "reshape": {"old": "legacy", "new": "moisture"},
+      "instances": [{"id": "a", "state": {"legacy": {"level": 5}}}],
+      "expect": {
+        "ran": true,
+        "transitional_has": ["legacy", "moisture"],
+        "final_lacks": ["legacy"],
+        "final_has": ["moisture"]
+      }
+    },
+    {
+      "name": "at_no_point_is_an_instance_without_a_shape_that_holds_it",
+      "why": "The article's own summary of why the pattern exists. Checked at each step rather than inferred from the ordering: held by D before, held by D† during, still held by D† after μ.",
+      "base_invariants": [["legacy_floor", "legacy.level >= 0"]],
+      "expand": {"kind": "AddDim", "name": "moisture"},
+      "mu": [{"copy": ["legacy.level", "moisture.level"]}],
+      "instances": [{"id": "a", "state": {"legacy": {"level": 5}}}],
+      "expect": {"held_before": true, "held_during": true, "held_after_mu": true}
+    },
+    {
+      "name": "a_migration_that_does_not_deliver_is_refused_at_the_contract",
+      "why": "The article says Safe(e₋, id) holds BY CONSTRUCTION. That is a claim worth VERIFYING rather than trusting: if μ was wrong, saying so at the contract beats discovering it later.",
+      "base_invariants": [["floor", "moisture.level >= 100"]],
+      "reshape": {"old": "legacy", "new": "moisture"},
+      "instances": [{"id": "a", "state": {"legacy": {"level": 5}}}],
+      "expect": {"ran": false, "error": "ContractStillStrands"}
+    }
+  ],
+  "compatibility_cases": [
+    {
+      "name": "a_migration_that_keeps_the_old_shape_is_both_ways",
+      "why": "μ copies without erasing, so new code reads old data AND old code reads new data. Rollback stays open.",
+      "mu": [{"copy": ["legacy.level", "moisture.level"]}],
+      "expect": {"backward": true, "forward": true, "one_way": false}
+    },
+    {
+      "name": "a_migration_that_erases_the_old_shape_is_one_way_and_says_so_up_front",
+      "why": "Forward compatibility is required BECAUSE ROLLBACK EXISTS — D's Enzymes must survive states μ already touched. An edit that achieves only backward compatibility may still be the right edit, but 'this commits you' is a fact the author is entitled to AT AUTHOR TIME, not a discovery made during a rollback. Available from `plan`, before `run` is ever called.",
+      "mu": [{"copy": ["legacy.level", "moisture.level"]}, {"drop": "legacy"}],
+      "expect": {"backward": true, "forward": false, "one_way": true}
+    }
+  ],
+  "knock_on_cases": [
+    {
+      "name": "journalling_the_pre_image_collapses_partial_rollback_to_total",
+      "why": "The link to EDIT-7. A bare RetireDim of a genesis dimension rolls back Partial — nothing recorded what was lost. Run through Expand–Migrate–Contract, μ journals what it erased, so μ⁻¹ becomes a lookup and the same rollback is Total. A lossy migration made losslessly reversible at the storage cost the article names.",
+      "reshape": {"old": "legacy", "new": "moisture"},
+      "instances": [{"id": "a", "state": {"legacy": {"level": 5}}}],
+      "expect": {"bare_retire_rollback": "partial", "emc_rollback": "total"}
+    },
+    {
+      "name": "the_pre_image_carries_the_real_erased_value",
+      "why": "A lookup, not an inference — the actual value the instance held, not a reconstruction.",
+      "mu": [{"copy": ["legacy.level", "moisture.level"]}, {"drop": "legacy"}],
+      "state": {"legacy": {"level": 5}},
+      "expect": {"journalled": {"legacy": {"level": 5}}}
+    }
+  ]
+}
