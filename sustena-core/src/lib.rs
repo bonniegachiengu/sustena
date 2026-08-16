@@ -65,6 +65,7 @@
 //! | Consensus — quorum · Paxos | [`consensus`] | R2 |
 //! | Physarum router | [`router`] | R2 |
 //! | Vector clocks · concurrency | [`vclock`] | R2 |
+//! | Disaggregation · hysteresis | [`disaggregation`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -73,6 +74,7 @@ pub mod consensus;
 pub mod controller;
 pub mod council;
 pub mod detect;
+pub mod disaggregation;
 pub mod editing;
 pub mod ensemble;
 pub mod error;
@@ -121,6 +123,9 @@ pub use controller::{
 pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalStatus, ResolutionInput, VoteChoice};
 pub use detect::{
     classify, Alert, Cusum, CusumSpec, DetectorError, Ewma, Reading, Severity, Shift, Watch,
+};
+pub use disaggregation::{
+    Assembly, AssemblyState, Band, BandPosition, BandTransition, DisaggregationError, Dispersal,
 };
 pub use editing::{
     admit_edit, safe, typecheck, AuthorityError, CouncilMint, Definition, Edit, EditAdmission,

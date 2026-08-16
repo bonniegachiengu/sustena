@@ -105,6 +105,7 @@ conformance/
     consensus.json      quorum · Paxos · FLP · 3f+1       (spec, R2)
     router.json         Physarum conductance routing    (spec, R2)
     vclock.json         vector clocks · concurrency     (spec, R2)
+    disaggregation.json θ↑/θ↓ hysteresis · dispersal    (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -448,3 +449,24 @@ it is a bug** — nothing silently differs.
   also records **two honest limits**: `O(n)` metadata per stamp, and that
   `assign_clocks` is only as complete as the `causes` a producer actually
   recorded.
+
+- **`disaggregation.json` — rust-ahead-of-python, but NARROWLY, and the
+  counterweight is unusually strong.** §IX's *dissolution semantics* are
+  already in the reference, deliberately and citing the article by name:
+  `sustain_engine.py`'s comment reads *"Disaggregation (§IX of the Multiparty
+  article)"*, `holon.dissolve_child` is *"⊕⁻¹: return the child's funds, then
+  unlink"*, and `unlink_child` removes the link while the child keeps its own
+  state. **Two terms are recorded AT PARITY** — *departure removes an edge,
+  never a node*, and *each node carries its portion home* are both implemented
+  there. What is absent is §IX's **trigger**: `hysteresis`, `disperse`,
+  `flicker` and `release_threshold` are grep-0, because the reference's
+  dissolution is **human-initiated** — so nothing reads a pressure, and there
+  is no oscillation to damp. **That is a coherent design, not an omission**, and
+  it is exactly the design that needs a band the moment the decision stops
+  being a person's. Read the gap as one term missing from a row that is
+  otherwise built. Two false positives are named, including `band` — both hits
+  are the deployment hostname `vyyBANDasky.online`. The file also discloses
+  **one interpretation**: §IX says the state settles to *"a final merged
+  value"*, singular, which is exact for a snapshot dimension; for a contested
+  one the settle keeps what the merge preserves, recorded as a reading of a
+  singular noun rather than a correction to the article.

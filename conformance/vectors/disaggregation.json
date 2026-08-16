@@ -1,0 +1,127 @@
+{
+  "conformance_version": 1,
+  "slice": "disaggregation",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Multiparty - Formal Execution.md, §IX (Disaggregation — the reverse threshold, hysteresis, and 'departure removes an edge, never a node')",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for MUL-2's closing bracket. That slice built commit = 1[c > θ]; this is disperse = 1[c < θ↓], and the two thresholds are deliberately not the same number.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "★_but_narrowly_and_the_counterweight_is_unusually_strong": "This is the slice where 'rust-ahead' most needs qualifying, because §IX's DISSOLUTION SEMANTICS are already implemented in the reference — deliberately, and with the article cited by name. What is absent is only §IX's TRIGGER: the hysteresis band that decides WHEN, automatically. Read the gap as one term missing from a row that is otherwise built, not as a module.",
+    "statement": "hysteresis, disperse, flicker and release_threshold are grep-0 in apps/api/sustena/. But `disaggregat` returns 3 hits and `dissolve` returns 11, and they are the real thing: sustain_engine.py's comment reads 'Disaggregation (§IX of the Multiparty article): dissolve a…', and holon.py declares `holon.dissolve_child — ⊕⁻¹: return the child's funds, then unlink`. The reference dissolves compositions, returns each child's portion, and keeps the child. What it does not do is decide on its own that pressure has fallen far enough — its dissolution is human-initiated, which holon.py says in as many words.",
+    "term_by_term": {
+      "departure removes an edge, never a node": "AT PARITY, and commented as such. sustain_engine.py: 'Unlike unlink_child() (disaggregation — the child keeps its own state, only the link is dissolved)'. The reference implements exactly this property and knows it is implementing it.",
+      "each node carries its portion home": "AT PARITY. holon.dissolve_child is ⊕⁻¹ — 'return the child's funds, then unlink'. The portion goes home before the edge goes.",
+      "the reverse threshold (disperse = 1[c < θ↓])": "RUST-AHEAD. grep-0. Nothing in the reference watches a pressure and decides to dissolve; a human decides.",
+      "hysteresis / the two-threshold band": "RUST-AHEAD, and it is the whole of this slice. grep-0, and not merely unimplemented — with a human-initiated dissolve there is no oscillation to damp, so the band would have nothing to do. It becomes necessary exactly when the trigger becomes automatic.",
+      "the settle through a CRDT merge": "RUST-AHEAD as a MERGE, at parity as a hand-back. holon.dissolve_child returns the funds, which is the right answer for a quantity. Settling a shared value that two members edited concurrently needs the merge from the previous slice, which the reference does not have."
+    },
+    "the_two_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "band (2 hits)": "Both are the deployment hostname `sustena.vyybandasky.online` — 'vyyBANDasky'. A substring of a domain name.",
+      "debounce (1 hit)": "devui.py's 500 ms debounce on the UI Preview tab's POST. A frontend input delay, and the nearest thing in the codebase to damping — which is worth naming precisely, because damping a text input and damping a body's existence are the same idea at wildly different stakes."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "A genuine, shipped implementation of §IX's semantics, built earlier and citing the article. holon.dissolve_child performs ⊕⁻¹ — return the child's funds, then unlink — and unlink_child removes the link while the child keeps its own state, which is 'departure removes an edge, never a node' implemented and commented. So the reference already honours the part of §IX that protects members. What it does not have is the part that decides: dissolution there is human-initiated in either direction, so nothing reads a pressure, nothing crosses a release value, and there is no oscillation to damp because there is no automatic decision to oscillate. That is a coherent design, not an omission — and it is exactly the design that needs a hysteresis band the moment the decision stops being a person's.",
+    "the_honest_reading_of_the_settle": "§IX says the shared state 'settles to a final merged value', singular. That is exact for a snapshot dimension, where §VII proves collapsing is correct. For a contested one it is not — discarding one of two genuinely concurrent edits is the very thing §VII warns against — so `settled` is a list: length 1 for a snapshot dimension, which is the reading §IX's phrasing has in mind, and longer only when collapsing would lose something. Recorded as an interpretation of a singular noun, not as a correction to the article.",
+    "the_honest_limits": "Two. (1) PRESSURE IS SUPPLIED, not computed here. `c` is the same quantity MUL-2 senses, and where it comes from is the caller's — a node's local c_i, or a measure the assembled body takes of itself. Reaching into a Population for it would re-decide the no-global-view question this module has no business re-deciding. (2) DISPERSAL IS TERMINAL for an assembly: re-forming is a new assembly with the same members, not a resurrection, which is what makes 'the composition is destroyed' true rather than decorative.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive, and it consumes the vclock merge without modifying it."
+  },
+  "fixture": {
+    "why": "Form at 0.7, release at 0.3 — a wide band, so the stable middle is unmistakable and the flicker a single threshold would produce is impossible to miss by comparison. Three members, each contributing its own portion.",
+    "form_at": 0.7,
+    "disperse_at": 0.3,
+    "members": ["a", "b", "c"]
+  },
+  "band_cases": [
+    {
+      "name": "a_zero_or_inverted_band_is_refused",
+      "why": "★ A zero-width band is a single threshold wearing two names, and an inverted one would form and disperse in the same breath. Both are precisely the flicker hysteresis exists to prevent, so neither is constructible — refused at declaration rather than producing a body that oscillates.",
+      "zero": [0.5, 0.5], "inverted": [0.3, 0.7],
+      "expect": {"error": "NoBand", "message_contains": "flicker hysteresis exists to prevent"}
+    },
+    {
+      "name": "the_gap_is_the_declared_design_parameter",
+      "why": "§IX: 'the gap between the two thresholds is the design parameter, and it is bought with responsiveness.' Wider is steadier and slower to react to a genuine collapse — a statement about how much churn a household will tolerate against how fast it wants to be told, which belongs where it can be argued with.",
+      "expect": {"gap": 0.4}
+    },
+    {
+      "name": "the_band_classifies_all_three_regions",
+      "why": "The boundaries matter and are easy to get subtly wrong: θ↑ itself forms, and θ↓ itself HOLDS — the release is strictly below it, so sitting exactly on the lower threshold is still inside the band.",
+      "expect": {"0.9": "AboveForm", "0.7": "AboveForm", "0.5": "Within", "0.3": "Within", "0.1": "BelowDisperse"}
+    }
+  ],
+  "hysteresis_cases": [
+    {
+      "name": "the_body_forms_at_the_upper_threshold",
+      "why": "MUL-2's aggregation, in its body-level form. Nothing surprising — the baseline the reverse threshold is measured against.",
+      "at": 0.8,
+      "expect": {"formed": true}
+    },
+    {
+      "name": "a_formed_body_does_not_dissolve_inside_the_band",
+      "why": "★★ THE PROOF OF VALUE, first half. Pressure falls well below θ↑ and the body holds, because it is still above θ↓. A single threshold would have dissolved it at the first of these readings.",
+      "readings": [0.69, 0.5, 0.31],
+      "expect": {"changed": false, "position": "Within", "state": "Formed"}
+    },
+    {
+      "name": "a_dispersed_body_does_not_form_inside_the_band",
+      "why": "★★ The other half, and the reason this is hysteresis rather than a grace period: the SAME readings that hold a formed body together also fail to assemble a dispersed one. The band is symmetric; what differs is the state it arrives in.",
+      "readings": [0.31, 0.5, 0.69],
+      "expect": {"changed": false, "position": "Within", "state": "Dispersed"}
+    },
+    {
+      "name": "the_full_loop_does_not_flicker",
+      "why": "★★ The whole point, walked end to end: up through the band without forming, form at θ↑, back down through the band without dissolving, dissolve below θ↓, and back up through the band without re-forming. Eight readings, exactly TWO transitions. A single threshold at 0.5 would have produced five.",
+      "readings": [0.4, 0.6, 0.8, 0.6, 0.4, 0.2, 0.4, 0.6],
+      "expect": {"transitions": 2, "ends_formed": false}
+    },
+    {
+      "name": "the_body_dissolves_only_below_the_release_value",
+      "why": "The reverse threshold itself, and the reading that released it is carried so a dispersal can be explained rather than merely observed.",
+      "form_at": 0.9, "release_at": 0.1,
+      "expect": {"changed": true, "released_at": 0.1}
+    },
+    {
+      "name": "a_non_finite_pressure_is_refused",
+      "why": "A NaN reading would classify into the band by accident — every comparison against it is false — and silently hold a body together on the strength of a broken sensor.",
+      "expect": {"error": "BadPressure"}
+    }
+  ],
+  "never_erase_cases": [
+    {
+      "name": "every_member_carries_its_portion_home",
+      "why": "★★ §IX: 'The composition is destroyed; the members are not. Departure removes an edge, never a node.' members_removed is asserted to be 0 rather than the sentence being trusted, edges_removed is asserted to be non-zero so the composition genuinely came apart, and every member's portion comes back untouched. The holon invariant applied to dissolution, and the same never-erase property the vclock merge applies to a concurrent edit — a body coming apart must not be a way to lose what its members brought.",
+      "portions": {"a": "mine", "b": "yours", "c": "theirs"},
+      "expect": {"members_removed": 0, "edges_removed_positive": true, "everyone_home": true}
+    },
+    {
+      "name": "a_non_member_cannot_contribute",
+      "why": "A portion from outside the assembly would be carried home to nobody, and would count toward a shared value it has no standing in.",
+      "expect": {"error": "NotAMember"}
+    },
+    {
+      "name": "dispersing_an_empty_assembly_settles_to_nothing",
+      "why": "Honest emptiness: no portions means no shared value, not a fabricated one. And still no members removed — the property does not depend on there being anything to protect.",
+      "expect": {"settled": 0, "members_removed": 0}
+    }
+  ],
+  "settle_cases": [
+    {
+      "name": "a_snapshot_dimension_settles_to_one_final_value",
+      "why": "§IX's phrasing, exact for this kind: the newest reading of an external authority supersedes by definition, so 'a final merged value' is literally one value. And both members still went home with what they brought — the settle and the hand-back are separate.",
+      "portions": {"a": "1200", "b": "1350"},
+      "expect": {"settled": 1, "value": "1350", "carried_home": 2}
+    },
+    {
+      "name": "a_contested_dimension_keeps_what_collapsing_would_discard",
+      "why": "★ The interpretation, made observable. §IX says 'a final merged value', singular — and for a contested dimension collapsing is the very thing §VII warns against. So the settle keeps what the merge preserves rather than picking a winner the article never asked it to pick.",
+      "portions": {"a": "go monday", "b": "go friday"},
+      "expect": {"settled": 2, "both_present": true}
+    },
+    {
+      "name": "a_causally_ordered_pair_settles_to_the_later_one_under_either_dimension",
+      "why": "★ A supersession is not a conflict, and the dimension kind does not change that. The later portion genuinely superseded the earlier one, so there is one value under both readings — which shows the contested case above is about CONCURRENCY, not about contested dimensions always keeping everything.",
+      "expect": {"settled": 1, "value": "revised"}
+    }
+  ]
+}
