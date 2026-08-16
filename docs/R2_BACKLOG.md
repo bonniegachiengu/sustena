@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel**, **16 tenet**, **18 ensemble**, **17 signal**, **16 pincer**, **17 ooda**, **17 monitor**, **15 holarchy** cases (divergences recorded) |
-| Rust tests | **444 unit · 193 conformance tests** across 18 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel**, **16 tenet**, **18 ensemble**, **17 signal**, **16 pincer**, **17 ooda**, **17 monitor**, **15 holarchy**, **14 population** cases (divergences recorded) |
+| Rust tests | **457 unit · 207 conformance tests** across 19 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -491,4 +491,4 @@ knowing about before opening the next slice:
 - **N3 — a definition edit destroys its predecessor.** Sharper than #26: rollback has
   nothing to roll back *to*.
 
-*Last updated: 2026-08-16 — **the spine is assembled, self-feeding, and reaches every level.** M-TEN's mathematics completed across three slices (`tenet.rs`, `ensemble.rs`, `pincer.rs`) on **the Signal primitive** (`signal.rs`, MUL-4/MUL-15); **CTL-3** (`ooda.rs`) wired Monitor→Tenet→Controller into one OODA cycle with the human structurally at DECIDE; **MON-9** (`monitor.rs`) gave OBSERVE an engine that owns the detection chain per sustain and drives the loop itself; and **CTL-5** (`holarchy.rs`) made a violation climb the parent chain until a level can act. **Monitor ✅ · Tenet ✅ · Controller ✅.** What is left across T1/G1/#23–#25: TEN-11's pawa term (parked on the economy), the belief tracker, the preattentive encoder, the IoT bridge, panels and damping.*
+*Last updated: 2026-08-16 — **the spine is assembled, self-feeding, reaches every level — and the coordination layer is open.** M-TEN's mathematics completed across three slices on **the Signal primitive** (`signal.rs`, MUL-4/MUL-15); **CTL-3** (`ooda.rs`) wired Monitor→Tenet→Controller into one OODA cycle with the human structurally at DECIDE; **MON-9** (`monitor.rs`) gave OBSERVE an engine that drives the loop itself; **CTL-5** (`holarchy.rs`) made a violation climb the parent chain until a level can act; and **MUL-1/2/3** (`population.rs`) added the aggregation layer — local neighbourhoods with no view of P, threshold commitment, and a cascade whose phase transition is observed on the declared graph. **Monitor ✅ · Tenet ✅ · Controller ✅.** **§V's consensus row is now unblocked** — it is what `EDIT-8`'s `CouncilMint` already names as its composition point. What is left: TEN-11's pawa term (parked on the economy), consensus, the belief tracker, the preattentive encoder, the IoT bridge, the router, panels and damping.*

@@ -61,6 +61,7 @@
 //! | OODA loop state machine | [`ooda`] | R2 |
 //! | MonitorEngine — owns the chain | [`monitor`] | R2 |
 //! | Holarchic escalation | [`holarchy`] | R2 |
+//! | Population · quorum sensing | [`population`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -83,6 +84,7 @@ pub mod operator;
 pub mod path;
 pub mod ooda;
 pub mod pincer;
+pub mod population;
 pub mod predicate;
 pub mod region;
 pub mod principal;
@@ -130,6 +132,10 @@ pub use operator::{
     Registry,
 };
 pub use principal::{effective_privilege, permitted, Denial, MembershipEdge, Memberships, Tier};
+pub use population::{
+    sweep, Cascade, LocalView, PhaseTransition, Population, PopulationError, PopulationSpec,
+    StepOutcome,
+};
 pub use predicate::{check, parse_predicate, Predicate};
 pub use region::{
     Distance, FitReport, Interval, Membership, Region, RegionError,

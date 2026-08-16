@@ -101,6 +101,7 @@ conformance/
     ooda.json           OBSERVE→ORIENT→DECIDE→ACT       (spec, R2)
     monitor.json        the per-sustain MonitorEngine    (spec, R2)
     holarchy.json       a breach climbs to who can act   (spec, R2)
+    population.json     N(i) · c>θ · cascade · bifurcation (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -364,3 +365,23 @@ it is a bug** — nothing silently differs.
   `C(s) ∧ s ⊆ parent(s)` and never defines `⊆`, so the implemented reading —
   a child must also satisfy its parent's region on the dimensions the parent
   bounds — is recorded as an interpretation rather than as the article's own.
+
+- **`population.json` — rust-ahead-of-python, and the counterweight IS the
+  point.** `quorum_sens*`, `neighbourhood`, `concentration`, `cascade` and
+  `bifurcation` are grep-0 — but **the reference HAS a quorum, and it is the
+  other one.** `CouncilSession` counts votes on a raised proposal: that is §V's
+  quorum, an intersecting majority deciding what a formed body may **ratify**.
+  What is absent is §II's — a count against a threshold deciding whether a body
+  **forms at all**. So the reference sits squarely on one side of the
+  distinction the article calls *"the classic error"*, which makes it the
+  sharpest available illustration of **MUL-3** rather than merely an absence.
+  Four false positives are named, the prettiest being `theta` (11 hits):
+  `effect_capture.py`'s `(o, θ)` is the **operator parameters** from the
+  `admit()` clause — the same Greek letter, in the same codebase, for a
+  completely different object. The file also records **one design decision**:
+  the commitment lattice is deliberately NOT routed through the refractory
+  field, because §II's `σ` is *standing* where §III's pulse is *transient*, and
+  doing so would make commitment die out like a wave instead of latching. And
+  **two honest limits**: the mean-field `β*` is not predicted (the transition is
+  *observed* on the declared graph), and neighbourhoods here are symmetric
+  though §I permits any subset.

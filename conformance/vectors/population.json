@@ -1,0 +1,127 @@
+{
+  "conformance_version": 1,
+  "slice": "population",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Multiparty - Formal Execution.md, §I (The Node and the Population) and §II (Aggregation Threshold — Threshold Commitment and Cascade; quorum sensing, Waters & Bassler 2005)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the aggregation layer on top of the Signal medium: does a body FORM at all. The commitment lattice is deliberately NOT routed through the refractory field — see the note below.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-16",
+    "statement": "quorum_sens*, neighbourhood, concentration, cascade, bifurcation and phase_transition are all grep-0 in apps/api/sustena/. There is no node with a local neighbourhood, no concentration sensed from it, and no threshold commitment — the reference's coordination is topic dispatch (EventBus), which delivers to whoever subscribed rather than letting a node read its own local density.",
+    "★_the_counterweight_IS_MUL-3": "The reference HAS a quorum, and it is the OTHER one. CouncilSession collects votes and resolves a proposal against a majority — that is §V's quorum, an intersecting/counted majority deciding what a formed body may RATIFY. What it does not have is §II's: a count against a threshold deciding whether a body FORMS at all. So the reference sits squarely on one side of exactly the distinction the article warns is 'the classic error', which makes it the sharpest possible illustration of MUL-3 rather than merely an absence. Anyone grepping 'quorum' in Python will find something real; it answers a different question.",
+    "the_four_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "theta (11 hits)": "The prettiest one in the series: effect_capture.py's (o, θ) is the OPERATOR PARAMETERS from the admit() clause — 'this is theta' in its own words. The same Greek letter, in the same codebase, for a completely different object. §II's θ is a concentration threshold; that θ is a params map.",
+      "commit (110 hits)": "Git commits and database transaction commits. Not threshold commitment, and nothing latching.",
+      "threshold (70 hits)": "Real thresholds — the advisory layer's 80%-spent pocket cutoff, a 7-day staleness cutoff, an operative's evaluation threshold. Every one is a per-node scalar compared against that node's own value. None is a population reading its own density.",
+      "population (1 hit)": "Incidental prose."
+    },
+    "term_by_term": {
+      "n_i = ⟨s_i, N(i), act_i⟩ (§I)": "RUST-AHEAD in the N(i) half. State and gated transitions are at parity — a sustain has state and its operators are gated locally, which is exactly act_i. What is absent is the NEIGHBOURHOOD: nothing in the reference gives a participant a local set of others whose state it can sense.",
+      "no node ever sees P (§I)": "RUST-AHEAD, and it is the constraint everything else lives under. In the reference the engine holds every sustain and any route handler can read all of them, so the constraint is not merely unmet — it is not modelled at all.",
+      "c_i = Σ σ_j·e^{−λd} (§II)": "RUST-AHEAD. grep-0. No concentration, no distance-weighted sensing, and no λ.",
+      "commit_i = 1[c_i > θ] (§II)": "RUST-AHEAD. The reference's thresholds are all a node checking its own number; this is a node checking how many OTHERS have moved.",
+      "the cascade / phase transition": "RUST-AHEAD. grep-0. Nothing propagates a commitment through neighbours, so no positive feedback and no bifurcation.",
+      "the Signal medium underneath": "AT PARITY WITH THE PREVIOUS SLICE, not with Python — signal.rs shipped 2026-08-16 and this layer consumes it. Recorded so the reuse is not mistaken for new ground."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "Two real things. EventBus genuinely distributes information — but by topic, to subscribers, from a publisher: a node cannot read its local density off it because there is no local. And CouncilSession genuinely reaches collective decisions — but by counting votes on a raised proposal, which is the §V quorum. Between them the reference can tell everyone something and can decide something together. What it cannot do is the thing in between: let a body form because enough neighbours independently committed, with no one convening it.",
+    "★_why_the_commitment_lattice_is_not_routed_through_the_refractory_field": "A design decision worth recording because getting it wrong would be subtle and total. §II's σ is STANDING — `node.signal = 1` is a state field that stays set, and c_i sums it as a persistent concentration, which is what makes commitment LATCH. §III's pulse is TRANSIENT — a node fires once, goes refractory, and the wave passes through. Routing the commitment itself through an excitable medium would make it die out like a wave instead of latching, and the phase transition would vanish. So the commitment lattice is its own monotone state; the Signal primitive supplies the medium (a shared topology with no broadcaster in it) and debounced announcements (a node announces once, not every tick — exactly the job §III's refractory window was described for). Neither is load-bearing for the cascade arithmetic, and saying so is more useful than implying the reuse runs deeper than it does.",
+    "the_honest_limit_on_the_bifurcation": "§II gives the mean-field form ẋ = −x + f(βx) with a critical gain β*, which describes a WELL-MIXED population. The exact cascade depends on the topology, so nothing here reports a predicted β*. `sweep` instead OBSERVES the transition on the graph that was actually declared, and PhaseTransition carries the population size so a reader knows which graph the answer is about.",
+    "a_disclosed_scope_choice": "§I permits N(i) to be any subset of P\\{n_i}, so a node could sense a neighbour that does not sense it. This build declares SYMMETRIC neighbourhoods, because they share a medium with the Signal field whose edges are symmetric by design. Stated rather than left to be discovered.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive, and it consumes signal.rs without modifying it."
+  },
+  "fixture": {
+    "why": "A 6-node ring with unit distances: everyone has exactly two neighbours, so the concentration a node can sense is bounded and θ has something to bite on. λ = 0 in the ring, so each committed neighbour contributes exactly 1 and θ reads directly as 'how many neighbours must have moved' — which keeps the threshold cases legible.",
+    "nodes": ["a", "b", "c", "d", "e", "f"],
+    "edges": [["a", "b"], ["b", "c"], ["c", "d"], ["d", "e"], ["e", "f"], ["f", "a"]],
+    "distance": 1.0,
+    "lambda": 0.0,
+    "seed": "a"
+  },
+  "node_cases": [
+    {
+      "name": "a_node_senses_only_its_own_neighbourhood",
+      "why": "★★ §I's hard constraint, and the one every other result lives under: 'the population must reach coordinated global state using only local information exchange. No node ever sees P.' Committing a node across the ring changes nothing `a` can see. A commit decision is computed from a LocalView built from N(i) and nothing else — there is no field on that type that could carry the roster.",
+      "commit": "d", "observer": "a",
+      "expect": {"concentration": 0.0, "committed_neighbours": 0, "neighbours": 2, "observer_can_see_it": true}
+    },
+    {
+      "name": "a_node_cannot_be_its_own_neighbour",
+      "why": "§I writes N(i) ⊆ P \\ {n_i}. A self-loop would let a node sense its own commitment and push itself over θ — a body forming out of one member agreeing with itself.",
+      "expect": {"error": "SelfNeighbour"}
+    },
+    {
+      "name": "the_declared_parameters_are_checked",
+      "why": "θ and λ are DECLARED, the same discipline as the region weights and the CUSUM parameters. θ ≤ 0 means every node commits on any neighbour at all — a body that always forms has not sensed anything.",
+      "expect": {"theta_zero": "BadTheta", "theta_negative": "BadTheta", "lambda_negative": "BadLambda"}
+    },
+    {
+      "name": "concentration_decays_with_declared_distance",
+      "why": "The e^{−λd} term doing real work: with λ = 1 a neighbour at distance 3 contributes measurably less than one at distance 1. Distances are declared per edge, which is what keeps λ from being inert — with a single hop-count everywhere it would multiply a constant.",
+      "lambda": 1.0, "near": 1.0, "far": 3.0,
+      "expect": {"near_only": 0.36787944117144233, "far_adds_less_than_near": true}
+    }
+  ],
+  "threshold_cases": [
+    {
+      "name": "below_theta_nothing_commits",
+      "why": "★ 'Below θ, nothing.' One seed gives each of its two neighbours a concentration of 1, which does not exceed θ = 1.5 — so the ring stays exactly as it was. The negative half of the bifurcation, and the half that makes the positive half mean something.",
+      "theta": 1.5,
+      "expect": {"converged": true, "committed": 1, "waves": 0}
+    },
+    {
+      "name": "above_theta_commitment_cascades_through_the_whole_population",
+      "why": "★★ THE PROOF OF VALUE. θ = 0.5, so one committed neighbour suffices: each commit raises a neighbour's c past θ, which commits it, which raises the next. From a single seed the entire ring commits — and it SPREADS over several ticks rather than happening at once, which is what makes it a cascade rather than a broadcast.",
+      "theta": 0.5,
+      "expect": {"converged": true, "total": true, "final_fraction": 1.0, "waves_at_least": 2}
+    },
+    {
+      "name": "the_cascade_spreads_outward_one_neighbourhood_at_a_time",
+      "why": "The shape of the spread, made explicit: the seed's neighbours first, then theirs. This is the positive feedback §II describes, visible as a wavefront rather than inferred from the end state.",
+      "theta": 0.5,
+      "expect": {"first_tick": ["b", "f"], "second_tick": ["c", "e"]}
+    },
+    {
+      "name": "a_node_is_not_pushed_over_by_a_neighbour_that_crossed_in_the_same_tick",
+      "why": "★ Decisions read the PRE-step lattice. Otherwise the cascade would run ahead of the information actually exchanged and a single step could sweep the whole graph — which would look like a cascade while being a broadcast with extra steps.",
+      "theta": 0.5,
+      "expect": {"first_tick_size": 2}
+    },
+    {
+      "name": "a_cascade_that_runs_out_of_ticks_says_so",
+      "why": "A partial spread must not read like a finished one — the same discipline as the Signal field's DidNotSettle and the kernel's horizon variant.",
+      "theta": 0.5, "max_ticks": 1,
+      "expect": {"converged": false, "total": false}
+    }
+  ],
+  "medium_cases": [
+    {
+      "name": "a_commit_is_announced_once_not_every_tick",
+      "why": "★ The Signal primitive doing precisely what it was built for, one layer up. A commitment is STANDING, so without the refractory window a committed node would announce on every subsequent tick forever. The debounce that stopped a persistent warning re-triggering a re-inversion in the pincer slice stops a standing commitment re-announcing here.",
+      "theta": 0.5,
+      "expect": {"every_node_announced_exactly_once": true}
+    }
+  ],
+  "bifurcation_cases": [
+    {
+      "name": "the_transition_is_sharp_on_the_declared_graph",
+      "why": "★★ §II's phase transition, OBSERVED rather than predicted. The same seed at a sequence of θ: below the critical point the ring fills completely, above it nothing moves at all. The jump is a discontinuity, not a slope — which is what 'a second, high-commitment state appears' means. No mean-field β* is reported, because its value depends on the topology; what is reported is what happened on the graph that was declared, and PhaseTransition carries the population size so a reader knows which graph that is.",
+      "thetas": [0.5, 0.9, 1.1, 1.5],
+      "expect": {"population_size": 6, "crossed": true, "sharp": true, "at_0_9": 1.0, "at_1_1_below": 0.2}
+    },
+    {
+      "name": "a_sweep_that_never_crosses_reports_no_critical_point",
+      "why": "Honest absence. If every θ tried behaves the same way there is no observed transition, and reporting one anyway would be inventing a critical point from a flat curve.",
+      "thetas": [2.0, 3.0, 4.0],
+      "expect": {"crossed": false, "sharp": false}
+    }
+  ],
+  "mul3_cases": [
+    {
+      "name": "this_quorum_is_a_scalar_threshold_not_a_set_property",
+      "why": "★ MUL-3, made structural rather than only warned about. §II's quorum is a concentration crossing θ — a comparison of two real numbers. §V's is a property of SETS: that any two quorum sets intersect. A scalar comparison cannot express a set-intersection property, so the confusion the article calls 'the classic error' is not spellable through this type. The reference engine sits on the other side of the same line: its CouncilSession counts votes on a raised proposal, which is §V's quorum.",
+      "expect": {"commits_at_low_theta": true, "does_not_commit_at_high_theta": true, "decision_is_a_scalar_comparison": true}
+    }
+  ]
+}
