@@ -59,6 +59,7 @@
 //! | Signal — relayed refractory pulse | [`signal`] | R2 |
 //! | Signal fns · temporal pincer | [`pincer`] | R2 |
 //! | OODA loop state machine | [`ooda`] | R2 |
+//! | MonitorEngine — owns the chain | [`monitor`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -74,6 +75,7 @@ pub mod fold;
 pub mod inverse;
 pub mod kernel;
 pub mod migrate;
+pub mod monitor;
 pub mod mutation;
 pub mod operator;
 pub mod path;
@@ -138,6 +140,9 @@ pub use version::{
 pub use ensemble::{
     DeadDrop, DeadDropBook, DecisionNode, Ensemble, EnsembleAnalysis, EnsembleError, InvariantSet,
     ModelTemplate, Prob, Resolution, RewardBasis, Scenario,
+};
+pub use monitor::{
+    Driven, Ingested, MonitorEngine, MonitorError, SustainWatch,
 };
 pub use ooda::{
     Candidate, Ooda, OodaError, OodaObservation, OodaPhase, OodaStep, Orientation, StayReason,

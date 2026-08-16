@@ -1,0 +1,146 @@
+{
+  "conformance_version": 1,
+  "slice": "monitor",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Monitor - Formal Execution.md, §IX (The Monitor Engine) + the Additions (urgency is distance-to-V; the fit caveat that makes Kalman a declined import)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the per-sustain engine that OWNS the detection chain. The chain itself shipped in the detect slice; what was missing was the object that carries it between observations and hands an escalation to the OODA loop.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-16",
+    "statement": "The reference has no MonitorEngine: MonitorEngine, monitor_engine, kalman, detector, escalate, flatten_holarchy and belief are all grep-0 in apps/api/sustena/. But the sharpest statement of the gap is not a grep count — it is that the reference watches by RECOMPUTING and this engine watches by ACCUMULATING. GET /devui/state computes its widgets fresh on every poll, so nothing carries an EWMA level or a CUSUM accumulator between observations. A CUSUM is definitionally an accumulator; in a recompute-per-request design it does not merely lack an implementation, it has nowhere to live.",
+    "the_three_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "ewma (1 hit) and cusum (1 hit)": "Both are the SAME comment, in curated_ui.py, and it is a comment recording their ABSENCE: the urgency proxy there notes that 'CUSUM/EWMA per §2 of the upgrade spec do not' exist yet. The only grep hits for the detectors are a note saying they are not there — worth naming precisely, because a reviewer skimming a hit count of 1 and 1 would draw the opposite conclusion.",
+      "heartbeat (1 hit)": "devui.py's comment about the shell's event-count polling heartbeat — a UI refresh interval, not a monitor cadence."
+    },
+    "term_by_term": {
+      "per-sustain filters/detectors (§IX)": "RUST-AHEAD. grep-0, and structurally blocked: there is no object per sustain to hold them, because the monitoring surface is recomputed per request.",
+      "the ingest() pipeline": "RUST-AHEAD, and built in the NATIVE form — see below. The reference has no pipeline at all; it computes a display value and discards it.",
+      "Kalman (MON-2)": "DECLINED IMPORT, not a gap, and this is the one term where 'rust-ahead' would be the wrong word entirely. §IX runs Kalman → EWMA → CUSUM; the article's own Additions say the Kalman apparatus assumes a continuous linear ODE that discrete event-sourced state is not, and that the Sustena-native form is distance-to-V on the fold with CUSUM/EWMA over that series. So this engine runs W = d(s,V) → EWMA → CUSUM. Building a Kalman stage would add an estimator for noise this state model does not have, in front of a detector that does not need it.",
+      "Controller.escalate on WARNING+": "RUST-AHEAD, and it is what makes OBSERVE self-driving. Before this slice the chain existed and nothing drove it; now an escalating ingest hands an OodaObservation to the loop.",
+      "BeliefStateTracker (MON-8)": "RUST-AHEAD and NOT BUILT HERE. A separate ⬜ row, left as a clean seam with no placeholder field — an empty belief_trackers map would read as built-and-idle rather than absent.",
+      "WidgetVisualEncoder / render_widget (MON-7)": "RUST-AHEAD and NOT BUILT HERE. Same treatment: a separate ⬜ row, no stub.",
+      "tick() at display refresh rate": "DELIBERATELY OUTSIDE CORE. No clock, no scheduler — the same boundary CTL-9 draws for the Controller's WHILE system.running. The host calls drive(); this module is the body of one pass, not the loop around it."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The Monitor panel is real, shipped and in daily use: GET /devui/state returns live state, events, operative statuses, constraint evaluations and three computed widgets, and the panel polls it. Slice 10's evaluate_operatives() is a real triggered pass that produces suggestions. Both genuinely watch. What neither can do is REMEMBER: every value is derived from the current state on the current request, so 'this has been drifting for six readings' is not expressible — not because the code for a detector is missing, but because there is no per-sustain object with a lifetime longer than one HTTP request for a detector's state to sit in. That is precisely MON-9, and it is why the backlog recorded it as 'scheduling external, no heartbeats' (#24).",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. The engine is additive, owns only its own detectors, and calls region/detect/pincer unmodified."
+  },
+  "fixture": {
+    "why": "A minimum operating float of 1000, so a state below it is genuinely outside V and W is the shortfall. The `pending` dimension is deliberately NOT bounded by the region — it is what proves the two escalation inputs are not redundant: a distance cannot measure what V does not describe.",
+    "region": {"intervals": [["balance", 1000.0, null]], "weights": {"balance": 1.0}},
+    "alpha": 0.5,
+    "cusum": {"mu_0": 0.0, "delta": 50.0, "h": 100.0},
+    "unbounded_dimension": "pending"
+  },
+  "engine_cases": [
+    {
+      "name": "an_engine_with_no_sustains_is_refused",
+      "why": "An engine watching nothing would report calm forever, which is the most dangerous possible output of a monitor — indistinguishable from an engine watching everything and finding nothing.",
+      "expect": {"error": "NothingToWatch"}
+    },
+    {
+      "name": "flatten_holarchy_orders_parents_before_children",
+      "why": "§IX's flatten_holarchy. There is no holarchy TYPE in core to walk, so this takes the flattened declaration and validates the links rather than pretending to traverse a tree it was not given. Ordering is deterministic so a replay is reproducible.",
+      "declare": [["child", "household"], ["household", null], ["grandchild", "child"]],
+      "expect": {"order": ["household", "child", "grandchild"]}
+    },
+    {
+      "name": "a_cycle_in_the_declared_holarchy_is_refused",
+      "why": "A holon that contains itself is not a hierarchy. Caught at construction, where it is cheap, rather than at traversal, where it is a hang.",
+      "declare": [["a", "b"], ["b", "a"]],
+      "expect": {"error": "HolarchyCycle", "message_contains": "contains itself"}
+    },
+    {
+      "name": "a_parent_that_was_never_declared_is_refused",
+      "why": "A dangling parent link would silently place a child at the root, which is a different holarchy from the one someone declared.",
+      "expect": {"error": "UnknownParent"}
+    },
+    {
+      "name": "a_duplicate_sustain_is_refused",
+      "why": "Two declarations for one id means two chains for one household, and which one accumulated what would depend on insertion order.",
+      "expect": {"error": "DuplicateSustain"}
+    },
+    {
+      "name": "each_sustain_keeps_its_own_chain",
+      "why": "★ THE POINT of per-sustain ownership. One household's drift must not move another's accumulator — which is exactly what a single shared detector, or a recomputed-per-request value, cannot promise.",
+      "ingests": {"a": 5, "b": 1},
+      "expect": {"history_a": 5, "history_b": 1}
+    },
+    {
+      "name": "an_unwatched_sustain_is_refused",
+      "why": "Ingesting into a sustain nobody declared would create a chain with no declared parameters — α, μ₀, δ and h invented rather than read.",
+      "expect": {"error": "UnknownSustain"}
+    }
+  ],
+  "pipeline_cases": [
+    {
+      "name": "ingest_computes_w_as_distance_to_v_not_the_raw_state",
+      "why": "★ The Additions' 'urgency is distance-to-V'. What enters the detector is the shortfall against the household's own declared region, not the balance — so a large number inside V is calm and a small shortfall outside it is not.",
+      "expect": [{"balance": 5000.0, "w": 0.0}, {"balance": 600.0, "w": 400.0}]
+    },
+    {
+      "name": "the_ewma_smooths_across_ingests_because_the_engine_owns_it",
+      "why": "★★ THE THING THAT WAS MISSING. The chain has STATE, and until this slice nothing carried it between observations. With α = 0.5 the second reading lands halfway toward the new level — which is only possible because the first one was remembered.",
+      "expect": {"first_smoothed": 0.0, "second_smoothed": 500.0}
+    },
+    {
+      "name": "a_quiet_stream_does_not_escalate",
+      "why": "Watching is metered; looking spends a budget. Ten quiet ingests produce ten real readings and zero observations — and observation() is None, so there is no route from a quiet ingest into OBSERVE at all.",
+      "balance": 5000.0, "ingests": 10,
+      "expect": {"escalates": false, "severity": "Info", "observation": null}
+    },
+    {
+      "name": "a_sustained_drift_eventually_escalates",
+      "why": "The CUSUM doing what an accumulator is for: a shift held long enough crosses h. This is the one behaviour a recompute-per-request design structurally cannot produce.",
+      "balance": 0.0, "within_ingests": 12,
+      "expect": {"escalates": true}
+    },
+    {
+      "name": "there_is_no_kalman_stage",
+      "why": "★ THE DECLINED IMPORT, checked rather than asserted. §IX runs Kalman → EWMA → CUSUM. What reaches the EWMA here is W itself — the first observation seeds the smoother directly from d(s,V), with nothing having estimated it first.",
+      "balance": 600.0,
+      "expect": {"w": 400.0, "smoothed_equals_w": true}
+    }
+  ],
+  "self_driving_cases": [
+    {
+      "name": "a_quiet_ingest_leaves_the_loop_untouched",
+      "why": "The common case. The chain advanced, nobody was disturbed, and nothing was held back — because nothing tried to go.",
+      "balance": 5000.0,
+      "expect": {"step": null, "held_back": null, "phase": "Observe"}
+    },
+    {
+      "name": "an_escalating_ingest_drives_the_loop_into_orient",
+      "why": "★★ THE PROOF OF VALUE. A stream of state updates through ONE engine advances the chain until the CUSUM crosses, and that crossing walks the OODA loop out of OBSERVE — with nobody calling observe() by hand. This is what 'OBSERVE is self-driving' means, and it is the whole of MON-9's escalation clause.",
+      "balance": 0.0, "within_ingests": 12,
+      "expect": {"drove": true, "phase": "Orient"}
+    },
+    {
+      "name": "a_signal_alone_drives_the_loop_even_without_a_cusum_crossing",
+      "why": "★ Why escalation has TWO inputs rather than one. The state is comfortably inside V, so W = 0 and the CUSUM never stirs — and a declared trajectory signal watching `pending`, a dimension the region does not bound at all, fires anyway. A distance cannot measure what V does not describe.",
+      "pending": 9,
+      "expect": {"w": 0.0, "reading_escalates": false, "ingested_escalates": true, "phase": "Orient"}
+    },
+    {
+      "name": "watching_continues_while_the_loop_is_busy_and_says_who_held_it",
+      "why": "★ §III: 'Monitor is always running at OBSERVE. Controller only surfaces when the OODA loop has reached DECIDE.' A reading arriving mid-cycle is RECORDED — the history grows, the accumulator advances — and is NOT forced into a busy loop. held_back names the phase that declined it, so a deferred hand-off is visible rather than looking like the reading was ignored.",
+      "balance": 0.0,
+      "expect": {"history_grew": true, "step": null, "held_back": "Orient"}
+    },
+    {
+      "name": "a_persistent_signal_does_not_repeatedly_drive_observe",
+      "why": "The pincer's refractory debounce doing its job one layer up. A condition that stays true does not re-drive OBSERVE on every ingest — the difference between a monitor and an alarm that will not stop. And the suppression stays VISIBLE all the way up here, in the report's debounced list.",
+      "pendings": [9, 12],
+      "expect": {"first_drove": true, "second_escalates": false, "second_held_back": null, "debounced": ["backlog"]}
+    }
+  ],
+  "disclosed_limits": [
+    {
+      "name": "the_history_is_not_truncated",
+      "why": "Trajectory signals are σ_k: S^t → {0,1}, so the engine retains each sustain's observed states, and it grows without bound. It does NOT truncate, because dropping the oldest silently changes what a bounded Never can conclude — precisely the class of quiet wrongness the three-valued verdict exists to prevent. history_len() exposes the growth so a host can see it and decide, rather than having the decision made invisibly here.",
+      "ingests": 50,
+      "expect": {"history_len": 50}
+    }
+  ]
+}

@@ -99,6 +99,7 @@ conformance/
     signal.json         relayed refractory pulse (§III) (spec, R2)
     pincer.json         σ over S^t · forward ∥ backward   (spec, R2)
     ooda.json           OBSERVE→ORIENT→DECIDE→ACT       (spec, R2)
+    monitor.json        the per-sustain MonitorEngine    (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -319,3 +320,24 @@ it is a bug** — nothing silently differs.
   Sheridan approval line executes under `EffectClass::Unchecked`, since the
   declared `AutomationTable` is the prior human decision — made visible by
   `human_asked: false` in the trace, which a test asserts rather than trusting.
+
+- **`monitor.json` — rust-ahead-of-python, stated as a design difference rather
+  than a grep count.** The reference **watches by RECOMPUTING**; this engine
+  **watches by ACCUMULATING**. `GET /devui/state` derives its widgets fresh on
+  every poll, so nothing carries an EWMA level or a CUSUM accumulator between
+  observations — and a CUSUM is definitionally an accumulator, so in a
+  recompute-per-request design it does not merely lack an implementation, it has
+  **nowhere to live**. That is MON-9 exactly, and why the backlog recorded it as
+  *"scheduling external, no heartbeats"*. **The sweetest false positive in the
+  series is named here:** the only grep hits for `ewma` and `cusum` are one
+  comment in `curated_ui.py` recording their *absence*.
+  **Counterweight, asserted by a test:** the Monitor panel is real, shipped and
+  in daily use, and Slice 10's `evaluate_operatives()` is a real triggered pass
+  — both genuinely watch. What neither can do is **remember**.
+  **One term is a DECLINE, not a gap:** §IX runs Kalman→EWMA→CUSUM, and the
+  article's own Additions say the Kalman apparatus assumes a continuous linear
+  ODE that discrete event-sourced state is not — so the native form
+  (`W = d(s,V)`→EWMA→CUSUM) replaces it, and MON-2 stays deliberately unbuilt.
+  Two further rows (**MON-8** belief tracker, **MON-7** preattentive encoder)
+  and `tick()` are named as separate work rather than stubbed, because an empty
+  placeholder field reads as built-and-idle rather than absent.

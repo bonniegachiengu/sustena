@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel**, **16 tenet**, **18 ensemble**, **17 signal**, **16 pincer**, **17 ooda** cases (divergences recorded) |
-| Rust tests | **412 unit · 161 conformance tests** across 16 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel**, **16 tenet**, **18 ensemble**, **17 signal**, **16 pincer**, **17 ooda**, **17 monitor** cases (divergences recorded) |
+| Rust tests | **430 unit · 178 conformance tests** across 17 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -99,7 +99,7 @@ Ordered by dependency, not importance.
 | # | Gap | Article |
 |---|---|---|
 | ~~23~~ | ~~No Kalman / EWMA / CUSUM — urgency is a single `pct`~~ — **DONE in Rust** across two slices (2026-08-12): `region.rs` made `urgency(s) = d(s,V)` real (replacing the `pct` proxy *and* its `allocated <= 0 → 0.0` blind spot), and `detect.rs` added **EWMA + CUSUM** over that series plus the severity classification that is the **formal Monitor→Controller boundary**. **Kalman is a declined import, not a gap** — MON-11's own fit caveat says it assumes a continuous ODE that discrete event-sourced state is not, and the Sustena-native form now ships end to end. Python unchanged. | Monitor · PERCEPT |
-| 24 | No MonitorEngine; scheduling external, no heartbeats | Monitor |
+| ✅ 24 | ~~No MonitorEngine; scheduling external, no heartbeats~~ — **the engine is DONE in Rust** (`monitor.rs`, 2026-08-16): per-sustain chains keyed by id with `flatten_holarchy`, the **native** `ingest()` (`W = d(s,V) → EWMA → CUSUM`, no Kalman), and the escalation that makes **OBSERVE self-driving** into the OODA loop. The diagnosis behind this row was exactly right and is worth keeping: the reference watches by RECOMPUTING per request, so an accumulator had nowhere to live. **Scheduling stays external on purpose** — no clock or `tick()` in core, the same boundary CTL-9 draws. Python unchanged. | Monitor |
 | 25 | Widget type-checker exists with **no application call site** | PERCEPT |
 
 ### Editing
@@ -195,7 +195,7 @@ This backlog covers the **foundation + walking skeleton** well. But the master s
 
 ### ✅ SPINE — **all three modules now shipped in Rust** (2026-08-16)
 
-**Monitor ✅ · Tenet ✅ · Controller ✅.** The spine the master spec puts at the centre is no longer a gap: `region.rs` + `detect.rs` (Monitor), `tenet.rs` + `ensemble.rs` (Tenet), `controller.rs` (Controller), with `kernel.rs` underneath all three. **And as of 2026-08-16 they are wired into one cycle** — `ooda.rs` (CTL-3) sequences them, with the human structurally at DECIDE. What remains is the surrounding assembly: the `MonitorEngine` that owns the detection chain per sustain, holarchy escalation, panels. Not the mathematics, and no longer the loop.
+**Monitor ✅ · Tenet ✅ · Controller ✅.** The spine the master spec puts at the centre is no longer a gap: `region.rs` + `detect.rs` (Monitor), `tenet.rs` + `ensemble.rs` (Tenet), `controller.rs` (Controller), with `kernel.rs` underneath all three. **And as of 2026-08-16 they are wired into one cycle** — `ooda.rs` (CTL-3) sequences them, with the human structurally at DECIDE. **And as of 2026-08-16 the loop feeds itself**: `monitor.rs` (MON-9) owns the detection chain per sustain and drives OBSERVE, so a state update reaches a surfaced decision without anyone stepping the machine by hand. What remains is holarchy escalation, the belief tracker, the preattentive encoder and panels — not the mathematics, no longer the loop, and no longer its input.
 
 | # | Gap | Article | Where |
 |---|---|---|---|
@@ -491,4 +491,4 @@ knowing about before opening the next slice:
 - **N3 — a definition edit destroys its predecessor.** Sharper than #26: rollback has
   nothing to roll back *to*.
 
-*Last updated: 2026-08-16 — **the spine is assembled.** M-TEN's mathematics completed across three slices (`tenet.rs`, `ensemble.rs`, `pincer.rs`), built on **the Signal primitive** (`signal.rs`, MUL-4/MUL-15) that MON-13, CTL-3 and TEN-8 all ride — and then **CTL-3** (`ooda.rs`) wired Monitor→Tenet→Controller into one OODA cycle with the human structurally at DECIDE. **Monitor ✅ · Tenet ✅ · Controller ✅**, and now one loop rather than three modules that could be. What is left across T1/G1: TEN-11's pawa term (parked on the economy), the MonitorEngine, holarchy escalation, the IoT bridge, panels and damping.*
+*Last updated: 2026-08-16 — **the spine is assembled and self-feeding.** M-TEN's mathematics completed across three slices (`tenet.rs`, `ensemble.rs`, `pincer.rs`) on top of **the Signal primitive** (`signal.rs`, MUL-4/MUL-15); **CTL-3** (`ooda.rs`) wired Monitor→Tenet→Controller into one OODA cycle with the human structurally at DECIDE; and **MON-9** (`monitor.rs`) gave OBSERVE an engine that owns the detection chain per sustain and drives the loop itself. **Monitor ✅ · Tenet ✅ · Controller ✅**, one loop, fed by its own watching. What is left across T1/G1/#23–#25: TEN-11's pawa term (parked on the economy), holarchy escalation, the IoT bridge, the belief tracker, the preattentive encoder, panels and damping.*

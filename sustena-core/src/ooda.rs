@@ -127,6 +127,18 @@ impl OodaObservation {
         }
     }
 
+    /// When the Monitor ran the detector chain and **no trajectory signals
+    /// were declared** for this sustain.
+    ///
+    /// The watched list is genuinely empty, and that is the truth rather than a
+    /// gap: nothing was declared, so nothing was watched for. A sustain can be
+    /// legitimately covered by the CUSUM alone, and fabricating an empty
+    /// `MonitorReport` to reach `from_monitor` would invent a signal pass that
+    /// never happened.
+    pub fn from_severity(severity: Severity) -> Self {
+        Self { severity, signals: Vec::new(), watched: Vec::new() }
+    }
+
     /// `δ`'s condition at OBSERVE: does anything cross the Monitor→Controller
     /// boundary?
     ///
