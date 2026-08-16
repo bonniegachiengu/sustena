@@ -98,6 +98,7 @@ conformance/
     ensemble.json       Ω · invariant actions · D · δ   (spec, R2)
     signal.json         relayed refractory pulse (§III) (spec, R2)
     pincer.json         σ over S^t · forward ∥ backward   (spec, R2)
+    ooda.json           OBSERVE→ORIENT→DECIDE→ACT       (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -299,3 +300,22 @@ it is a bug** — nothing silently differs.
   `σ(history)==1` makes *"no customers by week 6"* true at week 0, so the
   build is three-valued) and **one disclosure**: "parallel" is interleaved
   deterministically, since core has no threads.
+
+- **`ooda.json` — rust-ahead-of-python, and precise about WHAT is missing.**
+  `OODA`, `orient`, `state_machine` and `control_loop` are grep-0 — but the
+  block does not stop at "absent". The reference has real pieces of OBSERVE,
+  DECIDE and ACT and **no `δ`**: nothing holds a phase, so the ordering is a
+  property of how route handlers and the frontend happen to call things.
+  Concretely, nothing prevents `execute_approved` running for an act that was
+  never surfaced. **Three terms are recorded AT PARITY or partly so** — ACT
+  genuinely runs through the real gate, DECIDE is a real *surface* (just not a
+  *state*), OBSERVE really observes — because claiming the whole module would
+  overstate the gap badly. **Counterweight, asserted by a test:** it names
+  `curated_ui.compose(r)`'s real attention-budgeted knapsack, the advisory
+  ACCEPT/DISMISS flow, and `control.execute_approved`. Five greppable false
+  positives are named, including `surface` (33 hits — real, and a genuine
+  near-miss) and `ranked` (2 — it ranks **widgets to show**, not **actions to
+  authorize**). The file also carries **one disclosure**: an action above the
+  Sheridan approval line executes under `EffectClass::Unchecked`, since the
+  declared `AutomationTable` is the prior human decision — made visible by
+  `human_asked: false` in the trace, which a test asserts rather than trusting.

@@ -1,0 +1,146 @@
+{
+  "conformance_version": 1,
+  "slice": "ooda",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Controller - Formal Execution.md, §III (The OODA Loop Formalized — Boyd 1987) and §IX (The Full Controller Loop)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the OODA state machine. This slice ASSEMBLES: region/detect/signal do OBSERVE, ensemble/tenet do ORIENT, approval holds the token, operator::execute_admitted is the gate at ACT. What is new is δ, and the DECIDE surface.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-16",
+    "statement": "The reference engine has no OODA machine. OODA, orient, state_machine and control_loop are all grep-0 in apps/api/sustena/. More precisely than 'absent': the reference has real pieces of OBSERVE, DECIDE and ACT, and no δ. Nothing holds a phase, so nothing enforces the ordering — a caller can execute without ever having surfaced, because the sequencing lives in route handlers and the frontend rather than in a machine.",
+    "the_five_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "surface (33 hits)": "The largest, and it IS about surfacing to a human — the Curated UI and the needs-attention block. Real and relevant, but it is the RENDERING of things to show, not a phase in a cycle. See the counterweight below, which treats it as the near-miss it is rather than dismissing it.",
+      "decide (9 hits)": "All nine are prose: 'operatives ADVISE, the human DECIDES' comments in advisory.py, devui.py and sustain_engine.py, plus incidental uses ('decided by SENDER'). The principle is genuinely honoured in the reference — it just is not a state.",
+      "observe (3 hits)": "None is the OODA phase. Two are the holon composition rule ('a parent OBSERVES its children, it never VETOES them') and one is a transducer comment about 'observed real variation'.",
+      "authorize (3 hits)": "All three are HTTP 401 'Unauthorized' in sustains.py — request auth, not the DECIDE seam.",
+      "ranked (2 hits)": "curated_ui.py and orchie.py's `r = ⟨state, query, device⟩ → a ranked, attention-budgeted widget set`. This is the closest thing in the codebase and is named in the counterweight: it ranks WIDGETS TO SHOW, not ACTIONS TO AUTHORIZE."
+    },
+    "term_by_term": {
+      "OBSERVE": "PARTLY AT PARITY. The reference genuinely observes — the Monitor panel polls real state, and Slice 10's evaluate_operatives() is a real triggered pass. What it lacks is the Monitor→Controller boundary as a decidable condition, because Severity/CUSUM are grep-0 (recorded in detect.json).",
+      "ORIENT": "RUST-AHEAD, entirely. There is no scoring of available actions against a policy, because until the last three slices there was no policy. simulate.score ranks ONE branch a human wrote; §III's orient scores the available actions.",
+      "DECIDE": "RUST-AHEAD as a PHASE, at parity as a SURFACE. curated_ui's knapsack really does present a ranked, attention-budgeted set to a person, and the advisory ACCEPT/DISMISS flow really does wait for them. What is missing is that it is not a state the loop is IN — nothing is parked, and nothing else is blocked while it waits.",
+      "ACT": "AT PARITY in the execution itself. control.execute_approved runs an approved act through the real gate; that is not a gap. The gap is upstream: nothing guarantees the act it runs came from a DECIDE.",
+      "δ (the transition function)": "RUST-AHEAD, and this is the whole slice. grep-0. The reference has no phase variable, so no ordering is enforceable: observe/surface/execute are independent entry points that a route handler calls in whatever order it likes.",
+      "the human enters at DECIDE (§III)": "RUST-AHEAD as a STRUCTURAL property. The reference honours it by convention and does so sincerely — 'operatives ADVISE, the human DECIDES' appears as a CORE PRINCIPLE comment in three files. Convention is not the same as a machine that cannot advance."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "Three real, shipped things, and it would be wrong to call this module's ground empty. curated_ui.compose(r) is a genuine ranked, attention-budgeted surface with a real knapsack — a person sees a bounded set, not everything. The advisory layer really does wait for a human to ACCEPT or DISMISS. control.execute_approved really does run the approved act through the real gate. Between them the reference has a recognisable observe-surface-act shape. What it does not have is δ: no phase is held anywhere, so the ordering is a property of how the frontend and the route handlers happen to call things, not of anything that could refuse. Concretely, nothing in the reference prevents execute_approved being called for an act that was never surfaced — the ordering is a convention that holds because everyone follows it.",
+    "the_automation_disclosure": "One design decision worth stating rather than burying. Routing::Automate (Sheridan level above the approval line, §IV) goes straight to ACT under EffectClass::Unchecked, because the declared AutomationTable IS the prior human decision — the same reading as a dead drop being a pre-commitment. This is a real widening of what executes without a token at the moment it executes, so it is disclosed and made visible: the transition records human_asked: false, and a test asserts that flag rather than trusting it.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific. `now` is passed in for the same no-clock-in-core reason as everywhere else.",
+    "not_a_divergence_in": "R1 behaviour. The machine is additive and calls execute_admitted unmodified; the gate it goes through is the same one every R1 vector already exercises."
+  },
+  "fixture": {
+    "why": "A household below its declared minimum operating float. The region floor is 1000 and the live balance is 500, so W = 500 and the state is genuinely OUTSIDE V. This matters: urgency is Lyapunov-derived, so a fixture sitting comfortably inside the region would have urgency 0 and every route would be Withhold — the tests would exercise the withhold branch four times over while claiming to test surfacing.",
+    "region": {"intervals": [["finances.liquid.balance", 1000.0, null]], "weights": {"finances.liquid.balance": 1.0}},
+    "live_balance": 500.0,
+    "plan_space": {"here": 500.0, "better": 900.0, "worse": 10.0},
+    "inversion_point": ["finances.liquid.balance >= 900"],
+    "automation_table": {"ROUTINE": "ExecuteAndNotify", "SPEND": "ExecuteIfApproved"},
+    "preferences": {"threshold": 1.0, "weights": {"SPEND": 10.0}},
+    "candidates": [
+      {"action_type": "SPEND", "operator": "budget.spend", "amount": 50.0, "to": "worse", "lands_at": 10.0},
+      {"action_type": "SPEND", "operator": "budget.record_income", "amount": 400.0, "to": "better", "lands_at": 900.0}
+    ],
+    "candidate_honesty_note": "The winning candidate's real effect matches the after-state it claims: record_income(400) on a balance of 500 genuinely produces 900. A candidate whose declared landing disagreed with what its operator actually does would make the stability verdict a fiction, and the full-cycle case asserts the gate committed rather than shrugging at the result."
+  },
+  "machine_cases": [
+    {
+      "name": "q0_is_observe",
+      "why": "§III: q₀ = OBSERVE. The loop starts where the Monitor already is.",
+      "expect": {"phase": "Observe"}
+    },
+    {
+      "name": "a_quiet_observation_stays_at_observe",
+      "why": "★ §III's `IF signals.empty: STAY in observe`. The overwhelmingly common case, and the one calm is actually made of — a loop that treated a quiet observation as an error would invert what the Rocinante's bridge is for. STAY is a real outcome, not a failure.",
+      "severity": "Info", "signal_fires": false,
+      "expect": {"stayed": true, "phase": "Observe", "interrupts_a_human": false}
+    },
+    {
+      "name": "a_quiet_observation_still_says_what_it_was_watching",
+      "why": "The honest limit carried up from the pincer slice: 'nothing fired' is only ever 'nothing among these'. An Observation carries the watched list, so a quiet cycle cannot be quoted as 'nothing is wrong'.",
+      "expect": {"watched": ["drain"]}
+    },
+    {
+      "name": "an_escalating_observation_advances_to_orient",
+      "why": "δ fires on the completion event. A fired signal crosses the Monitor→Controller boundary.",
+      "severity": "Warning", "signal_fires": true,
+      "expect": {"advanced_to": "Orient"}
+    },
+    {
+      "name": "severity_alone_escalates_even_with_no_signal",
+      "why": "★ The boundary is REUSED, not re-decided here. Severity::escalates() was built in the detect slice as the formal Monitor→Controller seam; this machine consumes it rather than defining its own notion of 'important'.",
+      "severity": "Critical", "signal_fires": false,
+      "expect": {"escalates": true, "signals": 0}
+    },
+    {
+      "name": "phases_fire_on_completion_events_not_on_request",
+      "why": "δ is a function of the state you are in. Calling orient from OBSERVE, or act from anywhere but ACT, is refused — the machine is a machine, not a menu.",
+      "expect": {"error": "WrongPhase"}
+    }
+  ],
+  "orient_cases": [
+    {
+      "name": "the_orientation_is_ranked_by_the_plan",
+      "why": "★ ORIENT is owned by Tenet, and STRUCTURALLY so: Orientation is constructible only from a real Plan, and ranks candidates by J at their destinations. There is no way to hand the machine a ranking that did not come from a backward-induction sweep.",
+      "expect": {"top_operator": "budget.record_income", "horizon": 2}
+    },
+    {
+      "name": "a_candidate_the_plan_cannot_score_is_refused_not_zeroed",
+      "why": "Scoring an unknown destination as 0 would rank it below a known bad option — a claim nobody made. Refused, the same discipline as the sweep's dangling-outcome refusal.",
+      "to": "nowhere",
+      "expect": {"error": "UnscoredCandidate"}
+    },
+    {
+      "name": "an_empty_candidate_set_is_refused",
+      "why": "A ranking over nothing is not a ranking, and a DECIDE built on one would surface an empty choice to a person.",
+      "expect": {"error": "NothingToOrient"}
+    }
+  ],
+  "decide_cases": [
+    {
+      "name": "the_loop_parks_at_decide_and_cannot_advance_itself",
+      "why": "★★ THE PROPERTY §III is about. Routing::Surface leaves the machine parked; act() refuses while awaiting authorisation. The loop closing through a human is a fact about what this machine CANNOT do — and there is no method on it that mints a token, because minting requires approval.rs's Simulated → Voted → approve chain, which only a person completes.",
+      "expect": {"interrupts_a_human": true, "awaiting_authorization": true, "act_error": "AwaitingAuthorization"}
+    },
+    {
+      "name": "decide_refuses_without_an_orientation",
+      "why": "★ BOYD, encoded as a refusal. 'The Council's deliberation (ORIENT phase) must complete before the human sees anything.' A person is never shown raw options, because the surface cannot be built from a machine that has not oriented.",
+      "expect": {"error": "WrongPhase"}
+    },
+    {
+      "name": "a_token_for_a_different_act_does_not_admit_this_one",
+      "why": "The N1 binding, enforced at the seam. A token minted for some other (o, θ) is a real approval for a different act, and accepting it here would let a human's yes be spent on something they did not see.",
+      "expect": {"error": "TokenBindingMismatch", "still_parked": true}
+    },
+    {
+      "name": "the_human_moves_the_loop_to_act",
+      "why": "The only route past DECIDE, and it takes a real token bound to the surfaced act.",
+      "expect": {"advanced_to": "Act", "awaiting_authorization": false}
+    },
+    {
+      "name": "withheld_is_not_automated_and_executes_nothing",
+      "why": "★ The distinction that matters most in this phase. Withhold means 'needs approval, not urgent enough to interrupt anyone YET' — nothing executes, nobody is asked, and the loop returns to watching. Folding it into Automate would turn an attention filter into an auto-approver, so they stay separate outcomes here exactly as they are separate variants in controller.rs.",
+      "threshold": 1000000000.0,
+      "expect": {"withheld": true, "interrupts_a_human": false, "phase": "Observe", "nothing_pending": true}
+    },
+    {
+      "name": "an_automated_action_skips_the_human_and_says_so",
+      "why": "★ Sheridan above the approval line (§IV): the declared AutomationTable IS the prior human decision, so the action proceeds under EffectClass::Unchecked. That is a real widening of what runs without a token at the moment it runs, so it is DISCLOSED — the transition records human_asked: false and the test asserts that flag rather than trusting the design note.",
+      "action_type": "ROUTINE",
+      "expect": {"automated": true, "phase": "Act", "human_asked": false, "note_contains": "nobody asked"}
+    }
+  ],
+  "full_cycle_cases": [
+    {
+      "name": "the_full_cycle_closes_and_returns_to_observe",
+      "why": "★★ THE PROOF OF VALUE, and the assembly this slice exists for. A signal fires at OBSERVE → Tenet's sweep ranks the candidates at ORIENT → the Controller surfaces one at DECIDE and a human authorises it → the gate executes it at ACT → back to OBSERVE. Every stage is the module that owns it, unmodified. The gate's commit is ASSERTED, not assumed, so the cycle proves an act really happened rather than that four methods returned Ok.",
+      "expect": {
+        "committed": true,
+        "final_phase": "Observe",
+        "cycle": 1,
+        "human_asked_transitions": 2,
+        "human_asked_only_at_decide": true
+      }
+    }
+  ]
+}

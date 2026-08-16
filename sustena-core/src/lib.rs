@@ -58,6 +58,7 @@
 //! | Scenario ensembles · dead drops | [`ensemble`] | R2 |
 //! | Signal — relayed refractory pulse | [`signal`] | R2 |
 //! | Signal fns · temporal pincer | [`pincer`] | R2 |
+//! | OODA loop state machine | [`ooda`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -76,6 +77,7 @@ pub mod migrate;
 pub mod mutation;
 pub mod operator;
 pub mod path;
+pub mod ooda;
 pub mod pincer;
 pub mod predicate;
 pub mod region;
@@ -136,6 +138,10 @@ pub use version::{
 pub use ensemble::{
     DeadDrop, DeadDropBook, DecisionNode, Ensemble, EnsembleAnalysis, EnsembleError, InvariantSet,
     ModelTemplate, Prob, Resolution, RewardBasis, Scenario,
+};
+pub use ooda::{
+    Candidate, Ooda, OodaError, OodaObservation, OodaPhase, OodaStep, Orientation, StayReason,
+    Transition,
 };
 pub use pincer::{
     run_pincer, Draws, ForwardStep, MonitorReport, PincerError, PincerRun, PincerSpec, Recompute,
