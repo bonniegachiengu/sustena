@@ -103,6 +103,7 @@ conformance/
     holarchy.json       a breach climbs to who can act   (spec, R2)
     population.json     N(i) · c>θ · cascade · bifurcation (spec, R2)
     consensus.json      quorum · Paxos · FLP · 3f+1       (spec, R2)
+    router.json         Physarum conductance routing    (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -408,3 +409,22 @@ it is a bug** — nothing silently differs.
   comment saying quorum arithmetic *"is not built"*; that comment is now false,
   and `from_consensus` derives the quorum from a `Decision` that cannot exist
   without one.
+
+- **`router.json` — rust-ahead-of-python, and the distinction is one line.**
+  `physarum`, `conductance`, `kirchhoff`, `flux`, `reinforce` and
+  `shortest_path` are grep-0. The reference routes in the **dispatch** sense —
+  it sends things to declared destinations — and never in the **adaptive**
+  sense: no edge in it gets thicker for carrying load. **Counterweight,
+  asserted by a test:** `procurement.py` really does publish a supply signal
+  toward a Mycelium destination (its own comment marks the relay worker
+  *"Phase 2"*, not built), and `OperativeGraph` really does route execution
+  along declared edges by condition. Both are routing. In both, the path is
+  decided by a declaration made in advance and nothing about it changes because
+  traffic went down it — **a dispatcher picks; a medium adapts.** The nearest
+  greppable miss is named as *real routing* rather than dismissed. The file
+  also **refuses to overclaim "no global view"**: the reinforcement is strictly
+  local, and the flow solve is a conservation law — physics, not planning. And
+  it records **three honest limits**: a fixed-point iteration that reports
+  whether it settled, asymptotic decay so *pruned* is a reading at a declared
+  cutoff rather than a deletion, and a disconnected source/sink **refused
+  rather than reported as zero flow**.

@@ -63,6 +63,7 @@
 //! | Holarchic escalation | [`holarchy`] | R2 |
 //! | Population · quorum sensing | [`population`] | R2 |
 //! | Consensus — quorum · Paxos | [`consensus`] | R2 |
+//! | Physarum router | [`router`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -90,6 +91,7 @@ pub mod population;
 pub mod predicate;
 pub mod region;
 pub mod principal;
+pub mod router;
 pub mod schema;
 pub mod signal;
 pub mod state;
@@ -145,6 +147,9 @@ pub use population::{
 pub use predicate::{check, parse_predicate, Predicate};
 pub use region::{
     Distance, FitReport, Interval, Membership, Region, RegionError,
+};
+pub use router::{
+    Convergence, Edge, Reinforcement, Router, RouterError, RouterSpec,
 };
 pub use schema::{bind, preserves_shape, validate, DimType, Schema};
 pub use state::State;

@@ -1,0 +1,116 @@
+{
+  "conformance_version": 1,
+  "slice": "router",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Multiparty - Formal Execution.md, §VIII (Network Optimization — Conductance-Adaptive Routing, the Physarum Model; Tero et al. 2010, Nakagaki/Yamada/Tóth 2000, Bonifaci/Mehlhorn/Varma 2012)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the router half of MUL-15. Signal was the first half; completing this closes the row. The graph is the Population's already-declared topology — this layer adds flow and reinforcement, not a second graph.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-16",
+    "statement": "physarum, conductance, conductivity, kirchhoff, flux, reinforce, shortest_path, decay and pressure are all grep-0 in apps/api/sustena/. The reference routes in the DISPATCH sense — it sends things to declared destinations — and never in the ADAPTIVE sense: no edge in it gets thicker for carrying load, so nothing can be reinforced and nothing can be pruned.",
+    "the_two_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "routing (6 hits)": "The nearest miss is operative_graph.py's 'edge-routing time' — a declared DAG whose edges carry conditions evaluated against a prior node's result. That IS routing, and it is real: execution follows one edge rather than another. What it is not is adaptive — the edges are declared, their weights never change, and no amount of traffic makes one preferred. The rest: advisory.py 'routing through execute_operator' (a call path), whatsapp_handler's keyword routing (message dispatch), and twice the Navigator operative's job-title string 'Logistics & routing' — a councillor's domain label, not a mechanism.",
+      "flow (14 hits)": "All UI flows — the capture flow, the create/definition flow, WhatsApp conversation flows. Nothing fluid, and nothing conserved."
+    },
+    "term_by_term": {
+      "the Kirchhoff flow solve": "RUST-AHEAD. grep-0. Nothing in the reference conserves a quantity across a graph; its dispatch delivers a message and the message is not conserved.",
+      "flux Q_ij and conductivity D_ij": "RUST-AHEAD. grep-0. There is no per-edge quantity at all — an OperativeGraph edge carries a condition, not a weight.",
+      "the reinforcement rule dD/dt = f(|Q|) − D": "RUST-AHEAD, and it is the whole slice. Nothing in the reference changes because of what passed through it.",
+      "pruning what doesn't carry load": "RUST-AHEAD. The reference's graphs are as declared, forever. An unused edge stays exactly as important as a used one.",
+      "'This is Mycelium' (§VIII)": "PARTLY AT PARITY IN INTENT, not in mechanism — see the counterweight. procurement.py really does publish a supply signal toward a Mycelium destination, and its own comment calls the relay worker 'Phase 2'. The intent is on the record in Python; the mechanism §VIII names is not."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "Two real things, and the second is the honest near-miss. procurement.py publishes a supply signal with destination='mycelium.public' and carries a marker field for a relay worker its own comment marks as Phase 2 and not built — so the reference has the INTENT of Mycelium routing recorded in shipped code, aimed at a fixed destination chosen when the message is published. And OperativeGraph genuinely routes execution along declared edges, choosing one branch over another by condition. Both are routing in the sense of 'send this there'. Neither is routing in the sense §VIII means: in both, the path is decided by a declaration made in advance, and nothing about the path changes because traffic went down it. That is the whole distinction — a dispatcher picks; a medium adapts.",
+    "★_what_is_global_here_and_what_is_not": "Worth stating because 'no planner and no global view' is easy to overclaim. The REINFORCEMENT is local: f sees one edge's own flux and nothing else, and that is where all the adaptation happens. The FLOW SOLVE is a Kirchhoff conservation law over the whole graph — physics, not planning. Nothing chooses a route, ranks alternatives, or knows a destination; pressure equalises and each edge responds to what passes through it. In a physical Physarum the solve IS the fluid, and calling it a global step would be like calling gravity a planner.",
+    "the_honest_limits": "Three. (1) It is a FIXED-POINT ITERATION, not a closed form — converge() reports whether it actually settled, and running out of steps comes back as converged: false. (2) Decay is ASYMPTOTIC: D += dt·(f(|Q|) − D) with dt < 1 never reaches exactly zero from a positive start, so 'pruned' is a READING at a declared cutoff, not a claim that an edge was removed — nothing is deleted and the graph keeps every edge it was given. (3) A disconnected source and sink is REFUSED, not zeroed: with no path the Laplacian is singular, and returning zeros would say 'no flow needed' where the truth is 'no route exists'.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive, and it consumes population.rs's topology without modifying it."
+  },
+  "fixture": {
+    "why": "Source and sink joined by two DISJOINT routes: a short one through `a` (total length 2) and a long one through `b` (total length 6). Equal starting conductivity everywhere, so nothing but the flow distinguishes them — which is the point. Path resistance is Σ L/D, so 2 against 6, and the short route carries three times the current before any adaptation has happened at all.",
+    "nodes": ["s", "a", "b", "t"],
+    "edges": [
+      {"from": "s", "to": "a", "length": 1.0, "conductivity": 1.0},
+      {"from": "a", "to": "t", "length": 1.0, "conductivity": 1.0},
+      {"from": "s", "to": "b", "length": 3.0, "conductivity": 1.0},
+      {"from": "b", "to": "t", "length": 3.0, "conductivity": 1.0}
+    ],
+    "spec": {"dt": 0.5, "mu": 1.0, "saturating": false, "prune_below": 0.05},
+    "source": "s", "sink": "t", "rate": 1.0
+  },
+  "flow_cases": [
+    {
+      "name": "flow_is_conserved_at_every_interior_node",
+      "why": "★ Kirchhoff's law, which is what makes the solve physics rather than planning. Whatever enters `a` leaves it, the same through `b`, and the two routes together carry exactly what the source injects. A solver that lost or invented flow would be routing by preference.",
+      "expect": {"conserved_at_a": true, "conserved_at_b": true, "sums_to_rate": 1.0}
+    },
+    {
+      "name": "the_shorter_route_carries_more_flow_before_any_adaptation",
+      "why": "★ The asymmetry the reinforcement then amplifies, and it exists before the first step. Equal conductivity, different length ⇒ path resistance 2 against 6 ⇒ a 3:1 split. Nothing has adapted yet; physics alone has already found the shorter route.",
+      "expect": {"short_over_long": 3.0}
+    },
+    {
+      "name": "a_disconnected_sink_is_refused_not_zeroed",
+      "why": "★ 'No flow needed' and 'no route exists' are different answers, and only one of them is true here. With no path the Laplacian is singular; returning zeros would report the wrong one.",
+      "expect": {"error": "NoRoute"}
+    },
+    {
+      "name": "a_source_that_is_also_the_sink_is_refused",
+      "why": "There is nothing to route. A rate injected and extracted at the same node is not a degenerate problem, it is not a problem.",
+      "expect": {"error": "SourceIsSink"}
+    }
+  ],
+  "adaptation_cases": [
+    {
+      "name": "flow_reinforces_the_load_bearing_channel_and_prunes_the_unused_one",
+      "why": "★★ THE PROOF OF VALUE, and §VIII's own claim — the same dynamics provably solve shortest path (Bonifaci, Mehlhorn & Varma 2012). Both routes start identical in conductivity; only the flow through them differs, and that alone is enough. The short route thickens, the long one decays below the cutoff, and no planner was consulted at any point.",
+      "expect": {"converged": true, "short_exceeds_long": true, "carrying_includes": "a", "pruned_includes": "b"}
+    },
+    {
+      "name": "the_reinforcement_sees_only_its_own_edges_flux",
+      "why": "★ Where 'no global view' actually lives. f is a function of ONE number and that number is this edge's own flux — direction does not matter, only magnitude. Both declared forms are monotone, which is the property §VIII actually relies on; the saturating one additionally refuses to let a channel thicken without bound.",
+      "expect": {"power_of_2": 2.0, "sign_ignored": true, "saturating_bounded": true, "monotone": true}
+    },
+    {
+      "name": "an_unused_channel_decays_toward_zero_without_ever_reaching_it",
+      "why": "★ The honest limit made observable. dD/dt = f(0) − D = −D with dt < 1 is asymptotic, so the decayed edge is still strictly positive — below the declared cutoff, but not gone. And the edge count is unchanged: 'pruned' is a reading, and nothing was deleted.",
+      "expect": {"still_positive": true, "below_cutoff": true, "edge_count_unchanged": 4}
+    },
+    {
+      "name": "equal_routes_stay_equal",
+      "why": "★ The symmetric case, and the one that would expose a router that secretly chooses. With two identical routes nothing distinguishes them, so neither may win — a tie-break here would be a planner in disguise, which is precisely what §VIII's mechanism is defined against.",
+      "expect": {"stay_within": 1e-9}
+    },
+    {
+      "name": "a_run_that_does_not_settle_says_so",
+      "why": "A fixed-point iteration that ran out of steps has not found a fixed point. Reporting converged: false beats returning a partial network that reads settled.",
+      "max_steps": 1,
+      "expect": {"converged": false, "steps": 1}
+    }
+  ],
+  "composition_cases": [
+    {
+      "name": "a_router_runs_over_the_populations_declared_topology",
+      "why": "★ One topology, two readings. The Population declared d(i,j) so concentration could decay with distance; the SAME numbers are edge lengths here. That is what a shared topology is for, and it is why this is the second half of MUL-15 rather than a module that happens to sit nearby.",
+      "population_edges": [["s", "a", 2.0], ["a", "t", 4.0]],
+      "expect": {"nodes": 3, "edges": 2, "s_a_length": 2.0, "a_t_length": 4.0}
+    },
+    {
+      "name": "a_population_with_no_edges_has_nothing_to_route_on",
+      "why": "A body whose members have no declared neighbours is not a network. Refused rather than treated as a network with no traffic.",
+      "expect": {"error": "NoEdges"}
+    }
+  ],
+  "declared_cases": [
+    {
+      "name": "the_declared_parameters_are_checked",
+      "why": "dt, f and L are DECLARED — the same discipline as the region weights, the CUSUM parameters and θ/λ. A reinforcement exponent is a statement about how sharply this body commits to a channel that is carrying load. A step above 1 overshoots the fixed point; μ ≤ 0 is not monotone.",
+      "expect": {"mu_zero": "BadExponent", "dt_zero": "BadStep", "dt_above_one": "BadStep"}
+    },
+    {
+      "name": "an_edge_that_starts_at_zero_could_never_be_reinforced",
+      "why": "★ A structural consequence worth refusing at declaration. With D = 0 the edge has zero weight, carries zero flux, and f(0) − 0 = 0 — so it would sit at zero forever. Allowing it would be allowing an edge that looks present and can never participate.",
+      "expect": {"error": "BadConductivity"}
+    }
+  ]
+}
