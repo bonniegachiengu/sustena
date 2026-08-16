@@ -46,6 +46,7 @@
 //! | Council | [`council`] | R1 |
 //! | Approval token | [`approval`] | R2 |
 //! | Edit authority | [`editing`] | R2 |
+//! | Transition constraints | [`transition`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -62,6 +63,7 @@ pub mod predicate;
 pub mod principal;
 pub mod schema;
 pub mod state;
+pub mod transition;
 
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
 pub use approval::{
@@ -85,6 +87,10 @@ pub use principal::{effective_privilege, permitted, Denial, MembershipEdge, Memb
 pub use predicate::{check, parse_predicate, Predicate};
 pub use schema::{bind, preserves_shape, validate, DimType, Schema};
 pub use state::State;
+pub use transition::{
+    check_all as check_transitions, Direction, Quantity, Tolerance, TransitionDeclError,
+    TransitionRule, TransitionViolation,
+};
 
 /// Version of the conformance contract this build satisfies.
 ///

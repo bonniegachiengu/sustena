@@ -1,0 +1,264 @@
+{
+  "conformance_version": 1,
+  "slice": "constraints",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Constraint - Formal Execution.md, §I (three kinds of constraint) and §VI (conservation as a transition constraint)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for D : S×S → bool, the gate's third conjunct. Authored from the article, not generated from the reference engine.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-12",
+    "statement": "The reference engine has NO transition-constraint family. Both of its evaluators are single-state by signature — `ConstraintEngine.evaluate(constraint, state, params)` and `evaluate_predicate(node, state, params)` each take one StateAccessor — so there is no two-state evaluation anywhere and rate limits, monotonicity and conservation are not merely unimplemented but INEXPRESSIBLE. The article's own audit says exactly this: 'the run path already holds both states, so the plumbing is available and the language is not.'",
+    "what_python_does_have_and_why_it_is_not_D": "`_commit_atomic_multi_sustain` gives holon.transfer an ATOMICITY guarantee — the paired debit and credit both land or neither does, in one sqlite transaction. That is a transactional property, not a transition constraint, and the difference is load-bearing in two directions: (1) atomicity does not check that the debit and the credit are EQUAL, so a transfer that credits more than it debits commits happily; (2) it is hardcoded into one operator, so it says nothing about any other operator that might create or destroy value. A conservation law is declarative, applies to every step, and catches both. Recording this so the gap is not overstated (Python is not defenceless here) or understated (atomicity is not conservation).",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. `Enforcement.transitions` defaults to empty, so every vector recorded before this slice runs with no D and is byte-identical."
+  },
+  "expressiveness_cases": [
+    {
+      "name": "every_single_state_satisfies_every_transition_rule_vacuously",
+      "why": "§I's structural claim: these are true OF THE STEP and say nothing about the endpoints in isolation. Checking a state against itself holds for every shape — which is precisely why a state constraint cannot simulate one, and why D needed its own family rather than a cleverer predicate.",
+      "state": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000}}}},
+      "expect": {"all_rules_hold_against_self": true}
+    },
+    {
+      "name": "the_after_state_alone_is_perfectly_admissible",
+      "why": "The same step, with and without D. Money appears from nowhere, and NOTHING about the resulting state is wrong — every balance is non-negative, every pocket is well-formed. Without D it commits. That gap is the whole reason the family exists.",
+      "before": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000}}}},
+      "after": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 25000}}}},
+      "expect": {"state_constraints_hold": true, "conservation_holds": false}
+    }
+  ],
+  "conservation_cases": [
+    {
+      "name": "a_transfer_between_pockets_conserves_money",
+      "why": "The shadow of a real sameness: the total does not depend on which pocket you call which.",
+      "quantity": ["finances.liquid.balance", "finances.pockets[*].allocated"],
+      "tolerance": "exact",
+      "before": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000}, "rent": {"allocated": 30000}}}},
+      "after": {"finances": {"liquid": {"balance": 90000}, "pockets": {"food": {"allocated": 30000}, "rent": {"allocated": 30000}}}},
+      "expect": {"holds": true}
+    },
+    {
+      "name": "relabelling_the_pockets_leaves_the_household_the_same",
+      "why": "The symmetry the law is the shadow of, stated directly.",
+      "quantity": ["finances.liquid.balance", "finances.pockets[*].allocated"],
+      "tolerance": "exact",
+      "before": {"finances": {"liquid": {"balance": 0}, "pockets": {"food": {"allocated": 20000}, "rent": {"allocated": 30000}}}},
+      "after": {"finances": {"liquid": {"balance": 0}, "pockets": {"food": {"allocated": 30000}, "rent": {"allocated": 20000}}}},
+      "expect": {"holds": true}
+    },
+    {
+      "name": "money_created_out_of_nothing_is_refused",
+      "why": "The flagship case, and inexpressible before this slice.",
+      "quantity": ["finances.liquid.balance", "finances.pockets[*].allocated"],
+      "tolerance": "exact",
+      "before": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000}}}},
+      "after": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20001}}}},
+      "expect": {"holds": false, "detail_contains": "created 1 minor units"}
+    },
+    {
+      "name": "money_destroyed_is_refused_too",
+      "why": "Conservation is two-sided. Value vanishing is as much a violation as value appearing.",
+      "quantity": ["finances.liquid.balance", "finances.pockets[*].allocated"],
+      "tolerance": "exact",
+      "before": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000}}}},
+      "after": {"finances": {"liquid": {"balance": 99999}, "pockets": {"food": {"allocated": 20000}}}},
+      "expect": {"holds": false, "detail_contains": "destroyed 1 minor units"}
+    },
+    {
+      "name": "a_new_pocket_appearing_with_money_in_it_is_refused",
+      "why": "The clearest form of creation: a pocket that did not exist now holds funds nobody moved into it. A wildcard sum sees it; a per-pocket state constraint would not.",
+      "quantity": ["finances.liquid.balance", "finances.pockets[*].allocated"],
+      "tolerance": "exact",
+      "before": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000}}}},
+      "after": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000}, "holiday": {"allocated": 5000}}}},
+      "expect": {"holds": false}
+    },
+    {
+      "name": "an_empty_pocket_appearing_is_fine",
+      "why": "Creating a category is not creating value. The law is about the quantity, not the shape — organisational closure is a different gate term.",
+      "quantity": ["finances.liquid.balance", "finances.pockets[*].allocated"],
+      "tolerance": "exact",
+      "before": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000}}}},
+      "after": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000}, "holiday": {"allocated": 0}}}},
+      "expect": {"holds": true}
+    },
+    {
+      "name": "an_integral_float_is_the_same_count_of_minor_units",
+      "why": "JSON does not distinguish 95000 from 95000.0, and the engine's arithmetic promotes to float (Python's rule, preserved in R1). Refusing an integral float would make the law undeclarable over any real ledger, which would be strictness that buys nothing.",
+      "quantity": ["finances.liquid.balance", "finances.pockets[*].allocated"],
+      "tolerance": "exact",
+      "before": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000}}}},
+      "after": {"finances": {"liquid": {"balance": 95000.0}, "pockets": {"food": {"allocated": 25000.0}}}},
+      "expect": {"holds": true}
+    },
+    {
+      "name": "a_fractional_value_under_an_exact_law_is_refused_not_rounded",
+      "why": "THIS is what exact mode is for. Half a minor unit that no declared rounding rule produced is the 'law false in the seventh decimal place' the article warns about — and truncating it silently would make the law a lie rather than a refusal.",
+      "quantity": ["finances.liquid.balance", "finances.pockets[*].allocated"],
+      "tolerance": "exact",
+      "before": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000}}}},
+      "after": {"finances": {"liquid": {"balance": 99999.5}, "pockets": {"food": {"allocated": 20000}}}},
+      "expect": {"holds": false, "detail_contains": "fractional"}
+    },
+    {
+      "name": "a_continuous_quantity_may_declare_a_tolerance",
+      "why": "Tolerance is not sloppiness — it is where representation and declared rounding get named out loud, at the declaration, instead of silently producing a false law.",
+      "quantity": ["tanks[*].kg"],
+      "tolerance": 0.01,
+      "before": {"tanks": {"a": {"kg": 1.0}, "b": {"kg": 2.0}}},
+      "after": {"tanks": {"a": {"kg": 1.005}, "b": {"kg": 1.995}}},
+      "expect": {"holds": true}
+    },
+    {
+      "name": "a_declared_tolerance_is_still_a_bound",
+      "why": "Naming a tolerance is not waiving the law.",
+      "quantity": ["tanks[*].kg"],
+      "tolerance": 0.01,
+      "before": {"tanks": {"a": {"kg": 1.0}, "b": {"kg": 2.0}}},
+      "after": {"tanks": {"a": {"kg": 1.5}, "b": {"kg": 2.0}}},
+      "expect": {"holds": false}
+    }
+  ],
+  "rate_limit_cases": [
+    {
+      "name": "a_rate_limit_bounds_one_step_not_the_endpoint",
+      "why": "'Balance may not jump by more than δ in one move.' Both endpoints are individually fine.",
+      "path": "finances.liquid.balance", "delta": 5000,
+      "before": {"finances": {"liquid": {"balance": 100000}}},
+      "after": {"finances": {"liquid": {"balance": 95000}}},
+      "expect": {"holds": true}
+    },
+    {
+      "name": "a_jump_beyond_the_limit_is_refused",
+      "why": "The same two perfectly valid balances, a step too far apart.",
+      "path": "finances.liquid.balance", "delta": 5000,
+      "before": {"finances": {"liquid": {"balance": 100000}}},
+      "after": {"finances": {"liquid": {"balance": 90000}}},
+      "expect": {"holds": false, "detail_contains": "moved by 10000"}
+    },
+    {
+      "name": "a_rate_limit_is_symmetric",
+      "why": "|·| is an absolute value: a sudden increase is as much a jump as a sudden decrease.",
+      "path": "finances.liquid.balance", "delta": 100,
+      "before": {"finances": {"liquid": {"balance": 0}}},
+      "after": {"finances": {"liquid": {"balance": 500}}},
+      "expect": {"holds": false}
+    }
+  ],
+  "monotonicity_cases": [
+    {
+      "name": "stock_may_only_decrease",
+      "why": "§I's second canonical shape, in the article's own words.",
+      "path": "stock.units", "direction": "non_increasing",
+      "before": {"stock": {"units": 10}}, "after": {"stock": {"units": 4}},
+      "expect": {"holds": true}
+    },
+    {
+      "name": "unchanged_is_non_increasing",
+      "why": "The boundary. ≤, not <.",
+      "path": "stock.units", "direction": "non_increasing",
+      "before": {"stock": {"units": 10}}, "after": {"stock": {"units": 10}},
+      "expect": {"holds": true}
+    },
+    {
+      "name": "stock_appearing_without_a_movement_is_refused",
+      "why": "Stock may only decrease, and only via consumption.",
+      "path": "stock.units", "direction": "non_increasing",
+      "before": {"stock": {"units": 10}}, "after": {"stock": {"units": 11}},
+      "expect": {"holds": false}
+    },
+    {
+      "name": "a_meter_never_runs_backwards",
+      "why": "The other direction, which is the same rule about a different kind of thing.",
+      "path": "meter.kwh", "direction": "non_decreasing",
+      "before": {"meter": {"kwh": 100}}, "after": {"meter": {"kwh": 99}},
+      "expect": {"holds": false}
+    }
+  ],
+  "fail_safe_cases": [
+    {
+      "name": "a_path_that_does_not_resolve_refuses_rather_than_defaulting_to_zero",
+      "why": "For a rate limit, 'absent' and 'zero' are different claims, and guessing which was meant is how a rule stops meaning what it says. Fail-safe defaults: an unevaluable rule refuses.",
+      "path": "nowhere.at.all", "delta": 1,
+      "before": {"stock": {"units": 1}}, "after": {"stock": {"units": 1}},
+      "expect": {"holds": false, "detail_contains": "does not resolve"}
+    },
+    {
+      "name": "a_rate_limit_over_a_wildcard_is_refused_as_ambiguous",
+      "why": "A rate limit constrains one quantity. Over a set it is not clear whether the bound is per-item or on the total — so it is refused rather than silently picking one. Use a conservation law to constrain a set.",
+      "path": "finances.pockets[*].allocated", "delta": 1,
+      "before": {"finances": {"pockets": {"a": {"allocated": 1}, "b": {"allocated": 2}}}},
+      "after": {"finances": {"pockets": {"a": {"allocated": 1}, "b": {"allocated": 2}}}},
+      "expect": {"holds": false, "detail_contains": "resolves to 2 values"}
+    }
+  ],
+  "declaration_cases": [
+    {
+      "name": "a_conservation_law_over_nothing_is_rejected_at_authoring_time",
+      "why": "An empty sum is conserved vacuously and asserts nothing. A law that cannot fail is not a law.",
+      "rule": {"kind": "conservation", "paths": [], "tolerance": "exact"},
+      "expect": {"well_formed": false, "error": "EmptyQuantity"}
+    },
+    {
+      "name": "a_negative_delta_is_rejected_at_authoring_time",
+      "why": "|x| ≤ δ with δ < 0 is unsatisfiable; declaring it means something else was meant.",
+      "rule": {"kind": "rate_limit", "path": "a.b", "delta": -1},
+      "expect": {"well_formed": false, "error": "BadDelta"}
+    },
+    {
+      "name": "a_malformed_path_is_a_load_time_finding",
+      "why": "A rule that could never be evaluated should fail when the spec loads, not at 2 a.m.",
+      "rule": {"kind": "rate_limit", "path": "a..b", "delta": 1},
+      "expect": {"well_formed": false, "error": "BadPath"}
+    },
+    {
+      "name": "a_well_formed_money_law_typechecks",
+      "why": "The ordinary path.",
+      "rule": {"kind": "conservation", "paths": ["finances.liquid.balance", "finances.pockets[*].allocated"], "tolerance": "exact"},
+      "expect": {"well_formed": true}
+    }
+  ],
+  "gate_cases": [
+    {
+      "name": "the_gate_refuses_a_step_that_creates_money",
+      "why": "End to end through the real gate, with a real operator that credits a pocket with no matching debit.",
+      "state": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000, "spent": 0, "limit": 0}}, "income": {"monthly_total": 0, "sources": []}}},
+      "operator": "test.mint",
+      "params": {},
+      "conservation": ["finances.liquid.balance", "finances.pockets[*].allocated"],
+      "enabled": true,
+      "expect": {"committed": false, "rule": "transition_constraint", "state_unchanged": true, "reason_contains": "created 5000 minor units"}
+    },
+    {
+      "name": "a_genuine_transfer_passes_the_gate",
+      "why": "The law refuses what it should and admits what it should. A conservation law that refused ordinary budgeting would be a bug wearing a law's clothes.",
+      "state": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000, "spent": 0, "limit": 0}}, "income": {"monthly_total": 0, "sources": []}}},
+      "operator": "budget.allocate",
+      "params": {"pocket_name": "food", "amount": 5000, "period": "monthly"},
+      "conservation": ["finances.liquid.balance", "finances.pockets[*].allocated"],
+      "enabled": true,
+      "expect": {"committed": true}
+    },
+    {
+      "name": "a_declared_conservation_law_is_not_opt_in",
+      "why": "`enforcement.enabled` gates the sustain's own invariants — an opt-in tightening of a viable region. A conservation law is a different claim: that a quantity does not change. Declaring one and having it skipped because a flag was off is the gate failing open.",
+      "state": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000, "spent": 0, "limit": 0}}, "income": {"monthly_total": 0, "sources": []}}},
+      "operator": "test.mint",
+      "params": {},
+      "conservation": ["finances.liquid.balance", "finances.pockets[*].allocated"],
+      "enabled": false,
+      "expect": {"committed": false, "rule": "transition_constraint"}
+    },
+    {
+      "name": "with_no_transition_rules_the_same_step_commits",
+      "why": "R1 parity, stated as a vector: Enforcement.transitions defaults to empty, so every behaviour recorded before this slice is unchanged.",
+      "state": {"finances": {"liquid": {"balance": 100000}, "pockets": {"food": {"allocated": 20000, "spent": 0, "limit": 0}}, "income": {"monthly_total": 0, "sources": []}}},
+      "operator": "test.mint",
+      "params": {},
+      "conservation": null,
+      "enabled": true,
+      "expect": {"committed": true}
+    }
+  ]
+}

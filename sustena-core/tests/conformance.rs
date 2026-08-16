@@ -312,8 +312,11 @@ fn operator_vectors() {
                 })
                 .unwrap_or_default(),
             // The R1 operator vectors predate typed state, so closure is not
-            // enforced for them — they must keep passing unchanged.
+            // enforced for them — they must keep passing unchanged. Transition
+            // constraints are R2 for the same reason: the reference engine has
+            // no D, so no R1 vector can carry one.
             schema: None,
+            transitions: vec![],
         };
 
         let mut state = case["initial"].clone();

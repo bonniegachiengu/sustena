@@ -86,6 +86,7 @@ conformance/
     events.json         event-time order, dedupe, LWW (spec, R2)
     approval.json       the approval token in the gate (spec, R2)
     editing.json        the meta-gate on the definition (spec, R2)
+    constraints.json    D(s,s') — rate/monotone/conservation (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -115,3 +116,12 @@ it is a bug** — nothing silently differs.
   included. Claiming the whole module as rust-ahead would overstate the gap, so
   the divergence is recorded term by term and a test asserts the `Safe` entry
   still says `AT PARITY`.
+
+- **`constraints.json` — rust-ahead-of-python.** The reference engine has no
+  transition-constraint family: both evaluators are single-state *by signature*,
+  so conservation is not merely unimplemented there but **inexpressible**. The
+  block also records the part that is easy to get wrong in the other direction —
+  Python *does* give `holon.transfer` transactional **atomicity** (both sides
+  land or neither does), which is a different guarantee: it does not check that
+  the debit and credit are **equal**, and it covers one operator rather than
+  every step. A test asserts that note stays.

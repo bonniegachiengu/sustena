@@ -25,6 +25,46 @@ pub use parse::{parse_predicate, SyntaxError};
 
 use serde_json::{Map, Value};
 
+/// Parse a bare state path — `finances.pockets[*].allocated` — into segments.
+///
+/// The predicate parser reaches this grammar only from inside an expression.
+/// Transition constraints ([`crate::transition`]) name paths directly, so the
+/// grammar is exposed here rather than reimplemented there: a second wildcard
+/// path grammar inside one crate is exactly the divergence the Constraint
+/// article records about the reference engine's two evaluators.
+///
+/// Accepts `name`, `name[0]` and `name[*]`, dot-separated.
+pub fn parse_state_path(raw: &str) -> Result<Vec<PathSegment>, String> {
+    if raw.is_empty() {
+        return Err("a path cannot be empty".to_string());
+    }
+    let mut out = Vec::new();
+    for part in raw.split('.') {
+        let (name, bracket) = match part.split_once('[') {
+            Some((n, rest)) => {
+                let inner = rest
+                    .strip_suffix(']')
+                    .ok_or_else(|| format!("unclosed '[' in segment '{part}'"))?;
+                (n, Some(inner))
+            }
+            None => (part, None),
+        };
+        if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            return Err(format!("'{name}' is not a valid path segment"));
+        }
+        out.push(PathSegment::Name(name.to_string()));
+        match bracket {
+            None => {}
+            Some("*") => out.push(PathSegment::Wildcard),
+            Some(n) => out.push(PathSegment::Index(
+                n.parse::<usize>()
+                    .map_err(|_| format!("'{n}' is not an index or '*' in segment '{part}'"))?,
+            )),
+        }
+    }
+    Ok(out)
+}
+
 /// Parse, then evaluate against concrete state.
 ///
 /// Returns `(verdict, reason)`. The reason is empty when the verdict holds and

@@ -95,6 +95,7 @@ fn armed_homestead() -> Enforcement {
             ),
         ],
         schema: None,
+        transitions: vec![],
     }
 }
 

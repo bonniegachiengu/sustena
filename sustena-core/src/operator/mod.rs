@@ -44,6 +44,7 @@ use crate::mutation::Mutation;
 use crate::principal::{permitted, Denial, Memberships, Tier};
 use crate::predicate;
 use crate::schema::{preserves_shape, Schema};
+use crate::transition::{check_all, TransitionRule};
 use crate::state::State;
 
 /// One published event. The host assigns durable ordering (`seq`) and writes
@@ -81,6 +82,13 @@ pub struct Enforcement {
     /// The declared state space. When present, organisational closure is
     /// enforced: an operator may change values, never the shape.
     pub schema: Option<Schema>,
+    /// `D(s, s')` — the transition constraints, evaluated over the (before,
+    /// after) PAIR. Rate limits, monotonicity, and conservation.
+    ///
+    /// Separate from `invariants` because it is a different predicate family:
+    /// strictly more expressive, and not simulable by a state constraint. Every
+    /// single state satisfies every rule here vacuously.
+    pub transitions: Vec<TransitionRule>,
 }
 
 /// Who is acting, for the `permitted(α, o, Σ)` conjunct.
@@ -396,6 +404,24 @@ pub fn execute_admitted(
         }
     }
 
+    // ── D(s, o(s)) ───────────────────────────────────────────────────────────
+    // The gate's third conjunct, and the last one to be built. Evaluated over
+    // the PAIR, so it can say things no state constraint can: money is
+    // conserved, stock only falls, the balance did not jump.
+    //
+    // Runs unconditionally, not behind `enforcement.enabled`. A conservation
+    // law is not an opt-in tightening of a viable region — it is a statement
+    // that a quantity does not change, and a sustain that declares one has
+    // said the step is illegal, not that it is outside a preference.
+    if let Err(v) = check_all(&enforcement.transitions, state, &candidate) {
+        return Execution {
+            result: OperatorResult::fail(v.to_string(), "transition_constraint"),
+            mutations: vec![],
+            events: vec![],
+            state: state.clone(),
+        };
+    }
+
     // ── commit ───────────────────────────────────────────────────────────────
     // The approval is spent here and nowhere else. Everything above this line
     // can refuse, and a refusal must leave the approval unspent — being turned
@@ -443,6 +469,7 @@ mod tests {
                  "ALL finances.pockets[*].allocated >= 0".into()),
             ],
             schema: None,
+            transitions: vec![],
         }
     }
 
@@ -839,6 +866,143 @@ mod tests {
         assert_eq!(ex.state, baseline.state);
     }
 
+    // ── D(s, o(s)) at the gate (Constraint §I, §VI · CON-1, CON-7) ──────────
+
+    use crate::transition::{Quantity, Tolerance, TransitionRule};
+
+    /// Money as integer minor units, which is what makes the law exact.
+    fn minor_units_state() -> Value {
+        json!({"finances":{"liquid":{"balance":100000},
+                           "pockets":{"food":{"allocated":20000,"spent":0,"limit":0}},
+                           "income":{"monthly_total":0,"sources":[]}}})
+    }
+
+    fn conserving() -> Enforcement {
+        Enforcement {
+            enabled: true,
+            invariants: vec![],
+            schema: None,
+            transitions: vec![TransitionRule::Conservation {
+                id: "money_conserved".into(),
+                quantity: Quantity::new(
+                    "household money",
+                    &["finances.liquid.balance", "finances.pockets[*].allocated"],
+                ),
+                tolerance: Tolerance::Exact,
+            }],
+        }
+    }
+
+    /// Adds to a pocket without debiting liquid — money from nowhere. No state
+    /// constraint can catch this: every endpoint it produces is perfectly valid.
+    fn with_minting_operator() -> (Registry, Vec<String>) {
+        use crate::operator::meta::{OperatorMeta, Protocol};
+        let mut reg = Registry::default();
+        reg.register(OperatorMeta {
+            name: "test.mint",
+            description: "Credits a pocket with no matching debit. Exists to prove D refuses it.",
+            constraints: vec![],
+            post_constraints: vec![],
+            side_effects: vec!["event.test.minted"],
+            pawa_cost: 0,
+            protocol: Protocol::Rpc,
+            min_privilege: 0,
+            run: |state, _p, events| {
+                let _ = state.set("finances.pockets.food.allocated", json!(25000));
+                events.push(EmittedEvent { name: "event.test.minted".into(), payload: json!({}) });
+                OperatorResult::ok(json!({}))
+            },
+        });
+        let mut allow = reg.names();
+        allow.push("test.mint".to_string());
+        (reg, allow)
+    }
+
+    #[test]
+    fn the_gate_refuses_a_step_that_creates_money() {
+        // The flagship case. Before this slice it was INEXPRESSIBLE: both
+        // evaluators take one state, and the after-state here is entirely valid.
+        let (reg, allow) = with_minting_operator();
+        let before = minor_units_state();
+        let ex = execute(&reg, &allow, &conserving(), &before, "test.mint", &params(&[]));
+
+        assert!(!ex.committed(), "5,000 minor units appeared from nowhere");
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("transition_constraint"));
+        let why = ex.result.reason.as_deref().unwrap_or_default();
+        assert!(why.contains("created 5000 minor units"), "{why}");
+        assert_eq!(ex.state, before, "a refusal changes nothing");
+        assert!(ex.mutations.is_empty());
+        assert!(ex.events.is_empty());
+    }
+
+    #[test]
+    fn the_after_state_alone_is_perfectly_admissible() {
+        // Proves the point of the family: with the SAME sustain rules but no
+        // transition constraint, the very same step commits — because nothing
+        // about the resulting state is wrong. Only the step is.
+        let (reg, allow) = with_minting_operator();
+        let no_d = Enforcement { transitions: vec![], ..conserving() };
+        let ex = execute(&reg, &allow, &no_d, &minor_units_state(), "test.mint", &params(&[]));
+        assert!(ex.committed(), "a state constraint cannot see what D sees");
+    }
+
+    #[test]
+    fn a_genuine_transfer_passes_the_conservation_law() {
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &conserving(), &minor_units_state(),
+                         "budget.allocate",
+                         &params(&[("pocket_name", json!("food")), ("amount", json!(5000)),
+                                   ("period", json!("monthly"))]));
+        assert!(ex.committed(), "{:?}", ex.result.reason);
+        // Debited from liquid, credited to the pocket: the total is unmoved.
+        // The engine promotes to float on arithmetic (Python's rule, preserved),
+        // which is exactly why exact mode accepts an INTEGRAL float — 95000.0 is
+        // the same count of minor units as 95000.
+        assert_eq!(ex.state["finances"]["liquid"]["balance"], json!(95000.0));
+        assert_eq!(ex.state["finances"]["pockets"]["food"]["allocated"], json!(25000.0));
+    }
+
+    #[test]
+    fn a_transition_constraint_binds_even_when_the_sustain_is_unarmed() {
+        // `enforcement.enabled` gates the sustain's own invariants — an opt-in
+        // tightening of a viable region. A conservation law is a different
+        // claim: that a quantity does not change. Declaring one and having it
+        // ignored because a flag was off would be the gate failing open.
+        let (reg, allow) = with_minting_operator();
+        let unarmed = Enforcement { enabled: false, ..conserving() };
+        let ex = execute(&reg, &allow, &unarmed, &minor_units_state(), "test.mint", &params(&[]));
+        assert!(!ex.committed(), "a declared conservation law is not opt-in");
+    }
+
+    #[test]
+    fn a_rate_limit_refuses_a_jump_the_endpoints_cannot_show() {
+        let reg = Registry::default();
+        let enf = Enforcement {
+            enabled: false,
+            invariants: vec![],
+            schema: None,
+            transitions: vec![TransitionRule::RateLimit {
+                id: "no_big_moves".into(),
+                path: "finances.liquid.balance".into(),
+                delta: 1000.0,
+            }],
+        };
+        let ex = execute(&reg, &allowed(), &enf, &minor_units_state(), "budget.allocate",
+                         &params(&[("pocket_name", json!("food")), ("amount", json!(5000)),
+                                   ("period", json!("monthly"))]));
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("transition_constraint"));
+    }
+
+    #[test]
+    fn the_refusal_names_which_law_refused() {
+        let (reg, allow) = with_minting_operator();
+        let ex = execute(&reg, &allow, &conserving(), &minor_units_state(), "test.mint", &params(&[]));
+        let why = ex.result.reason.as_deref().unwrap_or_default();
+        assert!(why.contains("money_conserved"),
+                "the difference between an explanation and a shrug: {why}");
+    }
+
     #[test]
     fn a_rule_that_will_not_compile_refuses_rather_than_failing_open() {
         let reg = Registry::default();
@@ -846,6 +1010,7 @@ mod tests {
             enabled: true,
             invariants: vec![("broken".into(), "this is (not ) valid".into())],
             schema: None,
+            transitions: vec![],
         };
         let ex = execute(&reg, &allowed(), &broken, &homestead_state(), "budget.allocate",
                          &params(&[("pocket_name", json!("food")), ("amount", json!(1.0)),

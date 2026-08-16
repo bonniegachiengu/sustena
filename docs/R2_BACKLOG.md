@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval** and **26 editing** cases (divergences recorded) |
-| Rust tests | **149 unit · 19 conformance tests** across 3 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint** cases (divergences recorded) |
+| Rust tests | **177 unit · 28 conformance tests** across 4 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -241,6 +241,53 @@ if the reference catches up.
 arguments. The fix is a context struct carrying registry/allowed/enforcement —
 a real API refactor touching every call site, and not something to do as a side
 effect of this slice.
+
+### ✅ CON-1 / CON-7 — transition constraints `D(s,s')` + conservation — SHIPPED IN RUST (2026-08-12)
+
+`sustena-core/src/transition.rs`, grounded in **Constraint §I** (three predicate
+families) and **§VI** (conservation).
+
+The gate's **third conjunct**, and the last of the three to be built:
+
+```text
+admit(o,s) ⟺ g_o(s) ∧ o(s)∈A ∧ D(s, o(s))
+```
+
+`D` is a predicate on the ordered **pair**, so it can say things no state
+constraint can. All three canonical shapes ship: **rate limit**, **monotonicity**,
+**conservation**.
+
+**"Money is conserved" is expressible for the first time.** A vector proves the
+point directly: a step that credits a pocket with no matching debit produces an
+after-state that is *individually valid* — every balance non-negative, every
+pocket well-formed — and commits happily with `D` absent. Only the step is
+wrong, and only `D` can see it.
+
+Two things are **unrepresentable** rather than checked:
+
+- **A clamped conservation law.** `TransitionRule` has **no strategy field at
+  all**. Capping a transfer's outflow while leaving the inflow untouched creates
+  money — it satisfies `C` by violating `D` — and the way to prevent that is to
+  leave nowhere to write the clamp down.
+- **Money summed in floating point.** `Tolerance::Exact` sums as `i128` over
+  whole minor units, so tolerance 0 is genuinely exact.
+
+**One correction found by testing, not inspection:** exact mode initially
+refused `95000.0`, which would have made the law undeclarable over any real
+ledger — the engine's arithmetic promotes to float (Python's rule, preserved in
+R1). It now accepts an **integral** float (same count of minor units, differently
+written) and still refuses a **fractional** one, which is the property that
+actually matters.
+
+**Divergence — rust-ahead, with the honest counterweight.** Python has no `D`.
+But it *does* give `holon.transfer` transactional **atomicity**, which is not
+nothing — and is also not conservation: it never checks the debit and credit are
+equal, and it is hardcoded into one operator rather than declared over every
+step. `constraints.json` records both halves so the gap is neither overstated
+nor understated.
+
+**Also closed:** CON-2's third conjunct. The §4E seam's **duty 2** now covers
+`D` as well as the invariants.
 
 ### ✅ EDIT-8 — edit authority, the meta-gate — SHIPPED IN RUST (2026-08-12)
 
