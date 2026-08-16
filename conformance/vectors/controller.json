@@ -1,0 +1,204 @@
+{
+  "conformance_version": 1,
+  "slice": "controller",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Controller - Formal Execution.md, §II (Stability — Lyapunov's condition), §IV (Supervisory control — Sheridan's automation levels), §VII (Governance signal quality — Shannon's SNR), and the Controller Additions (the potential well W(s) = d(s,V))",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the Controller's governance decision-math, and for the loop closing through a human. Authored from the article, not generated from the reference engine.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-12",
+    "statement": "The article's own Sustena Note says it plainly: 'the current code ships neither the table nor the four functions'. Re-confirmed by grep — should_surface, is_stable_intervention, compute_urgency, AUTOMATION_LEVEL, sheridan and lyapunov are all grep-0 in apps/api/sustena/.",
+    "term_by_term": {
+      "is_stable_intervention (§II)": "RUST-AHEAD. There is no notion of a good decision anywhere in the reference — an approved proposal executes because it was approved, not because it was shown to reduce anything. Nothing computes a distance before and after.",
+      "AUTOMATION_LEVEL (§IV)": "RUST-AHEAD. No Sheridan table exists, so there is no declared 'how much does the human decide' dial. Which actions need approval is implicit in which code paths happen to route through the Council.",
+      "should_surface / SNR (§VII)": "RUST-AHEAD. Nothing filters what reaches a person on governance grounds. The Curated UI's knapsack limits HOW MANY widgets are shown, which is a different question from whether an event warrants a human decision at all.",
+      "urgency as Lyapunov-derived (§VII)": "RUST-AHEAD, and now possible for the first time: it needs W = d(s,V), which region.rs shipped in the previous slice. The reference's urgency is pct = spent/allocated, which is not derived from a stability condition and cannot be."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The reference has real, working execute + rollback + council: control.execute_approved runs a PASSED proposal and control.rollback restores a prior snapshot, and the CouncilSession genuinely deliberates. That is the MECHANISM of human-in-the-loop governance, and it is not nothing. What is missing is the DECISION-MATH around it — nothing decides whether an intervention is a good one, nothing decides whether it is worth interrupting someone about, and nothing declares which action types need asking at all.",
+    "one_deliberate_departure_from_the_article": "§II writes the Lyapunov function as V(s) = ‖s_desired − s_actual‖² — distance to a POINT. The Controller's own Additions correct this to the potential well W(s) = d(s,V), and that is what is implemented: the viable region IS the desired set. A point target would need a desired point nobody declared and would make every state but one 'bad'. Using the region also means the Controller, the Monitor and the Curated UI all consume ONE quantity, which is the property the whole design rests on.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. The Controller is a new additive module and touches no existing gate path."
+  },
+  "stability_cases": [
+    {
+      "name": "an_intervention_that_reduces_the_distance_is_stable",
+      "why": "§II's formal definition of a good decision: an intervention is valid IF AND ONLY IF it reduces the Lyapunov distance. −300 → −100 is 200 closer to the region.",
+      "before": -300.0, "after": -100.0,
+      "expect": {"stable": true, "w_before": 300.0, "w_after": 100.0, "improvement": 200.0, "rollback": false}
+    },
+    {
+      "name": "an_intervention_that_increases_the_distance_is_not",
+      "why": "And the rollback panel's purpose follows immediately: an action that increased W moved away from the region, so the previous state was closer.",
+      "before": -100.0, "after": -300.0,
+      "expect": {"stable": false, "improvement": -200.0, "rollback": true}
+    },
+    {
+      "name": "holding_still_is_stable_because_the_condition_is_non_strict",
+      "why": "W(after) ≤ W(before), not <. Doing nothing does not move away, and demanding strict improvement would forbid every holding action.",
+      "before": -100.0, "after": -100.0,
+      "expect": {"stable": true, "improvement": 0.0, "rollback": false}
+    },
+    {
+      "name": "reaching_the_region_is_the_strongest_stable_move",
+      "why": "Inside V, W = 0 — the potential well's floor.",
+      "before": -100.0, "after": 50.0,
+      "expect": {"stable": true, "w_after": 0.0, "rollback": false}
+    },
+    {
+      "name": "a_comparison_against_a_lower_bound_is_reported_not_trusted",
+      "why": "A violated cross-dimension relation makes the box distance a lower bound, so ordering two such numbers is not reliable. Reporting that beats a confident wrong answer about whether a decision was good.",
+      "relations": ["finances.liquid.balance >= 999999"],
+      "before": 10.0, "after": 20.0,
+      "expect": {"exact": false}
+    }
+  ],
+  "sheridan_cases": [
+    {
+      "name": "the_approval_line_is_level_five",
+      "why": "§IV: Sustena's Controller operates at levels 5–6, and `level ≤ 5` is §VII's condition. 5 executes if the human approves; 6 executes and notifies.",
+      "requires_approval": ["SuggestsOne", "ExecuteIfApproved"],
+      "does_not": ["ExecuteAndNotify", "FullAutomation"]
+    },
+    {
+      "name": "the_articles_table_routes_as_it_says",
+      "why": "The article's own AUTOMATION_LEVEL, reproduced: ROUTINE executes and notifies; FINANCIAL, CRITICAL, IOT_WRITE and ROLLBACK all require approval.",
+      "table": {
+        "ROUTINE": "ExecuteAndNotify",
+        "FINANCIAL": "ExecuteIfApproved",
+        "CRITICAL": "ExecuteIfApproved",
+        "IOT_WRITE": "ExecuteIfApproved",
+        "ROLLBACK": "ExecuteIfApproved"
+      }
+    },
+    {
+      "name": "an_undeclared_action_type_surfaces_rather_than_automating_itself",
+      "why": "Fail-safe defaults at the governance layer. Forgetting a declaration must not be how something starts running unattended — so an unknown action type routes to ExecuteIfApproved, and is also reported as undeclared.",
+      "unknown_type": "SOMETHING_NEW",
+      "expect": {"level": "ExecuteIfApproved", "requires_approval": true, "reported_undeclared": true}
+    }
+  ],
+  "urgency_cases": [
+    {
+      "name": "urgency_rises_with_distance_from_the_region",
+      "why": "THE point of §VII: the urgency function is itself Lyapunov-derived. Events that move the system further from its viable region score higher, and that is not heuristic — it follows directly from the stability condition.",
+      "compare": [{"balance": -10.0}, {"balance": -1000.0}],
+      "expect": {"second_exceeds_first": true, "second_lyapunov": 1000.0}
+    },
+    {
+      "name": "a_state_inside_the_region_has_zero_urgency",
+      "why": "W = 0 inside V, so nothing is pulling. The Controller has nothing to escalate about a household that is fine.",
+      "balance": 500.0,
+      "expect": {"urgency": 0.0}
+    },
+    {
+      "name": "the_declared_base_weight_scales_it",
+      "why": "URGENCY_WEIGHTS is a spec field — the same discipline as the region weights and the CUSUM parameters. Same distance, two declared weights, two answers.",
+      "balance": -100.0,
+      "weights": {"LOUD": 10.0, "QUIET": 0.5},
+      "expect": {"LOUD": 1000.0, "QUIET": 50.0}
+    },
+    {
+      "name": "a_nearer_deadline_raises_the_pressure",
+      "why": "time_pressure = 1/(deadline − now). The third factor of the §VII product.",
+      "balance": -100.0, "now": 1,
+      "compare_deadlines": [2, 10],
+      "expect": {"nearer_is_higher": true, "nearest_time_pressure": 1.0}
+    },
+    {
+      "name": "no_deadline_means_no_time_pressure_not_zero_urgency",
+      "why": "The article's own fallback: `1.0` when there is no deadline. Zero would silently suppress every open-ended event.",
+      "balance": -100.0,
+      "expect": {"time_pressure": 1.0, "urgency": 100.0}
+    },
+    {
+      "name": "a_passed_deadline_is_refused_rather_than_clamped",
+      "why": "1/(deadline − now) with a passed deadline divides by zero or goes negative, which would silently INVERT the ranking. 'This was due yesterday' is a real condition the host should handle, not a number to invent.",
+      "balance": -100.0, "deadline": 5, "now": 5,
+      "expect": {"error": "DeadlinePassed"}
+    },
+    {
+      "name": "an_inexact_lyapunov_term_is_flagged_on_the_urgency",
+      "why": "When W is only a lower bound, the urgency is an UNDER-estimate — and an under-estimate must not quietly rank low.",
+      "relations": ["finances.liquid.balance >= 999999"],
+      "balance": 10.0,
+      "expect": {"lyapunov_exact": false}
+    }
+  ],
+  "routing_cases": [
+    {
+      "name": "an_urgent_action_needing_approval_surfaces",
+      "why": "φ(e) = 1 ⟺ level ≤ 5 ∧ urgency ≥ θ. Both hold.",
+      "action_type": "FINANCIAL", "balance": -100.0, "threshold": 10.0,
+      "expect": {"routing": "surface", "interrupts_a_human": true}
+    },
+    {
+      "name": "an_automated_action_goes_to_the_monitor_not_the_human",
+      "why": "Above the approval line the human is not part of this loop — HOWEVER urgent. That is what the Sheridan level means, and the urgency term does not override it.",
+      "action_type": "ROUTINE", "balance": -100000.0, "threshold": 10.0,
+      "expect": {"routing": "automate", "level": "ExecuteAndNotify", "interrupts_a_human": false}
+    },
+    {
+      "name": "withholding_is_not_automating",
+      "why": "THE MOST IMPORTANT DISTINCTION IN THE MODULE. An action that needs approval but is too quiet to interrupt does NOT proceed — nobody is being asked about it yet, and that is all. Folding 'not surfaced' into 'automated' would turn an attention filter into an auto-approver, which is the one way this design could fail dangerously.",
+      "action_type": "FINANCIAL", "balance": -1.0, "threshold": 10.0,
+      "expect": {"routing": "withhold", "interrupts_a_human": false, "urgency_below_threshold": true}
+    },
+    {
+      "name": "the_declared_threshold_moves_the_line",
+      "why": "θ_user is a declared preference — how much noise this person will accept. Same event, two tolerances, two answers.",
+      "action_type": "FINANCIAL", "balance": -50.0,
+      "compare_thresholds": [10.0, 1000.0],
+      "expect": {"first_surfaces": true, "second_surfaces": false}
+    },
+    {
+      "name": "a_surfaced_decision_carries_the_stability_verdict_when_one_can_be_made",
+      "why": "The Controller filters AND validates. With a candidate after-state it can vouch that the intervention reduces W.",
+      "action_type": "FINANCIAL", "balance": -100.0, "candidate_after": -10.0, "threshold": 10.0,
+      "expect": {"routing": "surface", "vouched_stable": true}
+    },
+    {
+      "name": "an_unassessed_intervention_is_not_vouched_for",
+      "why": "'Not assessed' and 'assessed and unstable' are different states, and neither is a yes. With no candidate after-state the Controller still surfaces — it just does not vouch.",
+      "action_type": "FINANCIAL", "balance": -100.0, "threshold": 10.0,
+      "expect": {"routing": "surface", "has_stability": false, "vouched_stable": false}
+    },
+    {
+      "name": "an_unstable_intervention_still_surfaces_but_is_not_vouched_for",
+      "why": "The Controller does not hide a bad idea from the person — it shows it and says it is a bad idea. Filtering is about ATTENTION, not truth.",
+      "action_type": "FINANCIAL", "balance": -100.0, "candidate_after": -500.0, "threshold": 10.0,
+      "expect": {"routing": "surface", "vouched_stable": false, "rollback": true}
+    }
+  ],
+  "declaration_cases": [
+    {
+      "name": "the_preferences_are_checked_at_authoring_time",
+      "why": "A negative θ or a negative weight silently inverts the filter.",
+      "cases": [
+        {"threshold": 10.0, "well_formed": true},
+        {"threshold": -1.0, "well_formed": false, "error": "BadThreshold"},
+        {"threshold": 1.0, "bad_weight": -1.0, "well_formed": false, "error": "BadWeight"}
+      ]
+    },
+    {
+      "name": "a_missing_urgency_weight_does_not_make_something_invisible",
+      "why": "Defaulting to 0.0 would silently suppress every unweighted event — a governance filter must not fail closed on ATTENTION. The fallback is 1.0, so an undeclared weight leaves urgency equal to the Lyapunov term.",
+      "balance": -100.0,
+      "expect": {"weight": 1.0, "urgency": 100.0}
+    }
+  ],
+  "loop_case": {
+    "name": "monitor_to_controller_to_human_to_gate_end_to_end",
+    "why": "THE SLICE'S POINT: the loop closes through a human, using only pieces earlier slices built. The Monitor's CUSUM sees a sustained distance from V; the Controller filters it past the SNR threshold and validates it against the Lyapunov condition; the decision surfaces with the binding a token must match; a HUMAN approving is the only step that mints one; the gate then admits exactly that act. And the same approval cannot be spent twice.",
+    "monitor": {"alpha": 0.5, "cusum": {"mu_0": 0.0, "delta": 1.0, "h": 10.0}, "series_value": 3.0, "series_len": 20},
+    "controller": {"action_type": "FINANCIAL", "operator": "budget.allocate", "before": -100.0, "after": -10.0, "threshold": 10.0},
+    "expect": {
+      "monitor_alerts": true,
+      "routing": "surface",
+      "vouched_stable": true,
+      "binding_operator": "budget.allocate",
+      "gate_commits": true,
+      "replay_refused": true
+    }
+  }
+}

@@ -52,10 +52,12 @@
 //! | Migration (μ, EMC) | [`migrate`] | R2 |
 //! | V as a region · urgency | [`region`] | R2 |
 //! | EWMA + CUSUM detectors | [`detect`] | R2 |
+//! | Controller decision-math | [`controller`] | R2 |
 
 pub mod admission;
 pub mod approval;
 pub mod compose;
+pub mod controller;
 pub mod council;
 pub mod detect;
 pub mod editing;
@@ -82,6 +84,11 @@ pub use approval::{
 pub use compose::{
     compose, entails, wp, Change, Composed, EffectSummary, Entailment, Pathway, PathwayError,
     Rejected, Step, WpResult,
+};
+pub use controller::{
+    compute_urgency, is_stable_intervention, route, should_rollback, AutomationTable,
+    ControlEvent, ControllerError, Preferences, Routing, SheridanLevel, Stability, SurfacedDecision,
+    Urgency,
 };
 pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalStatus, ResolutionInput, VoteChoice};
 pub use detect::{

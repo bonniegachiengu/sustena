@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect** cases (divergences recorded) |
-| Rust tests | **275 unit · 61 conformance tests** across 9 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller** cases (divergences recorded) |
+| Rust tests | **301 unit · 68 conformance tests** across 10 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -198,7 +198,7 @@ This backlog covers the **foundation + walking skeleton** well. But the master s
 | # | Gap | Article | Where |
 |---|---|---|---|
 | T1 | **Tenet optimisation engine (§4)** — backward-induction/Bellman, best/base/worst scenario ensembles, invariant-action extraction, decision-node detection, dead-drops, temporal pincer. Today only the deterministic **forward** simulator exists (ported in R1). | Tenet / Temporal Decision Architecture | new |
-| G1 | **Controller decision-math (§3)** — Lyapunov distance-to-V urgency, `should_surface` (SNR filter), `is_stable_intervention`, Sheridan `AUTOMATION_LEVEL` dispatch, OODA loop, holarchy escalation. Today: execute + rollback + council exist; **none of the governance decision-math.** | Controller / The Expanse | new |
+| 🔨 G1 | ~~**Controller decision-math (§3)**~~ — **the core is DONE in Rust** (`controller.rs`, 2026-08-12): Lyapunov distance-to-V urgency, `should_surface` (the SNR filter), `is_stable_intervention`, and the Sheridan `AUTOMATION_LEVEL` dispatch — plus **the loop closing through a human**, walked end to end by a conformance vector (Monitor → Controller → approval token → gate). **Still open: the OODA state machine and holarchy escalation**, which compose these functions rather than changing them. Python unchanged. | Controller / The Expanse | Python |
 
 ### 🟡 Confirm coverage (built in Python — verify the Rust plan carries them, core vs app-layer)
 

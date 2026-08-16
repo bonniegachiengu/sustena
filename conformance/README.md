@@ -92,6 +92,7 @@ conformance/
     migrate.json        μ + Expand–Migrate–Contract      (spec, R2)
     region.json         V as a region · urgency=d(s,V)   (spec, R2)
     detect.json         EWMA + CUSUM over the W series   (spec, R2)
+    controller.json     Lyapunov · Sheridan · SNR · loop (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -185,3 +186,16 @@ it is a bug** — nothing silently differs.
   and never escalate. The prose is unambiguous, so the ordering is the error; it
   is implemented per the prose and the departure is documented rather than made
   silently.
+
+- **`controller.json` — rust-ahead-of-python.** The Controller article's own
+  Sustena Note says it: *"the current code ships neither the table nor the four
+  functions"*, and `should_surface`, `is_stable_intervention`, `compute_urgency`,
+  `AUTOMATION_LEVEL`, `sheridan` and `lyapunov` are all grep-0. **Counterweight,
+  asserted by a test:** the reference's `control.execute_approved`,
+  `control.rollback` and `CouncilSession` are real — that is the *mechanism* of
+  human-in-the-loop governance, and it is not nothing. What is missing is the
+  *decision-math* around it. The block also records **one deliberate departure
+  from the article**: §II's Lyapunov function is written as a distance to a
+  point, and the Controller's own Additions correct it to `W(s) = d(s,V)` — the
+  viable region is the desired set. Implemented per the Additions, and recorded
+  rather than made silently.
