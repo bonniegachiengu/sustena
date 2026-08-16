@@ -97,6 +97,7 @@ conformance/
     tenet.json          T:S×A→Δ(S) + backward induction  (spec, R2)
     ensemble.json       Ω · invariant actions · D · δ   (spec, R2)
     signal.json         relayed refractory pulse (§III) (spec, R2)
+    pincer.json         σ over S^t · forward ∥ backward   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -278,3 +279,23 @@ it is a bug** — nothing silently differs.
   echo because it does not relay, so it avoids the echo problem by not having
   the capability that creates it. That is one engine not yet having the
   problem, not two solving it differently.
+
+- **`pincer.json` — rust-ahead-of-python.** The reference has neither half of
+  the when-to-re-plan layer: `trajectory`, `signal_function`, `linked_action`,
+  `re_inversion`, `replan`, `HMM`, `pincer` and `reclassif` are all grep-0, and
+  it is blocked upstream twice over — nothing to re-invert and no ensemble to
+  reclassify between. The block **names four greppable false positives**, the
+  largest being `history` at **102 hits**: essentially all of it is
+  `capture_classification_history` (a merchant-to-pocket lookup table) and chat
+  history — never a sequence of state snapshots, which is what `S^t` means.
+  **Counterweight, asserted by a test:** the advisory layer is real and shipped
+  — `evaluate_operatives()` genuinely watches and tells someone. Two things
+  separate it, and both are visible in the signatures rather than argued:
+  `rule_unallocated_income(state: dict)` takes the **current** state (the other
+  two rules take pre-computed scalars), so *"no customers for three weeks"* is
+  not expressible; and what a trigger produces is a **suggestion for a human**,
+  not a re-plan, because there is no policy for a signal to invalidate. The
+  file also records **an article correction** (§IX's two-valued
+  `σ(history)==1` makes *"no customers by week 6"* true at week 0, so the
+  build is three-valued) and **one disclosure**: "parallel" is interleaved
+  deterministically, since core has no threads.

@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel**, **16 tenet**, **18 ensemble**, **17 signal** cases (divergences recorded) |
-| Rust tests | **377 unit · 130 conformance tests** across 14 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel**, **16 tenet**, **18 ensemble**, **17 signal**, **16 pincer** cases (divergences recorded) |
+| Rust tests | **395 unit · 144 conformance tests** across 15 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -199,7 +199,7 @@ This backlog covers the **foundation + walking skeleton** well. But the master s
 
 | # | Gap | Article | Where |
 |---|---|---|---|
-| ✅ T1 | ~~**Tenet optimisation engine (§4)**~~ — **DONE in Rust across two slices** (`tenet.rs` + `ensemble.rs`, 2026-08-16). Slice 1: the stochastic transition `T:S×A→Δ(S)` (TEN-1), the inversion point (TEN-2, and it can be **the viability kernel**), **backward induction** → `J` + a complete policy (TEN-4), and the **CTL-12 join** — with `R(s,a)=W(s)−E[W(s')]` the `H=1` sweep IS the Controller's greedy Lyapunov step, checked by a vector rather than asserted. Slice 2: **scenario ensembles** (TEN-3, a declared assignment of named probabilities pushed through one shared template), **invariant actions** (TEN-5), **decision nodes** (TEN-6) and **dead drops** (TEN-7) — the whole layer composing the sweep by running it unmodified once per scenario. **Still open: TEN-8 signal-triggered re-inversion and TEN-9 the temporal pincer** — both about *when* to re-run the machinery rather than what it computes, and TEN-8 couples to M-MON. Python unchanged. | Tenet / Temporal Decision Architecture | Python |
+| ✅ T1 | ~~**Tenet optimisation engine (§4)**~~ — **MATHEMATICS COMPLETE in Rust across three slices** (2026-08-16). `tenet.rs`: `T:S×A→Δ(S)`, the inversion point, **backward induction** → `J` + a complete policy, and the **CTL-12 join** (the `H=1` sweep IS the Controller's greedy Lyapunov step, checked by a vector). `ensemble.rs`: **scenario ensembles, invariant actions, decision nodes, dead drops** — the sweep run unmodified once per declared future, read for its disagreements. `pincer.rs`: **signal functions over the trajectory + the temporal pincer** — forward on a sampled `T`, backward on a declared cadence or a fired signal, consuming the Signal primitive so a persistent warning is debounced rather than re-triggering forever. **Only TEN-11 (pawa-efficiency) remains, and it is parked on the economy rather than on Tenet.** Python unchanged. | Tenet / Temporal Decision Architecture | Python |
 | 🔨 G1 | ~~**Controller decision-math (§3)**~~ — **the core is DONE in Rust** (`controller.rs`, 2026-08-12): Lyapunov distance-to-V urgency, `should_surface` (the SNR filter), `is_stable_intervention`, and the Sheridan `AUTOMATION_LEVEL` dispatch — plus **the loop closing through a human**, walked end to end by a conformance vector (Monitor → Controller → approval token → gate). **Still open: the OODA state machine and holarchy escalation**, which compose these functions rather than changing them. Python unchanged. | Controller / The Expanse | Python |
 
 ### 🟡 Confirm coverage (built in Python — verify the Rust plan carries them, core vs app-layer)
@@ -491,4 +491,4 @@ knowing about before opening the next slice:
 - **N3 — a definition edit destroys its predecessor.** Sharper than #26: rollback has
   nothing to roll back *to*.
 
-*Last updated: 2026-08-16 — **T1's mathematics shipped in full** across two slices (`tenet.rs`: TEN-1/2/4/12; `ensemble.rs`: TEN-3/5/6/7), then **the Signal primitive** (`signal.rs`: MUL-4, and half of MUL-15) — the SHARED spine input that **MON-13, CTL-3 and TEN-8** all ride, built once here rather than three times. The operational spine reads **Monitor ✅ · Tenet ✅ · Controller ✅**; what is left across T1/G1 is assembly (MonitorEngine, OODA, holarchy escalation) and time (TEN-8/TEN-9 re-inversion, now unblocked), not mathematics.*
+*Last updated: 2026-08-16 — **M-TEN's mathematics is complete** across three slices (`tenet.rs`: TEN-1/2/4/12; `ensemble.rs`: TEN-3/5/6/7; `pincer.rs`: TEN-8/9), built on **the Signal primitive** (`signal.rs`: MUL-4, half of MUL-15) — the shared spine input that **MON-13, CTL-3 and TEN-8** all ride, built once rather than three times, and which TEN-8 shipped on the same day. The spine reads **Monitor ✅ · Tenet ✅ · Controller ✅**. What is left across T1/G1 is **assembly** — the MonitorEngine, the OODA state machine, holarchy escalation — plus TEN-11's pawa term, parked on the economy. Not mathematics.*

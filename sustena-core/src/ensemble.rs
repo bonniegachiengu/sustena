@@ -281,6 +281,19 @@ impl Ensemble {
         self.scenarios.iter().find(|s| s.name == name)
     }
 
+    /// **Reclassify** — believe you are in a different one of the declared
+    /// futures (Tenet §IX, the HMM reading: observable emissions infer the
+    /// latent scenario).
+    ///
+    /// Returns a NEW ensemble rather than mutating: the set of futures is
+    /// unchanged and only which one you act from moves, so the old belief is
+    /// still a value someone can hold on to and compare against. Refuses a
+    /// scenario that is not in the ensemble — you cannot reclassify into a
+    /// future nobody declared.
+    pub fn reclassified_to(&self, base: &str) -> Result<Self, EnsembleError> {
+        Self::new(self.scenarios.clone(), base)
+    }
+
     /// Run the §V sweep **once per scenario** and keep every policy.
     ///
     /// Nothing about backward induction changes here — this is TEN-4 called
@@ -598,6 +611,16 @@ impl DeadDropBook {
 
     pub fn get(&self, id: &str) -> Option<&DeadDrop> {
         self.drops.iter().find(|d| d.id == id)
+    }
+
+    /// Keep only the drops satisfying `f`.
+    ///
+    /// Used by §X's *refresh DEAD_DROPS*: after a re-inversion a drop may name
+    /// a state every future now agrees about, which is a pre-commitment
+    /// waiting for a question nobody asks any more. The caller is expected to
+    /// report what it removed rather than drop it quietly.
+    pub fn retain<F: Fn(&DeadDrop) -> bool>(&mut self, f: F) {
+        self.drops.retain(|d| f(d));
     }
 
     /// Register `δ(D_i) = a*`, checked while checking is cheap.

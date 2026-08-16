@@ -57,6 +57,7 @@
 //! | Tenet — T:S×A→Δ(S), Bellman | [`tenet`] | R2 |
 //! | Scenario ensembles · dead drops | [`ensemble`] | R2 |
 //! | Signal — relayed refractory pulse | [`signal`] | R2 |
+//! | Signal fns · temporal pincer | [`pincer`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -75,6 +76,7 @@ pub mod migrate;
 pub mod mutation;
 pub mod operator;
 pub mod path;
+pub mod pincer;
 pub mod predicate;
 pub mod region;
 pub mod principal;
@@ -134,6 +136,10 @@ pub use version::{
 pub use ensemble::{
     DeadDrop, DeadDropBook, DecisionNode, Ensemble, EnsembleAnalysis, EnsembleError, InvariantSet,
     ModelTemplate, Prob, Resolution, RewardBasis, Scenario,
+};
+pub use pincer::{
+    run_pincer, Draws, ForwardStep, MonitorReport, PincerError, PincerRun, PincerSpec, Recompute,
+    RecomputeReason, ScriptedDraws, Signal, SignalMonitor, SignalVerdict, Trajectory, Trigger,
 };
 pub use signal::{
     Field, Fired, Phase, Pulse, Refusal, RefusalReason, SignalError, SignalSpec, StepReport,

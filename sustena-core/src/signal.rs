@@ -267,6 +267,14 @@ impl Field {
         self
     }
 
+    /// The declared parameters this medium runs on.
+    ///
+    /// Exposed so a consumer can drive a node at exactly its own threshold
+    /// rather than guessing a number that happens to clear it.
+    pub fn spec(&self) -> &SignalSpec {
+        &self.spec
+    }
+
     pub fn neighbours(&self, id: &str) -> Option<&BTreeSet<String>> {
         self.adjacency.get(id)
     }

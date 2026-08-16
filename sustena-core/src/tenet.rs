@@ -129,6 +129,27 @@ impl Distribution {
         self.outcomes.len() == 1
     }
 
+    /// `T(s,a).sample()` (§X) — **the draw is supplied, not generated**.
+    ///
+    /// `u ∈ [0,1)` comes from the caller for the same reason `now` does in
+    /// `approval.rs`: core has no clock, no I/O and no RNG. It also makes a
+    /// forward run reproducible, which is what lets a conformance vector pin
+    /// one.
+    ///
+    /// Inverse-CDF over the declared outcomes. A `u` at or past the total
+    /// (only reachable through floating-point slack) yields the last outcome
+    /// rather than panicking.
+    pub fn sample(&self, u: f64) -> &str {
+        let mut acc = 0.0;
+        for o in &self.outcomes {
+            acc += o.p;
+            if u < acc {
+                return &o.to;
+            }
+        }
+        &self.outcomes.last().expect("a distribution has at least one outcome").to
+    }
+
     /// `Σ_s' P(s'|s,a) · f(s')` — the expectation of a function over next states.
     pub fn expectation<F: Fn(&str) -> f64>(&self, f: F) -> f64 {
         self.outcomes.iter().map(|o| o.p * f(&o.to)).sum()

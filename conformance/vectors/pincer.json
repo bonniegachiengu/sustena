@@ -1,0 +1,199 @@
+{
+  "conformance_version": 1,
+  "slice": "pincer",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Tenet - Formal Execution.md, §IX (Signal Functions — σ_k: S^t→{0,1}, HMM inference over observable emissions; Baum et al. 1970) and §X (The Temporal Pincer — forward execution ∥ periodic backward recompute)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the when-to-re-plan layer. Authored from the article, not generated from the reference engine. This layer invents nothing: it consumes signal.rs (MUL-15), backward_induct (TEN-4), the ensemble (TEN-3) and the dead drops (TEN-7).",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-16",
+    "statement": "The reference engine has neither half. trajectory, signal_function, linked_action, re_inversion, replan, HMM, hidden_markov, pincer and reclassif are all grep-0 in apps/api/sustena/. This layer is downstream of TEN-4 and TEN-3, so there is nothing to re-invert and no ensemble to reclassify between.",
+    "the_four_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "history (102 hits)": "The big one, and the one most likely to be believed. Essentially all of it is `capture_classification_history` — the merchant-to-pocket memory from the correction-learning work — plus chat/message history in the Orchie surface. A lookup table keyed by counterparty, and a list of messages. Neither is a sequence of STATE snapshots that a predicate could range over, which is what S^t means.",
+      "cadence (4 hits)": "All four are the ingest layer's `expected_interval_minutes` — how often a capture SOURCE is expected to report, used for staleness. A cadence about whether a phone is still sending texts, not about when to re-run a plan.",
+      "recompute (1 hit)": "A comment in sustain_engine.py about the roll-up recompute path — recomputing an AGGREGATE from children, not re-planning.",
+      "latent (1 hit)": "A security comment in ingest.py about a 'latent data-leak shape'. Nothing to do with latent state."
+    },
+    "term_by_term": {
+      "σ_k: S^t → {0,1} (§IX)": "RUST-AHEAD. grep-0. The reference has no predicate whose domain is a trajectory. Every rule it has takes the CURRENT state.",
+      "TRIGGER Inversion (§IX)": "RUST-AHEAD, and blocked upstream twice over: there is no policy to re-invert (TEN-4 was grep-0 before this build) and no ensemble to reclassify between (TEN-3 likewise).",
+      "HMM scenario inference (§IX)": "RUST-AHEAD. grep-0. Inferring which of several declared worlds you are in requires several declared worlds; the reference has one, and it is deterministic.",
+      "ForwardOperation with T.sample() (§X)": "RUST-AHEAD in the sampling. The reference's simulate.run_path executes a GIVEN sequence deterministically — no distribution, so nothing to sample from.",
+      "BackwardOperation on a cadence (§X)": "RUST-AHEAD. grep-0. Nothing periodically re-derives a plan, because nothing derives one.",
+      "the fork runs under the gate (Additions, TEN-10)": "AT PARITY and ALREADY DONE — flagged here so this slice does not appear to claim it. R1's simulate() genuinely enforces the admit gate on every simulated step, and TEN-10 has been ✅ since then. It is unrelated to the pincer."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The advisory layer (Slice 10) is the honest near-miss and it is REAL: `evaluate_operatives()` is a triggered monitoring pass that runs declared rules and surfaces suggestions a human can accept or dismiss, wired to a live panel. It is genuinely 'watch, then tell someone'. Two things separate it from §IX/§X, and both are visible in the signatures. First, `rule_unallocated_income(state: dict)` takes the CURRENT state; the two other shipped rules take pre-computed scalars (`children_meta`, `last_sent_days`). None takes a trajectory, so 'no customers for three weeks' is not expressible — only 'no customers right now'. Second, what a trigger produces is a SUGGESTION for a human, not a re-plan: there is no policy in the reference for a signal to invalidate.",
+    "the_pincer_is_interleaved_not_threaded_and_that_is_deliberate": "§X presents two PROCESSES in parallel. Core has no threads, no clock and no I/O, so they are driven in one deterministic loop: forward steps, with the backward recompute on its declared cadence or when a signal fires. That is the semantics of §X — forward executes, backward recalibrates, they converge at current_state — and genuine concurrency is an execution-environment concern. Recorded rather than glossed, because 'parallel' in a commit message would imply something this does not do.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific. The injected draw and the tick-driven clock are core-has-no-clock constraints, not language ones.",
+    "not_a_divergence_in": "R1 behaviour. The pincer is additive and touches no gate path. Its one change to an existing type is Distribution::sample, which is new API rather than altered behaviour."
+  },
+  "article_correction": {
+    "what": "§IX's pseudocode is two-valued: `IF σ(history) == 1`.",
+    "why_it_matters": "Read literally, the article's own example signal — 'no customers by week 6' — is TRUE at week 0, because nothing has happened and nothing contradicts it. Every warning signal would fire on an empty history and trigger a re-inversion before the run began.",
+    "what_was_built_instead": "A three-valued SignalVerdict: Holds, Fails, or Undetermined with the history length that will settle it. A signal fires only on Holds. Evaluation is early-determining in both directions, LTL-style: Ever settles TRUE the moment one observation matches, Never settles FALSE the moment one does, and either settles the other way when its window closes. An UNBOUNDED Never or Always can only ever be falsified, never confirmed — there is always more history — and the code says so rather than treating not-yet-contradicted as true.",
+    "same_discipline_as": "the Monitor's CUSUM ordering, the Controller's Lyapunov target, and §V's V→J rename — the article was corrected, not copied, and the correction is recorded here rather than made silently."
+  },
+  "signal_spec": {
+    "why": "The refractory window is the RE-PLAN DEBOUNCE. This is the load-bearing reason this layer consumes signal.rs rather than calling a callback: a warning condition is usually persistent, so a two-valued monitor with a direct callback would trigger a full re-inversion on every subsequent forward step — a re-plan storm dressed as vigilance.",
+    "theta_fire": 1.0,
+    "refractory_ticks": 5
+  },
+  "fixture": {
+    "why": "A venture whose early weeks reveal which world it is in. From `start` it can push (demand either materialises or does not) or hedge. The declared signal reads the observed history for a run of quiet weeks; if it fires, the belief moves from `good` to `worst` and the re-inverted policy takes a different action.",
+    "dimension": "customers",
+    "states": {"start": 0.0, "quiet": 0.0, "busy": 9.0, "scaled": 20.0, "safe": 5.0},
+    "template": [
+      {"state": "start", "action": "push", "outcomes": [["busy", "param:p_demand"], ["quiet", "one_minus:p_demand"]]},
+      {"state": "start", "action": "hedge", "outcomes": [["safe", "fixed:1.0"]]},
+      {"state": "busy", "action": "scale", "outcomes": [["scaled", "fixed:1.0"]]},
+      {"state": "quiet", "action": "push", "outcomes": [["busy", "param:p_demand"], ["quiet", "one_minus:p_demand"]]},
+      {"state": "quiet", "action": "retrench", "outcomes": [["safe", "fixed:1.0"]]},
+      {"state": "safe", "action": "hold", "outcomes": [["safe", "fixed:1.0"]]},
+      {"state": "scaled", "action": "hold", "outcomes": [["scaled", "fixed:1.0"]]}
+    ],
+    "scenarios": [
+      {"name": "good", "params": {"p_demand": 0.9}},
+      {"name": "worst", "params": {"p_demand": 0.05}}
+    ],
+    "base_scenario": "good",
+    "inversion_point": ["customers >= 20"],
+    "terminal_reward": 500.0,
+    "gamma": 0.9,
+    "horizon": 4,
+    "rewards": {"quiet|push": -60.0, "start|hedge": -5.0},
+    "signal": {
+      "id": "demand_warning",
+      "predicate": {"kind": "never_within", "steps": 3, "state": "customers >= 1"},
+      "evidence_for": "worst",
+      "linked_action": "retrench"
+    }
+  },
+  "trajectory_cases": [
+    {
+      "name": "a_bounded_never_is_undetermined_until_its_window_closes",
+      "why": "★★ THE ARTICLE CORRECTION, pinned. On an empty history 'no customers by week N' is not true — it is not yet decided. A two-valued reading fires every warning before the run begins, which is the difference between a monitor and an alarm that is always ringing.",
+      "predicate": {"kind": "never_within", "steps": 6, "state": "customers >= 1"},
+      "expect": [
+        {"history": [], "verdict": "Undetermined", "settles_at": 6},
+        {"history": [0, 0], "verdict": "Undetermined", "settles_at": 6},
+        {"history": [0, 0, 0, 0, 0, 0], "verdict": "Holds"}
+      ]
+    },
+    {
+      "name": "a_never_settles_false_the_moment_it_is_contradicted",
+      "why": "Early determination in the negative direction. One customer and the warning is definitively wrong — no need to wait out the window to know it.",
+      "predicate": {"kind": "never_within", "steps": 6, "state": "customers >= 1"},
+      "expect": [{"history": [0, 3], "verdict": "Fails"}]
+    },
+    {
+      "name": "an_ever_settles_true_early_and_false_only_at_the_window",
+      "why": "The mirror. 'First customers within 3 weeks' is TRUE as soon as one arrives, and FALSE only once the third week has passed — before that it is genuinely open.",
+      "predicate": {"kind": "ever_within", "steps": 3, "state": "customers >= 1"},
+      "expect": [
+        {"history": [0], "verdict": "Undetermined", "settles_at": 3},
+        {"history": [0, 2], "verdict": "Holds"},
+        {"history": [0, 0, 0], "verdict": "Fails"}
+      ]
+    },
+    {
+      "name": "an_unbounded_never_can_only_ever_be_falsified",
+      "why": "★ There is always more history to come, so an unbounded 'never' cannot be confirmed — not after fifty quiet steps, not ever. Saying Undetermined beats quietly promoting not-yet-contradicted to true, which is exactly the failure the bounded case above avoids, in its unbounded form.",
+      "predicate": {"kind": "never_unbounded", "state": "customers >= 1"},
+      "expect": [
+        {"history_zeros": 50, "verdict": "Undetermined", "settles_at": null},
+        {"history": [0, 1], "verdict": "Fails"}
+      ]
+    },
+    {
+      "name": "a_count_settles_false_as_soon_as_it_is_unreachable",
+      "why": "Early determination that needs arithmetic rather than a single observation: 3 of the first 4 steps must match, so after two misses it is already impossible. Waiting out the window would be technically correct and practically useless.",
+      "predicate": {"kind": "count", "steps": 4, "state": "customers >= 1", "at_least": 3},
+      "expect": [
+        {"history": [1], "verdict": "Undetermined", "settles_at": 4},
+        {"history": [0, 0], "verdict": "Fails"},
+        {"history": [1, 1, 1], "verdict": "Holds"}
+      ]
+    }
+  ],
+  "monitor_cases": [
+    {
+      "name": "a_signal_that_holds_triggers_with_its_linked_action",
+      "why": "§IX's TRIGGER Inversion(σ.linked_action). The trigger carries what to re-plan and which scenario the emission is evidence for — the two things a consumer needs to act on it.",
+      "history": [0, 0, 0],
+      "note": "three quiet steps — the fixture signal's window is 3, and a shorter history is genuinely Undetermined rather than firing. That is the article correction doing its job inside this file.",
+      "expect": {"triggered": ["demand_warning"], "linked_action": "retrench", "reclassifies_to": "worst"}
+    },
+    {
+      "name": "a_persistent_condition_is_debounced_by_the_refractory_window",
+      "why": "★★ THE LOAD-BEARING REASON this layer consumes signal.rs. The warning holds forever once true. Without the refractory window it would trigger a full re-inversion on every subsequent forward step — §III's load-bearing half doing exactly the job it was described for, one layer up. And the suppression is REPORTED, not silent: a debounced trigger is visible rather than looking like nothing happened.",
+      "histories": [[0, 0, 0], [0, 0, 0, 0]],
+      "expect": {"first_fires": true, "second_fires": false, "second_debounced": ["demand_warning"]}
+    },
+    {
+      "name": "nothing_fired_carries_the_list_it_was_watching",
+      "why": "★ The honest limit, encoded rather than footnoted. A signal is only as good as its declared predicate; undeclared warning conditions are caught by nothing here. MonitorReport carries the watched names and describe() says so, so 'nothing fired' can never be quoted as 'nothing is wrong'.",
+      "history": [3, 3, 3],
+      "expect": {"fired": false, "watched": ["demand_warning"], "describe_contains": "says nothing about conditions nobody declared"}
+    },
+    {
+      "name": "an_empty_signal_set_is_refused",
+      "why": "'Nothing fired' from an empty set is not reassurance, it is a category error. Refused at construction.",
+      "expect": {"error": "NoSignals"}
+    }
+  ],
+  "pincer_cases": [
+    {
+      "name": "a_fired_signal_reclassifies_and_the_policy_changes",
+      "why": "★★ THE PROOF OF VALUE. The run starts believing `good`. The world hands it quiet weeks. The declared signal reads that HISTORY — not the current state — fires, reclassifies the belief to `worst` (the HMM reading: an observable emission infers the latent scenario), the backward process re-runs, and the policy genuinely takes a different action than it would have. A trigger that changed nothing would not be a re-inversion, so `policy_changed` is asserted rather than the trigger merely being recorded.",
+      "draws": [0.99],
+      "max_steps": 8,
+      "expect": {
+        "some_recompute_changed_the_policy": true,
+        "reason": "SignalFired",
+        "base_before": "good",
+        "base_after": "worst",
+        "action_changed": true
+      }
+    },
+    {
+      "name": "without_a_signal_firing_the_belief_is_untouched",
+      "why": "The negative case, so the proof above cannot pass by reclassifying on every run. Lucky draws, no quiet streak, no warning, no reclassification — and the good path reaches the inversion point.",
+      "draws": [0.0],
+      "max_steps": 8,
+      "expect": {"reached_ip": true, "base_stays": "good"}
+    },
+    {
+      "name": "the_cadence_recomputes_even_when_no_signal_fires",
+      "why": "§X's 'EVERY 2 weeks'. The backward process runs on its own clock, not only in reaction to a signal — a plan going stale quietly is exactly what a periodic reassessment is for.",
+      "draws": [0.99],
+      "cadence": 2,
+      "max_steps": 6,
+      "expect": {"has_cadence_recompute": true}
+    },
+    {
+      "name": "the_forward_process_samples_the_declared_transition_reproducibly",
+      "why": "★ T(s,a).sample() with the draw SUPPLIED, not generated — the same reason approval.rs takes `now`: no clock, no I/O, no RNG in core. It also means the same script walks the same path twice, which is what lets a vector pin a stochastic run at all.",
+      "draws": [0.99, 0.0, 0.0, 0.0],
+      "max_steps": 6,
+      "expect": {"first_step_to": "quiet", "two_runs_identical": true}
+    },
+    {
+      "name": "the_recompute_carries_the_window_it_is_about",
+      "why": "The honest limit carried forward from TEN-4: re-running the sweep more often does not make it see further. Every recompute states its horizon rather than letting frequency be mistaken for foresight.",
+      "draws": [0.0],
+      "max_steps": 4,
+      "expect": {"every_recompute_horizon": 4}
+    },
+    {
+      "name": "an_unknown_start_state_is_refused",
+      "why": "The run cannot begin somewhere nobody enumerated — the same discipline as the sweep's dangling-outcome refusal.",
+      "expect": {"error": "UnknownState"}
+    },
+    {
+      "name": "a_zero_cadence_is_refused",
+      "why": "A cadence of 0 would recompute on every step and never execute anything — the pincer with one arm.",
+      "expect": {"error": "ZeroCadence"}
+    }
+  ]
+}
