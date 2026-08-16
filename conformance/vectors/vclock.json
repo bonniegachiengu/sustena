@@ -1,0 +1,135 @@
+{
+  "conformance_version": 1,
+  "slice": "vclock",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Events and Time - Formal Execution.md, §VI (Causal Order: Happens-Before, Logical and Vector Clocks — Lamport 1978; Fidge 1988; Mattern 1989) and §VII (The Convergence Theorem, and its honest limit on LWW)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for genuine concurrency detection, and for the merge it sharpens. §VI says vector clocks and the §4B merge are 'the same work' and to build them together — so this file covers both.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-16",
+    "statement": "vector_clock, vclock, happens_before, concurrent, causal, lamport, lww and last_writer are ALL grep-0 in apps/api/sustena/. The reference has no causal machinery of any kind — not a vector clock, not a scalar one, and no LWW register.",
+    "★_an_internal_sharpening_that_is_NOT_a_python_divergence": "Worth separating carefully, because conflating the two would misdescribe both. The scalar CausalStamp and the LWW register live in the RUST core and were built by an earlier R2 slice (events.json), not ported from Python. So the scalar→vector improvement in this slice is a RUST-TO-RUST sharpening of an earlier R2 decision, and it would be wrong to present it as a gap in the reference engine. What is a Python divergence is simpler and larger: there is no causal clock there at all.",
+    "★_the_defect_this_removes_named_precisely": "R1's Event::happens_before answers from two things: does the other event name this one among its DIRECT causes, or are they on the same node in counter order. Both are correct as far as they go, and together they miss transitive causality across nodes. Given a on node-1 → b on node-2 (causes: a) → c on node-2 (causes: b), `a → c` genuinely holds and the scalar answer is CONCURRENT — c does not name a, and they are on different nodes. That is a FALSE CONCURRENT, and it matters because a merge that believes two causally-ordered edits are concurrent will treat a supersession as a conflict. A vector clock gets it right, and a case below runs both answers side by side.",
+    "the_two_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "merge (14 hits)": "All dict merges — `{**state.snapshot(), **item}` in constraints.py and predicates.py for quantifier scope, and parse_rule.py merging regex groups with extracted fields. Python dict union, not a CRDT join.",
+      "dominates (1 hit)": "curated_ui.py's comment 'Urgency dominates deliberately' about salience weighting. Prose."
+    },
+    "term_by_term": {
+      "the happens-before relation": "RUST-AHEAD vs Python (grep-0), and sharpened vs the earlier Rust slice — see above.",
+      "vector clocks / the biconditional": "RUST-AHEAD. grep-0 in Python, and new in Rust: this is the first time `a ∥ b` can be answered exactly rather than approximated.",
+      "t_event as a physical stamp": "AT PARITY in Python — its events carry a timestamp, and it really is used for windowing. §VI's point is that this is NOT a causal clock, and the reference agrees by construction: it has nothing else, so it never mistakes one for the other.",
+      "the LWW register (§VII)": "RUST-AHEAD vs Python (grep-0) and pre-existing in Rust. What this slice adds is not the register but the ability to tell when it is the WRONG structure.",
+      "the ordering that actually ships in Python": "AT PARITY FOR ITS SCALE, and the counterweight explains why."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "A real, working total order: the events table carries `seq`, assigned as MAX(seq) + 1 per sustain, and get_events reads ORDER BY seq. Every replay lands in the same sequence and the fold is deterministic — that is genuine, and it is what the engine has run on. It works precisely BECAUSE there is a single writer: one process assigning one monotonic counter has no concurrency to detect, so a clock that could detect it would answer a question that never arises. That is a correct design for a single-node deployment, not a shortcut. It stops being sufficient at exactly the moment there are two writers — which the roadmap already has, with a native Android app and a hosted engine both able to record events.",
+    "the_honest_limits": "Two. (1) O(n) METADATA per stamp, one counter per node that has ever acted. §VI says it plainly: for a household — a phone, a laptop, a handful of devices — n is small and the cost is nothing. It is not nothing for an open federation, and that is the scale at which this choice is revisited. (2) assign_clocks DERIVES clocks from the recorded `causes` DAG rather than adding a field to Event, so no wire format changes and every R1 parity vector keeps passing untouched — but it is only as complete as the causes a producer actually recorded. A producer that records no causes gets a clock that says everything is concurrent, which is the honest answer to 'you told me nothing about what depended on what'.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive: no field is added to Event, no wire format changes, and Observation::join is untouched."
+  },
+  "chain_fixture": {
+    "why": "The minimal shape that exposes the scalar clock's blind spot: a transitive causal chain that crosses a node boundary. `c` does not name `a` among its causes, and they sit on different nodes — the two things the scalar answer looks at — yet a → b → c means a → c.",
+    "events": [
+      {"id": "a", "node": "node-1", "counter": 1, "t_event": 100, "causes": []},
+      {"id": "b", "node": "node-2", "counter": 2, "t_event": 200, "causes": ["a"]},
+      {"id": "c", "node": "node-2", "counter": 3, "t_event": 300, "causes": ["b"]}
+    ]
+  },
+  "fork_fixture": {
+    "why": "A shared root, then two independent edits. Genuinely concurrent — and the fix must not simply order everything, so this is the case that would catch a clock that always finds an order.",
+    "events": [
+      {"id": "root", "node": "node-1", "counter": 1, "t_event": 100, "causes": []},
+      {"id": "x", "node": "node-1", "counter": 2, "t_event": 200, "causes": ["root"]},
+      {"id": "y", "node": "node-2", "counter": 2, "t_event": 200, "causes": ["root"]}
+    ]
+  },
+  "clock_cases": [
+    {
+      "name": "a_local_event_advances_only_its_own_component",
+      "why": "§VI's V_i[i] += 1. And the other half of the rule: an absent component reads as 0, because a node that has never acted has done nothing — a fact, not a gap. That is what lets clocks over different node sets be compared at all.",
+      "expect": {"phone": 1, "laptop": 0}
+    },
+    {
+      "name": "receiving_takes_the_componentwise_max_then_steps",
+      "why": "§VI's V_i ← max(V_i, V_msg), then a local tick. The receiver learns everything the message knew and records that it has now acted on it.",
+      "expect": {"phone": 2, "laptop": 2}
+    },
+    {
+      "name": "clocks_over_different_node_sets_compare_correctly",
+      "why": "Only possible because absent means 0. Two devices that have never heard of each other's third device still compare.",
+      "expect": {"a_before_b": true, "b_after_a": true}
+    },
+    {
+      "name": "the_biconditional_holds_in_all_four_cases",
+      "why": "★ §VI's whole point. Same, HappensBefore, HappenedAfter — and Concurrent, which is what the scalar clock cannot produce. Neither dominating is a REAL answer, not a missing one.",
+      "expect": {"same": "Same", "before": "HappensBefore", "after": "HappenedAfter", "neither": "Concurrent"}
+    },
+    {
+      "name": "the_metadata_is_one_counter_per_node_that_has_acted",
+      "why": "§VI's O(n), made observable. For a household n is small and the cost is nothing; naming the cost is how it stays revisitable when the federation grows.",
+      "expect": {"size": 2}
+    }
+  ],
+  "false_concurrent_cases": [
+    {
+      "name": "the_scalar_clock_reports_a_false_concurrent_across_a_transitive_chain",
+      "why": "★★ THE PROOF OF VALUE, first half. a → b → c genuinely holds, and R1's scalar answer is CONCURRENT — because `c` does not name `a` directly and they sit on different nodes. Run against the real Event::happens_before, not a reconstruction of it.",
+      "expect": {"scalar_says_happens_before": false, "scalar_says_concurrent": true}
+    },
+    {
+      "name": "the_vector_clock_sees_the_transitive_chain_correctly",
+      "why": "★★ The same three events, stamped with vector clocks derived from the same recorded causes. a → c, which is the truth.",
+      "expect": {"verdict": "HappensBefore", "concurrent": false}
+    },
+    {
+      "name": "genuinely_concurrent_events_are_still_reported_concurrent",
+      "why": "★ The other direction, and the case that would catch a fix that simply ordered everything. Two independent edits off a shared root are concurrent, and must stay so.",
+      "expect": {"verdict": "Concurrent"}
+    },
+    {
+      "name": "a_causal_cycle_is_refused",
+      "why": "An event cannot depend on its own consequence. Caught while building the clocks, where it is cheap, rather than at comparison time where it would be a wrong answer.",
+      "expect": {"error": "CausalCycle"}
+    },
+    {
+      "name": "a_cause_outside_the_supplied_set_is_history_not_a_deadlock",
+      "why": "A caller handing over part of a log is the ordinary case. A cause nobody supplied is history that happened, not a missing dependency to wait on — treating it as a cycle would make partial replay impossible.",
+      "expect": {"clock_for_only": 1}
+    }
+  ],
+  "merge_cases": [
+    {
+      "name": "a_causally_ordered_pair_is_a_supersession_not_a_conflict",
+      "why": "The later event genuinely supersedes the earlier one, and nothing is lost by saying so. Only one value survives under either dimension kind, because there was never a conflict to resolve.",
+      "expect": {"concurrent": false, "snapshot_value": "new", "contested_count": 1}
+    },
+    {
+      "name": "two_concurrent_edits_are_detected_and_both_survive",
+      "why": "★★ THE PROOF OF VALUE, second half, and §VII's own honest limit made false: 'two genuinely concurrent edits to the same field under LWW means one is silently discarded'. Here neither is. Both survive — 'never erase the node', applied to a concurrent edit.",
+      "left": "go monday", "right": "go friday",
+      "expect": {"concurrent": true, "contested_count": 2, "both_present": true}
+    },
+    {
+      "name": "the_same_pair_under_snapshot_semantics_collapses_and_that_is_correct",
+      "why": "★ The scoping §VII insists on, shown as the same causal situation resolving two different — and both correct — ways. For an observation of an external authority, discarding the older reading is not data loss: the newer reading of a balance supersedes the older one by definition. The vector clock does not decide this; it makes the question askable.",
+      "left": "1200", "right": "1350",
+      "expect": {"concurrent": true, "snapshot_count": 1, "snapshot_value": "1350"}
+    },
+    {
+      "name": "the_contested_pair_surfaces_in_a_deterministic_order",
+      "why": "★ The merge must remain commutative. Two replicas handed the same pair in opposite orders surface the same list — otherwise 'both survive' would still diverge between devices, which is the failure the whole convergence theorem exists to prevent.",
+      "expect": {"order_independent": true}
+    },
+    {
+      "name": "re_delivering_the_same_stamp_is_idempotent",
+      "why": "§VII's idempotence, at the causal layer: the same point in causal history is not a conflict with itself.",
+      "expect": {"resolution": "Same", "count": 1}
+    },
+    {
+      "name": "the_physical_stamp_is_never_used_to_decide_causality",
+      "why": "★ §VI: 't_event is a physical stamp and is NOT a causal clock. Both are needed.' A concurrent pair stays concurrent however far apart their physical stamps are — a huge time gap is not causal evidence. This is the guard against quietly collapsing the two questions into one.",
+      "t_gap": 999999,
+      "expect": {"still_concurrent": true}
+    }
+  ]
+}

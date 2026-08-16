@@ -104,6 +104,7 @@ conformance/
     population.json     N(i) · c>θ · cascade · bifurcation (spec, R2)
     consensus.json      quorum · Paxos · FLP · 3f+1       (spec, R2)
     router.json         Physarum conductance routing    (spec, R2)
+    vclock.json         vector clocks · concurrency     (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -428,3 +429,22 @@ it is a bug** — nothing silently differs.
   whether it settled, asymptotic decay so *pruned* is a reading at a declared
   cutoff rather than a deletion, and a disconnected source/sink **refused
   rather than reported as zero flow**.
+
+- **`vclock.json` — rust-ahead-of-python, and it separates two things that
+  would be easy to conflate.** `vector_clock`, `happens_before`, `concurrent`,
+  `causal`, `lamport`, `lww` and `last_writer` are **all** grep-0 in the
+  reference: it has no causal machinery of any kind. But the scalar→vector
+  improvement is a **Rust-to-Rust sharpening** of an earlier R2 slice
+  (`events.json`), *not* a gap in Python — and the file says so, because
+  presenting it as one would misdescribe both. **The defect is named and
+  demonstrated:** R1's `Event::happens_before` sees direct `causes` or same-node
+  counter order, and together those miss transitive causality across nodes —
+  `a → b → c` is reported **concurrent**. A case runs both answers side by
+  side against the real method. **Counterweight, asserted by a test:** Python's
+  `seq` (`MAX(seq) + 1` per sustain) is a genuine, working total order, and it
+  works *precisely because* there is a single writer — one process assigning
+  one counter has no concurrency to detect. A correct design for its scale, not
+  a shortcut, and it stops being sufficient at exactly two writers. The file
+  also records **two honest limits**: `O(n)` metadata per stamp, and that
+  `assign_clocks` is only as complete as the `causes` a producer actually
+  recorded.

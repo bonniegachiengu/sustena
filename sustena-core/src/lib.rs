@@ -64,6 +64,7 @@
 //! | Population · quorum sensing | [`population`] | R2 |
 //! | Consensus — quorum · Paxos | [`consensus`] | R2 |
 //! | Physarum router | [`router`] | R2 |
+//! | Vector clocks · concurrency | [`vclock`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -97,6 +98,7 @@ pub mod signal;
 pub mod state;
 pub mod tenet;
 pub mod transition;
+pub mod vclock;
 pub mod version;
 
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
@@ -153,6 +155,10 @@ pub use router::{
 };
 pub use schema::{bind, preserves_shape, validate, DimType, Schema};
 pub use state::State;
+pub use vclock::{
+    assign_clocks, merge as merge_stamped, CausalVerdict, ClockError, Dimension, MergeResolution,
+    Stamped, VectorClock,
+};
 pub use version::{
     PathRollback, PreImage, Rollback, VersionDag, VersionError, VersionNode,
 };
