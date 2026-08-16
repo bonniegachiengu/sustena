@@ -243,6 +243,85 @@ impl Edit {
         out
     }
 
+    /// `e⁻¹` — the inverse edit, derived against the definition the edit was
+    /// applied TO (Editing §V).
+    ///
+    /// > The taxonomy is closed under inversion by construction:
+    /// > `AddDim⁻¹ = RetireDim`, `DropInv⁻¹ = AddInv`,
+    /// > `ModifyOp(o,g',ε')⁻¹ = ModifyOp(o,g,ε)`.
+    ///
+    /// This is the half the article calls **nearly always achievable** — it
+    /// restores the *document*. The other half, `μ⁻¹(μ(s)) = s`, is where
+    /// honesty is required and lives in [`crate::version`].
+    ///
+    /// The parent definition is needed because half the taxonomy is only
+    /// invertible against what was there before: undoing a `DropInv` means
+    /// knowing the expression that was dropped. That is the pre-image, read
+    /// from the value the edit was applied to rather than inferred.
+    pub fn inverse(&self, parent: &Definition) -> Result<Edit, Irreversible> {
+        let missing = |what: String| Irreversible { kind: self.kind(), detail: what };
+        Ok(match self {
+            Edit::AddDim { name, .. } => Edit::RetireDim { name: name.clone() },
+
+            // Restoring a retired dimension needs its declared type back. The
+            // TYPE is in the parent schema; the DEFAULT is not part of a
+            // Definition at all, which is exactly the lossy seam §V is about —
+            // see `version::Rollback`, which reports it rather than papering
+            // over it.
+            Edit::RetireDim { name } => {
+                let ty = parent
+                    .schema
+                    .dimensions
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| missing(format!("dimension '{name}' is not in the parent")))?;
+                Edit::AddDim { name: name.clone(), ty, default: Value::Null }
+            }
+
+            Edit::RetypeDim { name, .. } => {
+                let ty = parent
+                    .schema
+                    .dimensions
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| missing(format!("dimension '{name}' is not in the parent")))?;
+                Edit::RetypeDim { name: name.clone(), ty }
+            }
+
+            Edit::AddInv { id, .. } => Edit::DropInv { id: id.clone() },
+
+            Edit::DropInv { id } | Edit::ModifyInv { id, .. } => {
+                let expression = parent
+                    .invariants
+                    .iter()
+                    .find(|(i, _)| i == id)
+                    .map(|(_, e)| e.clone())
+                    .ok_or_else(|| missing(format!("invariant '{id}' is not in the parent")))?;
+                match self {
+                    Edit::DropInv { .. } => Edit::AddInv { id: id.clone(), expression },
+                    _ => Edit::ModifyInv { id: id.clone(), expression },
+                }
+            }
+
+            Edit::AddOp { name } => Edit::RetireOp { name: name.clone() },
+            Edit::RetireOp { name } => Edit::AddOp { name: name.clone() },
+        })
+    }
+
+    /// Whether undoing this edit can restore live instances exactly — i.e.
+    /// whether `μ` was injective for this kind.
+    ///
+    /// `RetireDim` forgets: the dimension's declared default is not part of a
+    /// `Definition`, so undoing it cannot say what new instances should start
+    /// with unless the log or an explicit pre-image supplies it. Everything
+    /// else in this taxonomy is document-only and loses nothing.
+    pub fn forgets(&self) -> Option<&str> {
+        match self {
+            Edit::RetireDim { name } => Some(name),
+            _ => None,
+        }
+    }
+
     /// Whether this kind can strand a live instance.
     ///
     /// §IV's asymmetry: **loosening is free by proposition** — a weaker `V`
@@ -286,6 +365,14 @@ pub struct Stranded {
     pub invariant_id: String,
     pub expression: String,
     pub reason: String,
+}
+
+/// An edit whose inverse could not be derived against the given parent.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("{kind} cannot be inverted here: {detail}")]
+pub struct Irreversible {
+    pub kind: &'static str,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

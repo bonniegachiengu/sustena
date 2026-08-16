@@ -48,6 +48,7 @@
 //! | Edit authority | [`editing`] | R2 |
 //! | Transition constraints | [`transition`] | R2 |
 //! | Checked composition | [`compose`] | R2 |
+//! | Version history | [`version`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -66,6 +67,7 @@ pub mod principal;
 pub mod schema;
 pub mod state;
 pub mod transition;
+pub mod version;
 
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
 pub use approval::{
@@ -78,7 +80,8 @@ pub use compose::{
 pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalStatus, ResolutionInput, VoteChoice};
 pub use editing::{
     admit_edit, safe, typecheck, AuthorityError, CouncilMint, Definition, Edit, EditAdmission,
-    EditAuthority, EditEffect, EditError, EditToken, Governance, Instance, Migration, Stranded,
+    EditAuthority, EditEffect, EditError, EditToken, Governance, Instance, Irreversible, Migration,
+    Stranded,
 };
 pub use event::{dedupe, merge, order, CausalStamp, Event, Observation, Provenance};
 pub use error::{FoldError, FoldResult, StateError, StateResult};
@@ -93,6 +96,9 @@ pub use principal::{effective_privilege, permitted, Denial, MembershipEdge, Memb
 pub use predicate::{check, parse_predicate, Predicate};
 pub use schema::{bind, preserves_shape, validate, DimType, Schema};
 pub use state::State;
+pub use version::{
+    PathRollback, PreImage, Rollback, VersionDag, VersionError, VersionNode,
+};
 pub use transition::{
     check_all as check_transitions, Direction, Quantity, Tolerance, TransitionDeclError,
     TransitionRule, TransitionViolation,

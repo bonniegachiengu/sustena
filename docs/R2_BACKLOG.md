@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose** cases (divergences recorded) |
-| Rust tests | **201 unit · 34 conformance tests** across 5 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version** cases (divergences recorded) |
+| Rust tests | **218 unit · 39 conformance tests** across 6 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -106,8 +106,8 @@ Ordered by dependency, not importance.
 
 | # | Gap | Article |
 |---|---|---|
-| 26 | **No definition version history** — edits in place, cannot roll back | SLOPE |
-| 27 | 3-valued rollback (Total / Partial / Unavailable) not built | SLOPE |
+| ~~26~~ | ~~**No definition version history** — edits in place, cannot roll back~~ — **DONE in Rust** (`version.rs`, 2026-08-12): append-only DAG, head is a pointer, nothing overwritten. Python unchanged. | SLOPE |
+| ~~27~~ | ~~3-valued rollback (Total / Partial / Unavailable) not built~~ — **DONE in Rust**: and `Total` has no Δ field, so reporting Partial as Total is unspellable. Python unchanged. | SLOPE |
 
 ### Grammar
 
@@ -241,6 +241,51 @@ if the reference catches up.
 arguments. The fix is a context struct carrying registry/allowed/enforcement —
 a real API refactor touching every call site, and not something to do as a side
 effect of this slice.
+
+### ✅ EDIT-7 / #26 / #27 / N3 — version history + the algebra of rollback — SHIPPED IN RUST (2026-08-12)
+
+`sustena-core/src/version.rs`, grounded in **Editing §V**. **This closes N3**,
+recorded as the sharpest remaining gap.
+
+**The fix.** The reference engine runs `UPDATE sustain_templates SET spec_json =
+?, version = ?` — an in-place overwrite that destroys the predecessor. The
+counter increments and nothing is versioned, so there is no `D_{n-1}` and
+therefore no `e⁻¹` to apply. Here `VersionDag::commit` **appends**, `head` is a
+**pointer rather than a counter**, and each node records the full
+`⟨D, parent, e, μ, author, t⟩`. Two edits can branch from one parent — which an
+integer cannot express, and which is the structural reason the article says the
+version field becomes a head pointer.
+
+**Two inverses, and only one is easy.**
+
+- `e⁻¹(e(D)) = D` — the document. Derived over the EDIT-8 taxonomy against the
+  **parent** node (undoing a `DropInv` needs the expression that was dropped, and
+  only the pre-state has it). Round-trips are applied and compared, not asserted.
+- `μ⁻¹(μ(s)) = s` — the instances. **Not generally available**, because μ is
+  frequently not injective (Fagin 2007).
+
+**Three-valued rollback, and the lie made unspellable.** `Rollback::Total` has
+**no field** for unrestorable dimensions, and `Rollback::classify` is the only
+constructor — it returns `Partial` whenever Δ is non-empty. *Reporting Partial as
+Total is the same class of lie as a clamp reported as an admit*, and here it is
+not a mistake to guard against but a thing that cannot be written down.
+
+**Both pre-image escapes work.** Free: **fold the log** — the `AddDim` that
+introduced a dimension is already in the history, so `μ⁻¹` becomes a lookup at no
+storage cost. Paid: **journal it explicitly**, which upgrades an otherwise-lossy
+edit from `Partial` to `Total`. A dimension present since genesis has neither, and
+that is an honest Δ rather than a contrived one.
+
+**A groupoid, not a group.** `path_between` returns `None` for two versions on
+branches that never meet, rather than inventing a route; each definition is its
+own identity; and a composed path is **no more restorable than its worst link**.
+
+**Divergence — rust-ahead, with the breadcrumb noted.** Python has no history
+table, no parent pointer and no rollback of definitions at all. It *does* bump a
+`version` integer and stamp `updated_at`, which tells you *that* something changed
+— an audit breadcrumb, not a history. The μ⁻¹ entry also records that **neither**
+engine can restore what was genuinely forgotten; the difference is that this one
+says so, with Δ naming the dimensions. Tests assert both notes stay.
 
 ### ✅ #16 — checked composition of Enzyme pathways — SHIPPED IN RUST (2026-08-12)
 

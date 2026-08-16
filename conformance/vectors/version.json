@@ -1,0 +1,184 @@
+{
+  "conformance_version": 1,
+  "slice": "version",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Editing - Formal Execution.md, §V (Versions, Inverses, and the Algebra of Rollback)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the append-only definition DAG, declared inverses, and three-valued rollback. Authored from the article, not generated from the reference engine.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-12",
+    "statement": "This closes WBD N3, recorded as the sharpest gap in the module.",
+    "term_by_term": {
+      "append-only DAG": "RUST-AHEAD, and the reference engine does the opposite. `update_definition` computes `new_version = existing['version'] + 1` and then runs `UPDATE sustain_templates SET spec_json = ?, version = ?, updated_at = ? WHERE id = ?` — an IN-PLACE OVERWRITE. The counter increments; nothing is versioned. There is no history table, no parent pointer, and no D_{n-1}.",
+      "e⁻¹ (the document)": "RUST-AHEAD. Nothing in the reference derives an inverse edit — unsurprising, since it has no typed edit `e` to invert (EDIT-2), and nothing to invert back TO.",
+      "μ⁻¹ (the instances)": "RUST-AHEAD, and deliberately partial even here. μ is frequently not injective (Fagin 2007), so the honest answer is three-valued rather than a promise. Neither engine can restore what was genuinely forgotten; the difference is that this one SAYS SO, with Δ naming the dimensions.",
+      "three-valued rollback": "RUST-AHEAD. R2_BACKLOG #27 records it as not built anywhere. The reference has no rollback of definitions at all — its `control.rollback` is the state-side operator, a different thing."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The reference DOES bump a `version` integer and stamp `updated_at`, so it can tell you THAT a definition changed and roughly when. That is an audit breadcrumb, not a history: it cannot tell you what the definition was, which edit produced it, or who made it — and it cannot get back.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Versioning is a new additive module and touches no existing gate path."
+  },
+  "append_only_cases": [
+    {
+      "name": "committing_appends_and_the_predecessor_survives",
+      "why": "The whole of N3. The reference engine's UPDATE destroys D_{n-1}; here it is still there, byte for byte, after the edit lands.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [{"id": "v2", "parent": "v1", "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"}}],
+      "expect": {"head": "v2", "nodes": 2, "predecessor_unchanged": true, "current_invariants": 1}
+    },
+    {
+      "name": "the_head_is_a_pointer_not_a_counter",
+      "why": "Two edits from the SAME parent. A monotonic integer cannot express this — which is the structural reason the article says the version field becomes a head pointer.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [
+        {"id": "v2", "parent": "v1", "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"}},
+        {"id": "v2b", "parent": "v1", "edit": {"kind": "AddOp", "name": "budget.summary"}}
+      ],
+      "expect": {"head": "v2b", "nodes": 3, "siblings_differ": true}
+    },
+    {
+      "name": "a_node_records_the_whole_tuple",
+      "why": "⟨D, parent, e, μ, author, t⟩. An audit trail that cannot say WHICH edit or WHOSE is a breadcrumb, not a history.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [{"id": "v2", "parent": "v1", "author": "cira", "t": 250, "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"}}],
+      "expect": {"parent": "v1", "edit_kind": "AddInv", "author": "cira", "t": 250}
+    }
+  ],
+  "inverse_cases": [
+    {
+      "name": "the_taxonomy_is_closed_under_inversion",
+      "why": "§V's claim, checked kind by kind: AddDim⁻¹ = RetireDim, DropInv⁻¹ = AddInv, and a Modify inverts to a Modify carrying the old value back.",
+      "base": {"invariants": [["floor", "moisture.level >= 0"]], "operators": ["edit.state_patch"]},
+      "pairs": [
+        {"edit": {"kind": "AddDim", "name": "n"}, "inverse_kind": "RetireDim"},
+        {"edit": {"kind": "RetireDim", "name": "moisture"}, "inverse_kind": "AddDim"},
+        {"edit": {"kind": "RetypeDim", "name": "moisture"}, "inverse_kind": "RetypeDim"},
+        {"edit": {"kind": "AddInv", "id": "x", "expression": "moisture.level >= 1"}, "inverse_kind": "DropInv"},
+        {"edit": {"kind": "DropInv", "id": "floor"}, "inverse_kind": "AddInv"},
+        {"edit": {"kind": "ModifyInv", "id": "floor", "expression": "moisture.level >= 5"}, "inverse_kind": "ModifyInv"},
+        {"edit": {"kind": "AddOp", "name": "budget.summary"}, "inverse_kind": "RetireOp"},
+        {"edit": {"kind": "RetireOp", "name": "edit.state_patch"}, "inverse_kind": "AddOp"}
+      ]
+    },
+    {
+      "name": "an_inverse_actually_restores_the_definition",
+      "why": "e⁻¹(e(D)) = D, applied and compared rather than asserted. A taxonomy 'closed under inversion' that did not round-trip would be a naming scheme.",
+      "base": {"invariants": [["floor", "moisture.level >= 0"]], "operators": []},
+      "round_trip": [
+        {"kind": "DropInv", "id": "floor"},
+        {"kind": "ModifyInv", "id": "floor", "expression": "moisture.level >= 9"},
+        {"kind": "AddOp", "name": "budget.summary"},
+        {"kind": "AddInv", "id": "ceiling", "expression": "moisture.level <= 10"}
+      ],
+      "expect": {"restores_exactly": true}
+    },
+    {
+      "name": "an_inverse_needs_the_parent_it_was_applied_to",
+      "why": "Undoing a DropInv means knowing the expression that was dropped, and only the pre-state has it. This is why the inverse is derived against the PARENT node, not the result.",
+      "base": {"invariants": [], "operators": []},
+      "edit": {"kind": "DropInv", "id": "floor"},
+      "expect": {"invertible": false}
+    }
+  ],
+  "rollback_cases": [
+    {
+      "name": "a_document_only_edit_rolls_back_totally",
+      "why": "Nothing about an invariant lives in an instance, so nothing is forgotten.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [{"id": "v2", "parent": "v1", "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"}}],
+      "rollback": "v2",
+      "expect": {"verdict": "total", "delta": []}
+    },
+    {
+      "name": "retiring_a_genesis_dimension_rolls_back_only_partially",
+      "why": "μ is not injective: RetireDim forgets, and the dimension's declared default was never recorded anywhere. Δ NAMES it. Reporting this as Total would be the same class of lie as a clamp reported as an admit.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [{"id": "v2", "parent": "v1", "edit": {"kind": "RetireDim", "name": "moisture"}}],
+      "rollback": "v2",
+      "expect": {"verdict": "partial", "delta": ["moisture"], "inverse_kind": "AddDim"}
+    },
+    {
+      "name": "folding_the_log_recovers_the_default_and_upgrades_to_total",
+      "why": "The FREE form of 'journal the pre-image': the AddDim that introduced the dimension is already in the history, so μ⁻¹ is a lookup rather than an inference — no extra storage bought it.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [
+        {"id": "v2", "parent": "v1", "edit": {"kind": "AddDim", "name": "nutrients", "default": 7}},
+        {"id": "v3", "parent": "v2", "edit": {"kind": "RetireDim", "name": "nutrients"}}
+      ],
+      "rollback": "v3",
+      "expect": {"verdict": "total", "delta": []}
+    },
+    {
+      "name": "an_explicit_pre_image_upgrades_partial_to_total",
+      "why": "The PAID form: storage bought exactness for a dimension the log could not account for. A lossy migration becomes losslessly reversible.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [
+        {"id": "v1b", "parent": "v1", "edit": {"kind": "AddOp", "name": "noop"}, "pre_image": {"moisture": {"level": 0}}},
+        {"id": "v2b", "parent": "v1b", "edit": {"kind": "RetireDim", "name": "moisture"}}
+      ],
+      "rollback": "v2b",
+      "expect": {"verdict": "total", "delta": []}
+    },
+    {
+      "name": "genesis_has_nothing_before_it",
+      "why": "The base of the DAG is not a rollback target.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [],
+      "rollback": "v1",
+      "expect": {"error": "AtGenesis"}
+    },
+    {
+      "name": "an_unknown_version_is_named",
+      "why": "A refusal that cannot say which version is an alarm, not a diagnosis.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [],
+      "rollback": "nope",
+      "expect": {"error": "UnknownVersion"}
+    }
+  ],
+  "groupoid_cases": [
+    {
+      "name": "each_definition_is_its_own_identity",
+      "why": "The groupoid has an identity per object, not one global identity. Rolling back to where you already are does nothing and restores everything.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [],
+      "from": "v1", "to": "v1",
+      "expect": {"total": true, "steps": []}
+    },
+    {
+      "name": "rollback_along_a_path_composes_the_inverses",
+      "why": "Rollback is arrow reversal along a path in the version DAG — newest first, because that is the order the arrows reverse in.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [
+        {"id": "v2", "parent": "v1", "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"}},
+        {"id": "v3", "parent": "v2", "edit": {"kind": "AddOp", "name": "budget.summary"}}
+      ],
+      "from": "v3", "to": "v1",
+      "expect": {"total": true, "steps": ["RetireOp", "DropInv"]}
+    },
+    {
+      "name": "a_path_is_only_defined_where_the_branches_meet",
+      "why": "e₂ ∘ e₁ is defined ONLY when e₁'s codomain is e₂'s domain — the groupoid is partial, and that partiality is the point. Two siblings have no path between them, and inventing one would be the near-miss the article warns about (a group, where everything composes).",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [
+        {"id": "left", "parent": "v1", "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"}},
+        {"id": "right", "parent": "v1", "edit": {"kind": "AddOp", "name": "budget.summary"}}
+      ],
+      "from": "left", "to": "right",
+      "expect": {"error": "NoPath", "each_reaches_common_ancestor": true}
+    },
+    {
+      "name": "a_chain_is_no_more_restorable_than_its_worst_link",
+      "why": "One lossy arrow makes the composed reversal lossy. The weakest verdict on the path wins — anything else would let a Total report hide a Partial step.",
+      "genesis": {"invariants": [], "operators": []},
+      "commits": [
+        {"id": "v2", "parent": "v1", "edit": {"kind": "AddInv", "id": "floor", "expression": "moisture.level >= 0"}},
+        {"id": "v3", "parent": "v2", "edit": {"kind": "RetireDim", "name": "moisture"}},
+        {"id": "v4", "parent": "v3", "edit": {"kind": "AddOp", "name": "budget.summary"}}
+      ],
+      "from": "v4", "to": "v1",
+      "expect": {"total": false, "delta": ["moisture"], "step_count": 3}
+    }
+  ]
+}

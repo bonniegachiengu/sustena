@@ -88,6 +88,7 @@ conformance/
     editing.json        the meta-gate on the definition (spec, R2)
     constraints.json    D(s,s') — rate/monotone/conservation (spec, R2)
     compose.json        checked composition of pathways (spec, R2)
+    version.json        definition DAG + rollback algebra (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -137,3 +138,13 @@ it is a bug** — nothing silently differs.
   1936), and the difference is that Rust returns a verdict and carries
   `runtime_guard_required` where Python has no verdict at all. A test asserts
   both notes stay.
+
+- **`version.json` — rust-ahead-of-python.** The reference engine does the
+  opposite of this module: `update_definition` runs `UPDATE sustain_templates SET
+  spec_json = ?, version = ?`, an in-place overwrite that destroys the
+  predecessor. No history table, no parent pointer, no `D_{n-1}`. The block notes
+  the breadcrumb Python *does* keep — an incrementing integer and `updated_at`,
+  which says *that* something changed but not what, which edit, or by whom — and
+  records that **neither** engine can restore what was genuinely forgotten
+  (μ is not injective; Fagin 2007). The difference is that this one says so, with
+  Δ naming the dimensions. A test asserts both notes stay.
