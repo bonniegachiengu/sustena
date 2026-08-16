@@ -91,6 +91,7 @@ conformance/
     version.json        definition DAG + rollback algebra (spec, R2)
     migrate.json        μ + Expand–Migrate–Contract      (spec, R2)
     region.json         V as a region · urgency=d(s,V)   (spec, R2)
+    detect.json         EWMA + CUSUM over the W series   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -171,3 +172,16 @@ it is a bug** — nothing silently differs.
   a violated cross-dimension relation, because a boolean has no natural distance
   — Rust names them and marks the weighted distance a lower bound instead of
   fabricating a penalty.
+
+- **`detect.json` — rust-ahead-of-python.** The reference has no time series at
+  all — its urgency is a scalar computed fresh per render — so there is nothing
+  for a detector to run over, and EWMA/CUSUM are both grep-0. **Counterweight,
+  asserted by a test:** the reference *does* have a real attention budget
+  (`curated_ui.py`'s knapsack), and budgeting *what* to show is a different
+  question from deciding *whether* anything changed enough to warrant showing —
+  a knapsack always fills its slots. The block also records the one place this
+  implementation **departs from the article**: §VI's pseudocode zeroes `S_pos`
+  before `classify()` reads it, which would make every upward shift report INFO
+  and never escalate. The prose is unambiguous, so the ordering is the error; it
+  is implemented per the prose and the departure is documented rather than made
+  silently.

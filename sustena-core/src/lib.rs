@@ -51,11 +51,13 @@
 //! | Version history | [`version`] | R2 |
 //! | Migration (μ, EMC) | [`migrate`] | R2 |
 //! | V as a region · urgency | [`region`] | R2 |
+//! | EWMA + CUSUM detectors | [`detect`] | R2 |
 
 pub mod admission;
 pub mod approval;
 pub mod compose;
 pub mod council;
+pub mod detect;
 pub mod editing;
 pub mod error;
 pub mod event;
@@ -82,6 +84,9 @@ pub use compose::{
     Rejected, Step, WpResult,
 };
 pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalStatus, ResolutionInput, VoteChoice};
+pub use detect::{
+    classify, Alert, Cusum, CusumSpec, DetectorError, Ewma, Reading, Severity, Shift, Watch,
+};
 pub use editing::{
     admit_edit, safe, typecheck, AuthorityError, CouncilMint, Definition, Edit, EditAdmission,
     EditAuthority, EditEffect, EditError, EditToken, Governance, Instance, Irreversible, Migration,

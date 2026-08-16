@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region** cases (divergences recorded) |
-| Rust tests | **255 unit · 54 conformance tests** across 8 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect** cases (divergences recorded) |
+| Rust tests | **275 unit · 61 conformance tests** across 9 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -98,7 +98,7 @@ Ordered by dependency, not importance.
 
 | # | Gap | Article |
 |---|---|---|
-| 🔨 23 | ~~urgency is a single `pct`~~ — **the urgency half is DONE in Rust** (`region.rs`, 2026-08-12): V is a first-class region and `urgency(s) = d(s,V)` replaces the `pct` proxy *and* its `allocated <= 0 → 0.0` blind spot. **CUSUM/EWMA over the `W` series remains open** — a time-series detector over the signal, and the immediate follow-on. Kalman is deliberately NOT on this list: MON-11's fit caveat says the observability apparatus assumes a continuous ODE and is a loose import for event-sourced state. Python unchanged. | Monitor · PERCEPT |
+| ~~23~~ | ~~No Kalman / EWMA / CUSUM — urgency is a single `pct`~~ — **DONE in Rust** across two slices (2026-08-12): `region.rs` made `urgency(s) = d(s,V)` real (replacing the `pct` proxy *and* its `allocated <= 0 → 0.0` blind spot), and `detect.rs` added **EWMA + CUSUM** over that series plus the severity classification that is the **formal Monitor→Controller boundary**. **Kalman is a declined import, not a gap** — MON-11's own fit caveat says it assumes a continuous ODE that discrete event-sourced state is not, and the Sustena-native form now ships end to end. Python unchanged. | Monitor · PERCEPT |
 | 24 | No MonitorEngine; scheduling external, no heartbeats | Monitor |
 | 25 | Widget type-checker exists with **no application call site** | PERCEPT |
 

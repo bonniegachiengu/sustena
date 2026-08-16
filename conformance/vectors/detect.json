@@ -1,0 +1,175 @@
+{
+  "conformance_version": 1,
+  "slice": "detect",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Monitor - Formal Execution.md, §V (EWMA — smooth telemetry without lag) and §VI (Anomaly detection — when to stop watching and start looking)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the detector layer over the W = d(s,V) series: EWMA smoothing, CUSUM for persistent shifts, and the severity classification that IS the Monitor→Controller boundary. Authored from the article, not generated from the reference engine.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-12",
+    "statement": "The reference engine has no time series at all, so it has nothing for a detector to run over.",
+    "term_by_term": {
+      "a W series to detect over": "RUST-AHEAD, and prerequisite. The reference's urgency is `pct = spent/allocated` computed fresh per render — a single scalar, not a series. There is no history of the quantity, so there is nothing to smooth or accumulate. This module could not exist there until region.rs's d(s,V) did.",
+      "EWMA (§V)": "RUST-AHEAD. Grep-0. Raw values go straight to the surface, which is the jitter §V opens by describing — 'a budget ring that flickers every second trains the eye to ignore it'.",
+      "CUSUM (§VI)": "RUST-AHEAD. Grep-0. The reference has no notion of a PERSISTENT shift: every reading is judged alone, so 5% over for ten consecutive days and one 50% spike that corrects are indistinguishable to it.",
+      "the Monitor→Controller boundary": "RUST-AHEAD. §VI calls the CUSUM detector 'the formal boundary between watching and looking'. In the reference there is no boundary because there is no detector — surfacing is decided by the Curated UI's knapsack on a per-render urgency score, with no concept of escalation."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The reference DOES have a real attention budget: curated_ui.py's knapsack picks ~4 widgets by salience, and that genuinely limits what a person is shown. But budgeting WHAT to show is not the same as deciding WHETHER anything has changed enough to warrant showing — a knapsack always fills its slots. CUSUM answers a question the knapsack never asks.",
+    "an_article_defect_levelled_up_not_copied": "§VI's pseudocode zeroes S_pos BEFORE calling classify(), which reads max(S_pos, S_neg)/h — so an upward shift would report excess ≈ 0 and classify INFO, never escalating however extreme. The prose is unambiguous (> 3.0 → CRITICAL), so the ordering is the error, not the rule. Implemented as the prose specifies: the excess is captured at the moment of the alert, then the accumulator resets. Recorded here rather than silently 'fixed'.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. The detectors are a new additive module and touch no existing gate path."
+  },
+  "ewma_cases": [
+    {
+      "name": "the_first_observation_seeds_the_level",
+      "why": "Starting from zero would make every series appear to ramp up from nothing — a fabricated transient in the one signal everything else trusts.",
+      "alpha": 0.1,
+      "series": [100.0],
+      "expect": {"levels": [100.0]}
+    },
+    {
+      "name": "smoothing_converges_on_a_new_level_rather_than_jumping_to_it",
+      "why": "§V's whole purpose: smooth signal that stays responsive. Raw telemetry jitters, and a widget that flickers trains the eye to ignore it.",
+      "alpha": 0.5,
+      "series": [0.0, 10.0, 10.0, 10.0],
+      "expect": {"levels": [0.0, 5.0, 7.5, 8.75]}
+    },
+    {
+      "name": "a_smaller_alpha_smooths_harder",
+      "why": "The declared tradeoff. A budget ring can be cosmetically smooth; a constraint-health indicator must respond within seconds. Same series, two declared α, two different answers.",
+      "compare": [{"alpha": 0.8}, {"alpha": 0.1}],
+      "series": [0.0, 100.0],
+      "expect": {"first_responds_faster": true}
+    },
+    {
+      "name": "the_half_life_says_what_the_chosen_alpha_actually_buys",
+      "why": "'α = 0.1' says little to whoever has to argue about it; 'half-life ≈ 7 updates' says what it costs. These are the article's own worked values.",
+      "half_lives": [{"alpha": 0.1, "approx": 6.58}, {"alpha": 0.4, "approx": 1.36}]
+    },
+    {
+      "name": "alpha_is_bounded_at_both_ends",
+      "why": "α = 1 is no smoothing (use the raw series) and α = 0 never moves at all. Both endpoints are excluded deliberately.",
+      "rejected": [0.0, 1.0, -0.5, 1.5],
+      "accepted": [0.5]
+    }
+  ],
+  "cusum_cases": [
+    {
+      "name": "a_small_persistent_drift_alerts",
+      "why": "THE property CUSUM exists for, and the reason it is not a threshold. W sitting at 2 against an expected 0 adds (2 − 0 − 1) = 1 per step, so S⁺ crosses h = 10 on the eleventh.",
+      "spec": {"mu_0": 0.0, "delta": 1.0, "h": 10.0},
+      "series": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0],
+      "expect": {"alerts_at_step": 11, "shift": "UPWARD_SHIFT"}
+    },
+    {
+      "name": "a_single_much_larger_spike_that_corrects_does_not",
+      "why": "THE PROOF OF VALUE, and the article's own comparison: a budget 5% over for ten consecutive days is more alarming than a single 50% spike that immediately corrects. Here the spike is 4.5× the drift value of the case above and still never fires, because it does not persist — it decays back to zero on its own.",
+      "spec": {"mu_0": 0.0, "delta": 1.0, "h": 10.0},
+      "series": [9.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "expect": {"alerts_at_step": null, "s_pos_after": 0.0}
+    },
+    {
+      "name": "the_accumulator_resets_when_the_process_returns_to_normal",
+      "why": "Evidence for a shift that stopped is not kept forever. The cumulative sum grows on a persistent shift and resets on return to normal — both halves matter.",
+      "spec": {"mu_0": 0.0, "delta": 1.0, "h": 10.0},
+      "series": [2.0, 2.0, 2.0, 2.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "expect": {"alerts_at_step": null, "s_pos_after": 0.0}
+    },
+    {
+      "name": "a_downward_shift_is_detected_too",
+      "why": "S⁻ is not decoration. On a W series a sustained DROP is the household recovering — moving back toward the viable region — and that is worth knowing as much as drifting away.",
+      "spec": {"mu_0": 10.0, "delta": 1.0, "h": 10.0},
+      "series": [8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0],
+      "expect": {"alerts_at_step": 11, "shift": "DOWNWARD_SHIFT"}
+    },
+    {
+      "name": "delta_sets_the_smallest_shift_worth_noticing",
+      "why": "A drift inside the δ band never accumulates at all. That is the declared parameter doing its job, not the detector missing something — δ IS 'the minimum shift you care about detecting'.",
+      "spec": {"mu_0": 0.0, "delta": 5.0, "h": 10.0},
+      "series": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0],
+      "expect": {"alerts_at_step": null, "s_pos_after": 0.0}
+    },
+    {
+      "name": "the_declared_threshold_changes_when_a_person_is_interrupted",
+      "why": "h is 'how much evidence do you want before being interrupted' — a judgement about THIS household, which is exactly why it is a spec field and not a constant. Same series, two declared patiences, two different answers.",
+      "series": [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0],
+      "compare": [
+        {"spec": {"mu_0": 0.0, "delta": 1.0, "h": 3.0}, "fires": true},
+        {"spec": {"mu_0": 0.0, "delta": 1.0, "h": 30.0}, "fires": false}
+      ]
+    }
+  ],
+  "severity_cases": [
+    {
+      "name": "the_severity_table_is_the_articles",
+      "why": "excess = max(S⁺,S⁻)/h, with strict inequalities exactly as §VI writes them.",
+      "table": [
+        {"excess": 1.0, "severity": "INFO"},
+        {"excess": 1.5, "severity": "INFO"},
+        {"excess": 1.6, "severity": "WARNING"},
+        {"excess": 3.0, "severity": "WARNING"},
+        {"excess": 3.1, "severity": "CRITICAL"}
+      ]
+    },
+    {
+      "name": "warning_and_critical_cross_the_boundary_and_info_does_not",
+      "why": "§VI: 'the CUSUM detector is the formal boundary between watching and looking.' CRITICAL and WARNING escalate to the Controller; INFO stays in the Monitor. This is the seam CTL-7 will consume.",
+      "escalates": ["WARNING", "CRITICAL"],
+      "stays": ["INFO"]
+    },
+    {
+      "name": "a_severe_shift_escalates_rather_than_reporting_info",
+      "why": "THE ARTICLE'S PSEUDOCODE DEFECT, pinned. It zeroes S_pos before calling classify(), which reads max(S_pos,S_neg)/h — so an upward shift would always report excess ≈ 0 and classify INFO, never escalating however extreme. The prose is unambiguous, so the ordering is the error. The excess is captured at the moment of the alert, then the accumulator resets.",
+      "spec": {"mu_0": 0.0, "delta": 0.0, "h": 1.0},
+      "series": [5.0],
+      "expect": {"excess": 5.0, "severity": "CRITICAL", "escalates": true, "s_pos_after": 0.0}
+    }
+  ],
+  "declaration_cases": [
+    {
+      "name": "a_well_formed_spec_typechecks",
+      "spec": {"mu_0": 0.0, "delta": 1.0, "h": 10.0},
+      "why": "The ordinary path.",
+      "expect": {"well_formed": true}
+    },
+    {
+      "name": "a_zero_threshold_is_rejected",
+      "why": "h = 0 alerts on everything, which is the same as no detector at all — and silence-by-noise is worse than silence.",
+      "spec": {"mu_0": 0.0, "delta": 1.0, "h": 0.0},
+      "expect": {"well_formed": false, "error": "BadThreshold"}
+    },
+    {
+      "name": "a_negative_delta_is_rejected",
+      "why": "A negative minimum-shift-worth-detecting inverts the accumulator.",
+      "spec": {"mu_0": 0.0, "delta": -1.0, "h": 10.0},
+      "expect": {"well_formed": false, "error": "BadDelta"}
+    }
+  ],
+  "pipeline_cases": [
+    {
+      "name": "a_household_sitting_inside_v_never_escalates",
+      "why": "W = 0 throughout. Nothing to look at, and watching stays cheap — which is the point of separating the two.",
+      "alpha": 0.5,
+      "spec": {"mu_0": 0.0, "delta": 1.0, "h": 10.0},
+      "series": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "expect": {"any_alert": false, "any_escalation": false}
+    },
+    {
+      "name": "a_household_drifting_out_of_v_eventually_gets_looked_at",
+      "why": "The end-to-end shape: a sustained distance from the viable region crosses the boundary. NOT on the first sample — that would be a threshold, not a CUSUM.",
+      "alpha": 0.5,
+      "spec": {"mu_0": 0.0, "delta": 1.0, "h": 10.0},
+      "series": [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0],
+      "expect": {"any_alert": true, "first_alert_after_step": 1}
+    },
+    {
+      "name": "the_pipeline_smooths_before_it_detects",
+      "why": "CUSUM sees the EWMA level, not the raw series. Feeding it raw would let a single jittery sample push the accumulator — exactly the spike sensitivity CUSUM exists to avoid. The two detectors are a pipeline, not alternatives. The raw W is still carried alongside, because that is what a person is told.",
+      "alpha": 0.5,
+      "spec": {"mu_0": 0.0, "delta": 1.0, "h": 10.0},
+      "series": [20.0, 0.0],
+      "expect": {"raw": [20.0, 0.0], "smoothed": [20.0, 10.0]}
+    }
+  ]
+}
