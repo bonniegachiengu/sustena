@@ -93,6 +93,7 @@ conformance/
     region.json         V as a region · urgency=d(s,V)   (spec, R2)
     detect.json         EWMA + CUSUM over the W series   (spec, R2)
     controller.json     Lyapunov · Sheridan · SNR · loop (spec, R2)
+    kernel.json         Viab_T(V) + runway R(s)          (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -199,3 +200,14 @@ it is a bug** — nothing silently differs.
   point, and the Controller's own Additions correct it to `W(s) = d(s,V)` — the
   viable region is the desired set. Implemented per the Additions, and recorded
   rather than made silently.
+
+- **`kernel.json` — rust-ahead-of-python.** `Viab` and `viability_kernel` are
+  grep-0, and runway followed from that: the Operative article's own Note says
+  *"no kernel anywhere. Hence no runway: `burn_rate_analysis` computes a RATE,
+  not an exit time — and cannot, because V is not yet a region to exit."*
+  **Counterweight, asserted by a test:** a burn rate is genuinely useful and is
+  what most household finance tools show; what it cannot do is name a date. The
+  block also states the **scoping of both honest limitations §VI names** — exact
+  kernels are exponential (so the exact form runs over an enumerated space), and
+  `Viab^H` is a superset and therefore optimistic (so it is a separate type that
+  cannot claim to be a guarantee). A test asserts both stay stated.

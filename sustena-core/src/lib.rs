@@ -53,6 +53,7 @@
 //! | V as a region · urgency | [`region`] | R2 |
 //! | EWMA + CUSUM detectors | [`detect`] | R2 |
 //! | Controller decision-math | [`controller`] | R2 |
+//! | Viability kernel · runway | [`kernel`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -65,6 +66,7 @@ pub mod error;
 pub mod event;
 pub mod fold;
 pub mod inverse;
+pub mod kernel;
 pub mod migrate;
 pub mod mutation;
 pub mod operator;
@@ -103,6 +105,10 @@ pub use event::{dedupe, merge, order, CausalStamp, Event, Observation, Provenanc
 pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};
 pub use inverse::{invert, is_reversible, InverseError};
+pub use kernel::{
+    is_stable_toward_kernel, kernel_margin, runway, viability_kernel, viability_kernel_horizon,
+    Kernel, KernelError, KernelStability, Move, Obligation, Runway, Space,
+};
 pub use migrate::{Applied, Compatibility, Emc, EmcVersionIds, MigrateError, Mu, StateMove};
 pub use mutation::Mutation;
 pub use operator::{
