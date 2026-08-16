@@ -1,0 +1,172 @@
+{
+  "conformance_version": 1,
+  "slice": "division",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Multiparty - Formal Execution.md, §VII (Division of Labor — why a node would spend itself; kin selection rb>c, ESS, costly signalling, and the assignment optimisation)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the third constraint. Coverage and redundancy are ordinary engineering; `rb > c` is the one §VII says is usually left implicit and shouldn't be — an assignment that violates it is not merely unfair, it is UNSTABLE and will be defected out of, announced or not.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "Nothing in the reference assigns roles, and nothing checks whether an arrangement would hold. `kin selection`, `rb > c`, `evolutionarily`, `hamilton`, `redundancy`, `relatedness`, `shared_interest`, `role_assign` and `assign_role` are all grep-0 in apps/api/sustena/. There is no cost function over pairings, no coverage or redundancy constraint, and no notion that an arrangement could be individually rational or not.",
+    "★_the_word_role_appears_and_never_once_means_this": "16 word-boundary hits for `role`/`roles` in the reference, in four distinct senses, and none of them is a division of labour. (1) `{\"role\": \"user\"}` — the Anthropic Messages API's own protocol field, in claude_client.py and orchie.py; a wire-format key, not a job. (2) `_OPERATIVE_ROLE_LABELS` / `\"role\": \"AI orchestrator\"` / `\"role\": \"sub-operative\"` — display strings for the operative cards in devui.py and the widget registry. (3) `for sid, role in ((parent_sustain_id, \"parent\"), (child_sustain_id, \"child\"))` — a loop variable naming a position in an error message. (4) `role_in_family` in habitat.json — a declared FREE-TEXT spec parameter, a person's own self-description; it carries no cost, no benefit, no share, and nothing anywhere reads it to decide who does what. The nearest thing in the codebase to a §VII role is a label somebody types about themselves.",
+    "term_by_term": {
+      "cost_i(role) — cost as a property of the PAIRING": "RUST-AHEAD. grep-0. Nothing in the reference models a role as costing different members differently, which is the entire reason there is something to minimise.",
+      "coverage": "RUST-AHEAD as a constraint. One `coverage` hit and it is a comment about parser coverage. The reference has no roles to leave uncovered.",
+      "redundancy ≥ ρ": "RUST-AHEAD. grep-0. Note this is NOT the same as the reference's honest reporting of an excluded child in compute_rollup — that is about a reading being incomplete, not about surviving a loss.",
+      "★ stability (rb > c)": "RUST-AHEAD, and it is the whole of this slice. grep-0 for every term. The reference has no way to say that an arrangement is individually irrational and will come apart.",
+      "r — the share that comes back through the composed Sustain": "★ THE COUNTERWEIGHT, and it is a real one. The quantity r is DERIVED FROM, and its source is AT PARITY. compute_rollup / _aggregate_from_child_states already fold each member's own value into the composed total and return `included: [{member, value}]` per aggregate — the exact per-member share this slice normalises into r. As of 2 Aug 2026 the roll-up folds the PARENT's own contribution in too, tagged `is_self`, so the denominator genuinely means everything. The reference computes the numerator and the denominator, member by member, and never forms the ratio. It is one division away from having r and does not take it, because it has nothing to spend r on.",
+      "ESS — no node does better by unilaterally defecting": "RUST-AHEAD. `defect` returns 3 hits in the reference and all three are the software sense — 'a defect in the spec or the code', 'exactly the defect class', 'a real defect'. A bug, not a departure from a strategy.",
+      "costly signalling": "RUST-AHEAD. One `costly` hit: 'meters as nothing, not as a failed-but-costly attempt', a comment in the pawa meter about a refused operator run. Adjacent in vocabulary, unrelated in kind."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "ESS (1058 hits, 0 real)": "★ Worth naming precisely because the count is alarming and the truth is zero. Word-boundary `ESS` returns 0. The 1058 are substrings: `message` alone accounts for 432, plus `Message` 20, `process` 37, `less` 37, `success` 29, `assess` 2. Not one is Maynard Smith.",
+      "role (16 hits, 0 real)": "See the four senses above. The word is present and the concept is not.",
+      "defect (3 hits, 0 real)": "All three are 'defect' as in a bug in code, not as in departing from a strategy.",
+      "coverage (1 hit, 0 real)": "A comment about broadening PARSER coverage.",
+      "costly (1 hit, 0 real)": "A pawa-meter comment about a refused run not being metered as a failed-but-costly attempt."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The roll-up, which is genuinely r's source and genuinely at parity — see term_by_term. What it does not have is anything that spends r: no roles, no costs, no constraints, and therefore no arrangement that could be stable or unstable. The reference's division of labour is implicit and human — a household decides who does what by talking about it — which is a completely coherent design for a single-operator engine and stops being sufficient at exactly the point where a body has to arrange itself without a person in the loop. Naming this as a gap is not a criticism of the reference; it is naming what the next thing needs.",
+    "the_honest_reading_of_ESS": "§VII gives kin selection and ESS as two separate answers and then names `rb > c` as THE stability constraint. They coincide exactly, for the deviation §VII names: a holder's payoff is r·b − c, a unilateral defector abandons the role so the benefit is not produced and its payoff is 0, and staying beats defecting iff r·b > c. So this is not an approximation of the ESS condition — it is it, for that deviation. **The limit, because the interaction is real and worth stating rather than papering over:** that derivation assumes the defector is PIVOTAL. Under ρ > 1 a single defector is by construction not pivotal — the other holders still produce b, so a defector would keep receiving r·b while paying nothing, and defecting would pay whenever c > 0. That is the free-rider problem, and resolving it needs the group's RESPONSE to defection (replacement, exclusion, a repeated game), which §VII does not specify and this build does not invent. `rb > c` is applied per-holder exactly as the article states it, with the reading disclosed.",
+    "the_honest_limits": "Three. (1) COVERAGE IS THE ρ=1 CASE of redundancy — the same inequality at different values. They are reported separately because 'nobody is doing it' is a different failure from 'only one person is doing it', but inventing a distinction the arithmetic does not have would be worse than saying so. (2) ONE ROLE PER MEMBER — §VII's 'the coordinator/worker/replica split' is a partition, and that is what is built; a member holding two roles at once is a different model, not a generalisation of this one. (3) THE SEARCH IS EXHAUSTIVE AND EXACT AND REFUSES RATHER THAN APPROXIMATING — a household-scale body is small, and above the declared limit `assign` errors rather than returning a heuristic's answer labelled as the minimum.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive, and it consumes the Population's node set without modifying it."
+  },
+  "fixture": {
+    "why": "A four-member body whose composed benefit comes back unequally — shares of 40/30/20/10 — so dilution is visible rather than assumed. Three roles: a coordinator needed once, two workers, one replica. Σρ = 4 = the membership, so every member is placed and the split really is a partition.",
+    "stakes": {"ama": 40.0, "ben": 30.0, "cira": 20.0, "dee": 10.0},
+    "roles": [
+      {"id": "coordinator", "b": 100.0, "rho": 1},
+      {"id": "worker", "b": 60.0, "rho": 2},
+      {"id": "replica", "b": 40.0, "rho": 1}
+    ],
+    "baseline_costs": {"coordinator": 3.0, "worker": 2.0, "replica": 1.0}
+  },
+  "shared_interest_cases": [
+    {
+      "name": "r_is_derived_from_the_rollup_and_sums_to_one",
+      "why": "★ §VII: r is 'the share of the benefit that comes back to the contributor through the composed Sustain' — which is exactly what the roll-up already computes per member. Normalising at the point of derivation makes Σr = 1 a property of the construction rather than of a caller's discipline: a member cannot get back more than the whole.",
+      "expect": {"total": 1.0, "ama": 0.4, "dee": 0.1}
+    },
+    {
+      "name": "a_single_member_body_has_r_of_one",
+      "why": "The degenerate case falls straight out and is worth pinning: with r = 1 stability collapses to b > c — the role simply has to be worth doing. There is nobody to dilute the return.",
+      "expect": {"r": 1.0}
+    },
+    {
+      "name": "shares_cannot_exceed_the_whole",
+      "why": "A share is a share OF something. Two members each declaring 0.7 of the same benefit is not an unfair split, it is not a split — refused at declaration rather than producing stability verdicts computed from an impossible denominator.",
+      "declared": [["a", 0.7], ["b", 0.7]],
+      "expect": {"error": "SharesExceedTheWhole"}
+    },
+    {
+      "name": "a_zero_rollup_is_refused_not_read_as_a_zero_share",
+      "why": "★ 0/0 is not r = 0, it is an unanswerable question — and answering it as 0 would silently make EVERY costly role unstable, producing a confident 'this body cannot arrange itself' from a body that simply had nothing to divide yet.",
+      "expect": {"error": "EmptyRollup"}
+    }
+  ],
+  "stability_cases": [
+    {
+      "name": "the_check_reports_every_number_it_used",
+      "why": "§VII: stability is 'a property of the assignment, checkable, not a hope about the members'. A verdict that cannot be re-derived from its own report is one you have to take on trust, which is the opposite of checkable. r, b, c, rb and the margin all come back with the answer.",
+      "member": "ama", "role": "coordinator",
+      "expect": {"r": 0.4, "b": 100.0, "c": 3.0, "rb": 40.0, "margin": 37.0, "holds": true}
+    },
+    {
+      "name": "dilution_destabilises_the_same_role_as_the_share_shrinks",
+      "why": "★ §VII's actual content, made observable: the identical role at the identical cost is stable for the member with the large share and unstable for the member with the small one. Cooperation is harder to sustain the more diluted your stake is — not a moral about generosity, an inequality about r.",
+      "role": "coordinator", "cost": 15.0,
+      "expect": {"ama": true, "dee": false}
+    },
+    {
+      "name": "a_role_that_benefits_nobody_is_stable_for_no_member_at_any_share",
+      "why": "★ b = 0 makes rb = 0, and 0 > c is false for every positive c and every r. So no assignment containing a costly-but-useless role can be stable, and no search for a generous enough member will find one. The check is about the role's own economics, not about who can be talked into it.",
+      "expect": {"stable_for_anyone": false}
+    },
+    {
+      "name": "a_free_role_is_stable_for_everyone_and_signals_nothing",
+      "why": "★ Costly signalling, as the one checkable thing it implies. A commitment is credible because a node that did not mean it would not pay — so c = 0 is stable trivially for every member and its acceptance is evidence of nothing. `signals_commitment` is false however comfortably the pairing holds.",
+      "expect": {"holds": true, "signals_commitment": false}
+    },
+    {
+      "name": "a_missing_cost_is_refused_never_read_as_free",
+      "why": "★ A cost defaulted to zero is always stable, so a forgotten declaration would turn into a confident 'this holds'. Refusing is the only honest reading of a number nobody supplied.",
+      "expect": {"error": "MissingCost"}
+    }
+  ],
+  "assignment_cases": [
+    {
+      "name": "a_stable_split_is_admitted_covered_and_redundant",
+      "why": "All three constraints at once, on the baseline body: every role filled, the worker role at its declared ρ = 2, and every pairing clearing rb > c. The case the constrained ones are measured against.",
+      "expect": {"assigned": true, "coordinator_holders": 1, "worker_holders": 2, "replica_holders": 1, "all_stable": true}
+    },
+    {
+      "name": "★_stability_is_binding_the_cheapest_split_is_refused_and_the_price_is_reported",
+      "why": "★★ THE PROOF OF VALUE, and the whole reason the third constraint is not decoration. Coordinating is made cheap for dee and dear for everyone else, so pure cost minimisation puts dee in the chair — and dee has the smallest share, r = 0.1, giving rb = 10 against c = 12. The unconstrained minimiser really does pick dee (asserted, not assumed); dee would defect out of it; so the stable minimiser picks someone else and the body pays MORE. Both totals are computed and compared side by side, so 'stability is bought' is a number rather than a claim — the same shape as the hysteresis band's two-transitions-against-five.",
+      "costs": {"dee": 12.0, "ama": 30.0, "ben": 30.0, "cira": 30.0},
+      "expect": {
+        "unconstrained_picks_dee_as_coordinator": true,
+        "dee_coordinator_stable": false,
+        "stable_avoids_dee_as_coordinator": true,
+        "price_of_stability_positive": true
+      }
+    },
+    {
+      "name": "a_member_with_no_stable_role_is_named_before_any_search",
+      "why": "★ Decided exactly, by inspection of one member's own row, rather than discovered by exhausting a space that never contained an answer. The report names the member and carries every failing check, so 'there is no arrangement' arrives with the reason attached.",
+      "expect": {"unfillable": "NoStableRole", "members": ["dee"]}
+    },
+    {
+      "name": "a_role_too_few_are_stable_in_cannot_reach_its_redundancy",
+      "why": "The second exact pre-flight: with b = 100 and c = 35 the rb column reads 40 · 30 · 20 · 10, so exactly one member clears it — and a role needing three holders cannot be staffed however the rest is arranged. Counted, not searched for.",
+      "expect": {"unfillable": "CannotMeetRedundancy", "role": "guard", "stable_candidates": 1, "needed": 3}
+    },
+    {
+      "name": "roles_needing_more_holders_than_the_body_has_are_refused_by_counting",
+      "why": "The third exact pre-flight, and the cheapest: Σρ against the membership. With one role per member this is decidable before anything is arranged, and reporting it as pigeonhole arithmetic is more useful than reporting an exhausted search.",
+      "expect": {"unfillable": "Oversubscribed", "required": 4, "members": 2}
+    },
+    {
+      "name": "the_search_is_deterministic",
+      "why": "Enumeration order is fixed and improvement is strictly-less-than, so the first minimum found wins and the same body always returns the same split. A core whose promise is reproducibility cannot answer this differently twice.",
+      "expect": {"identical": true}
+    }
+  ],
+  "refusal_cases": [
+    {
+      "name": "★_an_unstable_assignment_cannot_be_HELD_only_diagnosed",
+      "why": "★★ The structural half, and the reason this is a refusal rather than a warning. `Assignment` has private fields and no constructor taking a role→member map on trust: the only route to one is `assign`, which filters unstable pairings out of the candidate set BEFORE searching. So an unstable split is not a cheaper option that lost — it is not in the space. `diagnose` will tell you everything about a hand-proposed split, with the numbers, and still yields no `Assignment` for it. Refused structurally, flagged diagnostically.",
+      "proposed": [["dee", "coordinator"], ["ama", "worker"], ["ben", "worker"], ["cira", "replica"]],
+      "expect": {
+        "covers": true,
+        "is_redundant": true,
+        "is_stable": false,
+        "admissible": false,
+        "unstable_members": ["dee"],
+        "describe_contains": "defected out of"
+      }
+    },
+    {
+      "name": "coverage_and_redundancy_are_reported_separately",
+      "why": "They are the same inequality at ρ = 1 and ρ > 1, and they are still worth telling apart: 'nobody is doing it' and 'only one person is doing it' are different problems with different answers. A split leaving replica unheld and worker at one holder reports both, distinctly.",
+      "proposed": [["ama", "coordinator"], ["ben", "worker"]],
+      "expect": {"uncovered": ["replica"], "worker": [1, 2], "replica": [0, 1]}
+    },
+    {
+      "name": "a_role_nobody_must_hold_is_not_a_role",
+      "why": "ρ = 0 would make coverage vacuous — a role that is satisfied by being ignored. Refused at declaration, where it is a typo, rather than at assignment, where it is a silently trivial constraint.",
+      "expect": {"error": "ZeroRedundancy"}
+    }
+  ],
+  "composition_cases": [
+    {
+      "name": "the_node_set_comes_from_the_population_not_a_second_roster",
+      "why": "★ The same body the coordination layer already declared, read here as 'who can hold a role' — the same one-topology-two-readings move `Router::over` makes on the same `Population`. Reinventing a membership list beside the one that exists is how two rosters drift apart.",
+      "expect": {"ok": true}
+    },
+    {
+      "name": "a_node_with_no_declared_share_is_refused_in_both_directions",
+      "why": "★ rb > c is not computable without r, and defaulting a missing share to 0 (never stable) or 1 (always stable) would each be a fabricated answer with a confident verdict attached. A share declared for someone who is not in the body is the mirror error: a share of a body they are not in.",
+      "expect": {"missing_share": "NodesWithoutShare", "stranger": "SharesWithoutNode"}
+    }
+  ]
+}

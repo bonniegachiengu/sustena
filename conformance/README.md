@@ -106,6 +106,7 @@ conformance/
     router.json         Physarum conductance routing    (spec, R2)
     vclock.json         vector clocks · concurrency     (spec, R2)
     disaggregation.json θ↑/θ↓ hysteresis · dispersal    (spec, R2)
+    division.json       role assignment · rb > c        (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -470,3 +471,31 @@ it is a bug** — nothing silently differs.
   value"*, singular, which is exact for a snapshot dimension; for a contested
   one the settle keeps what the merge preserves, recorded as a reading of a
   singular noun rather than a correction to the article.
+
+- **`division.json` — rust-ahead-of-python.** Nothing in the reference assigns
+  roles or checks whether an arrangement would hold: `kin selection`,
+  `rb > c`, `evolutionarily`, `hamilton`, `redundancy`, `relatedness` and
+  `role_assign` are all grep-0. **The word `role` appears sixteen times and
+  never once means this**, in four distinct senses the file names so nobody
+  re-derives them — the Anthropic Messages API's own `{"role": "user"}`
+  protocol field, three display labels for the operative cards, a loop
+  variable naming *"parent"* / *"child"* in an error message, and
+  `role_in_family`, a declared **free-text** habitat parameter a person types
+  about themselves. The nearest thing in the codebase to a §VII role is a label
+  somebody writes about their own household position. **The counterweight is
+  specific and real:** `r` — *the share of the benefit that comes back to the
+  contributor through the composed Sustain* — is derived from the roll-up, and
+  **the roll-up is AT PARITY**. `compute_rollup` already returns
+  `included: [{member, value}]` per aggregate, and since 2 Aug 2026 folds the
+  parent's own contribution in too. The reference computes the numerator and
+  the denominator, member by member, and **never forms the ratio** — because it
+  has nothing to spend `r` on. Its division of labour is implicit and human,
+  which is coherent for a single-operator engine and stops being sufficient
+  where a body must arrange itself with nobody in the loop. One grep count is
+  named as the false positive it is: **`ESS` returns 1058 hits and 0 real ones**
+  — `message` alone accounts for 432, and word-boundary `ESS` is zero. The file
+  also discloses **one limit of the maths, not of the build**: `rb > c` is
+  exactly the ESS condition for the deviation §VII names, *provided the
+  defector is pivotal* — and `ρ > 1` structurally makes them not, which is the
+  free-rider problem. Resolving it needs the group's response to defection,
+  which §VII does not specify and this build does not invent.

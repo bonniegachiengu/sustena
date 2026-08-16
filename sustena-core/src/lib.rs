@@ -66,6 +66,7 @@
 //! | Physarum router | [`router`] | R2 |
 //! | Vector clocks · concurrency | [`vclock`] | R2 |
 //! | Disaggregation · hysteresis | [`disaggregation`] | R2 |
+//! | Division of labour · `rb > c` | [`division`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -75,6 +76,7 @@ pub mod controller;
 pub mod council;
 pub mod detect;
 pub mod disaggregation;
+pub mod division;
 pub mod editing;
 pub mod ensemble;
 pub mod error;
@@ -126,6 +128,10 @@ pub use detect::{
 };
 pub use disaggregation::{
     Assembly, AssemblyState, Band, BandPosition, BandTransition, DisaggregationError, Dispersal,
+};
+pub use division::{
+    Assignment, AssignmentOutcome, Diagnosis, Division, DivisionError, Role, SharedInterest,
+    StabilityCheck, Unfillable, SEARCH_LIMIT,
 };
 pub use editing::{
     admit_edit, safe, typecheck, AuthorityError, CouncilMint, Definition, Edit, EditAdmission,
