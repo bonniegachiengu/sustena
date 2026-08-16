@@ -96,6 +96,7 @@ conformance/
     kernel.json         Viab_T(V) + runway R(s)          (spec, R2)
     tenet.json          T:S×A→Δ(S) + backward induction  (spec, R2)
     ensemble.json       Ω · invariant actions · D · δ   (spec, R2)
+    signal.json         relayed refractory pulse (§III) (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -257,3 +258,23 @@ it is a bug** — nothing silently differs.
   holds only over the *declared* scenarios, which is a property of Shell/Wack's
   practice rather than a Rust shortfall — what is encoded is that the claim
   cannot be made without its scope.
+
+- **`signal.json` — rust-ahead-of-python.** The reference has no Signal
+  primitive: `refractory`, `excitable`, `FitzHugh`, `Nagumo`, `theta_fire`,
+  `RESTING`, `EXCITED` and `neighbour` are all grep-0. The block **names four
+  greppable false positives**, of which the sharpest is `pulse` — five hits,
+  every one the substring in *"imPULSE spending"* (`curator.py`'s
+  shopping-discipline utility). The other three: `relay` (a comment about
+  M-Pesa SMS, plus markers for a *planned* Phase-2 Mycelium worker), `propagat`
+  (Python **exception** propagation), and `quorum` (a canned string in
+  MockClaudeClient).
+  **Counterweight, asserted by a test:** `EventBus` is real, shipped and
+  load-bearing — the whole operator/event architecture runs on it. The precise
+  reason it is not this: dispatch asks **who subscribed**, a medium asks **who
+  is reachable**. Reach under dispatch is bounded by the publisher's subscriber
+  list; reach under relay is bounded by connectivity, so one origin recruits
+  nodes it has never heard of. A second note records that **the reference does
+  not need a refractory period, and that is the point** — `EventBus` cannot
+  echo because it does not relay, so it avoids the echo problem by not having
+  the capability that creates it. That is one engine not yet having the
+  problem, not two solving it differently.

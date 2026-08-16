@@ -56,6 +56,7 @@
 //! | Viability kernel · runway | [`kernel`] | R2 |
 //! | Tenet — T:S×A→Δ(S), Bellman | [`tenet`] | R2 |
 //! | Scenario ensembles · dead drops | [`ensemble`] | R2 |
+//! | Signal — relayed refractory pulse | [`signal`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -78,6 +79,7 @@ pub mod predicate;
 pub mod region;
 pub mod principal;
 pub mod schema;
+pub mod signal;
 pub mod state;
 pub mod tenet;
 pub mod transition;
@@ -132,6 +134,9 @@ pub use version::{
 pub use ensemble::{
     DeadDrop, DeadDropBook, DecisionNode, Ensemble, EnsembleAnalysis, EnsembleError, InvariantSet,
     ModelTemplate, Prob, Resolution, RewardBasis, Scenario,
+};
+pub use signal::{
+    Field, Fired, Phase, Pulse, Refusal, RefusalReason, SignalError, SignalSpec, StepReport,
 };
 pub use tenet::{
     backward_induct, rewards_from_region, BellmanSpec, Distribution, InversionPoint, Outcome,

@@ -17,8 +17,8 @@
 |---|---|
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
-| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel**, **16 tenet**, **18 ensemble** cases (divergences recorded) |
-| Rust tests | **357 unit · 111 conformance tests** across 13 binaries — all green |
+| Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel**, **16 tenet**, **18 ensemble**, **17 signal** cases (divergences recorded) |
+| Rust tests | **377 unit · 130 conformance tests** across 14 binaries — all green |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
@@ -491,4 +491,4 @@ knowing about before opening the next slice:
 - **N3 — a definition edit destroys its predecessor.** Sharper than #26: rollback has
   nothing to roll back *to*.
 
-*Last updated: 2026-08-16 — **T1 shipped in full** across two slices (`tenet.rs`: TEN-1/2/4/12; `ensemble.rs`: TEN-3/5/6/7 — 36 unit · 37 conformance between them). The operational spine now reads **Monitor ✅ · Tenet ✅ · Controller ✅**; what is left across T1/G1 is assembly (MonitorEngine, OODA, holarchy escalation) and time (TEN-8/TEN-9 re-inversion), not mathematics.*
+*Last updated: 2026-08-16 — **T1's mathematics shipped in full** across two slices (`tenet.rs`: TEN-1/2/4/12; `ensemble.rs`: TEN-3/5/6/7), then **the Signal primitive** (`signal.rs`: MUL-4, and half of MUL-15) — the SHARED spine input that **MON-13, CTL-3 and TEN-8** all ride, built once here rather than three times. The operational spine reads **Monitor ✅ · Tenet ✅ · Controller ✅**; what is left across T1/G1 is assembly (MonitorEngine, OODA, holarchy escalation) and time (TEN-8/TEN-9 re-inversion, now unblocked), not mathematics.*

@@ -1,0 +1,178 @@
+{
+  "conformance_version": 1,
+  "slice": "signal",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Multiparty - Formal Execution.md, §III (Excitable Media — The Relayed, Refractory Signal; FitzHugh 1961, Nagumo et al. 1962, Turing 1952) + the Additions (this paper is the canonical home of the Signal primitive; Monitor §2, Controller §3 and Tenet §4 all ride it)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the Signal primitive — the SHARED spine input (MUL-15). Authored from the article, not generated from the reference engine.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-16",
+    "statement": "The reference engine has no Signal primitive. refractory, excitable, FitzHugh, Nagumo, theta_fire, RESTING, EXCITED and neighbor/neighbour are all grep-0 in apps/api/sustena/. There is no node state machine, no relay, and no threshold on inbound.",
+    "the_four_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "pulse (5 hits)": "ALL FIVE are the substring in 'imPULSE spending' — curator.py's shopping-discipline utility function. Worth naming precisely because a bare grep count of 5 for 'pulse' in a codebase being checked for a pulse primitive is exactly the kind of hit that gets skimmed and believed.",
+      "relay (4 hits)": "None is a relay. One is transducer.py's comment about M-Pesa SMS 'relays of M-Pesa activity' (a message-forwarding sense, about bank texts). Three are procurement.py's marker/comment/docstring for a PLANNED Mycelium relay worker — explicitly 'Phase 2', not built, and a transport worker rather than an excitable node.",
+      "propagat (2 hits)": "Both are Python EXCEPTION propagation — operative_graph.py and sustain_engine.py docstrings about errors reaching the caller.",
+      "quorum (1 hit)": "A canned string inside MockClaudeClient's status reply ('council quorum met'). Mock prose, not a mechanism."
+    },
+    "term_by_term": {
+      "the three-phase node (§III)": "RUST-AHEAD. grep-0. Nothing in the reference gives a participant a state that determines whether it will respond. A subscriber responds to every matching event, always.",
+      "relay / emit_to(neighbors)": "RUST-AHEAD. EventBus dispatch is ONE HOP from the publisher to every subscriber of a topic. A subscriber never re-emits to its own neighbours, so nothing travels — reach is bounded by the publisher's subscriber list rather than by connectivity.",
+      "θ_fire on accumulated inbound": "RUST-AHEAD. A subscriber fires on each matching event individually; there is no accumulation and nothing to compare against a threshold, so spatial summation ('only if more than one of my neighbours agrees') is not expressible.",
+      "the refractory window": "RUST-AHEAD, and it does not merely lack an implementation — the reference has no place to put it. EventBus is scoped to a single sustain execution context and constructed per operator call, so no node state survives between calls even in principle.",
+      "no broadcaster required": "RUST-AHEAD, and this is the architectural difference rather than a missing feature. EventBus IS the broadcaster: every delivery originates from the publisher. In an excitable medium no node knows the field, and the field is recruited anyway."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "EventBus is real, shipped, and load-bearing — it persists events to the log and dispatches to subscribers with wildcard support, and it is what the whole operator/event architecture runs on. Topic dispatch is exactly the right mechanism for 'this happened, whoever cares should know'. It is not this because the two answer different questions: dispatch asks WHO SUBSCRIBED, a medium asks WHO IS REACHABLE. Reach under dispatch is bounded by the publisher's subscriber list; reach under relay is bounded by connectivity, so one origin recruits nodes it has never heard of.",
+    "the_reference_does_not_need_a_refractory_period_and_that_is_the_point": "Worth stating so the gap is not misread as a bug in Python. EventBus cannot echo, because it does not relay — a subscriber that receives an event does not re-emit it. So the reference avoids the echo problem by not having the capability that creates it. This is not two engines solving the same problem differently; it is one engine not yet having the problem.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific. The tick-driven logical clock is a core-has-no-clock constraint, not a language one.",
+    "not_a_divergence_in": "R1 behaviour. Signal is a new additive module with no dependency on any existing type and touches no gate path."
+  },
+  "spec": {
+    "why": "θ_fire and the refractory window are DECLARED, the same discipline as the region weights and the CUSUM parameters. Emission strength is declared too — see the trap below.",
+    "theta_fire": 1.0,
+    "refractory_ticks": 2,
+    "excited_ticks": 1,
+    "emit_strength": 1.0,
+    "emit_strength_note": "At the default of 1.0, θ_fire reads directly as a COUNT of concurrently-firing neighbours — the seam to §II's threshold commitment. An earlier draft emitted θ_fire itself, which is recorded as a trap rather than a typo: it makes one neighbour sufficient at EVERY threshold, so θ_fire becomes inert while still appearing in the spec and being validated at construction. Only comparing two different thresholds on the same topology reveals it, which is why a case below does exactly that."
+  },
+  "topologies": {
+    "chain": {"nodes": ["a", "b", "c"], "edges": [["a", "b"], ["b", "c"]]},
+    "ring": {
+      "why": "Five nodes, symmetric. A stimulus at one node sends waves BOTH ways — which is what makes the annihilation case possible.",
+      "nodes": ["a", "b", "c", "d", "e"],
+      "edges": [["a", "b"], ["b", "c"], ["c", "d"], ["d", "e"], ["e", "a"]]
+    }
+  },
+  "spec_cases": [
+    {
+      "name": "a_medium_with_no_refractory_period_is_refused",
+      "why": "★ The structural encoding of §III's own claim. An excitable medium with no refractory period is not one: the excitation sloshes back into the elements that just fired and the field rings forever. The article calls this term load-bearing, so a spec that zeroes it has deleted the mechanism while keeping the vocabulary — refused at construction rather than warned about. It is also a soundness requirement: a zero window would leave a node entering REFRACTORY with nothing to count down.",
+      "refractory_ticks": 0,
+      "expect": {"error": "NoRefractoryPeriod", "message_contains": "load-bearing"}
+    },
+    {
+      "name": "a_threshold_that_everything_clears_is_refused",
+      "why": "θ_fire ≤ 0 means every node fires on any inbound at all — a broadcast wearing a relay's clothes, and one that would make every other property in this file trivially true.",
+      "thresholds": [0.0, -1.0],
+      "expect": {"error": "BadThreshold"}
+    },
+    {
+      "name": "a_self_edge_is_refused",
+      "why": "A node relaying to itself is precisely the echo the refractory period exists to prevent, arriving by a different route. Refused at wiring time.",
+      "expect": {"error": "SelfEdge"}
+    },
+    {
+      "name": "edges_are_symmetric",
+      "why": "★ THE design decision the module's central claim rests on. With a DIRECTED edge the wave would travel outward because the topology said so, and §III's assertion that refractoriness makes it directional would never be tested — it would appear to hold while being unexamined. Every edge here runs both ways, and the wave is directional anyway.",
+      "expect": {"a_knows_b": true, "b_knows_a": true}
+    }
+  ],
+  "relay_cases": [
+    {
+      "name": "the_pulse_travels_one_node_per_tick",
+      "why": "§III's relay, observed as a wave rather than an instantaneous flood. Emissions land in the NEXT tick's inbox, which is what makes propagation visible and reproducible.",
+      "topology": "chain", "stimulate": "a",
+      "expect": {"fired_by_tick": [["a"], ["b"], ["c"]]}
+    },
+    {
+      "name": "a_stimulus_below_threshold_does_nothing",
+      "why": "The negative case. Nothing travels, and the node that declined says why — so a wave that never started is distinguishable from one that started and stopped.",
+      "theta_fire": 2.0, "stimulate_strength": 1.0,
+      "expect": {"fired": [], "refusal": "BelowThreshold", "neighbour_phase": "Resting"}
+    },
+    {
+      "name": "the_three_phases_are_all_observable",
+      "why": "§III names RESTING → EXCITED → REFRACTORY → RESTING. The pseudocode fires and starts the refractory period in one line, which read literally would make EXCITED instantaneous and the three-state machine notional. One tick of EXCITED keeps all three observable — an interpretation, recorded as one.",
+      "topology": "chain", "stimulate": "a",
+      "expect": {"phase_by_tick": ["Resting", "Excited", "Refractory", "Refractory", "Resting"]}
+    },
+    {
+      "name": "the_origin_travels_not_the_last_hop",
+      "why": "A consumer (MON-13, CTL-3, TEN-8) asking where this started must get the wave's SOURCE, not the neighbour that handed it over. hops then reads as distance from the origin, which is the thing that carries information.",
+      "topology": "chain", "stimulate": "a",
+      "expect": {"b": {"origin": "a", "hops": 1}, "c": {"origin": "a", "hops": 2}}
+    },
+    {
+      "name": "an_external_stimulus_goes_through_the_same_threshold_as_a_relayed_one",
+      "why": "No privileged way in. A weak external stimulus is refused exactly as a weak relay is, so nothing can drive the field by calling the right method — the threshold is a property of the node, not of the caller.",
+      "theta_fire": 5.0, "stimulate_strength": 1.0,
+      "expect": {"fired": [], "refusal": "BelowThreshold"}
+    }
+  ],
+  "refractory_cases": [
+    {
+      "name": "a_relayed_pulse_cannot_re_excite_its_sender",
+      "why": "★★ THE PROPERTY §III calls load-bearing, and half the proof of value. The edge is symmetric, so b's emission genuinely IS sent back to a — this is not a case of the message not arriving. a declines because it is refractory, and the refusal is RECORDED, so the property is observed rather than inferred from the absence of a second excitation.",
+      "topology": "chain", "stimulate": "a",
+      "expect": {"at_tick": 3, "node": "a", "refusal": "Refractory", "fired": false}
+    },
+    {
+      "name": "the_wave_is_directional_despite_symmetric_edges",
+      "why": "★★ The claim, tested where it could have failed. Every node fires exactly once, in order, outward — over a topology in which nothing prefers a direction. Refractoriness is the only thing that could have produced this, which is what makes it evidence rather than illustration.",
+      "topology": "chain", "stimulate": "a",
+      "expect": {"fire_order": ["a", "b", "c"]}
+    },
+    {
+      "name": "the_field_falls_quiet_rather_than_ringing_forever",
+      "why": "Termination is the practical consequence of the refractory term and the reason a relay is safe to build a spine on. Without it this file would describe a message storm.",
+      "topology": "chain", "stimulate": "a",
+      "expect": {"settles": true}
+    },
+    {
+      "name": "two_wavefronts_annihilate_where_they_meet",
+      "why": "★ The excitable-media signature, and a precision worth keeping. A symmetric ring stimulated at one node sends waves BOTH ways; where they meet each finds the other inside the excitation cycle and both die. NOTE the phase distinction, found by running it: at a head-on collision the opposing pulse lands while the node is still EXCITED, one tick before REFRACTORY — whereas a pulse arriving back at its own SENDER is later and finds REFRACTORY. Two phases, one mechanism (not resting). Blurring them into 'refractoriness stopped it' would be very slightly false.",
+      "topology": "ring", "stimulate": "a",
+      "expect": {
+        "fire_tick": {"a": 1, "b": 2, "e": 2, "c": 3, "d": 3},
+        "late_refusals_are_all_in_the_excitation_cycle": true,
+        "no_late_below_threshold": true
+      }
+    }
+  ],
+  "proof_of_value_cases": [
+    {
+      "name": "one_origin_recruits_the_whole_field_with_no_broadcaster",
+      "why": "★★ THE PROOF OF VALUE. The origin's adjacency is 2 of 5 nodes — it does not know the field, and there is no broadcaster anywhere. Every node fires anyway, each carrying the same origin, and each exactly ONCE: recruited from one origin, and terminating. That pair is the whole primitive. Under topic dispatch the reach would have been bounded by a subscriber list; here it is bounded by connectivity.",
+      "topology": "ring", "stimulate": "a",
+      "expect": {
+        "origin_neighbours": 2, "node_count": 5,
+        "origin_knows_whole_field": false,
+        "all_nodes_fired": true,
+        "every_pulse_carries_origin": "a",
+        "total_excitations": 5
+      }
+    }
+  ],
+  "summation_cases": [
+    {
+      "name": "a_higher_threshold_needs_more_than_one_neighbour_to_agree",
+      "why": "Spatial summation. With unit emissions θ_fire reads as a count of concurrently-firing neighbours — the seam to §II's threshold commitment, the same number read as 'how many of my neighbours are in'.",
+      "theta_fire": 2.0,
+      "expect": {"both_neighbours_fire": true, "mid_fires": true}
+    },
+    {
+      "name": "one_neighbour_alone_does_not_clear_a_two_neighbour_threshold",
+      "why": "The negative half of the same mechanism, and the one that actually constrains the implementation. A threshold is only meaningful if it can REFUSE — a medium where one neighbour always suffices has a threshold in name only, which is exactly the flaw the next case exists to catch.",
+      "theta_fire": 2.0,
+      "expect": {"mid_fires": false, "refusal": "BelowThreshold"}
+    },
+    {
+      "name": "theta_fire_is_not_inert_across_different_thresholds",
+      "why": "★ The regression test for a real flaw this slice shipped and then caught. An earlier draft emitted θ_fire as the message strength, which made ONE neighbour sufficient at every threshold — θ_fire present in the spec, validated at construction, and completely inert. Every single-threshold test still passed. Only running the SAME topology at two thresholds reveals it, so that is what this case does.",
+      "expect": {"one_neighbour_clears_theta_1": true, "one_neighbour_does_not_clear_theta_2": true}
+    }
+  ],
+  "honesty_cases": [
+    {
+      "name": "a_field_that_does_not_settle_says_so",
+      "why": "max_ticks is a bound, not a promise of termination. A field still active when it runs out returns an error rather than a partial trace that reads like a finished one — the same discipline as the kernel's horizon variant, which cannot claim to be a guarantee.",
+      "max_ticks": 1,
+      "expect": {"error": "DidNotSettle"}
+    },
+    {
+      "name": "silence_is_not_a_refusal",
+      "why": "A node nothing arrived at has not declined anything. Recording it as a refusal would make every quiet node look like it suppressed something, and the refusal list is the mechanism by which a stopped wave is legible.",
+      "expect": {"quiet": true}
+    }
+  ]
+}
