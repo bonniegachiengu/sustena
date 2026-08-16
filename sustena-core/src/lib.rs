@@ -67,11 +67,13 @@
 //! | Vector clocks · concurrency | [`vclock`] | R2 |
 //! | Disaggregation · hysteresis | [`disaggregation`] | R2 |
 //! | Division of labour · `rb > c` | [`division`] | R2 |
+//! | CRDT family · join-semilattice | [`crdt`] | R2 |
 
 pub mod admission;
 pub mod approval;
 pub mod compose;
 pub mod consensus;
+pub mod crdt;
 pub mod controller;
 pub mod council;
 pub mod detect;
@@ -128,6 +130,10 @@ pub use detect::{
 };
 pub use disaggregation::{
     Assembly, AssemblyState, Band, BandPosition, BandTransition, DisaggregationError, Dispersal,
+};
+pub use crdt::{
+    converges, laws_hold, merge_stamped as merge_stamped_crdt, ConvergenceReport, CrdtError,
+    ElementId, GCounter, JoinSemilattice, LawReport, OrSet, PnCounter, Rga, Tag, PERMUTATION_LIMIT,
 };
 pub use division::{
     Assignment, AssignmentOutcome, Diagnosis, Division, DivisionError, Role, SharedInterest,

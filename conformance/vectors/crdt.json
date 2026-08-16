@@ -1,0 +1,147 @@
+{
+  "conformance_version": 1,
+  "slice": "crdt",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Multiparty - Formal Execution.md, §VI (Convergence of Shared State — CRDTs; join-semilattice, LUB merge, the G-counter, CAP, and 'never erase the node IS the merge')",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for the wider family beyond the LWW register. §VI's own prose names the join-semilattice, the three laws, the G-counter and CAP; the OR-set and RGA come from Shapiro et al. 2011 and Roh et al. 2011 — the citation §VI makes, not §VI's text. That distinction is recorded rather than blurred.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`crdt`, `semilattice`, `lattice`, `commutative`, `associative`, `least upper bound`, `g_counter`, `grow-only`, `or_set`, `observed-remove`, `tombstone`, `monotone`, `replica` and `eventual consistency` are ALL grep-0 in apps/api/sustena/. There is no merge function anywhere that takes two divergent copies of the same state and returns one.",
+    "★_and_the_reason_is_architectural_not_an_oversight": "There are never two copies to merge. `get_shared_engine()` is a single-process singleton over one SQLite file, and every read of the roll-up is recomputed fresh from the one authoritative store. A lattice merge answers 'these two replicas disagree, what is the truth' — a question this deployment has never been able to ask. The whole family becomes load-bearing at exactly the moment a second writer exists, which the roadmap already has in view (the Node Zero notes record the single-file singleton as the thing a genuine multi-node architecture must change).",
+    "term_by_term": {
+      "the join-semilattice and the three laws": "RUST-AHEAD. grep-0 for every term. See the idempotent false positive below, which is the closest thing and is a different mathematical object.",
+      "★ the G-counter — 'exactly a shared-pocket roll-up'": "AT PARITY IN SHAPE, rust-ahead in ALGEBRA, and the distinction is the honest one. `_aggregate_from_child_states` returns `included: [{member, value}]` — each member's own entry, kept as their own entry — and the aggregate `value` is a fold over them, which is precisely `value(g) = Σ g[id]`. Since 2 Aug 2026 the parent's own contribution folds in too, tagged `is_self`. What is absent is `merge`: the reference never combines two divergent readings of the same counter, because it never holds two. It has the G-counter's shape and does not yet need its algebra.",
+      "never erase the node IS the merge": "AT PARITY as a property, rust-ahead as a PROOF. MUL-11 already records the reference roll-up as structurally never-overwriting — the parent value is a fold over member entries, and no code path writes a member's number from the group's. What is new is that here it is a theorem about `max` rather than a property of how the code happens to be written: `join(a,b)[id] ≥ a[id]` for every id and every pair, because max is monotone, asserted across every permutation.",
+      "the PN-counter": "RUST-AHEAD, and here because the roll-up correspondence demanded it rather than because §VI names it. §VI's example is grow-only BY NAME, and a real pocket balance falls — merging a falling quantity with `max` would silently discard the decrease. Two monotone halves is the standard family answer and it is what keeps the roll-up claim honest instead of approximate.",
+      "the OR-set": "RUST-AHEAD, and grounded in Shapiro et al. 2011 — the citation §VI makes — not in §VI's own prose, which names only the counter. `tombstone` and `observed-remove` are grep-0.",
+      "the sequence (RGA)": "RUST-AHEAD, grounded in Roh et al. 2011. The reference has no ordered shared collection at all; the task board §VI mentions as a motivating example is not built there.",
+      "the CAP tax": "RUST-AHEAD as a named trade-off. `partition` returns exactly one hit and it is `str.partition('[*]')` — string splitting. The reference is not partition-tolerant because it is not partitioned; it is one process, and CAP's choice has never come up."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "rga (5 hits, 0 real)": "★ Every one is a substring of 'ba-RGA-ining' — Nash bargaining, in council.py, curator.py and protege.py. The sequence CRDT's acronym hiding inside the council's utility function.",
+      "idempotent (20 hits) — ★ THE SUBTLE ONE, and it is worth being precise rather than dismissive": "These are REAL and they are CORRECT — and they are a different mathematical object. The reference means OPERATIONAL idempotence of an API CALL: 'the exact same (source_id, sustain_id, raw_payload) is captured once', 'confirming an already-sent entry is an idempotent no-op', 'idempotent — safe to call again once every slot is filled'. §VI means ALGEBRAIC idempotence of a MERGE: s ⊔ s = s. The reference reaches the delivered-twice-is-safe property one operation at a time, by dedup keys and status guards, each of which it had to design and get right individually. A lattice gets the same property for the whole state at once, from the algebra, for free. So this is not the reference missing the idea — it is the reference having the INTUITION thoroughly and reaching it the expensive way, which is exactly what the formalism is for.",
+      "partition (1 hit, 0 real)": "`child_path.partition('[*]')` — Python's string method, in the roll-up's own wildcard handling. Not CAP.",
+      "converge (1 hit, 0 real)": "A transducer comment about two parsers cross-checking each other for convergence on a reading. Not lattice convergence."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The G-counter's shape, in the place §VI says it lives — the shared-pocket roll-up — and the never-erase property as a structural fact about how the fold is written. It also has a deep, correct, hard-won grasp of 'delivering this twice must be safe', spread across twenty individually-designed idempotent operations. What it does not have is the algebra that would give it all of that at once, and it does not have it because it has never had two replicas to reconcile. Naming the gap is naming what the second writer will need, not a criticism of a single-node engine for being single-node.",
+    "the_honest_limits": "Three. (1) NO RNG IN THIS CRATE, so tags and element ids are caller-supplied `(node, seq)` — not a workaround, since a replica already has its own id and a monotone counter, which is exactly what uniqueness needs. (2) TOMBSTONES ARE NEVER COLLECTED: a removed tag that vanished could not suppress a duplicate delivery, and a removed sequence element that vanished would orphan a concurrent insert anchored to it. Monotone growth buys convergence; unbounded growth is the price, and collecting it needs a causal-stability barrier this module does not have. (3) `converges` IS EXHAUSTIVE over permutations and REFUSES above its limit rather than sampling — a convergence proof over a sample is not a proof.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive. It consumes the vclock's concurrency detection without modifying it, and the R1 LWW register in event.rs is untouched — this is the family AROUND it, not a replacement for it."
+  },
+  "fixture": {
+    "why": "A four-member body whose entries differ, so 'the group total is the merge' is visible rather than assumed, and a stale replica carrying a smaller reading for the same member, so 'never erase the node' has something to try to erase.",
+    "group": {"ama": 40, "ben": 30, "cira": 20, "dee": 10},
+    "total": 100,
+    "stale": {"ama": 5}
+  },
+  "law_cases": [
+    {
+      "name": "the_three_laws_hold_for_every_member_of_the_family",
+      "why": "★ §VI: 'Commutative, associative, idempotent — which is exactly the statement that arrival order, duplication, and retry cannot change the result.' The laws ARE the property, so they are checked on a real triple of every type built here rather than asserted in a doc comment beside each one.",
+      "types": ["GCounter", "PnCounter", "OrSet", "Rga"],
+      "expect": {"commutative": true, "associative": true, "idempotent": true}
+    },
+    {
+      "name": "the_lattice_order_is_derived_from_the_join",
+      "why": "`s ⊑ t ⟺ s ⊔ t = t`. Deriving the order from the join rather than declaring it alongside means the two cannot drift apart — there is no second definition to keep in sync.",
+      "expect": {"small_leq_big": true, "big_leq_small": false, "reflexive": true}
+    }
+  ],
+  "convergence_cases": [
+    {
+      "name": "★_a_g_counter_converges_over_every_ordering_and_every_duplication",
+      "why": "★★ THE PROOF OF VALUE, and the article's sentence executed rather than quoted. Four updates give 24 orderings; every one is folded, then every one is folded AGAIN with each update delivered twice, and a single state comes out of all 48 folds. Arrival order, duplication and retry — all three, tested. This is strong eventual consistency for this update set, not a claim about it.",
+      "updates": [{"ama": 3}, {"ben": 5}, {"ama": 7}, {"cira": 2}],
+      "expect": {"orderings": 24, "order_independent": true, "duplication_free": true}
+    },
+    {
+      "name": "an_or_set_converges_over_every_ordering_and_every_duplication",
+      "why": "The same proof on the harder case: an add, a remove that observed it, and a concurrent add that the remove never saw. Order-independence here is not obvious by inspection — whether the element survives must not depend on whether the remove or the concurrent add arrived first, and it does not.",
+      "expect": {"orderings": 6, "order_independent": true, "duplication_free": true}
+    },
+    {
+      "name": "a_sequence_converges_over_every_ordering_and_every_duplication",
+      "why": "Two concurrent inserts at the same anchor, delivered in every order and duplicated. The read is a pure function of the merged set, so convergence of the SET is convergence of the SEQUENCE — which is why the join can be plain union and still order deterministically.",
+      "expect": {"order_independent": true, "duplication_free": true}
+    },
+    {
+      "name": "convergence_refuses_to_sample_rather_than_prove",
+      "why": "★ Eight updates is 40,320 orderings and the limit is seven. Sampling would return a report that reads like a proof and is not one, so it is refused with the count and the limit named.",
+      "expect": {"error": "TooManyToPermute"}
+    }
+  ],
+  "never_erase_cases": [
+    {
+      "name": "★_a_merge_can_never_lower_anybody_s_entry",
+      "why": "★★ §VI: 'The holon invariant — never erase the node — is not a policy sitting on top of the merge. It IS the merge.' Here that is a theorem about `max`, not a property of how the code happens to be written: join(a,b)[id] ≥ a[id] for every id, against a smaller reading, an empty one and a zero one. There is no merge that could lower it, so there is no rule anyone has to remember not to.",
+      "expect": {"never_lowered": true, "ama_stays": 40}
+    },
+    {
+      "name": "the_group_total_is_the_merge_and_the_entries_stay_the_members_own",
+      "why": "§VI: 'each person's pocket is their own entry, the group total is the merge, and no member's number is ever overwritten by the group.' Merging a stale replica carrying ama=5 into a group where ama=40 changes neither ama's entry nor the total — the group cannot write down a member's number for them.",
+      "expect": {"total_before": 100, "total_after": 100, "ama_after": 40}
+    },
+    {
+      "name": "a_pn_counter_carries_a_decrease_a_g_counter_would_discard",
+      "why": "★ Where the roll-up correspondence stops being exact, made observable. `max(10, 4)` keeps 10 — correct for a grow-only quantity and silently wrong for a balance that fell. Two monotone halves give 6, which is the answer, and that is why the PN-counter is here rather than a footnote saying the roll-up isn't quite a G-counter.",
+      "expect": {"g_counter_keeps": 10, "pn_counter_value": 6}
+    },
+    {
+      "name": "counter_overflow_is_refused_not_wrapped",
+      "why": "A counter that silently stopped counting would still converge — on a wrong number, identically, on every replica. Refusing is the only reading that keeps convergence worth having.",
+      "expect": {"error": "CounterOverflow"}
+    }
+  ],
+  "or_set_cases": [
+    {
+      "name": "★_a_concurrent_add_survives_a_remove_that_never_observed_it",
+      "why": "★ The whole point of observed-remove, and note it is not a tie-break rule. A remove tombstones only the tags the removing replica had SEEN; a concurrent add minted a tag it never saw. So add wins not because add is favoured, but because the remove was never about that add — deterministically, from the structure, with no clock consulted.",
+      "expect": {"contains": true, "live_tags": 1, "surviving_tag_node": "ben"}
+    },
+    {
+      "name": "a_remove_that_observed_every_tag_removes_the_element",
+      "why": "The other side, so 'add wins' is not mistaken for 'remove never works'. A remove that saw both tags kills both — and delivering that remove a second time changes nothing, which is idempotence doing its job on the case where it matters.",
+      "expect": {"contains": false, "duplicate_delivery_changes_nothing": true}
+    },
+    {
+      "name": "a_reused_tag_is_refused",
+      "why": "Two adds sharing a tag would let one remove silently kill both — the exact failure observed-remove exists to prevent. Refused where it is a mistake, rather than discovered where it is a lost element.",
+      "expect": {"error": "TagReused"}
+    }
+  ],
+  "sequence_cases": [
+    {
+      "name": "concurrent_inserts_at_the_same_anchor_order_deterministically",
+      "why": "★ Two replicas insert at the same position with no coordination. Siblings are ordered by DESCENDING id, a total order on (seq, node), so both replicas read the same sequence — and the test asserts both merge directions give it, which is the commutativity law showing up as a user-visible fact rather than an algebraic one.",
+      "expect": {"read": ["milk", "bread", "eggs"], "both_directions_agree": true}
+    },
+    {
+      "name": "a_removed_element_stays_as_an_anchor",
+      "why": "★ Why tombstones are not optional. An element removed while a concurrent insert was anchored to it must remain as a position, or the child is orphaned and lost. The removed value disappears from the read; the child does not.",
+      "expect": {"read": ["eggs"], "tombstones": 1}
+    },
+    {
+      "name": "★_an_element_whose_anchor_has_not_arrived_is_reported_not_guessed",
+      "why": "★ A partial delivery is a legitimate transient state, so it needs an honest answer rather than a plausible one. Dropping the element loses an edit; appending it somewhere sensible gives two replicas holding the SAME set two different reads, which is the one thing convergence forbids. It is reported as pending — and reported identically by every replica holding that set, so `pending` is a pure function of the state too.",
+      "expect": {"orphan_read": [], "pending": 1, "full_read": ["milk", "eggs"]}
+    },
+    {
+      "name": "inserting_after_something_never_seen_is_refused",
+      "why": "You can only position against what you have observed. That is what keeps the structure a forest rooted at the head, which is what makes the read terminate and the pending set meaningful.",
+      "expect": {"error": "UnknownAnchor"}
+    }
+  ],
+  "vclock_composition_cases": [
+    {
+      "name": "★_a_concurrent_pair_merges_rather_than_one_being_picked",
+      "why": "★★ The payoff the previous slice set up. Its `Dimension::Contested` had to hand back BOTH values because collapsing a concurrent pair would discard an edit — §VII's own warning. A CRDT does not have to choose: the LUB contains both, so LWW's loss and Contested's ambiguity both disappear. ama's 5 and ben's 7 are both in the merged counter, total 12, where LWW would have kept only the later one.",
+      "expect": {"verdict": "Concurrent", "ama": 5, "ben": 7, "total": 12}
+    },
+    {
+      "name": "★_a_causally_ordered_pair_merges_to_the_successor_which_is_what_lww_would_pick",
+      "why": "★ The finding that makes the clock unnecessary HERE, stated precisely. A local update is an inflation, so a ⊑ successor(a) and a ⊔ successor(a) = successor(a) — exactly what LWW picks. So the LUB agrees with LWW wherever LWW is right and loses nothing wherever LWW is wrong, which means the causal verdict no longer changes the ANSWER for this dimension. It is still reported, because why two replicas differed stays worth knowing even when what to do about it does not depend on it.",
+      "expect": {"verdict": "HappensBefore", "equals_successor": true, "order_irrelevant": true}
+    }
+  ]
+}

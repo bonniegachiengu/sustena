@@ -107,6 +107,7 @@ conformance/
     vclock.json         vector clocks · concurrency     (spec, R2)
     disaggregation.json θ↑/θ↓ hysteresis · dispersal    (spec, R2)
     division.json       role assignment · rb > c        (spec, R2)
+    crdt.json           G-counter · OR-set · RGA        (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -499,3 +500,34 @@ it is a bug** — nothing silently differs.
   defector is pivotal* — and `ρ > 1` structurally makes them not, which is the
   free-rider problem. Resolving it needs the group's response to defection,
   which §VII does not specify and this build does not invent.
+
+- **`crdt.json` — rust-ahead-of-python, with one term at parity in *shape*.**
+  `crdt`, `semilattice`, `lattice`, `commutative`, `associative`,
+  `least upper bound`, `grow-only`, `observed-remove`, `tombstone`, `monotone`,
+  `replica` and `eventual consistency` are all grep-0 — **and the reason is
+  architectural rather than an oversight.** `get_shared_engine()` is a
+  single-process singleton over one SQLite file, so there have never been two
+  divergent replicas to reconcile; a lattice merge answers a question this
+  deployment has not been able to ask. **The G-counter is AT PARITY IN SHAPE:**
+  §VI says it *"is exactly a shared-pocket roll-up"*, and
+  `_aggregate_from_child_states` really does return
+  `included: [{member, value}]` — each member's own entry, the total a fold
+  over them, no member's number written by the group. What is absent is the
+  **merge**. The reference has the G-counter's shape and does not yet need its
+  algebra. Four false positives are named, and **one of them deserves care
+  rather than dismissal**: `idempotent` returns 20 hits and every one is real
+  and correct — but it is **operational** idempotence of an API call ("the same
+  capture lands once", "confirming an already-sent entry is a no-op"), not
+  **algebraic** idempotence of a merge (`s ⊔ s = s`). The reference reaches
+  delivered-twice-is-safe one operation at a time, by dedup keys and status
+  guards it had to design and get right individually; a lattice gets the same
+  property for the whole state at once, from the algebra. That is the reference
+  having the intuition thoroughly and reaching it the expensive way — which is
+  what the formalism is for. Also named: `rga` (5 hits, every one inside
+  *"ba-RGA-ining"* — Nash bargaining in the council), `partition` (1 hit,
+  `str.partition('[*]')`, not CAP), and `converge` (1 hit, two parsers
+  cross-checking each other). The file discloses three limits: no RNG in the
+  crate so tags and ids are caller-supplied `(node, seq)`; **tombstones are
+  never collected**, because a vanished tag could not suppress a retry and a
+  vanished element would orphan a concurrent insert; and `converges` refuses
+  above seven updates rather than sampling.
