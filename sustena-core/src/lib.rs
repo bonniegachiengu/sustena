@@ -50,6 +50,7 @@
 //! | Checked composition | [`compose`] | R2 |
 //! | Version history | [`version`] | R2 |
 //! | Migration (μ, EMC) | [`migrate`] | R2 |
+//! | V as a region · urgency | [`region`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -65,6 +66,7 @@ pub mod mutation;
 pub mod operator;
 pub mod path;
 pub mod predicate;
+pub mod region;
 pub mod principal;
 pub mod schema;
 pub mod state;
@@ -97,6 +99,9 @@ pub use operator::{
 };
 pub use principal::{effective_privilege, permitted, Denial, MembershipEdge, Memberships, Tier};
 pub use predicate::{check, parse_predicate, Predicate};
+pub use region::{
+    Distance, FitReport, Interval, Membership, Region, RegionError,
+};
 pub use schema::{bind, preserves_shape, validate, DimType, Schema};
 pub use state::State;
 pub use version::{

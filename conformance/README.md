@@ -90,6 +90,7 @@ conformance/
     compose.json        checked composition of pathways (spec, R2)
     version.json        definition DAG + rollback algebra (spec, R2)
     migrate.json        μ + Expand–Migrate–Contract      (spec, R2)
+    region.json         V as a region · urgency=d(s,V)   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -157,3 +158,16 @@ it is a bug** — nothing silently differs.
   recorded alongside: refuse-if-unsafe **is** a real safety property, at parity
   in shape with `Safe(e, id)`. What the reference lacks is the escape — it can
   say no, and cannot offer a way through. A test asserts that note stays.
+
+- **`region.json` — rust-ahead-of-python.** The reference has neither a region
+  nor a distance: its `V` is a flat list of boolean invariant strings and its
+  urgency is `pct = spent/allocated` on one hardcoded pair of fields, with a
+  concrete blind spot (`allocated <= 0 → 0.0` reports an overspent unfunded
+  pocket as maximally calm). **Two counterweights are recorded and asserted by a
+  test.** First, the `pct` proxy is *not* arbitrary — the reference's own comment
+  calls it the only real distance-to-viable-region metric available today and
+  deliberately avoids inventing a second notion of "important"; this slice
+  replaces it rather than competing with it. Second, **neither** engine can score
+  a violated cross-dimension relation, because a boolean has no natural distance
+  — Rust names them and marks the weighted distance a lower bound instead of
+  fabricating a penalty.

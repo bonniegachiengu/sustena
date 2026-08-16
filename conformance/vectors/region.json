@@ -1,0 +1,195 @@
+{
+  "conformance_version": 1,
+  "slice": "region",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Sustain - Formal Execution.md, §V (V — the viable region) and §VII (Control — Lyapunov distance to V); 3B1B — Monitor - Formal Execution.md, Additions (urgency is distance-to-V; the fit caveat)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors for V as a first-class region and urgency(s) = d(s,V). Authored from the articles, not generated from the reference engine.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-12",
+    "statement": "The reference engine has neither a region nor a distance. Its V is a flat list of boolean invariant expressions, and its urgency is a single ratio.",
+    "term_by_term": {
+      "V as a region": "RUST-AHEAD. The reference stores invariants as a list of strings and evaluates them to true/false. A list can only be true or false; it cannot be measured, projected, intersected or searched — which is why §V calls the upgrade 'the crux of the module' rather than cosmetic. There is no box of per-dimension intervals anywhere, so 'how far outside' has nothing to compute against.",
+      "urgency = d(s,V)": "RUST-AHEAD. The reference's urgency is `pct = spent / allocated` (curated_ui.urgency_for_pocket, identical to monitor.jsx's Slice 0 signal). It is a ratio on ONE hardcoded pair of fields, not a distance from a declared region — so it says nothing about a fridge temperature, a stock level, or any dimension that is not a pocket.",
+      "the allocated<=0 blind spot": "A CONCRETE DEFECT the region form fixes: `if allocated <= 0: return 0.0`. A pocket with nothing allocated and money going out of it is reported as MAXIMALLY CALM. As a region it is simply outside V, by exactly the overspend.",
+      "declared weights w": "RUST-AHEAD, and absent by construction: with no multi-dimensional distance there is nothing to weight. §VII is explicit that the relative-importance judgement across incommensurable units must be declared in the spec where it can be argued with, never buried in a norm.",
+      "three-valued membership + margin": "RUST-AHEAD. The reference's invariants are boolean, so 'comfortably fine' and 'one bad week from not fine' are the same answer."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The `pct` proxy is NOT arbitrary, and the reference is honest about what it is: curated_ui.py's own comment calls it 'the only real distance-to-viable-region metric this codebase has today' and says it deliberately reuses the Monitor's existing signal rather than inventing a second notion of 'important'. That discipline is right and is preserved here — this slice replaces the proxy with the real quantity, it does not add a competing one.",
+    "shared_limit_not_a_rust_shortfall": "Neither engine can score a violated cross-dimension RELATION: a boolean has no natural distance. Rust names them instead, and marks `weighted` a lower bound when any is violated. Inventing a penalty number would fabricate the one signal the whole system is supposed to trust.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. The region is a new additive module and touches no existing gate path."
+  },
+  "measure_cases": [
+    {
+      "name": "inside_the_region_the_distance_is_zero",
+      "why": "W(s) = 0 ⟺ s ∈ V̄.",
+      "state": {"finances": {"liquid": {"balance": 1000.0}}, "fridge": {"temperature": 5.0}},
+      "expect": {"weighted": 0.0, "is_zero": true, "binding": null}
+    },
+    {
+      "name": "outside_the_region_the_distance_says_how_far",
+      "why": "The crux of §V. A list of booleans can only say 'false'; a region says 250.",
+      "state": {"finances": {"liquid": {"balance": -250.0}}, "fridge": {"temperature": 5.0}},
+      "expect": {"weighted": 250.0, "is_zero": false, "binding": "finances.liquid.balance"}
+    },
+    {
+      "name": "a_band_is_violated_from_below",
+      "why": "A two-sided interval, not just a floor — `temperature ∈ [2,8]` is the article's own example.",
+      "state": {"finances": {"liquid": {"balance": 0.0}}, "fridge": {"temperature": 1.0}},
+      "expect": {"weighted": 1.0, "binding": "fridge.temperature"}
+    },
+    {
+      "name": "a_band_is_violated_from_above",
+      "why": "The other side of the same band.",
+      "state": {"finances": {"liquid": {"balance": 0.0}}, "fridge": {"temperature": 12.0}},
+      "expect": {"weighted": 4.0, "binding": "fridge.temperature"}
+    },
+    {
+      "name": "a_dimension_that_is_not_a_number_is_refused",
+      "why": "Fail loudly rather than treat an unreadable dimension as satisfied — the same rule the gate follows for an unparseable invariant.",
+      "region_override": {"intervals": [["name", 0.0, null]]},
+      "state": {"name": "bonnie"},
+      "expect": {"error": "NotANumber"}
+    }
+  ],
+  "projection_cases": [
+    {
+      "name": "the_binding_dimension_is_named",
+      "why": "PROJECTED: which dimension is the binding one. Under equal weights the larger excess wins — 12 over a ceiling beats 10 under a floor.",
+      "state": {"finances": {"liquid": {"balance": -10.0}}, "fridge": {"temperature": 20.0}},
+      "weights": {"finances.liquid.balance": 1.0, "fridge.temperature": 1.0},
+      "expect": {"binding": "fridge.temperature", "per_dimension_count": 2}
+    },
+    {
+      "name": "the_declared_weights_change_which_dimension_binds",
+      "why": "§VII's first warning, made operational: shillings and degrees are incommensurable, so the ranking IS a judgement. The same state has a different binding dimension once money is weighted 10× — which is exactly why the weights belong in the spec where they can be argued with.",
+      "state": {"finances": {"liquid": {"balance": -10.0}}, "fridge": {"temperature": 20.0}},
+      "weights": {"finances.liquid.balance": 10.0, "fridge.temperature": 1.0},
+      "expect": {"binding": "finances.liquid.balance"}
+    },
+    {
+      "name": "an_undeclared_weight_is_reported_not_silently_defaulted",
+      "why": "A relative-importance judgement being made by a default must be VISIBLE. The fallback exists so a region is usable before every weight is argued out, not so the judgement can be skipped.",
+      "region_override": {"intervals": [["a", 0.0, null], ["b", 0.0, null]], "weights": {"a": 2.0}},
+      "expect": {"undeclared_weights": ["b"], "weight_for_b": 1.0}
+    }
+  ],
+  "relation_cases": [
+    {
+      "name": "a_violated_relation_is_named_not_scored",
+      "why": "An interval violation has a natural distance; a boolean has none. Reporting a zero box distance as W = 0 would say 'in the viable region' about a state that is not — so `is_zero` requires BOTH halves and `weighted` is marked a lower bound.",
+      "relations": ["finances.liquid.balance >= fridge.temperature"],
+      "state": {"finances": {"liquid": {"balance": 1.0}}, "fridge": {"temperature": 5.0}},
+      "expect": {"weighted": 0.0, "relations_violated": 1, "is_zero": false, "is_exact": false}
+    },
+    {
+      "name": "w_is_zero_exactly_when_the_state_is_viable",
+      "why": "W(s) = 0 ⟺ s ∈ V̄, checked in BOTH directions and including the case a box-only distance would get wrong.",
+      "relations": ["finances.liquid.balance >= fridge.temperature"],
+      "table": [
+        {"state": {"finances": {"liquid": {"balance": 1000.0}}, "fridge": {"temperature": 5.0}}, "viable": true},
+        {"state": {"finances": {"liquid": {"balance": -1.0}}, "fridge": {"temperature": 5.0}}, "viable": false},
+        {"state": {"finances": {"liquid": {"balance": 1.0}}, "fridge": {"temperature": 5.0}}, "viable": false}
+      ]
+    },
+    {
+      "name": "an_unparseable_relation_refuses_rather_than_passing",
+      "why": "Fail-safe defaults. A rule that cannot be read is not a rule that holds.",
+      "relations": ["this is (not ) valid"],
+      "state": {"finances": {"liquid": {"balance": 1.0}}, "fridge": {"temperature": 5.0}},
+      "expect": {"error": "BadRelation"}
+    }
+  ],
+  "membership_cases": [
+    {
+      "name": "membership_distinguishes_the_boundary_from_the_interior",
+      "why": "Inside V, W ≡ 0 and cannot rank anything — so the boundary has to be its own answer, or the margin has nowhere to live.",
+      "table": [
+        {"state": {"finances": {"liquid": {"balance": 1000.0}}, "fridge": {"temperature": 5.0}}, "membership": "interior"},
+        {"state": {"finances": {"liquid": {"balance": 0.0}}, "fridge": {"temperature": 5.0}}, "membership": "boundary"},
+        {"state": {"finances": {"liquid": {"balance": -1.0}}, "fridge": {"temperature": 5.0}}, "membership": "outside"}
+      ]
+    },
+    {
+      "name": "the_margin_distinguishes_comfortably_fine_from_one_bad_week_away",
+      "why": "§VII's second warning. Both states are in V with W = 0; only the margin tells them apart. NOTE this is the BOX margin — the article's kernel_margin needs Viab_T(V) (§VI), which needs T and is not built. The box margin is an honest over-estimate of it, named as such.",
+      "comfortable": {"finances": {"liquid": {"balance": 1000.0}}, "fridge": {"temperature": 5.0}},
+      "precarious": {"finances": {"liquid": {"balance": 1000.0}}, "fridge": {"temperature": 7.9}},
+      "expect": {"comfortable_exceeds_precarious": true, "precarious_margin": 0.1}
+    },
+    {
+      "name": "there_is_no_margin_outside_the_region",
+      "why": "Outside V the question is the distance back in, not the room left.",
+      "state": {"finances": {"liquid": {"balance": -1.0}}, "fridge": {"temperature": 5.0}},
+      "expect": {"margin": null}
+    }
+  ],
+  "containment_cases": [
+    {
+      "name": "a_tighter_child_fits_inside_its_parent",
+      "why": "INTERSECTED: does the child's region fit inside the parent's? Routine against a region, impossible against a list.",
+      "parent": {"intervals": [["x", 0.0, 100.0]]},
+      "child": {"intervals": [["x", 10.0, 90.0]]},
+      "expect": {"fits": true}
+    },
+    {
+      "name": "a_wider_child_does_not_and_the_dimension_is_named",
+      "why": "A child that can be alive where its parent is not.",
+      "parent": {"intervals": [["x", 0.0, 100.0]]},
+      "child": {"intervals": [["x", -10.0, 90.0]]},
+      "expect": {"fits": false, "wider": ["x"]}
+    },
+    {
+      "name": "a_child_that_does_not_bound_a_parent_dimension_at_all_does_not_fit",
+      "why": "Unbounded where the parent bounds is not containment — it is the absence of a bound.",
+      "parent": {"intervals": [["x", 0.0, 100.0]]},
+      "child": {"intervals": [["y", 0.0, 1.0]]},
+      "expect": {"fits": false, "unbounded": ["x"]}
+    },
+    {
+      "name": "containment_over_relations_is_provable_only_when_the_child_carries_them",
+      "why": "Interval containment is decidable; an opaque predicate is not. Returning false rather than guessing keeps the answer honest — and the report says which relation is missing.",
+      "parent": {"relations": ["a >= b"]},
+      "child": {},
+      "expect": {"fits": false, "missing_relations": ["a >= b"]}
+    },
+    {
+      "name": "a_child_carrying_the_parents_relation_fits",
+      "why": "The provable case.",
+      "parent": {"relations": ["a >= b"]},
+      "child": {"relations": ["a >= b"]},
+      "expect": {"fits": true}
+    }
+  ],
+  "declaration_cases": [
+    {
+      "name": "an_empty_interval_is_rejected_at_authoring_time",
+      "why": "A region nothing can be inside is a load-time finding, not a 2 a.m. one.",
+      "region_override": {"intervals": [["x", 10.0, 5.0]]},
+      "expect": {"well_formed": false, "error": "EmptyInterval"}
+    },
+    {
+      "name": "a_non_positive_weight_is_rejected",
+      "why": "A zero or negative weight silently deletes or inverts a dimension's contribution to the one signal everything else trusts.",
+      "region_override": {"intervals": [["x", 0.0, null]], "weights": {"x": 0.0}},
+      "expect": {"well_formed": false, "error": "BadWeight"}
+    },
+    {
+      "name": "a_well_formed_region_typechecks",
+      "why": "The ordinary path.",
+      "relations": ["finances.liquid.balance >= 0"],
+      "expect": {"well_formed": true}
+    }
+  ],
+  "replacement_cases": [
+    {
+      "name": "an_unfunded_pocket_can_be_urgent_which_the_pct_proxy_could_never_say",
+      "why": "The concrete payoff, and the defect it fixes. The reference returns 0.0 whenever `allocated <= 0`, so a pocket with nothing allocated and money going out of it is reported as MAXIMALLY CALM. As a region it is simply outside V, by exactly the overspend.",
+      "region_override": {"intervals": [["pockets.food.remaining", 0.0, null]], "weights": {"pockets.food.remaining": 1.0}},
+      "state": {"pockets": {"food": {"remaining": -300.0}}},
+      "expect": {"weighted": 300.0, "is_zero": false, "binding": "pockets.food.remaining", "pct_proxy_would_say": 0.0}
+    }
+  ]
+}
