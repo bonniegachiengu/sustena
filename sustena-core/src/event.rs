@@ -72,20 +72,19 @@ use serde::{Deserialize, Serialize};
 use crate::mutation::Mutation;
 
 /// Where an event's time came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provenance {
     /// The time was observed — the source said when it happened.
+    ///
+    /// The `#[default]` reproduces the wire format exactly: a pre-slice record
+    /// carrying no `provenance` field was an observation, so deserialising one
+    /// must land here and not on `Legacy`.
+    #[default]
     Observed,
     /// The time was inferred when backfilling history. Never to be mistaken
     /// for an observation.
     Legacy,
-}
-
-impl Default for Provenance {
-    fn default() -> Self {
-        Provenance::Observed
-    }
 }
 
 /// What kind of thing reported an event.

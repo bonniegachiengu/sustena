@@ -48,12 +48,17 @@ fn normalize_pocket_name(raw: &str) -> String {
     out.trim_matches('_').to_string()
 }
 
+/// The single seam every money value in this module passes through.
+///
+/// It is a passthrough, deliberately and honestly so. It once branched on
+/// `v.fract() == 0.0` intending to emit an integral amount as `100` rather than
+/// `100.0` — but both arms produced `json!(v)`, because `serde_json` keeps the
+/// f64 representation either way and the branch could not have done what it
+/// was named for. The dead condition is removed rather than the seam: keeping
+/// one named place all amounts flow through is what makes a future
+/// representation decision a one-line change instead of fourteen.
 fn money(v: f64) -> Value {
-    if v.fract() == 0.0 && v.abs() < 9.0e15 {
-        json!(v)
-    } else {
-        json!(v)
-    }
+    json!(v)
 }
 
 // ── budget.record_income ──────────────────────────────────────────────────────
@@ -125,16 +130,17 @@ fn allocate(
     let amount = num(params, "amount");
     let pocket_path = format!("finances.pockets.{pocket_name}");
 
-    if !state.exists(&format!("{pocket_path}.allocated")) {
-        if state
+    // `&&` short-circuits, so the `set` still runs only when the pocket is
+    // absent — collapsing the nesting changes the shape, not the behaviour.
+    if !state.exists(&format!("{pocket_path}.allocated"))
+        && state
             .set(&pocket_path, json!({"allocated": 0.0, "spent": 0.0, "limit": 0.0}))
             .is_err()
-        {
-            return OperatorResult::fail(
-                format!("Pocket name '{pocket_name}' is not a usable path segment."),
-                "pocket_name_valid",
-            );
-        }
+    {
+        return OperatorResult::fail(
+            format!("Pocket name '{pocket_name}' is not a usable path segment."),
+            "pocket_name_valid",
+        );
     }
 
     if state.decrement("finances.liquid.balance", &json!(amount), false).is_err() {

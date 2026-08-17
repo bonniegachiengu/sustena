@@ -113,7 +113,7 @@ fn eval_node(
 
         Predicate::Quantifier { kind, list_path, body } => {
             let mut container = resolve_owned(scope, &list_path.segments);
-            if container.as_ref().map_or(true, |v| v.is_null()) && !std::ptr::eq(scope, global_root) {
+            if container.as_ref().is_none_or(|v| v.is_null()) && !std::ptr::eq(scope, global_root) {
                 container = resolve_owned(global_root, &list_path.segments);
             }
 

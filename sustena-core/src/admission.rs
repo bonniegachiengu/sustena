@@ -59,23 +59,22 @@ use serde_json::{Map, Value};
 use crate::predicate::{self, ast::Operand, ast::Predicate, parse_predicate};
 
 /// What a constraint does when it is not satisfied.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Strategy {
     /// Do not commit; name the rule. The default, and the only safe choice
     /// when nothing more specific has been established.
+    ///
+    /// The `#[default]` is deliberate and load-bearing: an undeclared strategy
+    /// must refuse, never clamp. It is marked on the variant so the safe
+    /// choice is visible where the variants are read.
+    #[default]
     Refuse,
     /// Project onto the admissible interval. Only legal on interval-shaped,
     /// non-conserved constraints — see [`typecheck_constraint`].
     Clamp,
     /// Route to a person or the Council instead of deciding.
     Defer,
-}
-
-impl Default for Strategy {
-    fn default() -> Self {
-        Strategy::Refuse
-    }
 }
 
 /// A declared constraint: the rule, what it is called, and what happens when it

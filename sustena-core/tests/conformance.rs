@@ -58,10 +58,9 @@ fn run_ops(initial: &Value, ops: &[Value]) -> (State, Vec<OpOutcome>) {
         let path = op["path"].as_str().unwrap_or_default();
 
         let outcome = match kind {
-            "set" => state
-                .set(path, op["value"].clone())
-                .map(|_| Value::Null)
-                .map_err(|e| e),
+            // `set` returns `()` where the arithmetic ops return a `Value`;
+            // the `map` normalises the Ok side so all arms share one type.
+            "set" => state.set(path, op["value"].clone()).map(|_| Value::Null),
             "increment" => state.increment(path, &op["delta"]),
             "decrement" => state.decrement(
                 path,
