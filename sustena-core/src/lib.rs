@@ -49,6 +49,7 @@
 //! | Fixed vs learned rules, least privilege | [`learned`] | R2 |
 //! | The definition lens π : D → G | [`lens`] | R2 |
 //! | The preattentive encoder φ | [`preattentive`] | R2 |
+//! | Widget schema, checked on the load path | [`widget`] | R2 |
 //! | Edit authority | [`editing`] | R2 |
 //! | Transition constraints | [`transition`] | R2 |
 //! | Checked composition | [`compose`] | R2 |
@@ -156,6 +157,7 @@ pub mod transition;
 pub mod vclock;
 pub mod version;
 pub mod watermark;
+pub mod widget;
 pub mod windowing;
 
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
@@ -286,6 +288,9 @@ pub use lens::{DefinitionGraph, DimLabel, EdgeKind, GraphEdge, Node, PutError, S
 pub use preattentive::{
     encode_field, Arrow, Channel, DataDimension, Fraction, Hue, Motion, VisualAttribute,
     VisualSpec,
+};
+pub use widget::{
+    EmitError, LoadError, LoadedWidget, WidgetDecl, WidgetEmission, WidgetSet,
 };
 pub use principal::{
     effective_privilege, effective_privilege_with, permitted, permitted_with, Denial,

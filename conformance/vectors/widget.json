@@ -1,0 +1,116 @@
+{
+  "conformance_version": 1,
+  "slice": "widget",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Curated UI (the widget schema w = ⟨inputs, render, emits⟩, inputs ⊆ dim(S), emits ⊆ T); §II's typed-edit discipline for the two-containment shape",
+  "replayed_by": ["rust"],
+  "note": "★★ The row's property is not *there is a checker* — it is *the check is ON the load path*. A widget that does not typecheck must be **unable to reach a surface**, structurally, rather than merely checkable by whoever remembers to call the checker.",
+
+  "★★_the_STEP_0_reconcile_AND_THE_CRUX_WAS_THAT_THERE_IS_NO_LOAD_PATH": {
+    "1_there_is_NO_widget_code_in_this_core_at_all": "★★ Checked before designing, and it decided the slice: `curated` is **grep-0** in `sustena-core/src`, and every `widget` / `Widget` / `salience` hit is **prose in a doc comment** — `editing.rs` explaining why `RebindWidget` is absent, `monitor.rs` naming `WidgetVisualEncoder` as a row, `region.rs` saying its distance is the salience quantity, and MON-7's own header. **No widget type, no binding table, no `compose(r)`, no knapsack, no load path.**",
+    "★★_2_so_the_honest_scope_is_BUILD_THE_LOAD_PATH_WITH_THE_CHECK_ON_IT": "Porting `validate_widget_schema` here would have produced a checker **beside nothing**, which checks nothing and cannot have the property the row is about. The row is the typed load path itself, with the judgment on it — which is also why the fix is cheap: there is no existing untyped path to retrofit, so the check can be structural from the first line rather than bolted onto a surface that already loads widgets without it.",
+    "★_3_the_substrate_it_reads_ALREADY_EXISTS_and_is_not_redefined": "`dim(S)` is `Definition.schema` and `T` is `Definition.operators` — the same two things EDIT-13's `π` walks. Inputs are parsed with `predicate::parse_state_path`, which exists **precisely so a second wildcard-path grammar does not appear inside this crate** (its own docstring says so, citing the Constraint article's record of the reference's two divergent evaluators). Wildcards work because `Schema::declares` already handles them.",
+    "★★_4_AND_STEP_0_CAUGHT_THIS_REPOSITORY_OVERSTATING_ITSELF": "★★★ MON-7's vector, written yesterday, recorded *urgency → selection* as **`AT PARITY — curated_ui.py's knapsack there, curated_ui.rs's equivalent here`**. There is **no `curated_ui.rs`**. The line was wrong, it was written by this same process one slice earlier, and it is **corrected in that vector rather than quietly left standing** — a vector that overstates parity is the single failure mode this whole discipline exists to catch, and it is worth recording that the discipline caught one of its own."
+  },
+
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "The reference has `validate_widget_schema()` and it is **off the load path** (R2 #25). The check exists and is real; nothing on the path from a declared widget to a rendered one is obliged to call it. So a widget naming a made-up dimension or an unregistered operator loads, renders, and fails later — or worse, silently no-ops.",
+    "★★_the_counterweight_THE_CHECK_ITSELF_IS_THE_REFERENCE'S_AND_SO_IS_THE_SCHEMA_SHAPE": "★★ The judgment this row enforces was **written there first**. `w = ⟨inputs, render, emits⟩` with `inputs ⊆ dim(S)` and `emits ⊆ T` is the reference's own schema and its own check — this core did not invent the shape, the containments or the idea of typing a widget against the definition. ★ And the Curated UI module as a whole is **mostly built** there, which the article's own headline correction records: typed widgets, β keyed on event class, `compose(r)` as a pure computed value, a genuine knapsack and deterministic effect-first capture all ship in Python. ★★ So the gap is **one word wide** — *on* — and that is the honest size of it: not *the check does not exist*, but *nothing makes it run*. The same shape `min_privilege`, `Skin` and `colour_rule` all had before their rows closed, and naming it as a pattern rather than an oversight is what makes it a class of defect rather than four accidents.",
+    "term_by_term": {
+      "the widget schema w = ⟨inputs, render, emits⟩": "PYTHON-AHEAD as a concept and a shipped shape; typed here for the first time.",
+      "the judgment inputs ⊆ dim(S) ∧ emits ⊆ T": "AT PARITY as a check — `validate_widget_schema()` performs it.",
+      "★★ the check being ON the load path": "**THIS SLICE**, and the whole row.",
+      "★ an unloadable widget being unrepresentable on the render path": "**THIS SLICE.** There, a widget is a dict either way.",
+      "★ the emit-time containment (a widget's own declared emits)": "**THIS SLICE.** The reference checks `emits ⊆ T` at authoring and does not bound a widget to its own list at call time.",
+      "binding table β / compose(r) / the knapsack": "PYTHON-ONLY, and deliberately still so — later UI rows.",
+      "dim(S) and T to check against": "AT PARITY — `sustain_templates.spec_json` there, `Definition` here.",
+      "rendering": "PYTHON-AHEAD and out of this core by design."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "★★ widget / Widget in RUST (12 hits, ZERO code)": "★★ The finding that scoped the slice. Every hit is prose: `editing.rs` explaining why a `RebindWidget` edit kind is absent, `monitor.rs` naming `WidgetVisualEncoder` as MON-7's row, `region.rs`'s *cannot be gamed by a widget*, and MON-7's own header and tests. A reviewer grepping `widget` in this core finds twelve hits and **no widget**.",
+      "★ salience in RUST (3 hits, all prose)": "`region.rs` calling `d(s,V)` *THE salience quantity* and MON-7 citing UI-13. Real statements about a real quantity — and not a selection mechanism, which is the thing `curated_ui.rs` would have been.",
+      "★★ curated (grep-0 in Rust) — and the line that got this wrong": "★★★ Named because **this repository's own MON-7 vector claimed otherwise** one slice earlier. `curated` is grep-0; there is no `curated_ui.rs`. Corrected there, recorded here."
+    },
+    "the_honest_limits": "★★ THIS IS THE LOAD PATH, NOT A SURFACE — a `LoadedWidget` carries a checked declaration and an opaque `render` tag; nothing here draws, lays out, or decides what to show. `compose(r)`, the binding table β and the knapsack are later UI rows, and MON-7 already drew the same encoder/renderer line for the same reason: this core has no display. · ★★ `render` IS AN OPAQUE STRING, DELIBERATELY — typing it would mean inventing a card/ring/feed vocabulary here, which is the core acquiring an opinion about rendering. The cost is real and stated: a misspelled render tag is **not** caught at load, because the core has nothing to check it against. That is a surface-side check, and pretending otherwise would be the same off-the-load-path defect one layer over. · ★★ THE PARAMS OF AN EMISSION ARE NOT TYPE-CHECKED — `emits ⊆ T` says the operator exists and is permitted; it does not say the params match its signature. `OperatorMeta` has no params schema in this core (IMM-10's `build_params` reaches for `inspect.signature` on the Python side precisely because of that), so a params check would need a mechanism that does not exist. The gate still catches it at execution; the point is it is caught **there** and not here. · ★ A LOADED SET CAN GO STALE, AND SAYS SO BUT DOES NOT SELF-HEAL — a typed `Edit` retiring a dimension or an operator invalidates the set. `is_current_for` detects it against a key over `dim(S)` and `T` only (an invariant change is deliberately not staleness, since a widget check does not depend on invariants), but nothing reloads automatically; the host does. · ★ ALL-OR-NOTHING IS A POSITION, NOT AN OVERSIGHT — a partial load is silent degradation, and a surface that quietly renders four cards instead of five cannot be debugged by the person looking at it. · AND NOTHING WIRES A `WidgetEmission` TO `execute` HERE — the emission is a typed request the host runs through the gate, the same seam every other core→host boundary uses."
+  },
+
+  "load_path_cases": [
+    {
+      "name": "a_valid_widget_loads",
+      "why": "The positive case, first: a widget whose inputs are declared dimensions and whose emits are permitted, registered operators loads and is retrievable by id. A check that only ever refuses is not a type-checker, it is a wall.",
+      "expect": "Ok(WidgetSet) with the widget present, render tag and inputs intact"
+    },
+    {
+      "name": "★★_a_made_up_input_is_rejected_AT_LOAD",
+      "why": "★★ `inputs ⊆ dim(S)`, enforced where it matters. A typo'd dimension (`finaces.liquid` for `finances.liquid`) does not produce a widget that renders blank or reads `null` at runtime — it produces **no widget at all**, with the widget and the path both named. This is the row's headline behaviour and the reason the check being on the path is the property rather than the check existing.",
+      "expect": "Err([UndeclaredInput { widget, path }])"
+    },
+    {
+      "name": "★★_an_unpermitted_emit_is_rejected_AT_LOAD",
+      "why": "★★ `emits ⊆ T`. `budget.spend` **is** registered — the definition simply does not list it — so exactly one error fires and it is the right one. A widget cannot even name an operator this sustain does not permit, which means the operator allow-list bounds the surface and not only the gate.",
+      "expect": "Err([NotPermitted]) — exactly one error"
+    },
+    {
+      "name": "★_an_unregistered_emit_is_a_DIFFERENT_error_from_an_unpermitted_one",
+      "why": "★ *This sustain does not allow it* and *it does not exist* send an author to different repairs — add it to the definition, versus write the operator. Kept apart for the same reason EVT-15 splits `Refused` from `NotPermitted` and IMM-7 splits `NoEdge` from `InsufficientTier`. Proven by a definition that **does** permit an operator nothing registers, so only the registry error fires.",
+      "expect": "Err containing NotRegistered and no NotPermitted"
+    },
+    {
+      "name": "an_unparseable_input_is_reported_as_such",
+      "why": "A third distinct finding: *that is not a path* is not the same as *that path names nothing*. Reusing `predicate::parse_state_path` means the widget layer and the predicate layer agree about what a path even is, which is the point of that function existing.",
+      "expect": "Err([UnparseableInput])"
+    },
+    {
+      "name": "a_wildcard_input_is_accepted_where_the_schema_declares_the_map",
+      "why": "`pockets[*]` against a declared `Map` type loads, because `Schema::declares` already understands that a wildcard steps into an open map. Reuse rather than a second grammar — the widget layer inherits the schema's own idea of what is declared.",
+      "expect": "Ok"
+    }
+  ],
+
+  "structural_cases": [
+    {
+      "name": "★★★_every_error_is_reported_not_only_the_first",
+      "why": "★★ Three defects in one widget produce three errors, not one. Fixing a surface one message at a time is exactly the experience `editing::typecheck`'s *well-typedness is a property of the whole definition* already avoids, and a load path that stops at the first problem trains an author to run it repeatedly rather than read it once.",
+      "expect": "three errors from a widget with two bad inputs and one bad emit"
+    },
+    {
+      "name": "★★_one_bad_widget_refuses_the_WHOLE_set",
+      "why": "★★ A deliberate position, not an oversight. A partial load — keep the good widgets, drop the bad — is **silent degradation**: the widget simply is not there, which is indistinguishable from one that decided it had nothing to show. A surface that fails loudly can be fixed; one that quietly renders four cards instead of five cannot be debugged by the person looking at it. Fail-closed, IMM-4's rule at the surface.",
+      "expect": "a valid widget and a broken one together yield Err"
+    },
+    {
+      "name": "a_duplicate_id_is_refused",
+      "why": "Two widgets sharing an id makes every later reference ambiguous — including the emission's own `widget_id`, which is how a host attributes a request back to what asked for it.",
+      "expect": "Err containing DuplicateId"
+    }
+  ],
+
+  "containment_cases": [
+    {
+      "name": "a_loaded_widget_may_emit_what_it_declared",
+      "why": "The positive half of the inner containment, and it carries the widget id so a host can attribute the request. An emission has no public constructor either — the only source is `LoadedWidget::emit` — so a request naming an operator no widget declared cannot be forged and handed to the gate.",
+      "expect": "Ok(WidgetEmission) with operator and widget_id"
+    },
+    {
+      "name": "★★_a_loaded_widget_may_NOT_emit_what_it_did_not_declare",
+      "why": "★★ The inner containment, and the case that shows the two are genuinely nested rather than one check twice. `budget.record_income` **is** permitted by the definition — this widget just never asked for it — so the load-time check passed and the emit-time check still refuses. A widget's authority is bounded by its own declaration *and* by the definition, the same shape IMM-10 gives a learned rule with its ingress bound.",
+      "expect": "Err(EmitError::NotDeclared)"
+    },
+    {
+      "name": "params_travel_with_the_emission",
+      "why": "The emission is a complete typed request the host can run through the gate — operator, params, and the widget that asked. Params are carried, not checked: see the limits on why a params type-check needs a mechanism this core does not have.",
+      "expect": "params preserved on the emission"
+    },
+    {
+      "name": "★_retiring_a_dimension_makes_a_loaded_set_STALE",
+      "why": "★ EDIT-13 just made definition edits real, so a loaded surface can now be invalidated by one. A set knows the `dim(S)`/`T` it was checked against and can **say** it has gone stale rather than rendering against a definition that no longer holds. It does not self-heal — the host reloads — and that boundary is named rather than assumed.",
+      "expect": "is_current_for = false after RetireDim"
+    },
+    {
+      "name": "★_changing_an_invariant_does_NOT_make_a_set_stale",
+      "why": "★ The staleness key covers `dim(S)` and `T` **only**, because a widget check depends on nothing else. A key over the whole definition would report staleness that is not there and send a host reloading its whole surface every time a rule was tightened — a false alarm is a cost, not a safe default.",
+      "expect": "is_current_for = true after AddInv"
+    }
+  ]
+}

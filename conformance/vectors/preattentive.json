@@ -19,7 +19,7 @@
     "★_the_contrast_worth_stating_because_it_is_the_exact_thing_this_row_forbids": "★★ `colour_rule` is chosen **by whoever wrote the widget spec**, per field, as free text. Even if it were wired, that is a **widget-chosen** salience: the widget decides when it turns amber. This row makes that shape unrepresentable — the map is fixed, `VisualSpec` has no constructor, and brightness is field-relative — so the difference is not *unwired versus wired*, it is *a widget declaring its own importance versus the household's own distance-to-V deciding it*.",
     "term_by_term": {
       "the ONE urgency signal (no second notion of important)": "AT PARITY, and the reference established it first (Slice 0) and honoured it again (Slice 13).",
-      "urgency → SELECTION (attention budget)": "AT PARITY — `curated_ui.py`'s knapsack there, `curated_ui.rs`'s equivalent here.",
+      "urgency → SELECTION (attention budget)": "PYTHON-ONLY. ★★ **Corrected 2026-08-17 by UI-2's STEP-0**: this line originally read *AT PARITY — `curated_ui.py`'s knapsack there, `curated_ui.rs`'s equivalent here*, and **there is no `curated_ui.rs`** — `curated` is grep-0 in this core and every `widget`/`salience` hit is prose in a doc comment. The selection half is the reference's alone until a UI row builds it. Recorded here rather than quietly amended, because a vector that overstates parity is the one failure mode this whole discipline exists to catch.",
       "★★ urgency → ENCODING (a visual channel)": "**THIS SLICE.** Neither side had it.",
       "a closed preattentive set as a type": "**THIS SLICE.** `colour_rule` is an open string.",
       "a fixed, non-configurable channel map": "**THIS SLICE**, and deliberately non-configurable — see the limits.",

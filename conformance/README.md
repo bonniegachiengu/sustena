@@ -133,6 +133,7 @@ conformance/
     learned.json        fixed vs learned, bounded tier    (spec, R2)
     lens.json           π : D → G, and the way back       (spec, R2)
     preattentive.json   φ : Data → VisualAttributes^n     (spec, R2)
+    widget.json         w = <inputs,render,emits>, loaded  (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1733,3 +1734,79 @@ per-ingest encode would be a field of one. And **trend is a one-step reading**
 (`w` against its own EWMA level, dead-band scaling with the series), since
 fitting a slope is MON-3's territory and would be the fabricated-model trap
 CTL-11 declined.
+
+### `widget.json` — the widget schema, checked on the load path (UI-2, Curated UI)
+**14 cases, R2 (spec).** First of the surface rows, taken first because it
+changes a real property rather than adding a surface.
+
+★★ **STEP-0's crux changed the row from a port into a build: there is no widget
+code in this core at all.** `curated` is **grep-0**, and all twelve
+`widget`/`Widget` hits plus all three `salience` hits are **prose in doc
+comments**. No widget type, no binding table, no `compose(r)`, no knapsack, **no
+load path**. Porting `validate_widget_schema` here would have produced a checker
+**beside nothing** — which checks nothing and cannot have the property the row
+is about. So the row is the **typed load path with the judgment on it**, and
+that is also why it stayed cheap: there was no untyped path to retrofit.
+
+★★★ **The check is ON the path, structurally.** A `WidgetDecl` is what an
+author writes; a `LoadedWidget` is what a surface may draw, and it has **private
+fields and no public constructor** — the only way to obtain one is
+`WidgetSet::load`, which checks `inputs ⊆ dim(S) ∧ emits ⊆ T`. *A widget that
+does not typecheck cannot be rendered* is a fact about the types, not a rule to
+remember. A typo'd dimension produces **no widget at all**, not one that renders
+blank or reads `null` later. Off-the-load-path is the same shape
+`min_privilege`, `Skin` and `colour_rule` all had before their rows closed —
+naming it as a **pattern** is what makes it a class of defect rather than four
+accidents.
+
+★★ **Two containments, nested.** At **load**, `emits ⊆ T`: a widget may not even
+name an operator the definition forbids. At **emit**, the operator must be in
+**its own** declared list — proven by a widget refused for
+`budget.record_income`, which the definition *does* permit and which it never
+asked for. ★ `WidgetEmission` has no public constructor either, so a request
+naming an operator no widget declared cannot be forged and handed to the gate.
+
+★ **Three distinct load errors**, for the reason EVT-15 splits `Refused` from
+`NotPermitted`: *not a path*, *not a declared dimension*, and *not permitted*
+versus *not registered*. ★★ **Every** error is reported rather than the first,
+and **one bad widget refuses the whole set**: a partial load is **silent
+degradation** — the widget simply is not there, indistinguishable from one that
+had nothing to show.
+
+★ **Reuse, not redefinition:** `dim(S)` and `T` come from `Definition` (the same
+two EDIT-13's `π` walks), and inputs are parsed with
+`predicate::parse_state_path`, which exists precisely so a second wildcard-path
+grammar does not appear in this crate. ★ And EDIT-13 pays off at once: a real
+typed `Edit` retiring a dimension makes a loaded set report **stale**, while
+adding an invariant correctly does not.
+
+**Divergence.** R2, rust-ahead. The reference's `validate_widget_schema()` is
+**off the load path** (R2 #25): the check exists and is real, and nothing on the
+path from a declared widget to a rendered one is obliged to call it.
+
+★★ **The counterweight belongs to the reference and it makes the gap precise.**
+`w = ⟨inputs, render, emits⟩` with `inputs ⊆ dim(S)` and `emits ⊆ T` is **the
+reference's own schema and its own check** — this core invented neither the
+shape nor the containments — and the Curated UI module as a whole is **mostly
+built** there. So the gap is **one word wide**: *on*. Not *the check does not
+exist*, but *nothing makes it run*.
+
+**Greppable false positives named.** ★★ `widget`/`Widget` **in Rust** — 12
+hits, **zero code**, every one prose. ★ `salience` in Rust — 3 hits, all prose
+about `d(s,V)`. ★★★ `curated` — **grep-0**, and named because **this
+repository's own MON-7 vector claimed otherwise** one slice earlier, recording
+*urgency → selection* as `AT PARITY — curated_ui.rs's equivalent here`. There is
+no `curated_ui.rs`. Corrected in that vector rather than left standing: a vector
+that overstates parity is the single failure mode this discipline exists to
+catch, and it caught one of its own.
+
+**Honest limits, six.** ★★ **This is the load path, not a surface** — β,
+`compose(r)`, the knapsack and the drawing are later rows. ★★ **`render` is an
+opaque string, deliberately**, so a misspelled render tag is **not** caught here
+— stated rather than hidden, because typing it would mean the core acquiring a
+card/ring/feed vocabulary, the line MON-7 already drew. ★★ **Emission params
+are not type-checked**: `OperatorMeta` carries no params schema in this core, so
+the gate catches a bad call — the point is it is caught *there*. ★ **A loaded
+set can go stale and says so but does not self-heal.** ★ **All-or-nothing is a
+position, not an oversight.** And nothing wires a `WidgetEmission` to `execute`
+— the same core→host seam every other row draws.
