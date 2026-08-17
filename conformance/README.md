@@ -137,6 +137,7 @@ conformance/
     curated.json        beta + compose(r) + the knapsack   (spec, R2)
     strategy.json       Pi, the strategy DAG              (parity+, R1+R2)
     attention.json      narrow + broad, the <b,d,p> meter  (spec, R2)
+    models.json         M_self, M_world, effective-N       (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2164,3 +2165,59 @@ heuristic**. ★ The path descends into the **first** child. ★ Broad reports t
 **first** frame change. ★★ And **nothing calls attention from an operative
 yet** — `ω` has no `attention` field, for the reason it had no `Π` slot.
 
+---
+
+### `models.json` — `M_self` and `M_world` (OPV-11, Operative §VII)
+**13 cases, R2 (spec).** ★★ **Reference-less** — `M_self`, `M_world`, `conant`
+and `ashby` are all grep-0 there — so the counterweight is **internal
+consistency** rather than a parity grep.
+
+★★★ **STEP-0 changed what this row is.** `M_world`'s engine **already existed
+in the Rust core, in two pieces**: `tenet::TransitionModel` is `S × T → Δ(S)`,
+and — the load-bearing one — **`ensemble::ModelTemplate` + `Scenario` ARE
+already §VII's declared-structure / learned-residual split**: the template
+declares *which edges exist*, the scenario binds *the probabilities on them*,
+`instantiate` combines. `WorldModel` therefore adds exactly two things, a
+**fidelity claim** and an **identity** — and the identity is what makes the
+correlation below **detectable at all**. Saying which parts are new **is** this
+row's substance; the vectors are written so a reader cannot mistake the framing
+for a second engine.
+
+★★★ **`M_world` is `Σ̂`, an approximate COPY.** `Ŝ`/`V̂`/`T̂` are **authored**
+and merely *consistent with* `Shared`, never a handle on it. `agrees_with` is a
+**report** — `imagined` (moves the model believes in that `T` lacks) and
+`unmodelled` (moves `T` has that the model is blind to) — and deliberately
+**not a constructor guard**: a model is *allowed* to be wrong, because §VII's
+claim is that it is wrong *in ways it cannot notice*, and a guard would hide
+exactly that. `blind_to(schema)` names the dimensions outside `Ŝ` as
+**unregulated** — Ashby's remainder, stated.
+
+★★ **`M_self` composes `ω`'s own parts** — objectives off `u`, moves off `Π`,
+budget off `⟨narrow, broad⟩` — so *consistent with `ω`* is a property of the
+construction, not a test that could rot. ★★★ And `moves_within(&Shared)` proves
+**CELL's recursion**: `Π`'s nodes were minted from `Shared`, so the inner
+Sustain is bounded by the outer world **by construction**.
+
+★★★ **THE KEYSTONE — `EffectiveN`.** `Agreement::independent(n)` **takes no
+model**; `Agreement::via_shared_model(n, &m)` **cannot yield `Independent`**.
+Five councillors who forked one `M_world` and five independent observers are
+**different values of different shapes** — the masquerade is **unspellable**,
+and the same headcount reads differently **by provenance alone**. ★★★ And
+`BoundedAbove` carries **no estimate**: the shortfall depends on how wrong the
+shared model is, which **nobody inside it can measure**. Forking gives
+independence of **sampling**, not of **assumptions**, and the correlation
+**does not dilute with headcount** (2, 20, 200 — still one model).
+
+★ **Counterweight, and the finding is real:** `council.py` computes
+**`weighted_yes = Σ confidence`** across councillors — the named arithmetic —
+but it **forks per councillor first** (Slice 7.3, unique fork ids, none shared)
+and **never claims** assumption independence, so the shortfall there is
+**unnamed rather than misstated**.
+
+**Limits, all six recorded in the file and asserted by the binary:** ★★
+`structure_is_declared()` **is always true** (the honesty, not a stub); ★★ the
+fidelity claim is **declared, never measured**, and **the gate never reads it**
+(`execute` takes no model); ★ `Projection` has **no value-only accessor**; ★
+`agrees_with` is **a report, not a guard**; ★★ **nothing wires either model
+onto `ω` yet** — *a declared-but-inert field reads as built*; ★ **`⊕̂` is not
+modelled**.

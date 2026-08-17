@@ -53,6 +53,7 @@
 //! | β and compose(r) — the curated view | [`curated`] | R2 |
 //! | Π, the strategy DAG | [`strategy`] | R1+R2 |
 //! | The two attentions ⟨narrow, broad⟩ | [`attention`] | R2 |
+//! | M_self and M_world | [`models`] | R2 |
 //! | The persistent-panel invariant | [`panel`] | R2 |
 //! | Edit authority | [`editing`] | R2 |
 //! | Transition constraints | [`transition`] | R2 |
@@ -136,6 +137,7 @@ pub mod learned;
 pub mod lens;
 pub mod migrate;
 pub mod mixture;
+pub mod models;
 pub mod monitor;
 pub mod mutation;
 pub mod obligation;
@@ -314,6 +316,9 @@ pub use strategy::{
 pub use attention::{
     broad_scan, narrow_scan, scan, Aperture, Attention, AttentionError, Reframing, Scan,
     Score, Stance,
+};
+pub use models::{
+    Agreement, EffectiveN, Fidelity, ModelAgreement, Projection, SelfModel, WorldModel,
 };
 pub use principal::{
     effective_privilege, effective_privilege_with, permitted, permitted_with, Denial,

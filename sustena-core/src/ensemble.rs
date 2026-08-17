@@ -174,6 +174,15 @@ impl ModelTemplate {
         self.edge(state, action, vec![(to, Prob::Fixed(1.0))])
     }
 
+    /// The actions the declared structure names.
+    ///
+    /// ★ A read, added for OPV-11 so `M_world`'s `T̂` can be compared against a
+    /// real `T` — mirroring [`TransitionModel::actions`], so the two report the
+    /// same thing about the same structure.
+    pub fn actions(&self) -> BTreeSet<String> {
+        self.edges.keys().map(|(_, a)| a.clone()).collect()
+    }
+
     /// Every parameter this template reads. A scenario is complete for this
     /// template exactly when it binds all of them.
     pub fn parameters(&self) -> BTreeSet<String> {

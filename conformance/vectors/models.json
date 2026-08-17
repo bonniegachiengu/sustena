@@ -1,0 +1,113 @@
+{
+  "conformance_version": 1,
+  "slice": "models",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Operative - Formal Execution.md, §VII (M_self, M_world, and the shared-model correlation); Conant & Ashby 1970, 'Every good regulator of a system must be a model of that system'",
+  "replayed_by": ["rust"],
+  "note": "★★ Reference-less — `M_self`, `M_world`, `self_model`, `world_model`, `conant` and `ashby` are **all grep-0** there. But most of `M_world`'s engine already existed **here**, so this row is largely a FRAMING, and saying which parts are new is the substance of its STEP-0.",
+
+  "★★_the_STEP_0_two_reconciles": {
+    "★★★_1_M_world_is_a_FRAMING_over_pieces_that_already_existed": "★★★ Two of them, and neither is rebuilt. `tenet::TransitionModel` is `S × T → Δ(S)` — §VII's declared type for `T̂` — with `backward_induct` over it. And ★★★ **`ensemble::ModelTemplate` is ALREADY the declared-structure / learned-residual split**: the template declares which `(state, action) → next` edges exist, a `Scenario` binds the probabilities, `instantiate` puts them together. **Structure declared, numbers swappable** — which is exactly §VII's *starts declared, only the residual is learned*, built before this row and for a different reason. So `WorldModel` bundles the template, the region and the scope into `Σ̂` and adds the two things the pieces did not carry: a **fidelity claim** and an **identity** — the second being what makes the correlation detectable at all.",
+    "★★★_2_how_an_operative_models_a_world_it_cannot_HOLD": "★★★ OPV-1 kept `⟨S,T⟩` **out** of `ω` deliberately — that absence *is* the sharing constraint — so `M_world` cannot be the world, and §VII does not ask it to be. It is `Σ̂`, an **approximate copy**: a separate declared object whose `Ŝ`/`V̂`/`T̂` are authored and merely **consistent with** `Shared`, never a handle on it. ★ And the consistency check is a **report, not a constructor guard**: `agrees_with` returns what the model **imagined** (moves the world lacks) and what it is **blind** to (moves it lacks) rather than refusing to build a wrong model — because refusing would hide exactly the disagreement this row exists to surface.",
+    "★_3_M_self_composes_ω's_own_parts_rather_than_forking_them": "★ `SelfModel::of` reads the objectives off `u`, the moves off `Π` and the budget off the declared `Attention`, so there is **no second notion** of any of them and the self-model cannot drift from the operative it models. ★★ And the recursion is checkable: `moves_within(world)` holds because `Π`'s moves came from `Shared` — the operative-as-a-Sustain is itself bounded by the shared world, which is CELL's recursion done honestly rather than asserted.",
+    "4_what_is_genuinely_new": "The `WorldModel` and `SelfModel` objects, the `Fidelity` claim, `Projection`'s horizon-with-the-score, and ★★★ the **`EffectiveN` correlation** — which is the row's keystone and has no antecedent anywhere on either side."
+  },
+
+  "divergence": {
+    "kind": "rust-only-spec",
+    "statement": "R2, reference-less: `M_self`, `M_world`, `self_model`, `world_model`, `conant` and `ashby` are **grep-0** in the reference. There is no model object of either kind, no fidelity notion, and no horizon carried with a score.",
+    "★★★_the_finding_the_reference_SUMS_confidence_across_councillors": "★★★ `council.py` aggregates a council decision as **`weighted_yes = Σ confidence for YES votes`** — summing confidences across councillors. That is precisely the masquerade §VII names: **N councillors confirming something are treated as N independent observations**, when they reasoned over one household's one model. Nothing in that arithmetic can see the correlation, and it presents as a larger number rather than as unanimity-from-a-shared-assumption. ★★ **The counterweight is real and belongs to the reference:** it genuinely **forks per councillor** (Slice 7.3 gives each relevant councillor its own `simulate.fork`, with a unique fork id and *none shared*), which is exactly the **sampling** independence §VII credits — the reference did the hard, expensive half. What it does not have is the **assumption** independence, and — this is the honest part — **it never claims to**: the shortfall is unnamed rather than misstated. This row names it.",
+    "★★_and_the_correction_refuses_to_fabricate_a_number": "★★★ `EffectiveN::BoundedAbove` carries the **headcount and the shared model, and no estimate**, because §VII is explicit that the shortfall is *an amount nobody inside can measure*. Offering an effective-N figure would replace an unnamed error with a fabricated one, which is worse. Same third answer as `Skew::Unknown`, `Soundness::Unavailable`, `DampingVerdict::Indeterminate` and `UrgencyBasis::Undeclared` — **do not fabricate a distinction, and do not fabricate a number either.** ★★ And the masquerade is **unspellable**: `via_shared_model` cannot yield `Independent`, and `independent` takes no model, so there is no way to declare shared-model agreement independent.",
+    "term_by_term": {
+      "the transition model `S × T → Δ(S)`": "RUST-AHEAD since M-TEN, and **consumed** here rather than rebuilt.",
+      "★★★ declared structure with a learned residual": "RUST-AHEAD since the ensemble row — `ModelTemplate` + `Scenario` **already are** this split. Framed here, not built.",
+      "★★ `M_world` as an object (`Σ̂`, with an identity)": "**THIS SLICE**, and thin — the identity is what makes the correlation detectable.",
+      "★★ a fidelity claim the gate does not read": "**THIS SLICE.** `fidelity` greps 6 in the reference, all unrelated English.",
+      "★ the horizon carried with the score": "**THIS SLICE.** `Reach_H` exists in the Tenet; pairing it inseparably with the value does not.",
+      "★ `M_self` as the operative-as-a-Sustain": "**THIS SLICE**, composed from `u`/`Π`/`attention` rather than forked from them.",
+      "per-councillor forking": "AT PARITY, and the reference did it first — real per-councillor sandbox forks, none shared.",
+      "★★★ effective-N under a shared model": "**THIS SLICE**, and the reference's `Σ confidence` is the shape it corrects."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "★ fidelity (6 hits in the reference, and 2 here, none of them this)": "★ All English: *fold-fidelity*, *kept for fidelity*. Named because it is the obvious grep for §VII's limit 1 and lands on nothing.",
+      "effective (10 hits, none an effective-N)": "*effective privilege*, *effective date*, *takes effect*. The one phrase this row is about does not appear.",
+      "★ conant / ashby (grep-0 on BOTH sides)": "Recorded as checked. Ashby's requisite variety does appear **here** in OPV-7's attention header, which is a different use of the same author and is not this.",
+      "★★ model (very many real hits, several different models)": "★★ `TransitionModel`, `ModelTemplate`, `MoE`/`mixture`, `parse_rule`'s rule model, the `editing::Definition` a *definition* models. All real, none of them `M_world`. Named because *model* is the word a reviewer greps first and it lands on four wrong things."
+    },
+    "the_honest_limits": "★★★ **`structure_is_declared` IS ALWAYS TRUE, AND THAT IS THE ROW'S HONESTY** — the structure is authored and **not up for revision by data**, so a missing edge stays missing however much data arrives and the model **cannot notice**. §VII calls this *easier and more brittle*, and the constant says so where a reader meets it rather than hiding it as a defect. · ★★ **THE FIDELITY CLAIM IS DECLARED, NEVER MEASURED, AND THE GATE NEVER READS IT** — measuring a model's accuracy would need the world the model exists because we do not have. There is no path from a claim to an admission: `operator::execute` takes no model, so a model that believes it is accurate changes nothing about what commits. · ★★ **NO EFFECTIVE-N NUMBER IS OFFERED FOR A SHARED MODEL** — only the bound and the model's identity. Estimating the shortfall would need to know the model's error, which is the thing that cannot be seen from inside. · ★ **`agrees_with` IS A REPORT, NOT A GUARD** — a model that disagrees with the world is still constructible, deliberately, because *the model is wrong* has to be observable to be useful. · ★ **NOTHING WIRES EITHER MODEL ONTO `ω` YET** — `Operative` still has no `M_self`/`M_world` field, for the same reason it has no `Π` slot and no `attention` field: *a declared-but-inert field reads as built*. The composition (`SelfModel::of`) exists; the storage does not, and the row that gives it a caller will add it. · ★ **`⊕̂` IS NOT MODELLED** — `Σ̂` here is `⟨B̂, Ŝ, V̂, T̂⟩` without a composition operator: a model of a **holon tree** would need the model to nest, and nothing yet consumes that. Named rather than stubbed."
+  },
+
+  "self_model_cases": [
+    {
+      "name": "★★_the_self_model_is_built_from_omegas_own_parts",
+      "why": "★★ No second notion of utility, strategy or attention: the objective count is `u`'s, the moves are `Π`'s, the budget is the declared attention's cost. Composed rather than forked, so the self-model **cannot drift** from the operative it models — which matters most for OPV-6, where *what changed about me* has to be true of the same object that changed.",
+      "expect": "objectives = u.m(), moves = Π.moves(), budget = attention.cost()"
+    },
+    {
+      "name": "★★★_the_self_models_moves_are_bounded_by_T",
+      "why": "★★★ CELL's recursion done honestly. The operative-as-a-Sustain has its own boundary, state, viability and moves — and its moves are `Π`'s, which came from `Shared`, so the inner Sustain is **itself bounded by the shared world**. Asserted rather than asserted-about: a self-model cannot describe an operative that can do more than `T` allows.",
+      "expect": "moves_within(world) = true"
+    }
+  ],
+
+  "world_model_cases": [
+    {
+      "name": "★★_the_structure_is_declared_and_only_parameters_move",
+      "why": "★★ A new `Scenario` rebinds probabilities and the **edge set is untouched** — checked by comparing the action set across an instantiation. This is §VII's *easier and more brittle* as a property rather than a warning: the structure is not up for revision by data, so the model is wrong in ways it cannot notice, and the code says so instead of implying otherwise.",
+      "expect": "actions unchanged after instantiate"
+    },
+    {
+      "name": "★_a_model_may_disagree_with_the_world_and_the_disagreement_is_REPORTED",
+      "why": "★ A model naming `budget.teleport` is **imagined** (the model is wrong); a world move it omits is **unmodelled** (the model is blind). Both are returned rather than refused, because `agrees_with` is a report and not a constructor guard — refusing to build a wrong model would hide precisely the disagreement this row exists to surface, and *the model is wrong* has to be observable to be useful.",
+      "expect": "imagined = {budget.teleport}, unmodelled ∋ budget.allocate, exact() = false"
+    },
+    {
+      "name": "dimensions_outside_the_model_are_named_as_unregulated",
+      "why": "§VII's limit 2. `blind_to` names what a declared schema has and the model does not — *unregulated*, not merely unmodelled. The **guard** against optimising into those dimensions is `goodhart.rs`'s and is already built, so this reports to it rather than duplicating it.",
+      "expect": "blind_to = [wellbeing]"
+    },
+    {
+      "name": "★_a_fidelity_claim_needs_a_basis_and_the_gate_never_reads_it",
+      "why": "★ Limit 1. A number with no basis is refused, because *0.9* with nothing behind it is the confidence §VII warns about; and out-of-range is refused too. The other half is structural and is the important one: **there is no path from a fidelity claim to an admission** — `execute` takes no model — so a model that believes it is accurate changes nothing about what commits.",
+      "expect": "empty basis refused, out-of-range refused, claim readable"
+    },
+    {
+      "name": "★_a_projection_cannot_be_read_without_its_horizon",
+      "why": "★ Limit 3: model error compounds with depth and a search will exploit it, so there is deliberately **no accessor returning the value alone**. A number without its horizon is what lets a deep search sell the model's own error back as a plan.",
+      "expect": "reported() = (value, horizon); no value-only accessor"
+    },
+    {
+      "name": "a_scenario_binds_the_residual_and_the_template_holds_the_structure",
+      "why": "The declared/learned split shown as the ensemble already built it: a named parameter appears in `parameters()` (the residual, learnable) while the action appears in `actions()` (the structure, not). Two different questions answered by two different accessors on the same object.",
+      "expect": "parameters ∋ p, actions ∋ budget.allocate"
+    }
+  ],
+
+  "correlation_cases": [
+    {
+      "name": "independent_observers_have_an_effective_n_equal_to_their_headcount",
+      "why": "The baseline the other cases are measured against: with genuinely separate models the headcount **is** the effective N, and `is_independent()` says so. Without this, *not independent* would have nothing to be *not* relative to.",
+      "expect": "Independent(5), is_independent() = true"
+    },
+    {
+      "name": "★★★_councillors_who_forked_one_model_are_NOT_n_independent_confirmations",
+      "why": "★★★ THE KEYSTONE. Five agreeing councillors, one `M_world`. Forking gives independence of **sampling**, not of **assumptions** — the trajectories differ, the model does not — so the residual correlation is the model's own error, invisible from inside, presenting as **unanimity**. `is_independent()` is false, and the headcount is still reported so nothing is hidden in either direction. The reference's `weighted_yes = Σ confidence` is exactly the arithmetic this refuses.",
+      "expect": "BoundedAbove { headcount: 5, shared_model }, is_independent() = false"
+    },
+    {
+      "name": "★★★_no_effective_n_NUMBER_is_fabricated_for_a_shared_model",
+      "why": "★★★ The shortfall is *an amount nobody inside can measure*, so no estimate is offered — only the bound and the model's identity. Offering a figure would replace an **unnamed** error with a **fabricated** one, which is strictly worse. The same third answer as `Skew::Unknown` and `DampingVerdict::Indeterminate`, and the `describe()` line says the un-measurability out loud so a surface can print it.",
+      "expect": "no estimate; describe() contains 'cannot be measured from inside'"
+    },
+    {
+      "name": "★★_shared_model_agreement_CANNOT_be_declared_independent",
+      "why": "★★ Unspellable rather than policed: `via_shared_model` cannot yield `Independent`, and `independent` takes no model, so there is no call to write that would launder the correlation away. The observable consequence is that the **same headcount reads differently depending only on provenance** — which is the whole content of the property.",
+      "expect": "same headcount, different EffectiveN"
+    },
+    {
+      "name": "★_forking_changes_the_SAMPLING_not_the_ASSUMPTIONS",
+      "why": "★ The correlation **does not dilute with headcount**: 2, 20 and 200 councillors forking one model are all equally non-independent. That is the point — more samples from one model is more precision about the model, not more evidence about the world, and a surface that scaled confidence with the council's size would be measuring its own agreement.",
+      "expect": "not independent at 2, 20 and 200"
+    }
+  ]
+}
