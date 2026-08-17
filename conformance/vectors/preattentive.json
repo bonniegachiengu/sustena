@@ -3,15 +3,15 @@
   "slice": "preattentive",
   "phase": "R2",
   "authored_from": "Articles (Serious)/technical/3B1B — Monitor - Formal Execution.md, §VII (Preattentive Processing); Treisman & Gelade 1980 (Feature Integration Theory); Tufte 1983 (data-ink)",
-  "replayed_by": ["rust"],
+  "replayed_by": [
+    "rust"
+  ],
   "note": "★★ `φ : Data → VisualAttributes^n`, maximising discriminability **subject to** the attributes being drawn only from the preattentive set. The *subject to* is the load-bearing half: an encoding that leaks onto a non-preattentive channel — a number to read, a label to parse — does not degrade gracefully, it stops being a glance and becomes a serial scan, which is exactly what §VII exists to avoid.",
-
   "★★_the_STEP_0_reconcile": {
     "1_no_encoder_exists_in_this_core": "Checked before designing: `preattentive`, `VisualAttribute`, `encoder`, `hue`, `brightness`, `Treisman` and `discriminab` are **all grep-0** in `sustena-core/src`. Nothing to reconcile with and nothing to extend — this establishes the surface block's conventions rather than joining them.",
     "★_2_everything_it_CONSUMES_already_exists_and_is_the_real_thing": "The consolidated `MonitorEngine` (the Phase-2 closer) hands back an `Ingested` per pass carrying **`Reading { w, smoothed, alert }`** — and ★★ **`w` IS `d(s,V)`**, computed by `region.rs` and carried through unchanged; the struct's own docstring says so. Severity comes from the CUSUM alert, activity from `detected()`, and trend from `w` against `smoothed`. So every data dimension is a number the engine already computed: **nothing here is fabricated input**, and the encoder adds no state.",
     "★_3_what_this_row_deliberately_does_NOT_touch": "MON-13's cycle suppression, MON-8's belief, MON-4's windows and MON-1's observability are all reachable from the engine and none is encoded. Five data dimensions, five channels; adding a sixth because a channel was free would be Tufte's decoration with extra steps."
   },
-
   "divergence": {
     "kind": "rust-ahead-of-python",
     "statement": "There is no preattentive encoder on either side before this slice — `preattentive`, `hue`, `brightness` and `encode_widget` are all **grep-0** in the reference. What the reference has instead is `colour_rule`: a **string hint declared per UI-schema field** (`\"amber_if_below_20pct\"`), stored on `UISchemaField`, serialised by `ui_render.*`, sent to the client — and ★★ **evaluated by nothing, on either side**. Every backend hit is a declaration or a pass-through into a dict, and it is **grep-0 in `apps/web/src`**, so the string travels the whole way to the browser and no code ever reads it. That is R2 #25's *exists, unwired* verified precisely, and it is the same *a field, not a check* pattern as `min_privilege` and `Skin`.",
@@ -19,7 +19,7 @@
     "★_the_contrast_worth_stating_because_it_is_the_exact_thing_this_row_forbids": "★★ `colour_rule` is chosen **by whoever wrote the widget spec**, per field, as free text. Even if it were wired, that is a **widget-chosen** salience: the widget decides when it turns amber. This row makes that shape unrepresentable — the map is fixed, `VisualSpec` has no constructor, and brightness is field-relative — so the difference is not *unwired versus wired*, it is *a widget declaring its own importance versus the household's own distance-to-V deciding it*.",
     "term_by_term": {
       "the ONE urgency signal (no second notion of important)": "AT PARITY, and the reference established it first (Slice 0) and honoured it again (Slice 13).",
-      "urgency → SELECTION (attention budget)": "PYTHON-ONLY. ★★ **Corrected 2026-08-17 by UI-2's STEP-0**: this line originally read *AT PARITY — `curated_ui.py`'s knapsack there, `curated_ui.rs`'s equivalent here*, and **there is no `curated_ui.rs`** — `curated` is grep-0 in this core and every `widget`/`salience` hit is prose in a doc comment. The selection half is the reference's alone until a UI row builds it. Recorded here rather than quietly amended, because a vector that overstates parity is the one failure mode this whole discipline exists to catch.",
+      "urgency → SELECTION (attention budget)": "AT PARITY as of 2026-08-17 (UI-1, `curated.rs`). ★★ **This line has now been corrected twice, in opposite directions, and both corrections are kept on the record because that is the point of the discipline.** It first read *AT PARITY* citing a `curated_ui.rs` that did not exist; UI-2's STEP-0 caught the overstatement and rewrote it to **PYTHON-ONLY**, which was true that morning. UI-1 then built β, `compose(r)` and the knapsack, so PYTHON-ONLY became an **understatement** — and a vector that understates is as wrong as one that overstates. ★ It is genuinely at parity now, with the Rust side using `d(s,V)` where the reference uses its declared proxy (see `curated.json`).",
       "★★ urgency → ENCODING (a visual channel)": "**THIS SLICE.** Neither side had it.",
       "a closed preattentive set as a type": "**THIS SLICE.** `colour_rule` is an open string.",
       "a fixed, non-configurable channel map": "**THIS SLICE**, and deliberately non-configurable — see the limits.",
@@ -33,7 +33,6 @@
     },
     "the_honest_limits": "★★ THIS IS THE ENCODER, NOT THE RENDERER — a `VisualSpec` carries `Hue::Amber`, never `#E8A020`; a `Fraction`, never a pixel radius; `Motion::Pulse`, never a keyframe. This core has no display and no units, and asserting that no `#`, `px`, `rgb` or `hsl` appears in a spec is how that boundary is kept honest rather than merely intended. · ★★ THE PSYCHOPHYSICS IS NOT CHECKABLE HERE — whether a particular amber is far enough from a particular red for a particular person on a particular screen is a rendering and measurement question. What IS checked is the necessary condition: distinct state-classes encode distinctly, run over every class this encoder can see. Discriminability is *bounded below*, not maximised, and the difference is stated rather than glossed. · ★★★ THE MAP IS FIXED, NOT CONFIGURABLE, AND THAT IS THE POINT — there is no `EncodingSpec` parameter, because a configurable map is a gaming surface: whoever chose it could route urgency onto a channel nobody looks at, or route its own metric onto brightness. A host wanting a different map is asking for a different guarantee. · ★★ BRIGHTNESS AND SIZE ARE FIELD-RELATIVE, SO A ONE-ITEM FIELD CARRIES NEITHER — `d(s,V)` is unbounded above, so an absolute scale would be invented; with nothing to be brighter than there is no honest value, and `1.0` would be a fabricated maximum. Hue, motion and orientation are absolute and are always emitted. · ★ FIVE OF SEVEN CHANNELS ARE USED — saturation and enclosure are deliberately unassigned, because there is no sixth or seventh data dimension and giving them a value would be Tufte's decoration wearing an encoding's clothes. They stay in `Channel` because the set is the set. · ★ NOTHING CALLS THIS FROM THE ENGINE YET — `MonitorEngine` does not encode on ingest, and should not: encoding is a surface concern with a surface's cadence, and a per-ingest encode would compute a field of one, which this deliberately refuses to give brightness. The caller assembles the field. · AND TREND IS A ONE-STEP READING — `w` against its own EWMA level, not a fitted slope; a real trend estimator is MON-3's territory and fitting one here would be the fabricated-model trap CTL-11 already declined."
   },
-
   "closure_cases": [
     {
       "name": "★★_every_channel_used_is_preattentive",
@@ -56,7 +55,6 @@
       "expect": "no rendering token appears in any spec"
     }
   ],
-
   "discriminability_cases": [
     {
       "name": "the_three_status_classes_get_three_distinct_hues",
@@ -84,7 +82,6 @@
       "expect": "Pulse where the detector fired, Still where it did not"
     }
   ],
-
   "ungameable_urgency_cases": [
     {
       "name": "★★_brightness_comes_from_the_real_distance_to_V",

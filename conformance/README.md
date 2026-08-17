@@ -1890,3 +1890,41 @@ and nothing hidden). ★ `device` is carried and **not** used to rank — naming
 device budget would be inventing policy. ★ Relevance is token overlap, not
 meaning, and is the weaker term at `λ = 0.25` for exactly that reason. And
 nothing calls `compose_view` from an engine — a host assembles `r`.
+
+**Extended 2026-08-17 by UI-7 (+8 cases).** ★★★ The row's blind spot — urgency
+returning `0.0` at zero allocation, so an unfunded pocket spent from scores as
+*calm* — was **already discharged by UI-1**, and the STEP-0 reconcile is the
+slice. `spent/allocated` **does not exist in this core's urgency path**;
+`urgency_of` calls `region.distance()` and nothing else, so there is **no
+denominator to be zero**. ★ The *1.1 unmapped-capture pin* is likewise grep-0
+here — a Python artifact, recorded as checked.
+
+★★★ **CASE A** proves the fix: the exact scenario — zero allocation, spent
+from, driving state through a wall `V` declares — reads a **non-zero** urgency
+with a `Bounded` basis. ★★★ **CASE B is the finding**: where `V` bounds nothing
+the widget reads, `d(s,V)` is honestly `0` — meaning *the household declared no
+wall here*, not *nothing is wrong*. **No wall is invented to force urgency**;
+the basis is **reported** instead (`UrgencyBasis::{Bounded, Undeclared}`,
+`describe()` → *silence rather than safety*). The proxy **manufactured** a wrong
+zero; `d(s,V)` gives an honest one, and which kind it is is now legible.
+
+★★ **And the weights left the module constant.** `SaliencePolicy::declared(α,
+λ)` is passed by the **household**; a widget has nowhere to put one. It keeps a
+`Default` — the honest call, unlike `TrustPolicy`, because the article *states*
+a preference and it is a good one; the defect was never *there is a default*,
+it was *there is no way to hold a different one*. ★★★ Two things are refused as
+unarguable: `α > λ` (a policy letting a search query outrank the household in
+danger would reintroduce at the weights the gaming UI-1 closed at the inputs —
+the **tie** is refused too), and `α + λ = 1` (so a score means the same thing
+across sustains). **You may argue the ratio; you may not argue urgency into
+second place.** ★ The precedent was already here: `Region::weights` carries
+exactly this docstring treatment.
+
+★ **False positive named:** `spent`/`allocated` **do** return hits in Rust and
+all are innocent — the operator's real state paths, fixtures, one prose mention
+of the reference, and `View.spent`, which is the **attention** budget, not
+money. ★★ **Residuals:** `Undeclared` is **reported, not penalised** (ranking it
+up would fabricate the household's concern); the basis is **per-widget**, so a
+mixed reader reads `Undeclared` (conservative, stated); and sum-to-one
+constrains the argument without deriving the ratio — nothing makes `0.75`
+correct.

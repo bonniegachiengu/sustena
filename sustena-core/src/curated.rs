@@ -105,14 +105,163 @@ use crate::event::Event;
 use crate::region::Region;
 use crate::widget::{LoadedWidget, WidgetSet};
 
-/// `α` — urgency's weight in the salience score. Dominant, deliberately.
+/// `α` — the **article's declared preference** for urgency's weight, not a
+/// derived value. Kept as the default a household inherits, never as the only
+/// one available: see [`SaliencePolicy`].
 pub const ALPHA_URGENCY: f64 = 0.75;
-/// `λ` — relevance's weight.
+/// `λ` — relevance's weight, same status.
 pub const LAMBDA_RELEVANCE: f64 = 0.25;
 /// `K ≈ 4` chunks (Cowan). The attention budget.
 pub const DEFAULT_BUDGET: usize = 4;
 /// Score → integer value for the DP table.
 const SCORE_SCALE: f64 = 1000.0;
+
+/// The salience weights — **a declared preference, argued with rather than
+/// hidden** (UI-7).
+///
+/// §IV is blunt about the defect this closes: *"Nothing derives `α = 0.75`. It
+/// is a declared preference ... belongs in a declared constraint where it can
+/// be **argued with**, not a module constant."* ★ The precedent is already in
+/// this codebase — [`Region::weights`](crate::region::Region::weights) carries
+/// exactly this treatment in its own docstring (*"A modelling choice, not a
+/// fact. Declared here so it can be argued with"*). The salience weights simply
+/// had not been given it.
+///
+/// ★★ It **does** have a `Default`, and that is the honest call rather than a
+/// lapse. [`TrustPolicy`](crate::learned::TrustPolicy) has none because what a
+/// trust level may reach is a genuine per-deployment decision with no safe
+/// answer. Here the article states a preference and it is a good one; the
+/// defect was never *there is a default*, it was *there is no way to hold a
+/// different one*. So the default is kept **and named as a declaration rather
+/// than a derivation**.
+///
+/// ★★★ **Two things you may not argue into.** [`declared`] refuses a policy
+/// where relevance meets or beats urgency, and refuses weights that do not sum
+/// to one:
+///
+/// - `α > λ` is §IV's whole point. A policy that let a *search query* outrank
+///   *the household being in danger* would reintroduce, at the weights, exactly
+///   the gaming UI-1 closed at the inputs.
+/// - `α + λ = 1` keeps `score ∈ [0,1]`, so a score means the same thing across
+///   sustains and the knapsack's integer scaling stays interpretable.
+///
+/// You may argue about the ratio. You may not argue urgency into second place.
+///
+/// [`declared`]: SaliencePolicy::declared
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SaliencePolicy {
+    alpha: f64,
+    lambda: f64,
+}
+
+impl Default for SaliencePolicy {
+    fn default() -> Self {
+        SaliencePolicy { alpha: ALPHA_URGENCY, lambda: LAMBDA_RELEVANCE }
+    }
+}
+
+/// Why a [`SaliencePolicy`] could not be declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyError {
+    /// Relevance meets or beats urgency.
+    UrgencyNotDominant,
+    /// The weights do not sum to one.
+    WeightsDoNotSumToOne,
+    /// A weight is negative or not finite.
+    NotAWeight,
+}
+
+impl std::fmt::Display for PolicyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PolicyError::UrgencyNotDominant => write!(
+                f,
+                "α must exceed λ: a policy where relevance outranks urgency would let                  a search query outrank the household being in danger"
+            ),
+            PolicyError::WeightsDoNotSumToOne => {
+                write!(f, "α + λ must be 1, so a score means the same thing across sustains")
+            }
+            PolicyError::NotAWeight => write!(f, "a weight must be finite and non-negative"),
+        }
+    }
+}
+
+impl SaliencePolicy {
+    /// Declare the weights. Refuses the two things that are not arguable.
+    pub fn declared(alpha: f64, lambda: f64) -> Result<SaliencePolicy, PolicyError> {
+        if !alpha.is_finite() || !lambda.is_finite() || alpha < 0.0 || lambda < 0.0 {
+            return Err(PolicyError::NotAWeight);
+        }
+        if (alpha + lambda - 1.0).abs() > 1e-9 {
+            return Err(PolicyError::WeightsDoNotSumToOne);
+        }
+        if alpha <= lambda {
+            return Err(PolicyError::UrgencyNotDominant);
+        }
+        Ok(SaliencePolicy { alpha, lambda })
+    }
+
+    pub fn alpha(&self) -> f64 {
+        self.alpha
+    }
+
+    pub fn lambda(&self) -> f64 {
+        self.lambda
+    }
+
+    /// `score(w) = α·urgency + λ·relevance`.
+    pub fn score(&self, urgency: f64, relevance: f64) -> f64 {
+        self.alpha * urgency + self.lambda * relevance
+    }
+}
+
+/// ★★★ Why an urgency of `0` is `0` — **UI-7's blind spot, reported rather than
+/// merely fixed**.
+///
+/// The row's named defect belongs to the *proxy*: `spent/allocated` is
+/// undefined at zero allocation, and returning `0.0` there scored an unfunded
+/// pocket that had been spent from as perfectly calm — **backwards**. UI-1
+/// replaced that proxy with `d(s,V)`, so there is no denominator left to be
+/// undefined, and the artifact is structurally gone.
+///
+/// ★★ But a `0` can still arise two ways, and they mean opposite things:
+///
+/// - **`Bounded`** — every dimension the widget reads has an interval in `V`,
+///   so a `0` means *inside the viable region*. Genuinely calm.
+/// - **`Undeclared`** — some dimension it reads is **not bounded by `V` at
+///   all**, so a `0` means *the household declared no wall here*, not *nothing
+///   is wrong*. The metric is silent, and silence is not safety.
+///
+/// ★★ The distinction is the finding: the proxy **manufactured** a wrong zero;
+/// `d(s,V)` gives an honest zero, and this type makes which kind it is legible
+/// so a surface can say *nothing is declared here* instead of showing calm.
+/// **No wall is invented to force urgency** — that would be this core deciding
+/// what the household should care about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UrgencyBasis {
+    /// Every dimension read is bounded by `V`.
+    Bounded,
+    /// These dimensions have no interval in `V`. A zero here is silence.
+    Undeclared { dimensions: Vec<String> },
+}
+
+impl UrgencyBasis {
+    /// Is a reading of `0` from this basis *calm*, or merely *unmeasured*?
+    pub fn is_measured(&self) -> bool {
+        matches!(self, UrgencyBasis::Bounded)
+    }
+
+    pub fn describe(&self) -> String {
+        match self {
+            UrgencyBasis::Bounded => "measured against the declared viable region".to_string(),
+            UrgencyBasis::Undeclared { dimensions } => format!(
+                "not measured: {} {} no bound in V, so a zero here is silence rather than safety",
+                dimensions.join(", "),
+                if dimensions.len() == 1 { "has" } else { "have" },
+            ),
+        }
+    }
+}
 
 /// `EventClass ∪ Unit` — β's key, as a **sum type**.
 ///
@@ -229,6 +378,9 @@ pub struct WidgetCandidate {
     pub cost: usize,
     /// This widget's share of `d(s,V)`, on `[0,1]`.
     pub urgency: f64,
+    /// ★★ Whether that number was **measured** — see [`UrgencyBasis`]. A `0`
+    /// with an `Undeclared` basis is silence, not safety.
+    pub basis: UrgencyBasis,
     pub relevance: f64,
     pub score: f64,
     pub why: Eligibility,
@@ -261,6 +413,39 @@ pub fn attention_cost(input_count: usize) -> usize {
 
 /// A widget's share of `d(s,V)`: the per-dimension weighted excess over the
 /// dimensions it reads, as a fraction of the sustain's total.
+/// Root-name granularity, matching how `Distance::per_dimension` reports and
+/// how a widget's inputs are checked at load.
+fn roots_read(widget: &LoadedWidget) -> BTreeSet<&str> {
+    widget.inputs().iter().map(|p| p.split(['.', '[']).next().unwrap_or(p)).collect()
+}
+
+/// ★★ Which of the dimensions a widget reads `V` says nothing about.
+///
+/// A widget reading only unbounded dimensions can never show urgency — and
+/// that is a fact about the **household's declaration**, not about the widget
+/// or the state. Reported so a zero can be told apart from calm.
+fn basis_for(widget: &LoadedWidget, region: &Region) -> UrgencyBasis {
+    let bounded: BTreeSet<&str> = region.intervals.iter().map(|iv| iv.dim.as_str()).collect();
+    let mut undeclared: Vec<String> = roots_read(widget)
+        .into_iter()
+        .filter(|d| !bounded.contains(d))
+        .map(str::to_string)
+        .collect();
+    if undeclared.is_empty() {
+        UrgencyBasis::Bounded
+    } else {
+        undeclared.sort();
+        UrgencyBasis::Undeclared { dimensions: undeclared }
+    }
+}
+
+/// A widget's share of `d(s,V)`.
+///
+/// ★★ **No ratio, so no undefined denominator.** The proxy UI-7's row is about
+/// divided by `allocated`, which is why zero allocation had to be special-cased
+/// to `0.0` — scoring an unfunded pocket that had been spent from as calm. This
+/// reads `region.distance()` and nothing else; there is no denominator that can
+/// be zero, and therefore no case to special-case wrongly.
 fn urgency_of(widget: &LoadedWidget, region: &Region, state: &Value) -> f64 {
     let Ok(distance) = region.distance(state) else {
         // A region that cannot be measured against this state yields no
@@ -270,13 +455,7 @@ fn urgency_of(widget: &LoadedWidget, region: &Region, state: &Value) -> f64 {
     if distance.weighted <= 0.0 {
         return 0.0; // Inside V. Nothing is urgent.
     }
-    // Root-name granularity, matching how `per_dimension` reports and how a
-    // widget's inputs are checked.
-    let reads: BTreeSet<&str> = widget
-        .inputs()
-        .iter()
-        .map(|p| p.split(['.', '[']).next().unwrap_or(p))
-        .collect();
+    let reads = roots_read(widget);
     let mine: f64 = distance
         .per_dimension
         .iter()
@@ -306,9 +485,12 @@ fn relevance_of(widget: &LoadedWidget, query: Option<&str>) -> f64 {
     hits as f64 / tokens.len() as f64
 }
 
-/// `score(w) = α·urgency + λ·relevance`.
+/// `score(w) = α·urgency + λ·relevance`, under the **default** declared policy.
+///
+/// A convenience for a caller that has not declared its own; the weights it
+/// uses are still [`SaliencePolicy`]'s, so there is one place they live.
 pub fn salience(urgency: f64, relevance: f64) -> f64 {
-    ALPHA_URGENCY * urgency + LAMBDA_RELEVANCE * relevance
+    SaliencePolicy::default().score(urgency, relevance)
 }
 
 /// A real 0/1 knapsack. Returns `(selected, excluded)`, both score-ordered.
@@ -369,12 +551,16 @@ pub fn knapsack_select(
 /// ★ Named `compose_view`, not `compose` — [`crate::compose`] is OP-5's
 /// checked-composition module (`wp`, pathway chaining), a genuinely different
 /// thing. Twenty-sixth collision; the newcomer takes the longer name.
+/// ★ `policy` is the **household's**, passed by whoever assembles the view —
+/// never read off a widget, which has no field for it. The weights are
+/// argued-with, and they are argued with by the household.
 pub fn compose_view(
     widgets: &WidgetSet,
     region: &Region,
     state: &Value,
     recent: &[Event],
     request: &Request,
+    policy: &SaliencePolicy,
 ) -> View {
     let beta = BindingTable::build(widgets);
 
@@ -411,8 +597,9 @@ pub fn compose_view(
                 render: w.render().to_string(),
                 cost: attention_cost(w.inputs().len()),
                 urgency,
+                basis: basis_for(w, region),
                 relevance,
-                score: salience(urgency, relevance),
+                score: policy.score(urgency, relevance),
                 why,
             }
         })
@@ -508,7 +695,7 @@ mod tests {
                 .bound_to("event.finances.pocket_spent")
                 .reading("balance"),
         ]);
-        let view = compose_view(&set, &region(), &json!({"balance": 50.0}), &[], &Request::default());
+        let view = compose_view(&set, &region(), &json!({"balance": 50.0}), &[], &Request::default(), &SaliencePolicy::default());
         assert_eq!(view.candidates_considered, 1);
         assert!(view.selected.iter().all(|c| c.id == "always"));
     }
@@ -519,7 +706,7 @@ mod tests {
             .bound_to("event.finances.pocket_spent")
             .reading("balance")]);
         let log = [event("event.finances.pocket_spent")];
-        let view = compose_view(&set, &region(), &json!({"balance": 50.0}), &log, &Request::default());
+        let view = compose_view(&set, &region(), &json!({"balance": 50.0}), &log, &Request::default(), &SaliencePolicy::default());
         assert_eq!(view.candidates_considered, 1);
         assert_eq!(
             view.selected[0].why,
@@ -537,7 +724,7 @@ mod tests {
             WidgetDecl::new("feelings", "card").unit().reading("mood"),
         ]);
         let state = json!({"balance": 160.0, "stock": 50.0, "mood": 50.0});
-        let view = compose_view(&set, &region(), &state, &[], &Request::default());
+        let view = compose_view(&set, &region(), &state, &[], &Request::default(), &SaliencePolicy::default());
 
         let money = view.selected.iter().find(|c| c.id == "money").unwrap();
         let feelings = view.selected.iter().find(|c| c.id == "feelings").unwrap();
@@ -555,6 +742,7 @@ mod tests {
             &json!({"balance": 50.0, "stock": 50.0, "mood": 50.0}),
             &[],
             &Request::default(),
+            &SaliencePolicy::default(),
         );
         assert_eq!(view.selected[0].urgency, 0.0);
     }
@@ -570,6 +758,7 @@ mod tests {
             &json!({"balance": 50.0, "stock": 50.0, "mood": 50.0}),
             &[],
             &Request::default(),
+            &SaliencePolicy::default(),
         );
         let breached = compose_view(
             &set,
@@ -577,6 +766,7 @@ mod tests {
             &json!({"balance": 160.0, "stock": 50.0, "mood": 50.0}),
             &[],
             &Request::default(),
+            &SaliencePolicy::default(),
         );
         assert!(breached.selected[0].urgency > calm.selected[0].urgency);
     }
@@ -607,12 +797,160 @@ mod tests {
             WidgetDecl::new("focused_b", "card").unit().reading("stock"),
         ]);
         let state = json!({"balance": 160.0, "stock": 160.0, "mood": 50.0});
-        let view = compose_view(&set, &region(), &state, &[], &Request::default().with_budget(3));
+        let view = compose_view(&set, &region(), &state, &[], &Request::default().with_budget(3), &SaliencePolicy::default());
 
         let greedy = view.excluded.iter().find(|c| c.id == "greedy");
         assert!(greedy.is_some(), "the greedy widget is excluded");
         assert_eq!(greedy.unwrap().cost, 4, "three inputs cost four chunks");
         assert_eq!(view.selected.len(), 2, "two focused widgets fit where one greedy one did not");
+    }
+
+    // ── UI-7: the blind spot, and honest zero vs manufactured zero ───────────
+
+    /// The exact case UI-7's row worries about: a pocket with **zero
+    /// allocation** that has been spent from. Under the proxy this is
+    /// `spent/allocated` at zero denominator, special-cased to `0.0` — "calm".
+    fn unfunded_pocket_state() -> Value {
+        // Spending from an unfunded pocket drove `liquid` negative.
+        json!({"balance": -40.0, "stock": 50.0, "mood": 50.0})
+    }
+
+    #[test]
+    fn the_proxy_blind_spot_is_gone_because_there_is_no_denominator() {
+        // ★★★ CASE A — `V` declares the wall (`balance ≥ 0`). The unfunded
+        // pocket drove balance negative, so `d(s,V)` registers it and the
+        // widget reading it is urgent. The metric the proxy stood in for
+        // catches exactly what the proxy scored as calm.
+        let set = load(vec![WidgetDecl::new("money", "card").unit().reading("balance")]);
+        let view = compose_view(
+            &set,
+            &region(),
+            &unfunded_pocket_state(),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        let money = &view.selected[0];
+        assert!(money.urgency > 0.0, "an unfunded pocket spent from is NOT calm");
+        assert_eq!(money.basis, UrgencyBasis::Bounded, "and the reading is measured");
+    }
+
+    #[test]
+    fn an_undeclared_dimension_reads_zero_but_says_it_is_silence_not_safety() {
+        // ★★★ CASE B — `V` declares no wall on what this widget reads. The
+        // urgency is honestly 0, and the BASIS says why: nothing is declared
+        // here. No wall is invented to force urgency — that would be this core
+        // deciding what the household should care about.
+        let unbounded = Region::new()
+            .bounding(Interval::new("balance", 0.0, 100.0))
+            .weighing("balance", 1.0);
+        let set = load(vec![WidgetDecl::new("feelings", "card").unit().reading("mood")]);
+        let view = compose_view(
+            &set,
+            &unbounded,
+            &unfunded_pocket_state(),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        let c = view.selected.iter().chain(view.excluded.iter()).next().unwrap();
+        assert_eq!(c.urgency, 0.0);
+        assert_eq!(
+            c.basis,
+            UrgencyBasis::Undeclared { dimensions: vec!["mood".to_string()] },
+            "a zero here is the household's silence, not its safety"
+        );
+        assert!(!c.basis.is_measured());
+        assert!(c.basis.describe().contains("silence rather than safety"));
+    }
+
+    #[test]
+    fn an_honest_zero_inside_v_is_told_apart_from_an_unmeasured_one() {
+        // ★★ The distinction, side by side: both read 0.0, and only one of
+        // them means calm.
+        let set = load(vec![
+            WidgetDecl::new("bounded", "card").unit().reading("balance"),
+            WidgetDecl::new("unmeasured", "card").unit().reading("mood"),
+        ]);
+        let unbounded = Region::new()
+            .bounding(Interval::new("balance", 0.0, 100.0))
+            .weighing("balance", 1.0);
+        let view = compose_view(
+            &set,
+            &unbounded,
+            &json!({"balance": 50.0, "stock": 50.0, "mood": 50.0}),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        let all: Vec<_> = view.selected.iter().chain(view.excluded.iter()).collect();
+        let bounded = all.iter().find(|c| c.id == "bounded").unwrap();
+        let unmeasured = all.iter().find(|c| c.id == "unmeasured").unwrap();
+        assert_eq!(bounded.urgency, unmeasured.urgency, "the same number");
+        assert!(bounded.basis.is_measured());
+        assert!(!unmeasured.basis.is_measured(), "and a different meaning");
+    }
+
+    // ── UI-7: the weights are declared policy, not a module constant ─────────
+
+    #[test]
+    fn the_default_policy_is_the_articles_declared_preference() {
+        let p = SaliencePolicy::default();
+        assert_eq!((p.alpha(), p.lambda()), (0.75, 0.25));
+    }
+
+    #[test]
+    fn a_household_may_argue_the_ratio() {
+        let strict = SaliencePolicy::declared(0.9, 0.1).unwrap();
+        let set = load(vec![WidgetDecl::new("balance_card", "card").unit().reading("balance")]);
+        let state = json!({"balance": 160.0, "stock": 50.0, "mood": 50.0});
+
+        let under_default = compose_view(
+            &set,
+            &region(),
+            &state,
+            &[],
+            &Request::asking("weather"),
+            &SaliencePolicy::default(),
+        );
+        let under_strict =
+            compose_view(&set, &region(), &state, &[], &Request::asking("weather"), &strict);
+        assert!(
+            under_strict.selected[0].score > under_default.selected[0].score,
+            "weighting urgency harder raises a purely-urgent widget's score"
+        );
+    }
+
+    #[test]
+    fn urgency_cannot_be_argued_into_second_place() {
+        // ★★★ The one thing that is not arguable. A policy where a search
+        // query could outrank the household being in danger is refused.
+        assert_eq!(SaliencePolicy::declared(0.4, 0.6), Err(PolicyError::UrgencyNotDominant));
+        assert_eq!(SaliencePolicy::declared(0.5, 0.5), Err(PolicyError::UrgencyNotDominant));
+    }
+
+    #[test]
+    fn the_weights_must_sum_to_one_so_a_score_means_the_same_thing_everywhere() {
+        assert_eq!(SaliencePolicy::declared(0.9, 0.9), Err(PolicyError::WeightsDoNotSumToOne));
+        assert_eq!(SaliencePolicy::declared(0.3, 0.2), Err(PolicyError::WeightsDoNotSumToOne));
+        assert_eq!(SaliencePolicy::declared(f64::NAN, 0.0), Err(PolicyError::NotAWeight));
+    }
+
+    #[test]
+    fn a_widget_cannot_set_the_weights() {
+        // The policy is a parameter of the household's view, not a field of a
+        // widget — `WidgetDecl` has nowhere to put one, and `compose_view`
+        // never reads one off the set. Asserted as the observable consequence:
+        // the same widget scores differently only when the HOUSEHOLD changes
+        // its policy.
+        let set = load(vec![WidgetDecl::new("money", "card").unit().reading("balance")]);
+        let state = json!({"balance": 160.0, "stock": 50.0, "mood": 50.0});
+        let a = compose_view(&set, &region(), &state, &[], &Request::default(),
+                             &SaliencePolicy::default());
+        let b = compose_view(&set, &region(), &state, &[], &Request::default(),
+                             &SaliencePolicy::declared(0.95, 0.05).unwrap());
+        assert_ne!(a.selected[0].score, b.selected[0].score);
+        assert_eq!(a.selected[0].urgency, b.selected[0].urgency, "the urgency itself is untouched");
     }
 
     // ── the knapsack is real ─────────────────────────────────────────────────
@@ -623,6 +961,7 @@ mod tests {
             render: "card".into(),
             cost,
             urgency: score,
+            basis: UrgencyBasis::Bounded,
             relevance: 0.0,
             score,
             why: Eligibility::AlwaysEligible,
@@ -692,15 +1031,15 @@ mod tests {
     fn relevance_is_neutral_with_no_query_and_real_with_one() {
         let set = load(vec![WidgetDecl::new("balance_card", "card").unit().reading("balance")]);
         let state = json!({"balance": 50.0});
-        let quiet = compose_view(&set, &region(), &state, &[], &Request::default());
+        let quiet = compose_view(&set, &region(), &state, &[], &Request::default(), &SaliencePolicy::default());
         assert_eq!(quiet.selected[0].relevance, 0.5);
 
-        let asked = compose_view(&set, &region(), &state, &[], &Request::asking("balance"));
+        let asked = compose_view(&set, &region(), &state, &[], &Request::asking("balance"), &SaliencePolicy::default());
         assert_eq!(asked.selected[0].relevance, 1.0);
 
         // ★★ Zero relevance on a fully-viable sustain means a score of exactly
         // 0.0 — and a zero-value widget is NOT selected. See below.
-        let unrelated = compose_view(&set, &region(), &state, &[], &Request::asking("weather"));
+        let unrelated = compose_view(&set, &region(), &state, &[], &Request::asking("weather"), &SaliencePolicy::default());
         assert!(unrelated.selected.is_empty());
         assert_eq!(unrelated.excluded[0].relevance, 0.0);
     }
@@ -721,6 +1060,7 @@ mod tests {
             &json!({"balance": 50.0, "stock": 50.0, "mood": 50.0}),
             &[],
             &Request::asking("weather"),
+            &SaliencePolicy::default(),
         );
         assert_eq!(view.candidates_considered, 1, "it WAS considered");
         assert!(view.selected.is_empty(), "and not shown");
@@ -738,8 +1078,8 @@ mod tests {
 
         let before_state = state.clone();
         let before_log = log.clone();
-        let _ = compose_view(&set, &region(), &state, &log, &Request::default());
-        let _ = compose_view(&set, &region(), &state, &log, &Request::default());
+        let _ = compose_view(&set, &region(), &state, &log, &Request::default(), &SaliencePolicy::default());
+        let _ = compose_view(&set, &region(), &state, &log, &Request::default(), &SaliencePolicy::default());
         assert_eq!(state, before_state);
         assert_eq!(log, before_log);
     }
@@ -751,8 +1091,8 @@ mod tests {
             WidgetDecl::new("b", "card").unit().reading("stock"),
         ]);
         let state = json!({"balance": 160.0, "stock": 120.0, "mood": 50.0});
-        let one = compose_view(&set, &region(), &state, &[], &Request::default());
-        let two = compose_view(&set, &region(), &state, &[], &Request::default());
+        let one = compose_view(&set, &region(), &state, &[], &Request::default(), &SaliencePolicy::default());
+        let two = compose_view(&set, &region(), &state, &[], &Request::default(), &SaliencePolicy::default());
         assert_eq!(one, two, "resolved fresh, and deterministically");
     }
 }

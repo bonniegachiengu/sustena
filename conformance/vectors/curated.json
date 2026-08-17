@@ -3,16 +3,18 @@
   "slice": "curated",
   "phase": "R2",
   "authored_from": "Articles (Serious)/technical/3B1B — Curated UI, §§1–5 (widget schema, β, compose(r), salience, knapsack); Cowan 2001 (K ≈ 4); Hick 1952 / Hyman 1953 (choice cost); measured against the Slice-13 Python implementation in sustena/core/curated_ui.py",
-  "replayed_by": ["rust"],
+  "replayed_by": [
+    "rust"
+  ],
   "note": "★★ The Rust build of what Slice 13 shipped in Python, so this row has a **reference implementation to measure against** rather than only a spec. The algorithm is at parity on purpose; the sharpenings are three, and each closes a gaming surface the reference left open.",
-
   "★★_the_STEP_0_reconcile": {
     "★_1_there_is_NO_EventClass_in_this_core_and_none_in_the_reference_either": "★★ Checked first, because β's key depends on it. `EventClass` and `event_class` are **grep-0** in `sustena-core/src`; the Rust `Event` carries `name: String` and nothing that could serve as a class. ★ And the reference's `event_class` is **also just a string** — `WidgetSchema.binding_key` returns either that string or a `UNIT` sentinel, both used as plain `dict` keys. So there was no type to port, and inventing an `EventClass` taxonomy would have been this core deciding how the reference should have named its events. β keys on `Event.name` directly.",
     "★★_2_the_one_sharpening_that_IS_worth_it_the_UNION_AS_A_SUM_TYPE": "★★ `BindingKey::{Unit, Event(String)}` makes `EventClass ∪ Unit` genuinely the ∪ the notation claims, rather than a magic string sharing a namespace with real event names. ★ Two effects, and the second is the useful one: the sentinel collision disappears (**theoretical** — nobody names an event `__unit__`, and it is worth saying that rather than dressing it up), and a widget with **no** binding becomes **unrepresentable** — which the reference has to reject at runtime with *'must declare either event_class or unit=true'*.",
     "★★_3_UI_2's_typed_population_is_exactly_the_ordering_benefit_it_was_taken_first_for": "`BindingTable::build` and `compose_view` take a **`WidgetSet`**, not a list of declarations — so every widget in β has already type-checked against `dim(S)` and `T`. **A widget with a made-up input cannot enter the knapsack**, because it never loaded. Doing UI-1 first would have meant a compose that ranks widgets whose inputs may not exist, and UI-2 would then have been a retrofit through it.",
-    "★_4_and_the_urgency_signal_is_ALREADY_HERE_and_better_than_the_one_being_ported": "`region.rs`'s `Region::distance` returns `Distance { weighted, per_dimension, binding, relations_violated }` — the real weighted distance to `V`, with per-dimension excesses. The reference's urgency is an explicitly-declared **proxy** (`pct = spent/allocated`) and UI-7 says exactly why: *'deliberately reusing the Monitor's Slice-0 signal because CUSUM/EWMA don't exist'*. In this core they do."
+    "★_4_and_the_urgency_signal_is_ALREADY_HERE_and_better_than_the_one_being_ported": "`region.rs`'s `Region::distance` returns `Distance { weighted, per_dimension, binding, relations_violated }` — the real weighted distance to `V`, with per-dimension excesses. The reference's urgency is an explicitly-declared **proxy** (`pct = spent/allocated`) and UI-7 says exactly why: *'deliberately reusing the Monitor's Slice-0 signal because CUSUM/EWMA don't exist'*. In this core they do.",
+    "★★_5_UI_7_reconcile_2026_08_17_the_blind_spot_was_ALREADY_DISCHARGED": "★★★ Checked in code before touching anything, and it holds: **`spent/allocated` does not exist in this core's urgency path.** Every `allocated` hit in `sustena-core/src` is `budget.rs`'s operator writing real state paths, a `compose.rs`/`inverse.rs` test fixture, or the one docstring in `curated.rs` *describing* the reference's proxy. `urgency_of` calls `region.distance()` and nothing else. ★★ **There is no denominator, so there is no zero-denominator case to special-case wrongly** — the `allocated <= 0 -> 0.0` artifact is structurally impossible rather than fixed. UI-1 discharged it, and the honest move for UI-7 was to **say so and narrow**, not to re-derive a proxy that is gone. ★ The reference's *'unmapped captures pinned at 1.1'* constant is likewise **grep-0** here — a Python artifact of a queue this core does not have, recorded as checked.",
+    "★★_6_the_GENUINE_residual_was_the_WEIGHTS_and_it_was_real": "⚠ `pub const ALPHA_URGENCY: f64 = 0.75` — **exactly the defect UI-7's row names**: *'a policy living in a module constant'*. §IV is blunt: *'Nothing derives α = 0.75. It is a declared preference ... belongs in a declared constraint where it can be **argued with**, not a module constant.'* ★ And the precedent was already in this codebase: `Region::weights`'s own docstring reads *'A modelling choice, not a fact. Declared here so it can be argued with.'* The salience weights simply had not been given that treatment. `SaliencePolicy` is it."
   },
-
   "divergence": {
     "kind": "parity-plus-sharpening",
     "statement": "The algorithm is the reference's and is ported at parity: `score(w) = α·urgency + λ·relevance` with `α = 0.75` / `λ = 0.25`, a real 0/1 knapsack DP over integer cost and score×1000, `K = 4`, and `(selected, excluded)` both returned score-ordered. Three things are sharper, and each closes a gaming surface rather than adding a feature: **the ∪ is a sum type**, **the population is typed** (UI-2), and **cost is derived rather than declared**.",
@@ -28,16 +30,22 @@
       "★★★ cost derived from inputs, not author-declared": "**RUST-AHEAD**, and it closes a gaming surface.",
       "★ the population is type-checked before ranking": "**RUST-AHEAD** — UI-2, and the reason it was taken first.",
       "per-render view fragments (WIDGET_RENDERERS)": "PYTHON-ONLY, and deliberately so — `render` stays opaque here.",
-      "device-aware ranking": "NEITHER SIDE — carried and reported, not used. See the limits."
+      "device-aware ranking": "NEITHER SIDE — carried and reported, not used. See the limits.",
+      "★★ the urgency blind spot at zero allocation": "**FIXED, by UI-1 rather than by this row** — there is no ratio in the Rust urgency path, so no denominator to be zero. The reference's artifact is Python-only.",
+      "★★★ honest zero vs unmeasured zero, reported": "**THIS SLICE.** Neither side distinguished them; the reference could not, since its proxy's zero was manufactured either way.",
+      "★★ alpha/lambda as declared, argued-with policy": "**THIS SLICE.** A module constant on both sides before it.",
+      "the 1.1 unmapped-capture urgency pin": "PYTHON-ONLY — grep-0 here, an artifact of an ingest queue this core does not have."
     },
     "the_greppable_false_positives_named_so_nobody_re_derives_them": {
       "★ compose (real hits in Rust, and a DIFFERENT compose)": "★ `compose.rs` is OP-5's **checked composition** — `wp`, pathway chaining, illegal chains refused at write time. Real, load-bearing, and nothing to do with `compose(r)`. Named because *compose* is the first word a reviewer greps, and it lands squarely on the wrong module; the newcomer is `curated::compose_view` for that reason.",
       "★ Candidate (a collision, not a false positive)": "`ooda::Candidate` is a decision option surfaced at DECIDE. Twenty-seventh collision; the newcomer took `WidgetCandidate`.",
-      "EventClass / event_class (grep-0 on BOTH sides)": "Recorded as checked. The reference's `event_class` is a string field, not a type — so *there is an EventClass to port* would have been wrong in both directions."
+      "EventClass / event_class (grep-0 on BOTH sides)": "Recorded as checked. The reference's `event_class` is a string field, not a type — so *there is an EventClass to port* would have been wrong in both directions.",
+      "★ spent / allocated (real hits in Rust, and NONE in the urgency path)": "★★ The grep a reviewer would run to check UI-7, and it returns hits — all of them innocent. `budget.rs` writes `finances.pockets.*.allocated` because that is the operator's job; `compose.rs`/`inverse.rs` use them in fixtures; `curated.rs` mentions `spent/allocated` **once, in prose describing the reference**. And `View.spent` is the **attention** budget, not money. Named so a non-zero count is not read as *the proxy is still here*."
     },
-    "the_honest_limits": "★★ `render` STAYS OPAQUE, SO THIS RANKS RATHER THAN RENDERS — the output is a scored selection with its reasons, not a view fragment. The reference's `WIDGET_RENDERERS` are hand-written per render id and belong to a surface with a display; MON-7 drew the same line for the same reason. · ★★ URGENCY IS A **SHARE** OF `d(s,V)`, WHICH IS A MODELLING CHOICE AND IS STATED — a widget's urgency is the per-dimension excess it can show over the sustain's total, so it is relative to what else is wrong. A household with one breached dimension gives the widget reading it an urgency of 1.0; the same widget in a household with three breaches reads lower without changing. That is the intended reading (*the fraction of the trouble this card can show you*) and it is named so nobody infers an absolute. · ★ `relations_violated` CONTRIBUTES NO URGENCY — `region.rs` deliberately names failing relations rather than scoring them, because a boolean has no natural distance; so a sustain whose only breach is a relation reads zero urgency here. Inherited, correct, and worth stating: the widget layer does not invent the number the region layer refused to. · ★★ A ZERO-SCORE WIDGET IS NEVER SELECTED — the DP takes an item only when it strictly improves the total. That is right rather than a gap (`K ≈ 4` is scarce, and a card worth nothing is the noise a curated surface removes) and it is **at parity** with the reference; nothing is hidden, since it returns in `excluded` with its `0.0`. · ★ `device` IS CARRIED AND NOT USED — it rides in the request and comes back in the view, and ranking does not consult it. Naming a device-specific budget would be inventing policy; a host that wants one passes a different `budget`. · ★ RELEVANCE IS TOKEN OVERLAP, NOT MEANING — the same shape the reference uses, and it is the weaker term (`λ = 0.25`) precisely because the usual question is *what needs me right now* rather than a search. · AND NOTHING CALLS `compose_view` FROM AN ENGINE — a host assembles `r` and calls it, at a surface's cadence, the same seam MON-7 draws."
+    "the_honest_limits": "★★ `render` STAYS OPAQUE, SO THIS RANKS RATHER THAN RENDERS — the output is a scored selection with its reasons, not a view fragment. The reference's `WIDGET_RENDERERS` are hand-written per render id and belong to a surface with a display; MON-7 drew the same line for the same reason. · ★★ URGENCY IS A **SHARE** OF `d(s,V)`, WHICH IS A MODELLING CHOICE AND IS STATED — a widget's urgency is the per-dimension excess it can show over the sustain's total, so it is relative to what else is wrong. A household with one breached dimension gives the widget reading it an urgency of 1.0; the same widget in a household with three breaches reads lower without changing. That is the intended reading (*the fraction of the trouble this card can show you*) and it is named so nobody infers an absolute. · ★ `relations_violated` CONTRIBUTES NO URGENCY — `region.rs` deliberately names failing relations rather than scoring them, because a boolean has no natural distance; so a sustain whose only breach is a relation reads zero urgency here. Inherited, correct, and worth stating: the widget layer does not invent the number the region layer refused to. · ★★ A ZERO-SCORE WIDGET IS NEVER SELECTED — the DP takes an item only when it strictly improves the total. That is right rather than a gap (`K ≈ 4` is scarce, and a card worth nothing is the noise a curated surface removes) and it is **at parity** with the reference; nothing is hidden, since it returns in `excluded` with its `0.0`. · ★ `device` IS CARRIED AND NOT USED — it rides in the request and comes back in the view, and ranking does not consult it. Naming a device-specific budget would be inventing policy; a host that wants one passes a different `budget`. · ★ RELEVANCE IS TOKEN OVERLAP, NOT MEANING — the same shape the reference uses, and it is the weaker term (`λ = 0.25`) precisely because the usual question is *what needs me right now* rather than a search. · AND NOTHING CALLS `compose_view` FROM AN ENGINE — a host assembles `r` and calls it, at a surface's cadence, the same seam MON-7 draws. · ★★ **UNDECLARED IS REPORTED, NOT PENALISED** — a widget reading only unbounded dimensions gets urgency `0` and an `Undeclared` basis; it is **not** given a floor, a boost, or a warning severity. Ranking it up would be this core deciding the household should care about something it declined to bound, which is the fabrication the whole row is against. The surface is told; the score is not touched. · ★ **THE BASIS IS PER-WIDGET, NOT PER-DIMENSION-OF-THE-SUM** — a widget reading one bounded and one unbounded dimension reads `Undeclared`, naming the unbounded one, even though its bounded half did contribute. That is the conservative direction (it flags that the reading is incomplete) and it is stated rather than left to be inferred. · ★ **THE SUM-TO-ONE RULE IS A CONSTRAINT ON THE ARGUMENT, NOT A DERIVATION** — it makes scores comparable; it does not make `0.75` correct. Nothing here derives the ratio, and the row's point stands: it is a preference, now held somewhere it can be disagreed with.",
+    "★★_UI_7_the_blind_spot_is_the_PROXY'S_and_the_proxy_is_gone": "★★★ The row's defect is precise and it belongs to the **proxy**: `pct = spent/allocated` is undefined at zero allocation, and the reference returns `0.0` there — so **an unfunded pocket that has been spent from scores as perfectly calm**, which is backwards. That is a manufactured zero. ★★ UI-1 replaced the proxy with `d(s,V)`, and **CASE A proves the fix rather than asserting it**: with `V` declaring the wall the pocket's spending drove state through (`balance >= 0`), the unfunded-pocket state reads a **non-zero** urgency and a `Bounded` basis. The metric the proxy was standing in for catches exactly what the proxy called calm. ★★★ **And CASE B is the finding worth carrying**: where `V` declares **no** wall on what a widget reads, `d(s,V)` is honestly `0` — but that is *the household declared nothing here*, not *nothing is wrong*. Rather than invent a wall to force urgency (which would be this core deciding what a household should care about), the basis is **reported**: `UrgencyBasis::{Bounded, Undeclared}`. Two widgets can read the same `0.0` and mean opposite things, and a surface can now say **silence** instead of showing calm. ★ The proxy manufactured a wrong zero; `d(s,V)` gives an honest zero, and this makes *which kind* legible.",
+    "★★_the_weights_are_now_DECLARED_POLICY_not_a_module_constant": "★★ `SaliencePolicy::declared(alpha, lambda)` replaces the bare constants at the call site — the household passes it, and a **widget has nowhere to put one**, so the weights are argued with by the household and by nobody else. ★★ It **does** keep a `Default`, and that is the honest call rather than a lapse: `TrustPolicy` (IMM-10) has none because what a trust level may reach is a per-deployment decision with no safe answer, whereas here the article states a preference and it is a good one. The defect was never *there is a default* — it was *there is no way to hold a different one*. So the default survives, **named as a declaration rather than a derivation** in the constant's own docstring. ★★★ **Two things are not arguable, and they are refused**: `alpha > lambda`, because a policy letting a *search query* outrank *the household being in danger* would reintroduce at the weights exactly the gaming UI-1 closed at the inputs; and `alpha + lambda = 1`, so `score` in `[0,1]` keeps meaning the same thing across sustains and the DP's integer scaling stays interpretable. **You may argue the ratio; you may not argue urgency into second place.**"
   },
-
   "beta_cases": [
     {
       "name": "★_beta_keys_on_an_event_class_or_Unit_never_on_an_operator",
@@ -55,7 +63,6 @@
       "expect": "EventFired { class } on the candidate"
     }
   ],
-
   "urgency_cases": [
     {
       "name": "★★_a_widget_reading_the_breached_dimension_outranks_one_reading_a_healthy_one",
@@ -81,9 +88,23 @@
       "name": "★★★_grabbing_every_dimension_to_look_urgent_is_SELF_DEFEATING",
       "why": "★★★ The property that makes share-of-`d(s,V)` safe. A widget declaring all three dimensions captures the **whole** of the household's distance and scores maximally — and costs 4 chunks. Against a budget of 3 it is **excluded**, while two focused widgets costing 1 each are both selected. The greedy move buys the highest score at a price no budget can afford, so the attention budget prices out the gaming rather than a rule forbidding it.",
       "expect": "the greedy widget excluded at cost 4; two focused widgets selected"
+    },
+    {
+      "name": "★★★_the_proxy_blind_spot_is_gone_because_there_is_no_denominator",
+      "why": "★★★ CASE A, and the row's own worry run as a test: a pocket with **zero allocation** that has been spent from, driving `balance` negative through a wall `V` declares. Under the proxy this is `spent/allocated` at a zero denominator, special-cased to `0.0` — *perfectly calm*, backwards. Under `d(s,V)` it reads **non-zero** with a `Bounded` basis. The metric the proxy stood in for catches exactly what the proxy called calm, and the artifact is structurally impossible here because **there is no denominator at all**.",
+      "expect": "urgency > 0, basis = Bounded"
+    },
+    {
+      "name": "★★★_an_undeclared_dimension_reads_zero_but_says_it_is_SILENCE_not_safety",
+      "why": "★★★ CASE B, and the finding. Where `V` bounds nothing the widget reads, `d(s,V)` is honestly `0` — but that means *the household declared no wall here*, not *nothing is wrong*. **No wall is invented to force urgency**; instead the basis reports `Undeclared`, naming the dimension, and `describe()` says *silence rather than safety*. The proxy manufactured a wrong zero; this gives an honest one and makes which kind legible.",
+      "expect": "urgency = 0.0, basis = Undeclared { mood }, is_measured() = false"
+    },
+    {
+      "name": "★★_an_honest_zero_inside_V_is_told_apart_from_an_unmeasured_one",
+      "why": "★★ The distinction side by side: two widgets, the same `0.0`, opposite meanings. One is inside the viable region (calm); the other reads a dimension nothing bounds (unmeasured). Without the basis a surface would render both identically, which is precisely how a manufactured zero and an honest one become indistinguishable.",
+      "expect": "equal urgency, differing is_measured()"
     }
   ],
-
   "knapsack_cases": [
     {
       "name": "★★_it_is_a_REAL_knapsack_and_not_a_sort_dressed_up",
@@ -109,9 +130,33 @@
       "name": "an_empty_field_selects_nothing_and_says_so",
       "why": "No candidates yields two empty lists rather than an error or a fabricated placeholder — the same honest-empty treatment the surface's own design language already uses.",
       "expect": "both lists empty"
+    },
+    {
+      "name": "the_default_policy_is_the_articles_declared_preference",
+      "why": "The article's weights survive as the default a household inherits — named in the constant's docstring as **the article's declared preference, not a derived value**. The defect was never that a default existed; it was that there was no way to hold a different one.",
+      "expect": "(0.75, 0.25)"
+    },
+    {
+      "name": "★_a_household_may_argue_the_ratio",
+      "why": "★ The point of the row: weighting urgency harder is now something a household can *do*, not something someone edits a module constant to change. A purely-urgent widget scores higher under a stricter policy than under the default, on identical state.",
+      "expect": "the stricter policy raises the score"
+    },
+    {
+      "name": "★★★_urgency_cannot_be_argued_into_SECOND_PLACE",
+      "why": "★★★ The one thing that is not arguable, refused at construction. A policy where relevance meets or beats urgency would let a **search query outrank the household being in danger** — reintroducing at the weights exactly the gaming UI-1 closed at the inputs. Both the inverted case and the **tie** are refused, because *equal* is already a surface where a query can win.",
+      "expect": "Err(UrgencyNotDominant) for both"
+    },
+    {
+      "name": "the_weights_must_sum_to_one_so_a_score_means_the_same_thing_everywhere",
+      "why": "Keeps the score on `[0,1]`, so it is comparable across sustains and the DP's integer scaling stays interpretable. A non-finite weight is refused too — the same absent-rather-than-defaulted discipline `Fraction::of` follows.",
+      "expect": "Err(WeightsDoNotSumToOne), Err(NotAWeight)"
+    },
+    {
+      "name": "★★_a_widget_cannot_set_the_weights",
+      "why": "★★ The policy is a parameter of the **household's** view: `WidgetDecl` has nowhere to put one and `compose_view` never reads one off the set. Asserted as the observable consequence — changing the policy changes the score and leaves the **urgency itself untouched**, so the un-gameable signal stays exactly as un-gameable as UI-1 made it.",
+      "expect": "score differs, urgency identical"
     }
   ],
-
   "read_only_cases": [
     {
       "name": "★_compose_changes_nothing",

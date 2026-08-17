@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use sustena_core::{
     curated::{
         attention_cost, compose_view, knapsack_select, BindingKey, BindingTable, Eligibility,
-        Request, WidgetCandidate,
+        PolicyError, Request, SaliencePolicy, UrgencyBasis, WidgetCandidate,
     },
     editing::Definition,
     event::{CausalStamp, Event, Provenance},
@@ -90,6 +90,7 @@ fn candidate(id: &str, cost: usize, score: f64) -> WidgetCandidate {
         render: "card".into(),
         cost,
         urgency: score,
+        basis: UrgencyBasis::Bounded,
         relevance: 0.0,
         score,
         why: Eligibility::AlwaysEligible,
@@ -126,7 +127,7 @@ fn an_event_bound_widget_is_not_a_candidate_when_its_class_did_not_fire() {
             .bound_to("event.finances.pocket_spent")
             .reading("balance"),
     ]);
-    let view = compose_view(&set, &region(), &json!({"balance": 50.0}), &[], &Request::default());
+    let view = compose_view(&set, &region(), &json!({"balance": 50.0}), &[], &Request::default(), &SaliencePolicy::default());
     assert_eq!(view.candidates_considered, 1, "never scored, not scored-and-ranked-low");
 }
 
@@ -137,7 +138,7 @@ fn it_becomes_a_candidate_the_moment_its_class_appears() {
         .reading("balance")]);
     let log = [event("event.finances.pocket_spent")];
     let view =
-        compose_view(&set, &region(), &json!({"balance": 160.0}), &log, &Request::default());
+        compose_view(&set, &region(), &json!({"balance": 160.0}), &log, &Request::default(), &SaliencePolicy::default());
     assert_eq!(view.candidates_considered, 1);
     assert_eq!(
         view.selected[0].why,
@@ -154,7 +155,7 @@ fn a_widget_reading_the_breached_dimension_outranks_one_reading_a_healthy_one() 
         WidgetDecl::new("feelings", "card").unit().reading("mood"),
     ]);
     let state = json!({"balance": 160.0, "stock": 50.0, "mood": 50.0});
-    let view = compose_view(&set, &region(), &state, &[], &Request::default());
+    let view = compose_view(&set, &region(), &state, &[], &Request::default(), &SaliencePolicy::default());
 
     let money = view.selected.iter().find(|c| c.id == "money").unwrap();
     let feelings = view.selected.iter().find(|c| c.id == "feelings").unwrap();
@@ -172,6 +173,7 @@ fn inside_the_viable_region_nothing_is_urgent() {
         &json!({"balance": 50.0, "stock": 50.0, "mood": 50.0}),
         &[],
         &Request::default(),
+        &SaliencePolicy::default(),
     );
     assert_eq!(view.excluded.iter().chain(view.selected.iter()).next().unwrap().urgency, 0.0);
 }
@@ -188,6 +190,7 @@ fn a_widget_cannot_set_its_own_urgency() {
         &json!({"balance": 50.0, "stock": 50.0, "mood": 50.0}),
         &[],
         &Request::default(),
+        &SaliencePolicy::default(),
     );
     let breached = compose_view(
         &set,
@@ -195,6 +198,7 @@ fn a_widget_cannot_set_its_own_urgency() {
         &json!({"balance": 160.0, "stock": 50.0, "mood": 50.0}),
         &[],
         &Request::default(),
+        &SaliencePolicy::default(),
     );
     assert!(pick(&breached) > pick(&calm));
 }
@@ -222,11 +226,136 @@ fn grabbing_every_dimension_to_look_urgent_is_self_defeating() {
         WidgetDecl::new("focused_b", "card").unit().reading("stock"),
     ]);
     let state = json!({"balance": 160.0, "stock": 160.0, "mood": 50.0});
-    let view = compose_view(&set, &region(), &state, &[], &Request::default().with_budget(3));
+    let view = compose_view(&set, &region(), &state, &[], &Request::default().with_budget(3), &SaliencePolicy::default());
 
     let greedy = view.excluded.iter().find(|c| c.id == "greedy").expect("excluded");
     assert_eq!(greedy.cost, 4, "three inputs cost four chunks");
     assert_eq!(view.selected.len(), 2, "two focused widgets fit where one greedy one did not");
+}
+
+// ── UI-7: the blind spot, and honest zero vs manufactured zero ───────────────
+
+/// The case UI-7's row names: a pocket with **zero allocation** spent from.
+/// Under the proxy that is `spent/allocated` at a zero denominator, special-cased
+/// to `0.0` — scored as perfectly calm, backwards.
+fn unfunded_pocket_state() -> Value {
+    json!({"balance": -40.0, "stock": 50.0, "mood": 50.0})
+}
+
+#[test]
+fn the_proxy_blind_spot_is_gone_because_there_is_no_denominator() {
+    // ★★★ CASE A — V declares the wall. The unfunded pocket drove balance
+    // negative, d(s,V) registers it, and the widget reading it is urgent.
+    let set = load(vec![WidgetDecl::new("money", "card").unit().reading("balance")]);
+    let view = compose_view(
+        &set,
+        &region(),
+        &unfunded_pocket_state(),
+        &[],
+        &Request::default(),
+        &SaliencePolicy::default(),
+    );
+    assert!(view.selected[0].urgency > 0.0, "an unfunded pocket spent from is NOT calm");
+    assert_eq!(view.selected[0].basis, UrgencyBasis::Bounded);
+}
+
+#[test]
+fn an_undeclared_dimension_reads_zero_but_says_it_is_silence_not_safety() {
+    // ★★★ CASE B — V declares no wall on what this widget reads. The urgency
+    // is honestly 0, and the BASIS says why. No wall is invented to force it.
+    let unbounded =
+        Region::new().bounding(Interval::new("balance", 0.0, 100.0)).weighing("balance", 1.0);
+    let set = load(vec![WidgetDecl::new("feelings", "card").unit().reading("mood")]);
+    let view = compose_view(
+        &set,
+        &unbounded,
+        &unfunded_pocket_state(),
+        &[],
+        &Request::default(),
+        &SaliencePolicy::default(),
+    );
+    let c = view.selected.iter().chain(view.excluded.iter()).next().unwrap();
+    assert_eq!(c.urgency, 0.0);
+    assert_eq!(c.basis, UrgencyBasis::Undeclared { dimensions: vec!["mood".to_string()] });
+    assert!(!c.basis.is_measured());
+    assert!(c.basis.describe().contains("silence rather than safety"));
+}
+
+#[test]
+fn an_honest_zero_inside_v_is_told_apart_from_an_unmeasured_one() {
+    // ★★ Both read 0.0; only one of them means calm.
+    let unbounded =
+        Region::new().bounding(Interval::new("balance", 0.0, 100.0)).weighing("balance", 1.0);
+    let set = load(vec![
+        WidgetDecl::new("bounded", "card").unit().reading("balance"),
+        WidgetDecl::new("unmeasured", "card").unit().reading("mood"),
+    ]);
+    let view = compose_view(
+        &set,
+        &unbounded,
+        &json!({"balance": 50.0, "stock": 50.0, "mood": 50.0}),
+        &[],
+        &Request::default(),
+        &SaliencePolicy::default(),
+    );
+    let all: Vec<_> = view.selected.iter().chain(view.excluded.iter()).collect();
+    let b = all.iter().find(|c| c.id == "bounded").unwrap();
+    let u = all.iter().find(|c| c.id == "unmeasured").unwrap();
+    assert_eq!(b.urgency, u.urgency, "the same number");
+    assert!(b.basis.is_measured() && !u.basis.is_measured(), "and a different meaning");
+}
+
+// ── UI-7: the weights are declared policy ────────────────────────────────────
+
+#[test]
+fn the_default_policy_is_the_articles_declared_preference() {
+    let p = SaliencePolicy::default();
+    assert_eq!((p.alpha(), p.lambda()), (0.75, 0.25));
+}
+
+#[test]
+fn a_household_may_argue_the_ratio() {
+    let strict = SaliencePolicy::declared(0.9, 0.1).unwrap();
+    let set = load(vec![WidgetDecl::new("balance_card", "card").unit().reading("balance")]);
+    let state = json!({"balance": 160.0, "stock": 50.0, "mood": 50.0});
+    let default_view = compose_view(
+        &set,
+        &region(),
+        &state,
+        &[],
+        &Request::asking("weather"),
+        &SaliencePolicy::default(),
+    );
+    let strict_view =
+        compose_view(&set, &region(), &state, &[], &Request::asking("weather"), &strict);
+    assert!(strict_view.selected[0].score > default_view.selected[0].score);
+}
+
+#[test]
+fn urgency_cannot_be_argued_into_second_place() {
+    // ★★★ The one thing that is not arguable.
+    assert_eq!(SaliencePolicy::declared(0.4, 0.6), Err(PolicyError::UrgencyNotDominant));
+    assert_eq!(SaliencePolicy::declared(0.5, 0.5), Err(PolicyError::UrgencyNotDominant));
+}
+
+#[test]
+fn the_weights_must_sum_to_one_so_a_score_means_the_same_thing_everywhere() {
+    assert_eq!(SaliencePolicy::declared(0.9, 0.9), Err(PolicyError::WeightsDoNotSumToOne));
+    assert_eq!(SaliencePolicy::declared(f64::NAN, 0.0), Err(PolicyError::NotAWeight));
+}
+
+#[test]
+fn a_widget_cannot_set_the_weights() {
+    // The policy is the household's parameter, not a widget field — and the
+    // urgency itself is untouched by it.
+    let set = load(vec![WidgetDecl::new("money", "card").unit().reading("balance")]);
+    let state = json!({"balance": 160.0, "stock": 50.0, "mood": 50.0});
+    let a = compose_view(&set, &region(), &state, &[], &Request::default(),
+                         &SaliencePolicy::default());
+    let b = compose_view(&set, &region(), &state, &[], &Request::default(),
+                         &SaliencePolicy::declared(0.95, 0.05).unwrap());
+    assert_ne!(a.selected[0].score, b.selected[0].score);
+    assert_eq!(a.selected[0].urgency, b.selected[0].urgency);
 }
 
 // ── the knapsack ─────────────────────────────────────────────────────────────
@@ -288,6 +417,7 @@ fn a_zero_score_widget_is_not_shown_and_says_so_from_the_excluded_list() {
         &json!({"balance": 50.0, "stock": 50.0, "mood": 50.0}),
         &[],
         &Request::asking("weather"),
+        &SaliencePolicy::default(),
     );
     assert_eq!(view.candidates_considered, 1, "it WAS considered");
     assert!(view.selected.is_empty(), "and not shown");
@@ -310,8 +440,8 @@ fn compose_changes_nothing() {
     let log = vec![event("event.finances.pocket_spent")];
     let (before_state, before_log) = (state.clone(), log.clone());
 
-    let _ = compose_view(&set, &region(), &state, &log, &Request::default());
-    let _ = compose_view(&set, &region(), &state, &log, &Request::default());
+    let _ = compose_view(&set, &region(), &state, &log, &Request::default(), &SaliencePolicy::default());
+    let _ = compose_view(&set, &region(), &state, &log, &Request::default(), &SaliencePolicy::default());
     assert_eq!(state, before_state);
     assert_eq!(log, before_log);
 }
@@ -323,8 +453,8 @@ fn composing_twice_gives_the_same_view() {
         WidgetDecl::new("b", "card").unit().reading("stock"),
     ]);
     let state = json!({"balance": 160.0, "stock": 120.0, "mood": 50.0});
-    let one = compose_view(&set, &region(), &state, &[], &Request::default());
-    let two = compose_view(&set, &region(), &state, &[], &Request::default());
+    let one = compose_view(&set, &region(), &state, &[], &Request::default(), &SaliencePolicy::default());
+    let two = compose_view(&set, &region(), &state, &[], &Request::default(), &SaliencePolicy::default());
     assert_eq!(one, two, "resolved fresh, and deterministically");
 }
 
@@ -333,16 +463,16 @@ fn relevance_is_neutral_with_no_query_and_real_with_one() {
     let set = load(vec![WidgetDecl::new("balance_card", "card").unit().reading("balance")]);
     let state = json!({"balance": 160.0, "stock": 50.0, "mood": 50.0});
     assert_eq!(
-        compose_view(&set, &region(), &state, &[], &Request::default()).selected[0].relevance,
+        compose_view(&set, &region(), &state, &[], &Request::default(), &SaliencePolicy::default()).selected[0].relevance,
         0.5
     );
     assert_eq!(
-        compose_view(&set, &region(), &state, &[], &Request::asking("balance")).selected[0]
+        compose_view(&set, &region(), &state, &[], &Request::asking("balance"), &SaliencePolicy::default()).selected[0]
             .relevance,
         1.0
     );
     assert_eq!(
-        compose_view(&set, &region(), &state, &[], &Request::asking("weather")).selected[0]
+        compose_view(&set, &region(), &state, &[], &Request::asking("weather"), &SaliencePolicy::default()).selected[0]
             .relevance,
         0.0
     );
@@ -365,6 +495,28 @@ fn the_recorded_divergence_keeps_its_counterweight() {
     ] {
         assert!(step0[key].as_str().is_some_and(|s| s.len() > 80), "missing reconcile: {key}");
     }
+    // ★★ UI-7's reconcile: the blind spot was discharged by UI-1, and the
+    // genuine residual was the weights. Both must stay on the record.
+    for key in [
+        "★★_5_UI_7_reconcile_2026_08_17_the_blind_spot_was_ALREADY_DISCHARGED",
+        "★★_6_the_GENUINE_residual_was_the_WEIGHTS_and_it_was_real",
+    ] {
+        assert!(step0[key].as_str().is_some_and(|s| s.len() > 80), "missing reconcile: {key}");
+    }
+    assert!(step0["★★_5_UI_7_reconcile_2026_08_17_the_blind_spot_was_ALREADY_DISCHARGED"]
+        .as_str()
+        .unwrap()
+        .contains("grep-0"), "the 1.1 pin must stay recorded as checked");
+
+    let blind = d["★★_UI_7_the_blind_spot_is_the_PROXY'S_and_the_proxy_is_gone"].as_str().unwrap();
+    assert!(blind.contains("manufactured zero"));
+    assert!(
+        blind.contains("Rather than invent a wall to force urgency"),
+        "the refusal to fabricate a wall must stay stated"
+    );
+    let weights = d["★★_the_weights_are_now_DECLARED_POLICY_not_a_module_constant"].as_str().unwrap();
+    assert!(weights.contains("may not argue urgency into second place"));
+
     // The sentinel collision must stay described as theoretical, not inflated.
     assert!(step0["★★_2_the_one_sharpening_that_IS_worth_it_the_UNION_AS_A_SUM_TYPE"]
         .as_str()
@@ -391,6 +543,10 @@ fn the_recorded_divergence_keeps_its_counterweight() {
         .unwrap();
     assert!(fp.keys().any(|k| k.contains("compose (real hits in Rust")));
     assert!(fp.keys().any(|k| k.contains("EventClass / event_class (grep-0 on BOTH sides)")));
+    assert!(
+        fp.keys().any(|k| k.contains("spent / allocated")),
+        "the grep a reviewer runs to check UI-7 must stay named"
+    );
 
     let limits = d["the_honest_limits"].as_str().unwrap();
     for term in [
@@ -400,6 +556,9 @@ fn the_recorded_divergence_keeps_its_counterweight() {
         "A ZERO-SCORE WIDGET IS NEVER SELECTED",
         "`device` IS CARRIED AND NOT USED",
         "RELEVANCE IS TOKEN OVERLAP, NOT MEANING",
+        "UNDECLARED IS REPORTED, NOT PENALISED",
+        "THE BASIS IS PER-WIDGET, NOT PER-DIMENSION-OF-THE-SUM",
+        "THE SUM-TO-ONE RULE IS A CONSTRAINT ON THE ARGUMENT, NOT A DERIVATION",
     ] {
         assert!(limits.contains(term), "missing limit: {term}");
     }
@@ -415,5 +574,5 @@ fn the_recorded_divergence_keeps_its_counterweight() {
             assert!(seen.insert(c["name"].as_str().unwrap().to_string()), "duplicate case name");
         }
     }
-    assert_eq!(seen.len(), 16, "every declared case must be present");
+    assert_eq!(seen.len(), 24, "every declared case must be present");
 }
