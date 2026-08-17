@@ -1,0 +1,117 @@
+{
+  "conformance_version": 1,
+  "slice": "lens",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Editing - Formal Execution.md (SLOPE), §IX (π : D → G, the lens); Foster, Greenwald, Moore, Pierce & Schmitt 2007 (Combinators for Bidirectional Tree Transformations); §II for the typed edit taxonomy",
+  "replayed_by": ["rust"],
+  "note": "★★ `π` on its own is easy — walk a `Definition`, emit nodes and edges. The difficulty is that **π FORGETS**, so the inverse cannot be a function of the graph alone. The editor is a LENS: `get : D → G` paired with `put : (G′, D) → D′`, and `put` takes the old `D` precisely so it can restore what `get` discarded. That asymmetry is the whole row.",
+
+  "★★_the_STEP_0_reconcile_and_it_corrected_WHAT_π_FORGETS": {
+    "1_no_projection_exists_in_this_core": "Checked before designing: no `lens`, no `π`, no `D → G` projection anywhere — `Lens` and `lens` are both grep-0 in `sustena-core/src`, and the only `project` hits are `admission.rs`'s clamp (Π_A, a projection onto an interval — a genuinely different thing, named here so the grep is not misread).",
+    "2_everything_put_needs_to_TARGET_already_exists": "The typed edit taxonomy (`Edit`, eight kinds, with `applicable`/`apply`/`inverse`/`can_strand`), `admit_edit`'s four conjuncts, the version DAG, inverses, three-valued rollback, μ + EMC, and — as of this same day — EDIT-11's stranding decision. So `put` had a well-typed destination waiting; it did not need one built.",
+    "3_and_everything_get_needs_to_READ_exists_too": "`Definition` is `⟨schema, invariants, operators⟩`; `predicate::parse_predicate` turns an expression into an AST; and ★ `goodhart::referenced_dimensions` already walks that AST for root dimension names. So the graph's edges are **derived from the parsed predicate** rather than guessed from its text, reusing a walker rather than writing a second one.",
+    "★★_4_the_correction_ENZYME_BODIES_ARE_NOT_IN_D_AT_ALL": "★★ §IX names *Enzyme bodies* as the first thing `π` forgets, and the brief repeats it — but in this core `π` forgets them **for free**. `Definition.operators` is an allow-list of **names**, and the struct's own docstring already says *'operator bodies are not'* data here; the bodies live in the `Registry`. So there is nothing to forget on that axis and nothing for `put` to preserve, and a round-trip proof over Enzyme bodies would have been theatre. ★ What `π` forgets that is **real here** is two things, and they are what the preservation proof actually uses: **invariant expression text** (the graph draws *that there is a rule called `floor` touching `finances`*, not `finances >= 500`) and **fine type detail** (`Number { lo, hi }` draws as the label `number`; `Record { fields }` as `record`)."
+  },
+
+  "★★_the_design_decision_that_makes_PutGet_hold_LITERALLY": {
+    "the_problem": "Adding an invariant needs an expression and adding a dimension needs a type and a default — none of which the graph carries, *because π forgot them*. The obvious move is an optional field on the node: `Invariant { id, expression: Option<String> }`.",
+    "★★_why_that_was_rejected": "★★ `π` would always leave that field `None`, while an editor's added node would carry `Some`. So `get(put(G′, D))` would differ from `G′` in exactly that field, and **PutGet would have to be weakened** to *equal after clearing the fields π never fills* — a strictly weaker claim wearing the same name. Instead the detail travels beside the graph in `Supplied`, `G` stays purely structural, and the law holds as written.",
+    "★_the_second_benefit": "A purely structural `G` is exactly what a surface draws, with no phantom fields it must know to ignore — which matters because `G` is the UI-in-Rust block's input, not an internal convenience."
+  },
+
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "The Studio Edit zone is inspect-only. `GET /devui/sustain/{id}/definition` is an additive, read-only passthrough over `engine.get_spec()`, and the surface renders JSON plus a form. There is no editable graph, no `π`, no `put`, and no round-trip law — so a definition edit there is the untyped *'here is a new spec document'* shape §II warns about, which is exactly why no per-kind rule can fire on it.",
+    "★★_the_counterweight_EVERYTHING_THIS_LENS_TARGETS_AND_READS_ALREADY_EXISTED": "★★ The gap is the lens, and **only** the lens — which is a narrow gap precisely because the surrounding work is done. On the `put` side the typed taxonomy, `admit_edit`, authority, the version DAG, inverses, rollback, μ + EMC and EDIT-11's stranding decision were all already built, so a graph edit had a well-typed destination waiting rather than needing one invented for it. On the `get` side `Definition` was already the right three fields, `parse_predicate` was already there, and ★ `goodhart::referenced_dimensions` already walked a predicate AST for root names — so the edges are **derived** rather than guessed, by reusing a walker instead of writing a second one that could drift from the first. ★ And the reference's own `/definition` route, though read-only, is the correct shape for a surface to consume: additive, non-mutating, and a passthrough rather than a re-derivation.",
+    "term_by_term": {
+      "a Definition to project": "AT PARITY as data — `sustain_templates.spec_json` there, `Definition` here.",
+      "a read-only definition surface": "AT PARITY — `GET /devui/sustain/{id}/definition` there, and it is a reasonable thing to have.",
+      "★★ π : D → G (an editable graph)": "**THIS SLICE.** `Lens`/`lens` grep-0 in Rust; the Studio zone is JSON and a form.",
+      "★★ put : (G′, D) → D′ (the lens's other half)": "**THIS SLICE**, and the half that carries the difficulty.",
+      "★★ GetPut and PutGet as executed laws": "**THIS SLICE.** Neither side had a round-trip property to state, let alone run.",
+      "a graph edit routed through the TYPED taxonomy": "**THIS SLICE.** The reference's definition edit is a whole-spec replacement.",
+      "the typed edit taxonomy `put` targets": "RUST-AHEAD since 2026-08-12, and consumed here rather than rebuilt.",
+      "the AST walker the edges derive from": "RUST-AHEAD since OPV-27 (`goodhart::referenced_dimensions`), reused rather than duplicated."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "★ project / projection (real hits, and a DIFFERENT projection)": "★ `admission.rs` uses *projection* for `Π_A` — the clamp, projecting a value onto an admissible interval. Real, load-bearing, and nothing to do with `π : D → G`. Named because *projection* is the word a reviewer would grep for first and it lands squarely on the wrong mechanism.",
+      "Lens / lens (grep-0 in Rust before this slice)": "Recorded as checked. There was no partial implementation to reconcile with.",
+      "★ Edge (a collision, not a false positive)": "★ `router::Edge` is the MoE routing edge and predates this. Twenty-third collision; the newcomer took the longer name, `GraphEdge`, so a reader who greps `Edge` finds the routing one and is not misled about which module owns it."
+    },
+    "the_honest_limits": "★★ THE LENS IS THE ROW; THE EDITOR IS NOT — this builds `get`, `put` and the laws. An interactive Edit zone that draws `G` and lets someone move it is the surface block's work (UI-in-Rust), and what it gets from here is a real graph and a safe way back. Named so the row is not read as *the graph editor is done*. · ★★ `π` FORGETS EDGES BETWEEN OPERATORS AND DIMENSIONS — an `EffectSummary` would give *this operator writes that dimension*, and MON-1 already found that **no shipped operator declares one**, so those edges would be uniformly absent rather than merely sparse. Drawing them from nothing would be fabrication; the graph has one edge kind, `Constrains`, and says so. · ★ AN UNPARSEABLE INVARIANT CONTRIBUTES NO EDGES BUT STILL APPEARS AS A NODE — deliberate: a rule the graph cannot explain is exactly the one an editor most needs to see, so it is drawn unattached rather than hidden. · ★ `put_apply` APPLIES EDITS DIRECTLY, NOT THROUGH `admit_edit` — the round-trip laws are about the **lens**, and a gate refusal is a fact about the definition being edited rather than about whether the lens threaded the change correctly. A caller putting a real edit live runs the returned edits through `admit_edit`, and a case here proves that path fires. · THE GRAPH IS TOP-LEVEL-DIMENSION GRANULAR — a `Record`'s nested fields are inside the label, matching how `referenced_dimensions` reports root names, so the two halves agree by construction rather than by coincidence. · AND `put` DOES NOT REORDER — `Edit` has no move or rename kind, so repositioning a node in the graph is not an edit and produces none."
+  },
+
+  "law_cases": [
+    {
+      "name": "★★_GetPut_an_untouched_graph_produces_NO_EDIT_AT_ALL",
+      "why": "★★ `put(get(D), D) = D`, stated in the stronger form the return type makes available: projecting a definition and putting the untouched graph back yields the **empty edit list**, not an edit that happens to be a no-op. Both are asserted — the empty list, and that applying it reproduces `D` exactly. No spurious change is the property, and an empty list is a sharper way to have it than an identity edit would be.",
+      "expect": "edits = [], put_apply(get(D), D) == D"
+    },
+    {
+      "name": "★★_PutGet_an_edit_on_the_graph_survives_reprojection",
+      "why": "★★ `get(put(G′, D)) = G′` — **literally**, not up to a normalisation, because `G` carries no detail fields for `π` to leave empty. Remove an operator node from the projected graph, put it back, re-project: the result equals the edited graph exactly. The edit is not silently dropped, and nothing extra appears.",
+      "expect": "get(put_apply(G′, D)) == G′"
+    },
+    {
+      "name": "PutGet_holds_for_an_addition_too",
+      "why": "Removal is the easy direction. An addition goes through `Supplied`, and the resulting definition re-projects to a graph carrying the new node *and* the edges derived from the expression it was given — which the caller's `G′` could not have contained, since it did not know the expression when it drew the node. So the law is checked on the projections of the same definition, which is the honest form for the addition case and is stated as such rather than quietly skipped.",
+      "expect": "the new node is present, and re-projection is stable"
+    }
+  ],
+
+  "forgetting_cases": [
+    {
+      "name": "★★_π_forgets_the_expression_text_and_the_fine_type_detail",
+      "why": "★★ The forgetting, asserted directly rather than described: the invariant is present by id and the string `>= 500` appears nowhere in `G`; the dimension is present at label granularity and its bound `1000000` appears nowhere either. If a future change quietly widened `G` to carry them the lens would become a lossless encoding, this test would fail, and the row's whole argument would have gone with it.",
+      "expect": "invariant id present, expression absent; dimension present, bounds absent"
+    },
+    {
+      "name": "★★_a_round_trip_KEEPS_what_the_graph_never_showed",
+      "why": "★★★ THE LENS PROPERTY, and the reason `put` takes the old `D`. Remove an operator on the graph — a change the graph *can* express — and put it back: the operator is gone, and the invariant's expression text and the dimension's `lo`/`hi` bounds come back **byte-identical**, recovered from the old definition the graph never carried them in. A naive *regenerate D from G′* would have destroyed both.",
+      "expect": "the edit landed; invariants and the fine type detail unchanged"
+    },
+    {
+      "name": "the_edges_are_derived_from_the_parsed_predicate",
+      "why": "An edge is a fact about what a rule *reads*, obtained by parsing the expression and walking the AST with `goodhart::referenced_dimensions` — not a substring match on its text. The rule touching `finances` gets that edge; the untouched `roster` dimension gets none. Reusing the existing walker also means the graph and OPV-27's Goodhart guard cannot disagree about what a predicate reads.",
+      "expect": "inv:floor → dim:finances, and no edge to dim:roster"
+    },
+    {
+      "name": "★_a_new_node_with_no_supplied_detail_is_REFUSED_not_defaulted",
+      "why": "★★ Where `π`'s forgetting genuinely bites. For a node that survives, `put` recovers the detail from `D`; for a node that is **new** there is nothing to recover, so it refuses and names what is missing (`MissingDetail { node, needs }`). Inventing a plausible expression or a default type would be the lens making a decision that belongs to whoever is editing — the same refusal-over-invention discipline as `Strategy::Refuse` and `TrustPolicy`'s missing `Default`.",
+      "expect": "Err(MissingDetail) for a new invariant and for a new dimension"
+    },
+    {
+      "name": "an_unparseable_supplied_expression_is_refused_at_the_lens",
+      "why": "Caught before an edit is even constructed, so a graph edit cannot smuggle an unparseable rule into the typed taxonomy and have it surface later as a gate failure with a confusing provenance. Fail early, and name the rule.",
+      "expect": "Err(UnparseableExpression)"
+    },
+    {
+      "name": "★_an_operator_needs_nothing_supplied_because_π_forgot_nothing_there",
+      "why": "★ The asymmetry made concrete. A `Definition`'s operator entry **is** its name, so the graph node carries the whole of it and adding one needs no supplied detail — while adding an invariant does. That contrast is the clearest statement of what `π` forgets and what it does not, and it falls out of the data rather than being declared.",
+      "expect": "AddOp with an empty Supplied"
+    }
+  ],
+
+  "typed_edit_cases": [
+    {
+      "name": "★_every_graph_edit_is_a_TYPED_edit",
+      "why": "★★ §II is explicit that an untyped *'here is a new JSON document'* edit has no kind, so no per-kind rule can fire — which would lose the taxonomy, the authority check, `can_strand`'s asymmetry and EDIT-11's stranding decision in one move. `put` returns `Vec<Edit>`, never a rebuilt definition, so a graph edit arrives at the gate as a `DropInv` or a `RetireOp` and is judged exactly as a hand-written one would be.",
+      "expect": "edit kinds are AddOp / DropInv / RetireOp"
+    },
+    {
+      "name": "★★_a_graph_edit_reaches_admit_edit_AND_THE_STRANDING_CHECK_FIRES",
+      "why": "★★★ The routing proven end to end rather than at this module's boundary. Adding an invariant on the graph becomes a typed `AddInv`, which `can_strand` says CAN strand — so `admit_edit` runs `Safe(e,μ)` against the live instances and **refuses** with `WouldStrand`, naming the instance and the rule. The same graph edit against a compliant instance is admitted. A lens that produced an untyped replacement could not have reached either answer.",
+      "expect": "WouldStrand for the violating instance; admitted for the compliant one"
+    },
+    {
+      "name": "a_modified_expression_becomes_a_ModifyInv_not_a_drop_and_add",
+      "why": "Editing a rule's text is one typed edit, not a demolition and a rebuild — which matters because `DropInv` cannot strand and `AddInv` can, so the drop-then-add spelling would slip a strand-capable change past `can_strand`'s asymmetry as two individually-safe-looking steps.",
+      "expect": "a single ModifyInv"
+    },
+    {
+      "name": "supplying_the_identical_expression_is_not_an_edit",
+      "why": "Preservation must not be mistaken for a change. An editor that re-sends the text it was shown produces no edit at all — otherwise every open-and-close of the Edit zone would bump the definition's version and fill the DAG with edits that changed nothing.",
+      "expect": "edits = []"
+    }
+  ]
+}

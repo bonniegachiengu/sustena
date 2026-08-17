@@ -131,6 +131,7 @@ conformance/
     capability.json     the confused deputy, fixed        (spec, R2)
     stranding.json      states vs histories, 3 remedies   (spec, R2)
     learned.json        fixed vs learned, bounded tier    (spec, R2)
+    lens.json           π : D → G, and the way back       (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1568,3 +1569,88 @@ is declared, not derived.** ★★ **Nothing hands the capability to a running r
 engine** — this core has no ingest loop at all, so the threading is host work
 and the same residual IMM-7 carries. And the ingress bound is **per-rule-set,
 not per-source**: two bounds means two rule sets, one list rather than a matrix.
+
+### `lens.json` — `π : D → G`, and the way back (EDIT-13, Editing §IX)
+**13 cases, R2 (spec).** The last M-EDIT row, and it closes the module.
+
+★★ **It is a lens, not a projection.** `π` alone is easy — walk a `Definition`,
+emit nodes and edges. The difficulty is that **`π` forgets**, so the inverse
+cannot be a function of the graph alone. The editor is the pair `⟨get, put⟩`
+(Foster, Greenwald, Moore, Pierce & Schmitt 2007), and **`put` takes the old
+`D` as well as `G′` precisely so it can restore what `get` discarded**. A naive
+*regenerate `D` from `G′`* would destroy every detail the graph never carried.
+
+★★ **STEP-0 corrected what `π` forgets.** §IX names *Enzyme bodies* first, and
+in this core `π` forgets them **for free**: `Definition.operators` is an
+allow-list of **names**, and the struct's own docstring already says *"operator
+bodies are not"* data here — the bodies live in the `Registry`. A round-trip
+proof over Enzyme bodies would have been theatre. What `π` forgets that is
+**real here** is the **invariant expression text** and the **fine type detail**
+(`Number { lo, hi }` draws as the label `number`), and those are what the
+preservation proof uses.
+
+★★ **Both laws are executed.** **GetPut** in the stronger form the return type
+allows — an untouched graph yields the **empty edit list**, not an edit that
+happens to be a no-op. **PutGet** *literally*: `get(put(G′,D)) == G′`.
+
+★★ **The design decision behind that literalness, recorded because it was a
+real fork.** The obvious move is an optional `expression` field on the
+invariant node. It was rejected: `π` would always leave it `None` while an
+editor's added node carried `Some`, so `get(put(G′,D))` would differ from `G′`
+in exactly that field and PutGet would have to be weakened to *equal after
+clearing the fields π never fills* — a strictly weaker claim wearing the same
+name. Instead the detail travels **beside** the graph in `Supplied`, `G` stays
+purely structural, and it is therefore also exactly what a surface draws.
+
+★★★ **The preservation, proven.** Remove an operator on the graph, put it back,
+and the invariant's expression text and the dimension's `lo`/`hi` bounds return
+**byte-identical**, recovered from the old `D`. ★ Where the detail is genuinely
+absent — a **new** node — `put` **refuses and names what is missing** rather
+than inventing a default. The one addition needing nothing supplied is an
+**operator**, because there `π` forgot nothing: the asymmetry made concrete.
+
+★★ **A graph edit is a TYPED edit, all the way to the gate.** `put` returns
+`Vec<Edit>`, never a rebuilt definition, so §II's *an untyped JSON replacement
+has no kind* is honoured — proven end to end by a graph-added invariant
+becoming a typed `AddInv`, reaching `admit_edit`, and being **refused with
+`WouldStrand`** naming the instance and the rule: EDIT-11's own check firing on
+a change made by dragging a node. A modified expression becomes one
+`ModifyInv`, not a drop-and-add — which matters because `DropInv` cannot strand
+and `AddInv` can.
+
+**Divergence.** R2, rust-ahead. The Studio Edit zone is inspect-only: a
+read-only `/definition` passthrough plus JSON and a form, so a definition edit
+there is exactly the untyped whole-spec replacement §II warns about.
+★★ **The counterweight is that the gap was narrow because the surrounding work
+was done.** On the `put` side the typed taxonomy, `admit_edit`, authority, the
+version DAG, inverses, rollback, μ + EMC and EDIT-11's stranding decision were
+already built, so a graph edit had a well-typed destination waiting. On the
+`get` side `Definition` was already the right three fields, `parse_predicate`
+existed, and ★ `goodhart::referenced_dimensions` already walked a predicate AST
+for root names — so the edges are **derived** rather than guessed, by reusing
+that walker instead of writing a second one that could drift from it. ★ And the
+reference's read-only `/definition` route is the right shape for a surface to
+consume: additive, non-mutating, a passthrough rather than a re-derivation.
+
+**Greppable false positives named.** ★ `projection` in `admission.rs` is `Π_A`
+— the **clamp**, projecting a value onto an admissible interval. Real,
+load-bearing, and nothing to do with `π : D → G`; named because *projection* is
+the word a reviewer greps first and it lands on the wrong mechanism.
+`Lens`/`lens` were grep-0. And `Edge` was a **collision**, not a false
+positive: `router::Edge` is the MoE routing edge, so the newcomer took
+`GraphEdge` (twenty-third collision).
+
+**Honest limits, six.** ★★ **The lens is the row; the editor is not** — an
+interactive Edit zone that draws `G` and lets someone move it is the surface
+block's work, and what it gets from here is a real graph and a safe way back.
+★★ **No operator→dimension edges** — that needs an `EffectSummary`, and MON-1
+already found **no shipped operator declares one**, so they would be uniformly
+absent rather than sparse and drawing them would be fabrication; the graph has
+one edge kind and says so. ★ **An unparseable invariant contributes no edges
+but still appears as a node**, deliberately: a rule the graph cannot explain is
+exactly the one an editor most needs to see. ★ `put_apply` applies edits
+directly rather than through `admit_edit`, because the laws are about the lens
+and a gate refusal is a fact about the definition being edited. The graph is
+**top-level-dimension granular**, matching how `referenced_dimensions` reports,
+so the two halves agree by construction. And `put` does not reorder — `Edit`
+has no move or rename kind.

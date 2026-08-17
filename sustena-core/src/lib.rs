@@ -47,6 +47,7 @@
 //! | Approval token | [`approval`] | R2 |
 //! | Capabilities (confused deputy) | [`capability`] | R2 |
 //! | Fixed vs learned rules, least privilege | [`learned`] | R2 |
+//! | The definition lens π : D → G | [`lens`] | R2 |
 //! | Edit authority | [`editing`] | R2 |
 //! | Transition constraints | [`transition`] | R2 |
 //! | Checked composition | [`compose`] | R2 |
@@ -124,6 +125,7 @@ pub mod holarchy;
 pub mod inverse;
 pub mod kernel;
 pub mod learned;
+pub mod lens;
 pub mod migrate;
 pub mod mixture;
 pub mod monitor;
@@ -275,6 +277,10 @@ pub use capability::{Amplification, Attenuation, Capability, Rights};
 pub use learned::{
     BoundError, FixedRule, IngressBound, LearnedRule, RuleSet, RuleTrust, Screening, TrustPolicy,
 };
+// ★ `get`/`put`/`put_apply` are deliberately NOT re-exported at the crate root:
+// three-letter verbs that generic would collide with something eventually, and
+// `lens::get` reads better than `get` at a call site anyway.
+pub use lens::{DefinitionGraph, DimLabel, EdgeKind, GraphEdge, Node, PutError, Supplied};
 pub use principal::{
     effective_privilege, effective_privilege_with, permitted, permitted_with, Denial,
     MembershipEdge, Memberships, Skin, SkinRegistry, Tier,
