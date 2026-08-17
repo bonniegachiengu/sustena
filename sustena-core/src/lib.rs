@@ -80,10 +80,12 @@
 //! | Two clocks · skew · negative skew surfaced | [`clocks`] | R2 |
 //! | Watermarks · windows · declared lateness | [`watermark`] | R2 |
 //! | Periods · RRULE · zone-id anchoring | [`period`] | R2 |
+//! | Replay · checkpoints (s_k, k) | [`checkpoint`] | R2 |
 
 pub mod admission;
 pub mod approval;
 pub mod boundary;
+pub mod checkpoint;
 pub mod clocks;
 pub mod compose;
 pub mod consensus;
@@ -180,6 +182,7 @@ pub use editing::{
     EditAuthority, EditEffect, EditError, EditToken, Governance, Instance, Irreversible, Migration,
     Stranded,
 };
+pub use checkpoint::{events_applied, replay, replay_to, Checkpoint, ReplayError};
 pub use clocks::{clock_findings, skew_of, ClockFinding, Skew, Suspect};
 pub use period::{
     partitions, Anchor, CivilDateTime, DstPolicy, Freq, LocalResolution, Period, PeriodError,

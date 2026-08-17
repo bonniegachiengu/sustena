@@ -120,6 +120,7 @@ conformance/
     clocks.json         two clocks · skew · provenance   (spec, R2)
     watermark.json      W(τ) · windows · lateness policy (spec, R2)
     period.json         RRULE · zone anchoring · [a,b)  (spec, R2)
+    checkpoint.json     replay · (s_k,k) · O(n-k)        (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -911,3 +912,46 @@ it is a bug** — nothing silently differs.
   consumer has been migrated onto the primitive**, so it is ready rather than in
   use; the DST policy resolves rather than predicts; and a fixed-offset anchor
   is kept, as a labelled lesser thing.
+
+- **`checkpoint.json` — rust-ahead-of-python, with the homomorphism already in
+  continuous use on the other side, and one finding about the article's own
+  pseudocode.** `checkpoint` is grep-0; `rebuild_state()` always folds from
+  genesis, so a cold replay is always `O(n)`.
+  ★★ **The counterweight is most of §IX.** `sustain_states` holds the folded
+  state and `_append_events_and_update_cache()` advances it **one call at a
+  time** rather than re-folding — which is exactly `fold(s_k, L[k+1..n])` at
+  `k = n−1`. The reference is not missing the mathematics; it uses it
+  continuously. What it lacks is a checkpoint at any *other* `k`, which is what
+  turns a live cache into something a cold replay can start from.
+  ★ **And discardability is real there and tested**, not merely intended:
+  `rebuild_state()` regenerates the cache from the log alone, and its own
+  docstring calls that *"the proof that the cache is what it claims to be."*
+  ★★ **Where the two genuinely differ is small and sharp: derived versus
+  authorable.** `_persist_state()` is a raw cache write, guarded by a docstring
+  and a project rule (*"otherwise `rebuild_state()` silently diverges"*). Here
+  `Checkpoint::at` is the **only** constructor and it folds the log, so the
+  equivalent mistake is **not writable** rather than documented as forbidden.
+  ★★ **A finding about §IX's own pseudocode.** It initialises `seen = set()` per
+  call and iterates `L[start+1..]`, so with a checkpoint the ids already folded
+  in are never in `seen` — a late duplicate of an early event is therefore
+  *skipped* from scratch and *applied* from the checkpoint. Two paths, two
+  answers (380 vs 100), and the same section's *"can always be discarded"*
+  quietly broken. Carrying the folded id set on the checkpoint would fix it and
+  would make the checkpoint grow with `k`, which is most of what it was for — so
+  the fix is taken where §V already puts dedupe, and `replay` refuses an
+  un-deduped log by name. The conformance case runs the pseudocode **literally**
+  so the finding is demonstrated rather than argued. This is not a defect in the
+  mathematics; it is a gap between the mathematics and one line of the sketch.
+  **Greppable false positives named:** `snapshot` has **89 hits and none is a
+  checkpoint** — almost all are `StateAccessor.snapshot()`, a deep copy for
+  reading, plus `simulate.fork`'s in-memory fork and an Orchie context blob.
+  `incremental` has one hit and it is the right idea (the cache being advanced
+  rather than re-folded), credited above.
+  **Honest limits, five:** ★ the O(1) attachment check catches the **wrong log**,
+  not a corrupted state — only `verify()` does, at `O(k)`, exactly what the
+  checkpoint saved, and neither is pretended to be the other; nothing schedules
+  checkpoints (deliberately — the whole claim is that they are discardable);
+  ★ **replay requires a deduped log** and refuses otherwise, which is a real
+  precondition stated rather than assumed; ★ **replay-under-`D′` is not built** —
+  §IX's *second* consumer (Editing) is EVT-15/EDIT-11, and only Tenet's prefix
+  replay is answered here; and effect journaling (EVT-14) is untouched.

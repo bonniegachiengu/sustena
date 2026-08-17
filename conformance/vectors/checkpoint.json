@@ -1,0 +1,135 @@
+{
+  "conformance_version": 1,
+  "slice": "checkpoint",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Events and Time - Formal Execution.md, §IX (Replay, Checkpointing, and the Purity Requirement)",
+  "replayed_by": ["rust"],
+  "note": "Fowler (2005); Kleppmann (2017, ch. 11). A checkpoint (s_k, k) falls straight out of §II's homomorphism `fold(L₁·L₂) = fold(L₂) ∘ fold(L₁)`. ★★ Two structural properties: a checkpoint is DERIVED and never authored, so it cannot claim a state the log never produced; and replay CANNOT REACH an effect channel, so §IX's `no_external_effects_were_issued` is a fact about the signature rather than an assertion at the end.",
+  "★★_a_finding_about_§IX's_own_pseudocode": "The printed pseudocode initialises `seen = set()` per call and then iterates `L[start+1..]`. With a checkpoint, `start = k`, so **the ids already folded into the checkpoint are never in `seen`** — and a late duplicate of an early event is therefore SKIPPED from scratch and APPLIED from the checkpoint. The two paths disagree, which quietly breaks the same section's *'a checkpoint can always be discarded without loss'*. Carrying the folded id set on the checkpoint would fix it and would make the checkpoint grow with `k`, which is most of what it was for. So the fix is taken where §V already puts it — dedupe is uniform at the substrate — and `replay` refuses a log that has not been through it rather than silently picking one of the two wrong answers. A conformance case runs the pseudocode **literally** and shows the two answers, so the finding is demonstrated rather than argued.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`checkpoint` is grep-0 in apps/api/sustena/. `rebuild_state()` folds every event for a sustain from genesis in `seq` order, so replay is always `O(n)` — there is nowhere to start from other than the beginning.",
+    "★★_the_counterweight_the_reference_ALREADY_RUNS_the_homomorphism": "And this is most of §IX. `sustain_states` holds the folded state and `_append_events_and_update_cache()` advances it **one call at a time** rather than re-folding — which is exactly `fold(s_k, L[k+1..n])` with `k = n−1`. So the reference is not missing the mathematics; it is using it continuously. What it lacks is a checkpoint at any *other* `k`, which is what turns a live cache into something a cold replay can start from.",
+    "★_and_the_discardability_property_is_REAL_there_and_TESTED": "The cache is genuinely discardable: `rebuild_state()` regenerates it from the log alone, and its own docstring calls that *'the proof that the cache is what it claims to be — call this and `get_state()` back to back and they must be deep-equal.'* That is §IX's *L is still the truth* asserted in the reference's own test suite. Credit where it is due: the property is not merely intended there.",
+    "★★_where_the_two_genuinely_differ_derived_versus_AUTHORABLE": "The sharp difference, and it is small and real. `SustainEngine._persist_state()` is a **raw cache write** — it sets `sustain_states` without appending an event — and it is guarded by a docstring and a project rule (*'do not write state via `_persist_state()` from application code... otherwise `rebuild_state()` silently diverges from `get_state()`'*). The guard is a convention, and the method exists. Here `Checkpoint::at` is the **only** constructor and it folds the log to produce one: there is no constructor taking a state, so the equivalent mistake is not writable rather than documented as forbidden.",
+    "term_by_term": {
+      "★ the homomorphism fold(L₁·L₂) = fold(L₂) ∘ fold(L₁)": "AT PARITY, and in continuous use — the incremental cache update IS this.",
+      "full replay from genesis": "AT PARITY — `rebuild_state()`, and it is the correctness oracle the whole event-sourcing slice was verified against.",
+      "the log is the truth / cache regenerable": "AT PARITY, and tested there.",
+      "★★ a checkpoint (s_k, k) at an arbitrary k": "RUST-AHEAD. The reference has exactly one folded state, at the head. A cold rebuild therefore always costs O(n).",
+      "★ O(n−k) replay": "RUST-AHEAD by consequence, not by choice — with only a head cache there is no k to subtract.",
+      "★★ derived-never-authored": "RUST-AHEAD structurally; AT PARITY by convention there (`_persist_state` exists and is documented as not-for-application-code).",
+      "purity of apply": "AT PARITY — §4D already imposes it on Enzymes, and `apply_mutation` reads no clock on either side (EVT-13 is ✅ on both).",
+      "★ replay issues no external effects": "AT PARITY IN EFFECT, differently achieved. Python's `fold_events` also only applies mutations and cannot send anything. The difference is that here it is a property of the signature — no sink, no registry, no `execute` in reach — rather than of what the function happens to contain.",
+      "external effects journaled as their own events": "OUT OF SCOPE for this row — that is EVT-14, where Python has real egress prepare/confirm and Rust has no journaling model. Named so this slice is not read as having closed it."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "snapshot (89 hits, none a checkpoint)": "★ The one most likely to be misread. Almost every hit is `StateAccessor.snapshot()` — a deep copy of the current state for reading — plus `simulate.fork`'s in-memory fork and an Orchie context blob. None is a persisted `(s_k, k)` a replay could start from.",
+      "checkpoint (0 hits)": "A clean zero, under that spelling and no other.",
+      "incremental (1 hit, and it is the right idea)": "A comment about the cache being advanced rather than re-folded — which is the homomorphism, credited in the counterweight above."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The homomorphism in continuous use, a full replay that is the project's own correctness oracle, and a regenerable cache with the law asserted. What it does not have is a second place to start from, or a constructor that makes the wrong state unwritable.",
+    "the_honest_limits": "Five. (1) ★ THE CHEAP CHECK CATCHES THE WRONG LOG, NOT A CORRUPTED STATE — attachment is verified in O(1) by the event id; only `verify()` re-folds, and it costs O(k), exactly what the checkpoint saved. Both are offered and neither is pretended to be the other. (2) ★ NOTHING SCHEDULES CHECKPOINTS — when to take one, how many to keep, when to drop them is a policy this module does not hold, deliberately, since the whole claim is that they are discardable. (3) ★ REPLAY REQUIRES A DEDUPED LOG and refuses otherwise — see the finding; that is a real precondition, stated rather than assumed. (4) ★ REPLAY-UNDER-`D′` IS NOT BUILT — §IX's second consumer (Editing) needs a changed definition to replay *under*, which is EVT-15/EDIT-11 and is a separate row; `replay_to` answers the first consumer (Tenet) only. (5) NO EFFECT JOURNALING — EVT-14 is untouched here.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. The step is small, because the mathematics is already running: persist `(state, seq, through_event_id)` at some `k`, and let `rebuild_state` start there.",
+    "not_a_divergence_in": "R1 behaviour. Purely additive: a new module reusing `fold_events` unchanged, no call site in `execute`, no change to `Event`, and no existing vector touched."
+  },
+  "fixture": {
+    "why": "A household balance walking through five real events, so a checkpoint at any k has a distinct state to be right or wrong about — and a sixth event that repeats an early id, which is what exposes the pseudocode's `seen` problem.",
+    "path": "finances.liquid.balance",
+    "log": [
+      {"id": "e1", "t_event": 100, "old": 0, "new": 100},
+      {"id": "e2", "t_event": 200, "old": 100, "new": 250},
+      {"id": "e3", "t_event": 300, "old": 250, "new": 220},
+      {"id": "e4", "t_event": 400, "old": 220, "new": 400},
+      {"id": "e5", "t_event": 500, "old": 400, "new": 380}
+    ],
+    "final_balance": 380,
+    "late_duplicate": {"id": "e1", "t_event": 600, "old": 380, "new": 100,
+                       "note": "★ a REPEAT of e1's id arriving last — the case the pseudocode mishandles"}
+  },
+  "homomorphism_cases": [
+    {
+      "name": "★★_a_checkpoint_and_a_from_scratch_replay_agree_at_EVERY_k",
+      "why": "★★ `fold(s₀, L) = fold(s_k, L[k+1..n])` — §II's homomorphism, which is the entire justification for checkpointing. Checked at every k from 1 to n rather than at one convenient one, because a checkpointing scheme that is right at k=3 and wrong at k=1 is not a scheme.",
+      "expect": {"all_k_agree": true, "final_balance": 380}
+    },
+    {
+      "name": "★_the_cost_is_O(n−k)_and_it_is_COUNTABLE",
+      "why": "★ §IX's cost claim made checkable rather than asserted: `events_applied` reports how many events a replay will touch, so *2 instead of 5* is a number in a test rather than a sentence in a comment — and the two paths still return the same state.",
+      "expect": {"from_scratch": 5, "from_checkpoint_at_3": 2, "answers_identical": true}
+    },
+    {
+      "name": "a_checkpoint_stays_useful_as_the_log_grows",
+      "why": "The reason to take one at all: later events do not invalidate it. A checkpoint at k=2 still gives the right answer after the log has grown past it, which is exactly the case a head-only cache cannot serve.",
+      "expect": {"balance_after_growth": 999, "matches_from_scratch": true}
+    }
+  ],
+  "discardable_cases": [
+    {
+      "name": "★★_DISCARDING_the_checkpoint_is_changing_ONE_ARGUMENT",
+      "why": "★★ §IX: *'a checkpoint is an optimisation that can always be discarded without loss, because L is still the truth.'* Made structural rather than promised — `replay` takes `Option<&Checkpoint>`, so the fast path and the from-scratch path are the *same function*, and discarding is passing `None`. There is no separate slow implementation that could drift from the fast one.",
+      "expect": {"identical": true}
+    },
+    {
+      "name": "★★_a_checkpoint_is_DERIVED_and_cannot_be_AUTHORED",
+      "why": "★★ The other structural half, and the sharpest difference from the reference. `Checkpoint::at` is the only constructor and it **folds the log**; there is no constructor taking a state. So a checkpoint claiming a state the log never produced is not writable — where the reference's `_persist_state()` makes the equivalent mistake *possible* and forbids it by docstring and project rule.",
+      "expect": {"state_at_k3": 220, "k": 3, "through_event_id": "e3", "verifies": true}
+    },
+    {
+      "name": "★_a_checkpoint_from_a_DIFFERENT_LOG_is_refused_in_O(1)",
+      "why": "★ Deserialisation bypasses the constructor, so the realistic failure is a checkpoint attached to the wrong log — or to this one before it changed. The stored `through_event_id` catches that against `L[k-1]` in constant time, naming both the id it expected and the one it found.",
+      "expect": {"error": "CheckpointNotOfThisLog", "expected": "e3", "found": "different"}
+    },
+    {
+      "name": "★_verify_catches_a_CORRUPTED_state_that_the_cheap_check_cannot",
+      "why": "★ The honest split, stated rather than blurred. A state tampered with after the checkpoint was taken still carries the right event id, so the O(1) check passes it — and `verify()`, which re-folds, is what catches it. It costs O(k), precisely what the checkpoint saved, which is why it is offered rather than done implicitly. Claiming the cheap check validated the state would be the dishonest version of this.",
+      "expect": {"cheap_check_passes": true, "verify_returns_false": true}
+    },
+    {
+      "name": "a_checkpoint_at_zero_is_no_checkpoint_and_says_so",
+      "why": "`(s₀, 0)` is the from-scratch replay, which `None` already expresses — so accepting it as a checkpoint would be two spellings of one thing. Refused with the reason, rather than silently accepted.",
+      "expect": {"k0": "EmptyCheckpoint", "k_beyond": "CheckpointBeyondLog"}
+    }
+  ],
+  "dedupe_finding_cases": [
+    {
+      "name": "★★_the_pseudocode's_PER_CALL_seen_set_makes_the_two_paths_DISAGREE",
+      "why": "★★ THE FINDING, demonstrated rather than described — the case runs §IX's pseudocode literally, `seen = set()` and all. A repeat of `e1`'s id arriving last is SKIPPED from scratch (its id is already in `seen`) and APPLIED from a checkpoint taken at k=3 (the checkpoint's ids never entered `seen`). Two paths, two answers — 380 and 100 — and the same section's *discard it freely* property gone. This is not a defect in the mathematics; it is the gap between the mathematics and one line of the sketch.",
+      "expect": {"from_scratch": 380, "from_checkpoint": 100, "disagree": true}
+    },
+    {
+      "name": "★_replay_REFUSES_a_log_that_was_not_deduped_at_the_substrate",
+      "why": "★ The fix is taken where §V already puts it — dedupe is uniform at the substrate — rather than by growing the checkpoint with the id set it folded, which would cost most of what a checkpoint is for. A log carrying a repeat is refused by name, so the caller is told what is wrong instead of receiving one of the two wrong answers. `Checkpoint::at` refuses it too, since a checkpoint over an ambiguous log is already ambiguous.",
+      "expect": {"replay_error": "DuplicateEventId", "checkpoint_error": "DuplicateEventId"}
+    },
+    {
+      "name": "★_once_MERGED_the_two_paths_agree_again",
+      "why": "★ And the resolution is the existing substrate primitive, not a new one: put the log through `merge` (§V dedupe + event-time order) and the checkpointed and from-scratch answers coincide. The precondition is satisfiable with something the codebase already ships.",
+      "expect": {"identical_after_merge": true}
+    }
+  ],
+  "purity_cases": [
+    {
+      "name": "★★_replay_CANNOT_REACH_an_effect_channel_at_all",
+      "why": "★★ §IX's pseudocode ends `ASSERT mode == REPLAY IMPLIES no_external_effects_were_issued()`. Here that is not an assertion at the end but a fact about the signature: `replay` takes `&[Event]` and returns a `Value` — no event sink, no movement channel, no registry, and it never calls `execute`. The contrast is the proof: an operator body receives `&mut Vec<EmittedEvent>` and `&mut Vec<Movement>` because emitting and moving is what it is for. **An SMS cannot be re-sent on replay because there is nothing here to send it with.**",
+      "expect": {"log_untouched": true, "borrowed_not_owned": true}
+    },
+    {
+      "name": "replay_is_deterministic_because_apply_reads_no_clock",
+      "why": "*'Purity is a precondition, not a nicety'* — a replay that re-read the clock would produce a different state from the original run and destroy the only property the log was for. Two replays of the same log return byte-identical states.",
+      "expect": {"two_replays_identical": true}
+    }
+  ],
+  "consumer_cases": [
+    {
+      "name": "★_replay_to_reads_the_state_at_a_CHOSEN_POINT",
+      "why": "★ §IX's first consumer: Tenet *'replays to stand in a chosen future and read the path back'*. Prefix replay answers it — the balance at event 2 and at event 4 are both readable — and asking beyond the log is a named error rather than a clamp to the end.",
+      "expect": {"at_2": 250, "at_4": 400, "beyond": "UptoBeyondLog"}
+    },
+    {
+      "name": "★_a_checkpoint_PAST_the_point_asked_for_falls_back_to_the_LOG",
+      "why": "★ The whole of §IX in one behaviour: the log is always sufficient. A checkpoint at k=4 is no use for reading the state at event 2, so it is **ignored** and the answer comes from the log — rather than being an error, which would make the optimisation load-bearing, or being used, which would be wrong.",
+      "expect": {"at_2_with_late_checkpoint": 250, "matches_no_checkpoint": true}
+    }
+  ]
+}
