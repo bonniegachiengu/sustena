@@ -114,6 +114,7 @@ conformance/
     mixture.json        sparse MoE gate · top-k         (spec, R2)
     criticality.json    branching ratio σ̂ · slowing down (spec, R2)
     cynefin.json        suited domains · coverage · disorder (spec, R2)
+    boundary.json       B = ⟨scope, μ⟩ · closure law     (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -695,3 +696,33 @@ it is a bug** — nothing silently differs.
   inferring a graph's shape from an id would be guessing), and criticality
   informs **exactly one** transition — complex → chaotic, a flag that never
   reclassifies.
+
+- **`boundary.json` — rust-ahead-of-python, with the boundary-change ACT at
+  parity and the AUTHORITY not.** `autopoie`, `membership predicate`,
+  `closure law`, `organisationally closed` and `materially open` are grep-0.
+  The reference's model is the one §IV names by its symptoms:
+  `{"owner_ids": ["system"]}` — literally *"a state dict with an owner
+  field"*. **★ The counterweight is real:** `holon.create_child` (⊕) and
+  `holon.dissolve_child` (⊕⁻¹) exist and the reference *knows* they are
+  unlike ordinary operators — `operator.py` carves them out by name as *"a
+  narrow, deliberate escape hatch"*. **★★ But the carve-out is WIDER, not
+  HIGHER**, and that is the whole gap: the hatch grants `ctx.engine`, a
+  **capability** the other ~50 operators lack, where §IV asks for a
+  *"separate, **higher** gate"*. Nothing there asks who may move a boundary
+  as distinct from who may spend. With one path a closure law would have to
+  **exempt** those three operators; with two paths there is nothing to exempt,
+  because an ordinary operator cannot reach μ at all. Half the law was
+  **already at parity in Rust** — `schema(o(s)) = schema(s)` shipped with
+  R2 #14, with a gate comment that anticipated this row almost verbatim; what
+  is new is `μ_{o(s)} = μ_s`, the half an Enzyme could actually move. False
+  positives: `boundary` (8 hits — `HARD SAFETY BOUNDARY` twice, the inbox
+  dedup boundary, a sensing boundary, a LoosenInv analogy) and `scope` (68 —
+  the predicate evaluator's quantifier scope). ★ And one collision is named
+  **before** it bites: `migrate::Mu` is §4's state-migration function, so this
+  module deliberately introduces **no type called `Mu`** — two μs in one crate
+  would make one unsayable, the same trap OPV-16 recorded for `domain`. Four
+  limits, including a disclosed cosmetic one:
+  `AuthorityError::SharedNeedsCouncil`'s message is worded for definition
+  edits and reads slightly off for a boundary change — reusing the type keeps
+  **one** authority model, which is worth more than a perfectly-worded second
+  one.

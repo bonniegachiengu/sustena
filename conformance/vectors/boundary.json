@@ -1,0 +1,118 @@
+{
+  "conformance_version": 1,
+  "slice": "boundary",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Sustain - Formal Execution.md, §IV (B — The Boundary, and the Autopoietic Closure Law): B = ⟨scope, μ⟩, Own(Σ), the closure condition on T, and boundary change as a distinct higher-gated class of act",
+  "replayed_by": ["rust"],
+  "note": "Varela, Maturana & Uribe (1974); Maturana & Varela (1980). ★ Flows across B — the firewall F — are explicitly NOT this slice: §IV says they 'form their own predicate class and belong to the constraint-engine layer, not here.' That is CON-1's follow-on and is the immediate next slice.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`autopoie`, `membership predicate`, `closure law`, `organisationally closed` and `materially open` are ALL grep-0 in apps/api/sustena/. The reference's ownership model is the flat one §IV names by its symptoms: `{\"owner_ids\": [\"system\"]}` and `params.setdefault(\"owner_ids\", [body.user_id])` — literally *'a state dict with an owner field'*, which is the sentence this row exists to answer.",
+    "★_the_counterweight_a_boundary_change_PATH_exists_and_is_recognised_as_a_different_class": "Real and specific. `holon.create_child` (⊕) and `holon.dissolve_child` (⊕⁻¹) exist, do the right thing, and the reference *knows* they are unlike ordinary operators — `operator.py` carves them out by name: *'A narrow, deliberate escape hatch for the small number of operators (holon.create_child, holon.dissolve_child, holon.transfer) whose whole point is to read or atomically mutate a SECOND sustain.'* So the ACT is at parity and its distinctness is understood.",
+    "★★_but_the_carve_out_is_WIDER_not_HIGHER_and_that_is_the_whole_gap": "The escape hatch grants those operators `ctx.engine` — a **capability** the other ~50 do not get. §IV asks for something different in kind: *'governed by a separate, HIGHER gate — which is exactly why boundary changes feel different to users, and should.'* Wider is not higher. The reference's boundary changes run through the SAME `execute_operator` gate as a pocket spend, with more reach and no additional authority; nothing asks who may move a boundary, as distinct from who may spend. And there is a structural consequence: with one path, a closure law would have to EXEMPT those three operators. With two paths there is nothing to exempt — an ordinary operator cannot reach `μ` at all, and `admit_boundary_change` is not an operator.",
+    "term_by_term": {
+      "μ as a membership predicate": "RUST-AHEAD. `owner_ids` is a list of principals, not a predicate over `Entities ∪ Paths`; it answers *who may act* and never *what this Sustain owns*. Those are different questions, and conflating them is what makes private-vs-shared a permissions bolt-on.",
+      "scope, as a distinct conjunct": "RUST-AHEAD. §IV's own pseudocode is `scope.contains(x) AND membership(x)` — two checks — and both are kept. `scope` returns 68 hits in the reference and none is this: 11 are `scope_schema` (the predicate evaluator's quantifier scope), the rest bare `scope`/`scoped` in the same evaluator sense plus `_delete_sustain_scoped_rows`.",
+      "★ the autopoietic closure law": "HALF AT PARITY IN RUST ALREADY, half new. `schema(o(s)) = schema(s)` shipped with R2 #14 and `operator::execute` has enforced it since — with a comment that anticipated this row almost verbatim: *'Adding a member or adopting a child sustain is a different class of act, and belongs to a higher gate.'* What is new is `μ_{o(s)} = μ_s`, the half an ordinary Enzyme could actually move, and joining the two into one conjunction.",
+      "materially open, organisationally closed": "RUST-AHEAD as a stated property. The reference is materially open in fact — money and messages cross constantly — and has no notion of being organisationally closed, because it has no ⟨B, schema⟩ to preserve.",
+      "the boundary-change higher gate": "RUST-AHEAD in AUTHORITY, at parity in ACT — see the counterweight above.",
+      "person-first nesting": "AT PARITY IN INTENT, rust-ahead as a property. The reference's holon work is explicit that a departure removes an edge and never a node, and `unlink_child` keeps the child's own state — the same instinct. What is new is that owning a child says nothing about the paths inside it, which is what makes composing without dissolving a checkable fact rather than a convention about which code paths touch what."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "boundary (8 hits, 0 real)": "All metaphorical or unrelated: `HARD SAFETY BOUNDARY` twice (the egress module's no-send guarantee), `the inbox dedup boundary`, `sensing boundary`, and `boundary analog of LoosenInv`. The word is present in this codebase and never means `B`.",
+      "scope (68 hits, 0 real)": "Predicate-evaluator scope — `scope_schema` (11), `item_scope`, `merged_scope` — plus `_delete_sustain_scoped_rows`. Quantifier binding, not `B`'s first conjunct.",
+      "μ — ★ a collision worth naming BEFORE it bites": "`migrate::Mu` in the Rust core is §4's state-migration function, a completely different μ. This module therefore does NOT introduce a type called `Mu`; the membership predicate lives on `Boundary` and is reached through `owns`. Two μs in one crate would make one of them unsayable, which is the same trap OPV-16 recorded for `domain`."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The act, and the recognition that it is a different act. `holon.create_child`/`dissolve_child` compose and decompose real Sustains, the escape hatch that lets them is deliberate and documented, and the holon invariant they honour — a departure removes an edge, never a node — is the same instinct §IV's nesting clause is about. What is absent is `μ` itself: with only `owner_ids` there is no predicate to preserve, so there is nothing for a closure law to be a law about, and a boundary change is distinguished by what it may TOUCH rather than by who may AUTHORISE it.",
+    "the_honest_limits": "Four. (1) `μ` IS A DECLARED RULE SET, not an arbitrary predicate — owned path prefixes plus a state-resident entity register, no `eval`, the same discipline as `predicates`/`constraints`. An arbitrary computable μ is not expressible and is not meant to be. (2) `μ` HAS TWO HALVES WITH DIFFERENT NATURES, and the closure law bites on one: the path half is DECLARED (changing it is a definition edit, whose higher gate already exists in `editing.rs`), the entity half lives in STATE and is the half an ordinary Enzyme could move. Saying so is the accurate thing rather than pretending one mechanism covers both. (3) THE SHARED-CASE ERROR MESSAGE IS WORDED FOR DEFINITION EDITS — `AuthorityError::SharedNeedsCouncil` says *'permission to spend from a pocket is not permission to redefine what a pocket is'*, which reads slightly off for a boundary change. Reusing the type keeps ONE authority model, which is worth more than a perfectly-worded second one; a disclosed cosmetic imprecision, not an oversight. (4) FLOWS ARE NOT HERE — see the slot.",
+    "★_the_slot_and_what_this_row_unblocks": "§IV: *'Flows that cross B — what may enter, what may leave — form their own predicate class and belong to the constraint-engine layer, not here.'* So the firewall `F(φ, s)` over `φ = ⟨dir, kind, qty, counterparty⟩` is deliberately absent — it is CON-1's follow-on and the immediate next slice. What this row unblocks is its SUBJECT: `F` is a predicate about crossing a boundary, and until now there was no boundary to cross, only a list of owners. CON-2's standing *'F pending'* and IMM-1's *'D, F ⬜'* both wait on the same term, and now wait on nothing else.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive: `Enforcement` gains an `Option<BoundaryDecl>` that defaults to `None`, so a sustain that declares no boundary behaves exactly as before — every existing vector passes untouched."
+  },
+  "fixture": {
+    "why": "A household boundary that spans finances and a roster, owns the finances subtree, and reads its members from state — so μ's two halves are both exercised, and a weather reading sits outside scope entirely so the scope conjunct has something real to exclude.",
+    "scope_roots": ["finances", "roster"],
+    "entity_register": "roster",
+    "owned_prefixes": ["finances"],
+    "members": ["ama", "ben"],
+    "out_of_scope_path": "weather.outside"
+  },
+  "mu_cases": [
+    {
+      "name": "★_owns_requires_BOTH_scope_and_membership",
+      "why": "★ §IV's own pseudocode is `scope.contains(x) AND membership(x)` — two conjuncts, kept as two. A declared member is owned, a stranger is not, an owned path is owned, and a path outside every declared root is not owned however μ is written. Collapsing the two into one lookup would lose the check that catches a Sustain claiming something it has no business in.",
+      "expect": {"member": true, "stranger": false, "owned_path": true, "out_of_scope_path": false}
+    },
+    {
+      "name": "a_path_mu_claims_but_scope_does_not_span_is_not_owned",
+      "why": "★ The conjunct earning its place. A boundary declaring ownership of `weather` while its scope spans only `finances` owns nothing in `weather` — the declaration is refused by the container, not honoured because it was written down.",
+      "expect": {"owns": false}
+    },
+    {
+      "name": "a_sustain_with_no_entity_register_owns_no_entities",
+      "why": "A leaf Sustain with no members is a real configuration, not a missing one. Declaring no register means every entity is out of scope — and that is reported as *readable* rather than as a failure, because there is nothing that failed to be read.",
+      "expect": {"owns_entity": false, "register_readable": true}
+    },
+    {
+      "name": "★_an_unreadable_register_is_distinguished_from_an_EMPTY_one",
+      "why": "★ *'Nobody is a member'* and *'the roster is not where the declaration says it is'* are different facts, and reading the second as the first would silently empty the boundary. The same discipline as a roll-up excluding an unreadable child by name rather than counting it as zero.",
+      "expect": {"empty_readable": true, "missing_readable": false}
+    }
+  ],
+  "closure_cases": [
+    {
+      "name": "an_ordinary_move_changes_values_and_preserves_the_boundary",
+      "why": "The permitted case, and the one §IV is defining against: *'Enzymes may change the values inside the boundary.'* A balance moves, μ does not, and the gate is silent.",
+      "expect": {"preserved": true}
+    },
+    {
+      "name": "★★_admitting_a_member_through_an_ordinary_move_is_REFUSED",
+      "why": "★★ THE PROOF OF VALUE. *'They may not change what the boundary is.'* An operator that appends to the roster has moved μ, and it is refused before commit — with the refusal naming what it did (`admitted ben`) and what it would have needed instead (a `BoundaryToken`). This is the law made structural at the gate rather than a rule someone follows: the operator does not commit, and no ordinary code path can reach μ.",
+      "expect": {"refused": true, "detail_contains": "admitted ben", "message_contains": "needs a BoundaryToken"}
+    },
+    {
+      "name": "releasing_a_member_breaks_it_too",
+      "why": "The law is an equality, not a monotonicity — shrinking the boundary is as much a change as growing it, and an operator that quietly drops a member is the more dangerous direction.",
+      "expect": {"refused": true, "detail_contains": "released ben"}
+    },
+    {
+      "name": "★_moving_the_register_out_from_under_μ_is_refused_not_read_as_empty",
+      "why": "★ The subtle attack the two-halves design has to survive: an operator that deletes the roster rather than editing it. If an unreadable register read as an empty one, that operator would empty the boundary and pass the equality check on the way out. It is refused under its own reason.",
+      "expect": {"error": "RegisterLost"}
+    },
+    {
+      "name": "★_the_whole_law_is_one_conjunction_and_the_error_names_WHICH_half",
+      "why": "★ `μ_{o(s)} = μ_s ∧ schema(o(s)) = schema(s)` — one law, two halves, and they fail for different reasons. *You moved the boundary* wants a `BoundaryToken`; *you changed the shape* wants a migration. A single undifferentiated 'closure violation' would tell a caller neither.",
+      "expect": {"membership_half": "boundary_closure", "schema_half": "organisational_closure"}
+    }
+  ],
+  "nesting_cases": [
+    {
+      "name": "★_owning_a_child_does_not_own_the_childs_interior",
+      "why": "★ §IV's person-first clause: *'a person-Sustain's boundary is itself, and it composes into Homestead and Vyyb boundaries without dissolving.'* A parent that has adopted a child owns the child and **not** the paths inside it — written as a method rather than left as an absence, so the property is visible and testable instead of merely unimplemented. This is what stops composition from flattening.",
+      "expect": {"owns_child": true, "owns_childs_interior": false}
+    }
+  ],
+  "higher_gate_cases": [
+    {
+      "name": "a_sole_owner_may_move_their_own_boundary",
+      "why": "The permitted meta-level act. A token is minted, applied, and the new member is owned — while the existing one stays, because admitting is not replacing.",
+      "expect": {"admitted": "ben", "existing_kept": "ama"}
+    },
+    {
+      "name": "a_stranger_cannot_move_a_sole_owners_boundary",
+      "why": "The obvious refusal, and it comes from `editing.rs`'s own `AuthorityError` rather than a second error type — one authority model.",
+      "expect": {"error": "NotTheOwner"}
+    },
+    {
+      "name": "★★_a_SHARED_sustains_boundary_cannot_be_moved_by_a_single_actor",
+      "why": "★★ The asymmetry, REUSED rather than reinvented. `BoundaryToken::mint` takes the same `Governance` and `EditAuthority` the definition gate takes, so a shared Sustain's boundary needs a `CouncilMint` — obtainable only from a passed and quorate decision — and no single actor converts into one. Building a second authority model here would have forked the argument Editing §VI spent itself establishing.",
+      "expect": {"error": "SharedNeedsCouncil"}
+    },
+    {
+      "name": "★_adopting_and_releasing_a_child_ARE_boundary_changes",
+      "why": "★ The reconciliation with the composition work: `⊕` is not an ordinary move, it is μ gaining an entity — the same act the reference's `holon.create_child` performs, but reached through the higher gate rather than through an operator with a wider capability. `⊕⁻¹` removes the entity from μ and, per the holon rule, says nothing about the child ceasing to exist.",
+      "expect": {"after_adopt_owns": "cira", "after_release_owns": false, "describe_contains": "⊕"}
+    }
+  ]
+}

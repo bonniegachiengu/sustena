@@ -74,9 +74,11 @@
 //! | Sparse mixture-of-experts gate | [`mixture`] | R2 |
 //! | Criticality — branching ratio σ̂ | [`criticality`] | R2 |
 //! | Suited domains · coverage · disorder | [`cynefin`] | R2 |
+//! | Boundary B · autopoietic closure | [`boundary`] | R2 |
 
 pub mod admission;
 pub mod approval;
+pub mod boundary;
 pub mod compose;
 pub mod consensus;
 pub mod crdt;
@@ -122,6 +124,10 @@ pub mod version;
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
 pub use approval::{
     ApprovalToken, Binding, EffectClass, NonceLedger, Simulated, TokenError, TraceError, Voted,
+};
+pub use boundary::{
+    admit_boundary_change, preserves_closure, preserves_membership, Boundary, BoundaryChange,
+    BoundaryDecl, BoundaryToken, ClosureViolation, Owned, Scope,
 };
 pub use compose::{
     compose, entails, wp, Change, Composed, EffectSummary, Entailment, Pathway, PathwayError,

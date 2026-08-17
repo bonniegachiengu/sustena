@@ -316,6 +316,7 @@ fn operator_vectors() {
             // constraints are R2 for the same reason: the reference engine has
             // no D, so no R1 vector can carry one.
             schema: None,
+            boundary: None,
             transitions: vec![],
         };
 

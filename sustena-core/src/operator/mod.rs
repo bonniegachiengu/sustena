@@ -43,7 +43,8 @@ use crate::approval::{Binding, EffectClass, NonceLedger};
 use crate::mutation::Mutation;
 use crate::principal::{permitted, Denial, Memberships, Tier};
 use crate::predicate;
-use crate::schema::{preserves_shape, Schema};
+use crate::boundary::{preserves_closure, BoundaryDecl, ClosureViolation};
+use crate::schema::Schema;
 use crate::transition::{check_all, TransitionRule};
 use crate::state::State;
 
@@ -82,6 +83,15 @@ pub struct Enforcement {
     /// The declared state space. When present, organisational closure is
     /// enforced: an operator may change values, never the shape.
     pub schema: Option<Schema>,
+    /// `B = ⟨scope, μ⟩`. When present, the **other half of the same closure
+    /// law** is enforced: `μ_{o(s)} = μ_s`. An ordinary operator may change the
+    /// values inside the boundary and never what the boundary IS.
+    ///
+    /// A separate field from `schema` because the two halves fail for different
+    /// reasons and call for different things from whoever reads the refusal:
+    /// one wants a migration, the other a
+    /// [`crate::boundary::BoundaryToken`].
+    pub boundary: Option<BoundaryDecl>,
     /// `D(s, s')` — the transition constraints, evaluated over the (before,
     /// after) PAIR. Rate limits, monotonicity, and conservation.
     ///
@@ -320,27 +330,37 @@ pub fn execute_admitted(
     // ── gate ─────────────────────────────────────────────────────────────────
     let candidate = working.snapshot();
 
-    // Organisational closure (CELL §V): schema(o(s)) = schema(s).
+    // The autopoietic closure law (Sustain §IV):
+    //
+    //     ∀o ∈ T, ∀s ∈ S:  μ_{o(s)} = μ_s  ∧  schema(o(s)) = schema(s)
     //
     // A sustain is materially open — money and messages cross it constantly —
     // and organisationally closed: an ordinary operator changes values inside
     // the boundary, never what the boundary IS. Adding a member or adopting a
-    // child sustain is a different class of act, and belongs to a higher gate.
+    // child sustain is a different class of act, and belongs to a higher gate
+    // (`boundary::BoundaryToken`).
     //
-    // Checked before the invariants, because a state of the wrong shape cannot
-    // be meaningfully judged against rules written for the right one.
-    if let Some(schema) = &enforcement.schema {
-        if let Err(err) = preserves_shape(state, &candidate, schema) {
-            return Execution {
-                result: OperatorResult::fail(
-                    format!("would change the sustain's shape, not just its values: {err}"),
-                    "organisational_closure",
-                ),
-                mutations: vec![],
-                events: vec![],
-                state: state.clone(),
-            };
-        }
+    // Both halves are checked before the invariants, because a state of the
+    // wrong shape — or one whose boundary has moved under it — cannot be
+    // meaningfully judged against rules written for the right one.
+    if let Err(err) = preserves_closure(
+        state,
+        &candidate,
+        enforcement.boundary.as_ref(),
+        enforcement.schema.as_ref(),
+    ) {
+        // The two halves are tagged apart: they fail for different reasons and
+        // want different things from whoever reads the refusal.
+        let tag = match err {
+            ClosureViolation::Shape(_) => "organisational_closure",
+            _ => "boundary_closure",
+        };
+        return Execution {
+            result: OperatorResult::fail(err.to_string(), tag),
+            mutations: vec![],
+            events: vec![],
+            state: state.clone(),
+        };
     }
 
     if enforcement.enabled {
@@ -469,12 +489,135 @@ mod tests {
                  "ALL finances.pockets[*].allocated >= 0".into()),
             ],
             schema: None,
+            boundary: None,
             transitions: vec![],
         }
     }
 
     fn params(pairs: &[(&str, Value)]) -> Map<String, Value> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    }
+
+    // ── the autopoietic closure law, AT THE GATE ─────────────────────────────
+
+    /// An operator that appends a name to the roster — i.e. one that moves `μ`.
+    /// A real registered operator rather than a predicate call, so the refusal
+    /// is proven where it actually has to happen.
+    fn admit_member(
+        state: &mut State,
+        params: &Map<String, Value>,
+        _events: &mut Vec<EmittedEvent>,
+    ) -> OperatorResult {
+        let who = params.get("who").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let mut roster: Vec<Value> = state
+            .get("roster")
+            .and_then(|v| v.as_array().cloned())
+            .unwrap_or_default();
+        roster.push(json!(who));
+        let _ = state.set("roster", json!(roster));
+        OperatorResult::ok(json!({"admitted": who}))
+    }
+
+    fn bounded_registry() -> Registry {
+        let mut r = Registry::default();
+        r.register(crate::operator::meta::OperatorMeta {
+            name: "roster.admit",
+            description: "Append a name to the roster — an ordinary operator that moves μ.",
+            constraints: vec![],
+            post_constraints: vec![],
+            side_effects: vec![],
+            pawa_cost: 0,
+            protocol: crate::operator::meta::Protocol::Rpc,
+            min_privilege: 1,
+            run: admit_member,
+        });
+        r
+    }
+
+    fn bounded_state() -> Value {
+        json!({
+            "roster": ["ama"],
+            "finances": {"liquid": {"balance": 1000.0}, "pockets": {},
+                         "income": {"monthly_total": 0.0, "sources": []}}
+        })
+    }
+
+    fn with_boundary() -> Enforcement {
+        Enforcement {
+            boundary: Some(
+                crate::boundary::BoundaryDecl::new(
+                    crate::boundary::Scope::new()
+                        .spanning("finances")
+                        .spanning("roster")
+                        .with_entity_register("roster"),
+                )
+                .owning("finances"),
+            ),
+            ..Enforcement::default()
+        }
+    }
+
+    /// ★★ The closure law is structural AT THE GATE, not a convention.
+    ///
+    /// An ordinary operator that moves `μ` does not commit — and the refusal
+    /// names the half of `⟨B, schema⟩` it broke.
+    #[test]
+    fn an_ordinary_operator_that_moves_the_boundary_is_refused_at_the_gate() {
+        let reg = bounded_registry();
+        let before = bounded_state();
+        let ex = execute(
+            &reg,
+            &reg.names(),
+            &with_boundary(),
+            &before,
+            "roster.admit",
+            &params(&[("who", json!("ben"))]),
+        );
+
+        assert_eq!(ex.result.status, meta::OperatorStatus::Failed, "{:?}", ex.result);
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("boundary_closure"));
+        let why = ex.result.reason.clone().expect("a refusal names its reason");
+        assert!(why.contains("needs a BoundaryToken"), "{why}");
+        // ★ Nothing committed: the state comes back untouched.
+        assert_eq!(ex.state, before);
+        assert!(ex.mutations.is_empty());
+        assert!(ex.events.is_empty());
+    }
+
+    /// The same operator with no boundary declared behaves exactly as before
+    /// this row — which is what makes the new field additive.
+    #[test]
+    fn a_sustain_that_declares_no_boundary_is_unaffected() {
+        let reg = bounded_registry();
+        let ex = execute(
+            &reg,
+            &reg.names(),
+            &Enforcement::default(),
+            &bounded_state(),
+            "roster.admit",
+            &params(&[("who", json!("ben"))]),
+        );
+        assert_eq!(ex.result.status, meta::OperatorStatus::Ok, "{:?}", ex.result);
+    }
+
+    /// ★ An ordinary move inside the boundary still commits with the law armed
+    /// — the gate refuses boundary changes, not operators.
+    #[test]
+    fn an_ordinary_move_still_commits_with_the_closure_law_armed() {
+        let reg = bounded_registry();
+        let ex = execute(
+            &reg,
+            &reg.names(),
+            &with_boundary(),
+            &bounded_state(),
+            "budget.record_income",
+            &params(&[
+                ("amount", json!(50.0)),
+                ("source", json!("salary")),
+                ("entry_id", json!("e1")),
+            ]),
+        );
+        assert_eq!(ex.result.status, meta::OperatorStatus::Ok, "{:?}", ex.result);
     }
 
     #[test]
@@ -882,6 +1025,7 @@ mod tests {
             enabled: true,
             invariants: vec![],
             schema: None,
+            boundary: None,
             transitions: vec![TransitionRule::Conservation {
                 id: "money_conserved".into(),
                 quantity: Quantity::new(
@@ -981,6 +1125,7 @@ mod tests {
             enabled: false,
             invariants: vec![],
             schema: None,
+            boundary: None,
             transitions: vec![TransitionRule::RateLimit {
                 id: "no_big_moves".into(),
                 path: "finances.liquid.balance".into(),
@@ -1010,6 +1155,7 @@ mod tests {
             enabled: true,
             invariants: vec![("broken".into(), "this is (not ) valid".into())],
             schema: None,
+            boundary: None,
             transitions: vec![],
         };
         let ex = execute(&reg, &allowed(), &broken, &homestead_state(), "budget.allocate",

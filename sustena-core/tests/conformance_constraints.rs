@@ -272,6 +272,7 @@ fn gate_vectors() {
             enabled: case["enabled"].as_bool().unwrap(),
             invariants: vec![],
             schema: None,
+            boundary: None,
             transitions,
         };
 
