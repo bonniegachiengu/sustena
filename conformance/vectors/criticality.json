@@ -1,0 +1,123 @@
+{
+  "conformance_version": 1,
+  "slice": "criticality",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Operative - Formal Execution.md, §VIII (Feedback, Chaos, and Self-Organised Criticality — §4G.7 item 3's three consequences; the branching ratio, the three detectors, and the risk-arithmetic point) with §XIII line 269 on what a criticality reading contributes to dom(s)",
+  "replayed_by": ["rust"],
+  "note": "Bak, Tang & Wiesenfeld (1987) for self-organised criticality; Scheffer et al. (2009) for critical slowing down; Clauset, Shalizi & Newman (2009) for the tail procedure that is deliberately NOT shipped. σ̂ is a read over the causal DAG — the field was verified present before anything was built.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`branching`, `criticality`, `sigma`, `avalanche`, `cascade`, `power law`, `heavy-tail`, `autocorrel`, `slowing down`, `self-organis`, `scheffer` and `clauset` are ALL grep-0 in apps/api/sustena/. `critical` returns 2 hits and both are the shouted-comment sense — *'CRITICAL, checked FIRST, before anything else touches the database'* and *'CRITICAL, security-relevant: an OTP must NEVER be…'* — the emphasis adverb, not the phase transition.",
+    "★★_a_correction_to_the_articles_premise_number_1_the_reference_does_NOT_carry_causes": "§VIII's reason for calling σ̂ cheap is: *'§4J's event record ALREADY CARRIES `causes` — the causal-parent pointer is exactly what the estimate needs, so σ̂ is a read over the log, not new instrumentation.'* **That is true of the §4J spec and of the Rust core, and NOT of the shipped reference engine.** Checked rather than assumed: the Python `events` table is `(id, sustain_id, event_name, payload_json, operator_log_id, timestamp, seq, mutations_json)` — no causal-parent column — and `operators_log` records which OPERATIVE called an operator, never which EVENT prompted the call. So in Rust σ̂ is a read (the field is on `Event`, which is how `assign_clocks` derives the DAG); in Python it would be **new instrumentation**, and the article's 'cheap' is conditional on a field the reference does not have.",
+    "★_and_the_sharpest_part_the_edge_is_KNOWN_and_then_thrown_away": "The causal edge is not unavailable in the reference — it is present at the moment it matters and never written down. `OperativeRuntime` receives a `trigger_event`, `OperativeGraph.run` threads it through `accumulated[\"trigger_event\"]`, the graph's operators publish new events, and the parent-child relation is right there in the call stack. Nothing persists it. So closing this in Python is one column and one assignment, not a redesign — which is a much more useful thing to record than 'absent'.",
+    "★★_a_correction_to_the_articles_premise_number_2_the_monitor_does_NOT_maintain_those_moments": "§VIII justifies detector 3 as *'exactly the moments §2's Monitor already maintains for CUSUM/EWMA. A second use of existing signal.'* **Not true of this build, and checked rather than assumed.** `detect::Ewma` keeps a level and nothing else; `detect::Cusum` keeps two one-sided cumulative sums; a crate-wide grep for `variance`/`autocorr`/`sum_sq` returns nothing relevant. Neither is a second moment, and nothing retains a previous value for a lag-1 term. Variance needs an EWMV alongside the EWMA. So `critical_slowing_down` computes over a SUPPLIED window — the same discipline as MUL-14's pressure and OPV-28's dom(s) — and making it genuinely a second use of existing signal is a change to `detect.rs` this slice does not make.",
+    "★★_a_correction_to_MY_OWN_prior_claim": "The previous slice's report and tracker said OPV-14 was *'the one row that moves both Route and HoldTheWhole to Built.'* **It does not, and this was checked rather than asserted.** §XIII line 269 says the criticality detector is *'ONE OF THE INPUTS'* to the domain reading, because near-criticality is the complex→chaotic transition risk — it is not the four-way classification. Nothing maps σ̂ to a Cynefin regime, and a crate-wide check confirms `Cynefin` only ever appears as a DECLARED set (`dom_i` on an operative) or a SUPPLIED argument (`dom_s` in `mixture::route`); nothing derives it. So σ̂ gives HoldTheWhole the criticality signal §XV explicitly asks for, and leaves `dom(s)` absent for both duties — that absence is **OPV-16's**. A related imprecision is corrected too: an earlier status string read *'the domain reading exists (Cynefin, shipped with ω)'*, which conflated `dom_i` (an operative's SUITED domains, which ω does carry) with `dom(s)` (the Sustain's CURRENT regime, which nothing computes).",
+    "term_by_term": {
+      "★ σ̂ — the branching ratio": "RUST-AHEAD, and cheap HERE for the reason the article gives, which does not hold there. See correction 1.",
+      "the risk-arithmetic point (τ≤2 ⇒ E[s] diverges)": "RUST-AHEAD. Nothing in the reference computes a cascade size at all, so there is no expected-loss summary to be wrong about — which is a different thing from being right.",
+      "tail shape": "NOT BUILT EITHER SIDE, and deliberately here. See the honest limits.",
+      "critical slowing down": "RUST-AHEAD as a computation; its claimed substrate does not exist on either side. See correction 2.",
+      "★ a reading surfaces, never triggers": "AT PARITY IN DISCIPLINE, and this is a real counterweight. The reference's whole advisory layer is built on exactly this rule — `advisory.py`'s `Suggestion` is inert data, `evaluate_operatives` writes only to `operative_suggestions`, and the only path from a suggestion to state is a human pressing accept. §VIII asks for the same shape for a criticality reading, and the reference would have applied it correctly had it had one to surface."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "critical (2 hits, 0 real)": "Both are the shouted-comment sense — `CRITICAL, checked FIRST` in the ingest engine's secret filter, and `CRITICAL, security-relevant` in the transducer's OTP guard. Emphasis, not a phase transition. Worth naming because a reviewer grepping `critical` in a codebase this security-conscious will hit them first.",
+      "cascade (0 hits) — worth stating as a zero": "The reference does have a *dedup supersession* and a *fold*, but nothing it calls a cascade and nothing that measures one. Recorded so the absence is not mistaken for a naming difference."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The discipline, and the transient information. The advise-never-act rule §VIII asks for is already this codebase's keystone — the advisory layer is built on it and applies it correctly. And the causal edge σ̂ needs is genuinely computed on every operative run and simply not persisted. What is absent is the column and the read: no causal-parent pointer on the event record, and nothing that measures out-degree over it. This is the rare gap that is one schema change away rather than one subsystem away, and saying so is more useful than saying it is missing.",
+    "the_honest_limits": "Five. (1) TAIL SHAPE IS SLOTTED, and the reason is STRUCTURAL not scheduling — CSN's goodness-of-fit step is a semi-parametric bootstrap, which needs a random source this crate forbids by construction (ADR-0001). The MLE and the lognormal likelihood-ratio are closed-form and could ship, but without the GoF step there is no answer to 'is a power law even a plausible fit', and CSN are explicit that a lognormal frequently wins and both candidates can be bad. Shipping the two computable thirds would license a τ that reads as a fitted power law and is not one. When it is built, the constraint is already known: **the verdict type may not have an absolute 'power law' variant, only a comparison**, until the GoF step exists to support one. (2) RIGHT-CENSORING BIASES σ̂ DOWN — events near the window's end have not had time to produce consequences; the window size is carried so a short series is visible as one. (3) EDGES TO PARENTS OUTSIDE THE WINDOW are counted as DANGLING and reported, never as offspring nobody had, so a low σ̂ can be recognised as a truncation artefact rather than a calm household. (4) THE OBSERVED LARGEST CASCADE IS A FLOOR, NOT s_max — §VIII says the bound is set by the system, *'bounded for a household by the household, not by history'*, and history is exactly what an observed maximum is. (5) THE CRITICAL BAND IS DECLARED — with floating point σ̂ = 1 exactly is measure-zero, so how close counts as critical is a parameter rather than a hidden epsilon.",
+    "out_of_scope_named_not_stubbed": "The ⟨λ,β,γ⟩ weight modulation (*'β up, faith in Δu down near criticality'*) is §VIII's scoring IMPLICATION, which the article itself marks as design rather than derivation — this row produces the reading, consuming it to reweight is a later one. And `scenario_ensemble` (§VIII-iii) is a different thing entirely: constructive chaos, varying over initial conditions.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive and read-only — it takes `&[Event]` and returns readings, adds no field to `Event`, and touches `presentation.rs` only to correct two status strings."
+  },
+  "fixture": {
+    "why": "Three shapes chosen because each pins a different failure. A chain gives a σ̂ under 1 with a single long cascade. A binary tree shows that a TREE over a finite window is bounded by (n-1)/n and therefore can never read supercritical — worth pinning because it is the obvious wrong intuition. And a DAG where one event has several parents is what genuine supercriticality looks like.",
+    "chain": [["a", []], ["b", ["a"]], ["c", ["b"]], ["d", ["c"]]],
+    "tree": [["r", []], ["l", ["r"]], ["rr", ["r"]], ["ll", ["l"]], ["lr", ["l"]], ["rl", ["rr"]], ["rrr", ["rr"]]],
+    "dag": [["a", []], ["b", ["a"]], ["c", ["a", "b", "a"]]],
+    "band": 0.2
+  },
+  "branching_cases": [
+    {
+      "name": "★_sigma_hat_is_a_read_over_the_causal_DAG",
+      "why": "★ The dependency was verified before anything was built: `causes` is on `Event` and `assign_clocks` already derives the DAG from it, so this adds no field. A chain of four events with three edges reads σ̂ = 0.75 — subcritical, one cascade, largest 4. The counting is stated because window edges are where this kind of estimate quietly goes wrong: individuals are the events in the window, offspring edges are those with BOTH ends inside it.",
+      "expect": {"sigma_hat": 0.75, "regime": "subcritical", "cascades": 1, "largest": 4}
+    },
+    {
+      "name": "★_a_tree_over_a_finite_window_can_never_read_supercritical",
+      "why": "★ The obvious wrong intuition, pinned. A binary tree LOOKS like branching — every internal node has two children — but a tree with n nodes has exactly n−1 edges, so σ̂ = (n−1)/n < 1 ALWAYS. Seven events, six edges, σ̂ = 6/7. Supercriticality needs events with SEVERAL parents, which is a DAG rather than a tree. ★★ And the regime it reads is the band's judgement, not the tree's: 6/7 ≈ 0.857 is only 0.143 from 1, so under this fixture's declared band of 0.2 it reads **critical**, while under the narrower default (0.05) the identical tree reads subcritical. Neither is wrong — which is exactly why the band is a declared parameter someone can argue with rather than a hidden epsilon. What is invariant is the claim this case is about: σ̂ < 1, always.",
+      "expect": {"sigma_hat": 0.8571428571428571, "regime": "critical", "always_below_one": true, "under_narrow_band": "subcritical"}
+    },
+    {
+      "name": "a_multi_parent_dag_reads_supercritical",
+      "why": "Three events, four edges — one event naming three parents. σ̂ = 4/3 > 1: consequences outnumber the events producing them, which is what a growing cascade is.",
+      "expect": {"sigma_hat": 1.3333333333333333, "regime": "supercritical"}
+    },
+    {
+      "name": "★_a_cause_outside_the_window_is_dangling_not_an_offspring_nobody_had",
+      "why": "★ Window edges are where a branching estimate quietly goes wrong. An edge naming a parent the window does not contain is counted as DANGLING and reported, never as an offspring — and the count is surfaced so a suspiciously low σ̂ can be recognised as a truncation artefact rather than a calm household.",
+      "expect": {"dangling": 1, "edges": 1, "sigma_hat": 0.5}
+    },
+    {
+      "name": "the_critical_band_is_declared_not_a_hidden_epsilon",
+      "why": "With floating point, σ̂ = 1 exactly is a measure-zero event, so 'how close to 1 counts as critical' decides a regime. A hidden epsilon would decide it in a comparison nobody could argue with; a declared band can be argued with. The same σ̂ reads subcritical under a narrow band and critical under a wide one.",
+      "expect": {"narrow_at_0_9": "subcritical", "wide_at_0_9": "critical", "narrow_at_1_0": "critical", "negative_band": "BadBand"}
+    },
+    {
+      "name": "an_empty_window_and_a_causal_cycle_and_a_duplicate_are_refused",
+      "why": "σ̂ over an empty window is not zero, it is unanswered. A cycle in the declared causes means an event descends from its own consequence — a malformed log rather than a quiet one, refused the same way `assign_clocks` refuses it. And out-degree over a duplicated node is not a branching ratio.",
+      "expect": {"empty": "EmptyWindow", "cycle": "CausalCycle", "duplicate": "DuplicateEvent"}
+    }
+  ],
+  "risk_arithmetic_cases": [
+    {
+      "name": "★★_no_expected_size_is_offered_at_or_above_criticality",
+      "why": "★★ THE PROOF OF VALUE, and the point §VIII exists to make. *'τ ≤ 2 ⟹ E[s] diverges [...] Near criticality, expected loss is not a usable summary statistic.'* So there is NO method that returns a bare expected cascade size: `cascade_summary()` returns a `CascadeSummary` whose `Mean` variant is unreachable at or above criticality. Not a wider interval, not a caveated number — no number. A subcritical reading yields a mean because there the mean means something; a supercritical one yields the regime and the reason.",
+      "expect": {"subcritical_has_mean": true, "supercritical_mean": null, "why_contains": ["diverge", "floor"]}
+    },
+    {
+      "name": "★_being_INSIDE_the_band_already_withholds_the_mean",
+      "why": "★ Easy to get subtly wrong: the mean is withheld AT criticality, not only above it. Being inside the band is precisely not knowing which side of τ = 2 you are on, so a mean there is not a slightly-uncertain summary — it is one whose usability is unknown. σ̂ = 1.0 exactly, and no number comes back.",
+      "expect": {"sigma_hat": 1.0, "regime": "critical", "mean_is_usable": false, "mean": null}
+    },
+    {
+      "name": "★_the_largest_observed_cascade_is_reported_as_a_FLOOR",
+      "why": "★ §VIII says the honest quantity is the largest cascade the system can physically produce, *'bounded for a household by the household, NOT BY HISTORY'* — and an observed maximum is exactly history. So it is reported as a floor on what is possible, with the real s_max named as needing a declared system size nobody has declared. Presenting the observed maximum as the bound would be the same misreading §VIII warns about, one level down.",
+      "expect": {"describe_contains": "FLOOR, not the bound"}
+    }
+  ],
+  "read_only_cases": [
+    {
+      "name": "★★_a_reading_is_a_pure_function_of_the_log_and_can_never_act",
+      "why": "★★ §VIII's own honest limit: *'they are diagnostics with real false-positive rates on short household series. A criticality reading is a SIGNAL TO SURFACE TO A PERSON, not a trigger for autonomous action.'* Structural rather than conventional: everything here takes `&[Event]` and `&[f64]`, so the borrow checker enforces that computing a reading cannot change what it read. There is no engine, no operator and no `&mut` anywhere in the module, and the reading types are inert data with no method that acts. The same keystone the advisory layer is built on.",
+      "expect": {"repeatable": true, "log_untouched": true}
+    }
+  ],
+  "slowing_down_cases": [
+    {
+      "name": "★_variance_and_lag_one_over_a_SUPPLIED_window",
+      "why": "★ Scheffer et al. (2009). Computed over a supplied window because the moments §VIII says the Monitor maintains are not maintained — see correction 2. The ramp is pinned exactly because it is hand-computable: centred [-2,-1,0,1,2], ss = 10, lag-1 covariance = 4, r₁ = 0.4.",
+      "short_ramp": [1.0, 2.0, 3.0, 4.0, 5.0],
+      "expect": {"variance": 2.0, "lag1": 0.4}
+    },
+    {
+      "name": "★_the_same_shape_reads_more_persistent_on_a_longer_window",
+      "why": "★ A property worth pinning because it undercuts the naive reading of a single number: the identical linear shape gives r₁ = 0.4 at five points and 0.7 at ten. r₁ on a short series UNDERSTATES persistence — which is exactly why §VIII calls these diagnostics with real false-positive rates on short household series, and why one window is a level rather than a trend. `describe()` says so in as many words.",
+      "expect": {"short_lag1": 0.4, "long_lag1": 0.7, "longer_is_larger": true}
+    },
+    {
+      "name": "an_anti_correlated_series_reads_negative",
+      "why": "The other direction, so a positive result is not mistaken for the only possible one. An alternating series is strongly anti-correlated — the opposite of the slowing-down signature.",
+      "expect": {"lag1_below": -0.5}
+    },
+    {
+      "name": "★_a_constant_series_is_refused_rather_than_reported_as_zero",
+      "why": "★ r₁ on a constant series is 0/0. Returning 0 would read as *no warning* when the truth is *no signal* — the same distinction the roll-up makes when it excludes an unreadable child by name rather than counting it as zero, and the same one `SharedInterest::from_rollup` makes for an empty pot.",
+      "expect": {"error": "ConstantSeries"}
+    },
+    {
+      "name": "a_window_under_three_points_is_refused",
+      "why": "A lag-1 autocorrelation from a single pair is an arithmetic result, not a statistic. Refused rather than returned with a caveat nobody reads.",
+      "expect": {"two_points": "WindowTooShort", "non_finite": "NotFinite"}
+    }
+  ]
+}

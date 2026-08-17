@@ -491,6 +491,10 @@ fn the_three_duties_are_recorded_with_what_is_not_built() {
     assert_eq!(whole, Discharge::Partial);
     assert_eq!(e["hold_the_whole"].as_str().unwrap(), "Partial");
     assert!(whole_why.contains(e["hold_names"].as_str().unwrap()));
+    // ★ σ̂ shipped and did NOT complete dom(s) — one input, not the whole
+    // classification. Both duties wait on OPV-16.
+    assert!(whole_why.contains("criticality signal ships"));
+    assert!(whole_why.contains("different thing"));
 
     let (_, front, _) = find(Duty::PresentTheFrontier);
     assert_eq!(front, Discharge::Built);

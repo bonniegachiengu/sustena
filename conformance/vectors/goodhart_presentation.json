@@ -122,8 +122,8 @@
     },
     {
       "name": "the_three_duties_are_recorded_with_what_is_NOT_built",
-      "why": "★ §XV names three duties and `discharged_by_this_build` reports plainly which are real. **Updated 2026-08-16 when the mixture gate (OPV-28) shipped:** Route moved NotBuilt → Partial — the sparse gate is built, but `match(i,s)` needs `dom(s)`, which is SUPPLIED rather than computed until OPV-14 feeds the Monitor's domain reading, which is the same absence that keeps HoldTheWhole partial. PresentTheFrontier is Built. A status read that states its absences, because a declared-but-inert field reads as built and is worse than nothing — and a stale one that still claimed NotBuilt would be the same failure in the other direction.",
-      "expect": {"route": "Partial", "route_names": "OPV-14", "hold_the_whole": "Partial", "hold_names": "OPV-14", "present": "Built"}
+      "why": "★ §XV names three duties and `discharged_by_this_build` reports plainly which are real. **Updated twice, and the second update is a CORRECTION.** (1) When the mixture gate (OPV-28) shipped, Route moved NotBuilt → Partial. (2) When the criticality read (OPV-14) shipped, it was *expected* to move both Route and HoldTheWhole to Built — **it does not, and that was checked rather than assumed.** §XIII says the criticality detector is *'one of the inputs'* to the domain reading, not the four-way classification, so `σ̂` gives HoldTheWhole the criticality signal it explicitly wants while leaving `dom(s)` absent for both duties. That absence belongs to **OPV-16**. An earlier note also said *'the domain reading exists (Cynefin, shipped with ω)'*, which conflated `dom_i` — an operative's SUITED domains, which ω does carry — with `dom(s)`, the Sustain's CURRENT regime, which nothing computes. Both corrected. A status read that states its absences is only useful while it is accurate; a stale one is the same failure in the other direction.",
+      "expect": {"route": "Partial", "route_names": "OPV-16", "hold_the_whole": "Partial", "hold_names": "OPV-16", "present": "Built"}
     }
   ]
 }

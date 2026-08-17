@@ -112,6 +112,7 @@ conformance/
     goodhart_presentation.json
                         U-guard · present the frontier  (spec, R2)
     mixture.json        sparse MoE gate · top-k         (spec, R2)
+    criticality.json    branching ratio σ̂ · slowing down (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -630,3 +631,35 @@ it is a bug** — nothing silently differs.
   **Shazeer's load balancing is not built** — it is a training loss, there is
   no training here, and building something else and calling it load balancing
   would be fabrication.
+
+- **`criticality.json` — rust-ahead-of-python, and the slice that corrected
+  three premises by checking them.** `branching`, `criticality`, `sigma`,
+  `avalanche`, `cascade`, `power law`, `heavy-tail`, `autocorrel`,
+  `slowing down`, `self-organis`, `scheffer` and `clauset` are grep-0;
+  `critical` returns 2 and both are the shouted-comment sense
+  (*"CRITICAL, checked FIRST"*, *"CRITICAL, security-relevant"*) — emphasis,
+  not a phase transition, which is worth naming in a codebase this
+  security-conscious. **(1)** §VIII calls σ̂ cheap because *"the event record
+  already carries `causes`"* — true of the spec and of the Rust core, **not of
+  the shipped reference**: the Python `events` table has no causal-parent
+  column and `operators_log` records which *operative* called an operator,
+  never which *event* prompted it. ★ And the sharp part: the edge is **known at
+  runtime and thrown away** — `OperativeRuntime` receives a `trigger_event` and
+  threads it through the graph run, and nothing persists it. Closing this is
+  one column and one assignment, not a redesign, which is more useful to record
+  than "absent". **(2)** §VIII justifies detector 3 as *"exactly the moments the
+  Monitor already maintains"* — `Ewma` keeps a level, `Cusum` keeps one-sided
+  sums, neither is a second moment, so the window is **supplied**. **(3) ★★ A
+  correction to this project's own prior claim**: OPV-14 was recorded as the row
+  that would move both of §XV's remaining duties to `Built`. It does not —
+  §XIII says the criticality detector is *"one of the inputs"* to a domain
+  reading, and nothing derives `Cynefin`, which only ever appears declared
+  (`dom_i`) or supplied (`dom_s`). **The counterweight is the discipline and it
+  is at parity**: *a reading surfaces to a person, never triggers* is already
+  this codebase's keystone — `advisory.py`'s `Suggestion` is inert data and the
+  only path to state is a human pressing accept. Five limits disclosed,
+  including that **tail shape is slotted for a structural reason** — CSN's
+  goodness-of-fit is a semi-parametric bootstrap needing a random source
+  ADR-0001 forbids in core — with the constraint a future slice must satisfy
+  already recorded: **the verdict type may not carry an absolute "power law"
+  variant, only a comparison.**
