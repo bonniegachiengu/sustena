@@ -50,6 +50,7 @@
 //! | The definition lens π : D → G | [`lens`] | R2 |
 //! | The preattentive encoder φ | [`preattentive`] | R2 |
 //! | Widget schema, checked on the load path | [`widget`] | R2 |
+//! | β and compose(r) — the curated view | [`curated`] | R2 |
 //! | Edit authority | [`editing`] | R2 |
 //! | Transition constraints | [`transition`] | R2 |
 //! | Checked composition | [`compose`] | R2 |
@@ -110,6 +111,7 @@ pub mod controller;
 pub mod council;
 pub mod criticality;
 pub mod cynefin;
+pub mod curated;
 pub mod damping;
 pub mod detect;
 pub mod dimension;
@@ -291,6 +293,10 @@ pub use preattentive::{
 };
 pub use widget::{
     EmitError, LoadError, LoadedWidget, WidgetDecl, WidgetEmission, WidgetSet,
+};
+pub use curated::{
+    attention_cost, compose_view, knapsack_select, salience, BindingKey, BindingTable,
+    Eligibility, Request, View, WidgetCandidate,
 };
 pub use principal::{
     effective_privilege, effective_privilege_with, permitted, permitted_with, Denial,

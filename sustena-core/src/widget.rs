@@ -78,6 +78,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
+use crate::curated::BindingKey;
 use crate::editing::Definition;
 use crate::operator::Registry;
 use crate::predicate::parse_state_path;
@@ -97,6 +98,12 @@ pub struct WidgetDecl {
     pub render: String,
     /// Operators this widget may invoke. Checked against `T`.
     pub emits: Vec<String>,
+    /// β's key — `EventClass ∪ Unit` (UI-1).
+    ///
+    /// ★ A sum type, so a widget with **no** binding is unrepresentable. The
+    /// reference has to reject that at runtime (*"must declare either
+    /// event_class or unit=true"*); here there is nothing to reject.
+    pub binding: BindingKey,
 }
 
 impl WidgetDecl {
@@ -106,7 +113,24 @@ impl WidgetDecl {
             inputs: Vec::new(),
             render: render.into(),
             emits: Vec::new(),
+            // Unit-bound unless a class is named: always eligible is the
+            // conservative default, since an unbound widget would be
+            // permanently invisible and nobody would know why.
+            binding: BindingKey::Unit,
         }
+    }
+
+    /// Bind to an event class — eligible only when it appears in the log.
+    pub fn bound_to(mut self, event_class: &str) -> Self {
+        self.binding = BindingKey::event(event_class);
+        self
+    }
+
+    /// Bind to `Unit` — always eligible. Explicit for readability; it is
+    /// already the default.
+    pub fn unit(mut self) -> Self {
+        self.binding = BindingKey::Unit;
+        self
     }
 
     pub fn reading(mut self, path: &str) -> Self {
@@ -212,6 +236,11 @@ impl LoadedWidget {
     /// because it loaded.
     pub fn emits(&self) -> &[String] {
         &self.decl.emits
+    }
+
+    /// β's key for this widget (UI-1).
+    pub fn binding(&self) -> &BindingKey {
+        &self.decl.binding
     }
 
     /// Produce an emission. Refuses an operator this widget did not declare.

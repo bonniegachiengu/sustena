@@ -134,6 +134,7 @@ conformance/
     lens.json           π : D → G, and the way back       (spec, R2)
     preattentive.json   φ : Data → VisualAttributes^n     (spec, R2)
     widget.json         w = <inputs,render,emits>, loaded  (spec, R2)
+    curated.json        beta + compose(r) + the knapsack   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1810,3 +1811,82 @@ the gate catches a bad call — the point is it is caught *there*. ★ **A loade
 set can go stale and says so but does not self-heal.** ★ **All-or-nothing is a
 position, not an oversight.** And nothing wires a `WidgetEmission` to `execute`
 — the same core→host seam every other row draws.
+
+### `curated.json` — β and `compose(r)` (UI-1, Curated UI §§1–5)
+**16 cases, R2 (spec).** The first row in a while with a **reference
+implementation to measure against** rather than only a spec: Slice 13 shipped β,
+`compose(r)` and the knapsack in Python. The algorithm is ported **at parity on
+purpose**; three things are sharper, and each closes a gaming surface.
+
+★★ **STEP-0 settled β's key, and the answer was symmetric.** There is **no
+`EventClass` in this core** — grep-0, and `Event` carries only `name: String` —
+★ **and the reference has none either**: its `event_class` is a plain string and
+`binding_key` returns it or a `UNIT` sentinel, both as `dict` keys. No type to
+port, so β keys on `Event.name` with one sharpening: `BindingKey::{Unit,
+Event(String)}` makes `EventClass ∪ Unit` genuinely the ∪ the notation claims.
+★ The sentinel collision that removes is **theoretical** — nobody names an event
+`__unit__` — but a widget with **no** binding becomes unrepresentable, which the
+reference has to reject at runtime.
+
+★★ **Event-first in behaviour, not only shape:** a widget whose class is absent
+from the log is **never scored**, asserted through `candidates_considered`
+rather than the selection, because *ranked low* and *never considered* are
+different and only the second is what event-first means.
+
+★★★ **Urgency is the real `d(s,V)` — where the port improves on its source.**
+The reference's urgency is an explicitly **declared proxy**
+(`pct = spent/allocated`), and UI-7 says why: *"because CUSUM/EWMA don't
+exist"*. Here they do, so a widget's urgency is its **share of `d(s,V)`** — the
+per-dimension excess over the dimensions it declares, over the sustain's total.
+Inside `V`, every urgency is 0.
+
+★★★ **Two gaming surfaces closed structurally.** A widget **cannot set its own
+urgency** (its only lever is which dimensions it declares, already checked
+against `dim(S)` by UI-2). And it **cannot declare itself cheap**: the
+reference's `cost` is an author-declared integer defaulting to 1 while its own
+docstring describes a *"Hick-Hyman superlinear per-item cost"* — **the formula
+is written down and never computed**, a gaming surface of exactly the
+`colour_rule` kind. Here `attention_cost` is **derived** from `inputs.len()`,
+superlinear at `1 + n(n−1)/2`. ★★ Together they close the hole share-of-distance
+would open: grabbing dimensions raises urgency **and** cost superlinearly, so a
+greedy all-dimensions widget costing 4 is **excluded** while two focused ones
+costing 1 each are selected. **The greedy move is self-defeating.**
+
+★★ **The knapsack is real, proven twice.** Greedy-by-score takes 0.90 and stops;
+the DP takes 0.60+0.55 for 1.15. And optimality is asserted **against brute
+force** over every feasible subset. Every exclusion returns **with its score**.
+★ One behaviour found by testing and kept: a widget scoring exactly 0 is
+**never selected** (the DP takes an item only when it strictly improves) — right
+(`K ≈ 4` is scarce) and **at parity** with the reference; it returns in
+`excluded` with its `0.0`.
+
+★ **Read-only by signature** — shared refs in, no `Registry` — asserted anyway,
+which doubles as the determinism proof. ★★ And **UI-2's typed population is the
+ordering benefit realised**: `compose_view` takes a `WidgetSet`, so a widget
+with a made-up input **cannot enter the knapsack** — it never loaded.
+
+**Divergence: parity plus sharpening.** ★★ **The counterweight is that the
+algorithm is the reference's and it is good** — a genuine 0/1 DP with backtrack,
+integer scaling and excluded-with-scores, not the sort-and-take-N that would
+have been easy to ship and hard to notice. `α = 0.75` dominant is its choice and
+the right one. ★★ And *no second notion of important* is its own discipline,
+honoured under pressure: Slice 0 derived the signal and Slice 13 **reused it
+verbatim**, so this core inherits a signal that was already single and only
+substitutes a better measurement of the same thing.
+
+**Greppable false positives named.** ★ `compose` in Rust is **OP-5's checked
+composition** (`wp`, pathway chaining) — real, load-bearing, and the first word
+a reviewer would grep; the newcomer is `compose_view` for that reason.
+★ `Candidate` collided with `ooda::Candidate` (27th) → `WidgetCandidate`.
+`EventClass`/`event_class` — grep-0 on **both** sides.
+
+**Honest limits, seven.** ★★ `render` stays **opaque**, so this ranks rather
+than renders. ★★ Urgency-as-a-**share** is a modelling choice and is named as
+one — a widget's urgency is relative to what else is wrong. ★
+`relations_violated` contributes **no** urgency, inherited from `region.rs`'s
+refusal to score a boolean: the widget layer does not invent the number the
+region layer declined to. ★★ A zero-score widget is never selected (at parity,
+and nothing hidden). ★ `device` is carried and **not** used to rank — naming a
+device budget would be inventing policy. ★ Relevance is token overlap, not
+meaning, and is the weaker term at `λ = 0.25` for exactly that reason. And
+nothing calls `compose_view` from an engine — a host assembles `r`.

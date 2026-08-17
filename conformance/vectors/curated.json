@@ -1,0 +1,132 @@
+{
+  "conformance_version": 1,
+  "slice": "curated",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Curated UI, §§1–5 (widget schema, β, compose(r), salience, knapsack); Cowan 2001 (K ≈ 4); Hick 1952 / Hyman 1953 (choice cost); measured against the Slice-13 Python implementation in sustena/core/curated_ui.py",
+  "replayed_by": ["rust"],
+  "note": "★★ The Rust build of what Slice 13 shipped in Python, so this row has a **reference implementation to measure against** rather than only a spec. The algorithm is at parity on purpose; the sharpenings are three, and each closes a gaming surface the reference left open.",
+
+  "★★_the_STEP_0_reconcile": {
+    "★_1_there_is_NO_EventClass_in_this_core_and_none_in_the_reference_either": "★★ Checked first, because β's key depends on it. `EventClass` and `event_class` are **grep-0** in `sustena-core/src`; the Rust `Event` carries `name: String` and nothing that could serve as a class. ★ And the reference's `event_class` is **also just a string** — `WidgetSchema.binding_key` returns either that string or a `UNIT` sentinel, both used as plain `dict` keys. So there was no type to port, and inventing an `EventClass` taxonomy would have been this core deciding how the reference should have named its events. β keys on `Event.name` directly.",
+    "★★_2_the_one_sharpening_that_IS_worth_it_the_UNION_AS_A_SUM_TYPE": "★★ `BindingKey::{Unit, Event(String)}` makes `EventClass ∪ Unit` genuinely the ∪ the notation claims, rather than a magic string sharing a namespace with real event names. ★ Two effects, and the second is the useful one: the sentinel collision disappears (**theoretical** — nobody names an event `__unit__`, and it is worth saying that rather than dressing it up), and a widget with **no** binding becomes **unrepresentable** — which the reference has to reject at runtime with *'must declare either event_class or unit=true'*.",
+    "★★_3_UI_2's_typed_population_is_exactly_the_ordering_benefit_it_was_taken_first_for": "`BindingTable::build` and `compose_view` take a **`WidgetSet`**, not a list of declarations — so every widget in β has already type-checked against `dim(S)` and `T`. **A widget with a made-up input cannot enter the knapsack**, because it never loaded. Doing UI-1 first would have meant a compose that ranks widgets whose inputs may not exist, and UI-2 would then have been a retrofit through it.",
+    "★_4_and_the_urgency_signal_is_ALREADY_HERE_and_better_than_the_one_being_ported": "`region.rs`'s `Region::distance` returns `Distance { weighted, per_dimension, binding, relations_violated }` — the real weighted distance to `V`, with per-dimension excesses. The reference's urgency is an explicitly-declared **proxy** (`pct = spent/allocated`) and UI-7 says exactly why: *'deliberately reusing the Monitor's Slice-0 signal because CUSUM/EWMA don't exist'*. In this core they do."
+  },
+
+  "divergence": {
+    "kind": "parity-plus-sharpening",
+    "statement": "The algorithm is the reference's and is ported at parity: `score(w) = α·urgency + λ·relevance` with `α = 0.75` / `λ = 0.25`, a real 0/1 knapsack DP over integer cost and score×1000, `K = 4`, and `(selected, excluded)` both returned score-ordered. Three things are sharper, and each closes a gaming surface rather than adding a feature: **the ∪ is a sum type**, **the population is typed** (UI-2), and **cost is derived rather than declared**.",
+    "★★★_the_sharpening_that_matters_most_COST_IS_DERIVED_NOT_DECLARED": "★★★ The reference's `knapsack_select` docstring says the cost model is *'Hick-Hyman's superlinear per-item cost — a widget with more inputs costs more attention chunks to parse, **see WidgetSchema.cost**'*. Following that pointer: `cost: int = 1`, read straight from the spec with `int(raw.get('cost', 1))`. **The formula is written down and never computed.** That is a gaming surface of exactly the `colour_rule` kind — a widget reading eight dimensions can declare `cost: 1` and get a bargain, while an honest widget declaring `3` is penalised for its honesty. Here `attention_cost` is **derived** from `inputs.len()` — which UI-2 already checked against `dim(S)` — and superlinear: `1 + n(n−1)/2`, the pairwise relating a reader has to do. ★★ It also closes the one hole share-of-`d(s,V)` would otherwise open: a widget **could** raise its urgency by declaring more dimensions, but the same declaration raises its cost superlinearly, so **the attention budget prices the strategy out** and the greedy move loses to two focused widgets. Asserted, not argued.",
+    "★★_the_counterweight_THE_ALGORITHM_IS_THE_REFERENCE'S_AND_IT_IS_GOOD": "★★ This row ports rather than invents, and the thing being ported is right. The reference's knapsack is a **genuine 0/1 DP** — not the sort-and-take-N that would have been easy to ship and hard to notice — with the backtrack, the integer scaling and the excluded-with-scores return all already there, which is what makes *'N other things stayed quiet'* a true statement on the phone today. ★ `α = 0.75` dominant is its choice and is the right one. ★★ And the *no second notion of important* discipline is the reference's own and was honoured under pressure: Slice 0 derived the urgency signal, and Slice 13 **reused that formula verbatim** rather than inventing a selection-specific one. This core inherits a signal that was already single, and only substitutes a better measurement of the same thing. ★ Its urgency proxy is **declared as a proxy** in its own row, with the reason — which is why replacing it is an upgrade rather than a correction.",
+    "term_by_term": {
+      "score(w) = α·urgency + λ·relevance, α=0.75": "AT PARITY — the reference's formula and constants.",
+      "a real 0/1 knapsack DP, K = 4": "AT PARITY, and the reference's is genuinely a DP.",
+      "(selected, excluded) both with scores": "AT PARITY. The honest-exclusion discipline is the reference's.",
+      "β keyed on EventClass ∪ Unit, event-first": "AT PARITY in behaviour; **sharper as a type** here.",
+      "★ the union as a sum type (no sentinel, no unbound widget)": "**THIS SLICE.**",
+      "★★ urgency = d(s,V) rather than spent/allocated": "**RUST-AHEAD**, and the reference declares its own as a proxy.",
+      "★★★ cost derived from inputs, not author-declared": "**RUST-AHEAD**, and it closes a gaming surface.",
+      "★ the population is type-checked before ranking": "**RUST-AHEAD** — UI-2, and the reason it was taken first.",
+      "per-render view fragments (WIDGET_RENDERERS)": "PYTHON-ONLY, and deliberately so — `render` stays opaque here.",
+      "device-aware ranking": "NEITHER SIDE — carried and reported, not used. See the limits."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "★ compose (real hits in Rust, and a DIFFERENT compose)": "★ `compose.rs` is OP-5's **checked composition** — `wp`, pathway chaining, illegal chains refused at write time. Real, load-bearing, and nothing to do with `compose(r)`. Named because *compose* is the first word a reviewer greps, and it lands squarely on the wrong module; the newcomer is `curated::compose_view` for that reason.",
+      "★ Candidate (a collision, not a false positive)": "`ooda::Candidate` is a decision option surfaced at DECIDE. Twenty-seventh collision; the newcomer took `WidgetCandidate`.",
+      "EventClass / event_class (grep-0 on BOTH sides)": "Recorded as checked. The reference's `event_class` is a string field, not a type — so *there is an EventClass to port* would have been wrong in both directions."
+    },
+    "the_honest_limits": "★★ `render` STAYS OPAQUE, SO THIS RANKS RATHER THAN RENDERS — the output is a scored selection with its reasons, not a view fragment. The reference's `WIDGET_RENDERERS` are hand-written per render id and belong to a surface with a display; MON-7 drew the same line for the same reason. · ★★ URGENCY IS A **SHARE** OF `d(s,V)`, WHICH IS A MODELLING CHOICE AND IS STATED — a widget's urgency is the per-dimension excess it can show over the sustain's total, so it is relative to what else is wrong. A household with one breached dimension gives the widget reading it an urgency of 1.0; the same widget in a household with three breaches reads lower without changing. That is the intended reading (*the fraction of the trouble this card can show you*) and it is named so nobody infers an absolute. · ★ `relations_violated` CONTRIBUTES NO URGENCY — `region.rs` deliberately names failing relations rather than scoring them, because a boolean has no natural distance; so a sustain whose only breach is a relation reads zero urgency here. Inherited, correct, and worth stating: the widget layer does not invent the number the region layer refused to. · ★★ A ZERO-SCORE WIDGET IS NEVER SELECTED — the DP takes an item only when it strictly improves the total. That is right rather than a gap (`K ≈ 4` is scarce, and a card worth nothing is the noise a curated surface removes) and it is **at parity** with the reference; nothing is hidden, since it returns in `excluded` with its `0.0`. · ★ `device` IS CARRIED AND NOT USED — it rides in the request and comes back in the view, and ranking does not consult it. Naming a device-specific budget would be inventing policy; a host that wants one passes a different `budget`. · ★ RELEVANCE IS TOKEN OVERLAP, NOT MEANING — the same shape the reference uses, and it is the weaker term (`λ = 0.25`) precisely because the usual question is *what needs me right now* rather than a search. · AND NOTHING CALLS `compose_view` FROM AN ENGINE — a host assembles `r` and calls it, at a surface's cadence, the same seam MON-7 draws."
+  },
+
+  "beta_cases": [
+    {
+      "name": "★_beta_keys_on_an_event_class_or_Unit_never_on_an_operator",
+      "why": "★ β is the formal **inverse** of the operator→widget `ui_schema`, and the type says so: `BindingKey` has exactly two shapes and neither is an operator name. Asserted by looking up a real operator (`budget.allocate`) and finding nothing — not because the lookup fails, but because β has no key that could hold it.",
+      "expect": "Unit and the event class both resolve; an operator name resolves to nothing"
+    },
+    {
+      "name": "★★_an_event_bound_widget_is_NOT_a_candidate_when_its_class_did_not_fire",
+      "why": "★★ Event-first in **behaviour**, not only in shape. Absent from the recent log means the widget is never scored at all — not scored and ranked low. This is exactly what stops `compose` degrading into *scan everything and rank*, which is the failure mode the event-first framing exists to prevent, and it is checked by `candidates_considered` rather than by the selection.",
+      "expect": "candidates_considered = 1 (the Unit-bound one only)"
+    },
+    {
+      "name": "it_becomes_a_candidate_the_moment_its_class_appears",
+      "why": "The other half, and it carries **why**: the candidate's eligibility names the class that fired. A surface can say *this is here because a pocket was spent from* rather than *this is here*.",
+      "expect": "EventFired { class } on the candidate"
+    }
+  ],
+
+  "urgency_cases": [
+    {
+      "name": "★★_a_widget_reading_the_breached_dimension_outranks_one_reading_a_healthy_one",
+      "why": "★★ Urgency is the real `d(s,V)`, restricted to what the widget reads. With `balance` 60 outside its band and `mood` inside, the money card carries urgency and the feelings card carries **exactly zero** — and the score ordering follows. This is the one signal the Monitor escalates on and MON-7 encodes, now with a third consumer, and no widget had a say in any of it.",
+      "expect": "money.urgency > 0, feelings.urgency = 0, money.score > feelings.score"
+    },
+    {
+      "name": "inside_the_viable_region_nothing_is_urgent",
+      "why": "`d(s,V) = 0` ⇒ every urgency is 0. Correct rather than degenerate: a household inside its own viable region has nothing urgent to show, and a surface that manufactured urgency there would be training people to ignore it.",
+      "expect": "urgency = 0.0"
+    },
+    {
+      "name": "★_a_widget_cannot_set_its_own_urgency",
+      "why": "★ The only lever a widget has is **which dimensions it declares** — and those are checked against `dim(S)` at load by UI-2, so it cannot name one that does not exist. The distance itself is the household's, computed by `region.rs`. The same state read twice, breached and not, moves the urgency; nothing the widget does moves it.",
+      "expect": "urgency rises with the breach, not with anything the widget declares about itself"
+    },
+    {
+      "name": "cost_is_superlinear_in_the_declared_inputs",
+      "why": "`1 + n(n−1)/2` — 1, 2, 4, 7 — with the second difference asserted positive, so *superlinear* is checked rather than asserted. The justification is legible: reading `n` items is not `n` work, it is the pairwise relating between them.",
+      "expect": "1, 2, 4, 7 and a growing second difference"
+    },
+    {
+      "name": "★★★_grabbing_every_dimension_to_look_urgent_is_SELF_DEFEATING",
+      "why": "★★★ The property that makes share-of-`d(s,V)` safe. A widget declaring all three dimensions captures the **whole** of the household's distance and scores maximally — and costs 4 chunks. Against a budget of 3 it is **excluded**, while two focused widgets costing 1 each are both selected. The greedy move buys the highest score at a price no budget can afford, so the attention budget prices out the gaming rather than a rule forbidding it.",
+      "expect": "the greedy widget excluded at cost 4; two focused widgets selected"
+    }
+  ],
+
+  "knapsack_cases": [
+    {
+      "name": "★★_it_is_a_REAL_knapsack_and_not_a_sort_dressed_up",
+      "why": "★★ The case that tells the two apart: greedy-by-score takes the 0.90 item and stops at a total of 0.90; the DP takes the 0.60 + 0.55 pair for 1.15. A sort-and-take-N would fail this, and it is the difference between an attention budget that is spent well and one that merely looks ranked.",
+      "expect": "the pair selected, the big one excluded"
+    },
+    {
+      "name": "★_the_selection_is_OPTIMAL_against_brute_force",
+      "why": "★ Optimality asserted rather than trusted: every feasible subset of five items is enumerated and the DP's total is checked equal to the best. *Every selected widget provably outscored what it displaced* is the whole justification for a person trusting the surface, so it is worth proving over the algorithm rather than over one example.",
+      "expect": "DP total == brute-force maximum"
+    },
+    {
+      "name": "every_exclusion_comes_back_with_its_score",
+      "why": "The *'N other things stayed quiet'* disclosure needs something true to say. An exclusion nobody can inspect is indistinguishable from a widget that was never considered — the same OPV-29 discipline that makes the Pareto frontier report what collapsing hid.",
+      "expect": "the excluded candidate carries its score"
+    },
+    {
+      "name": "★★_a_zero_score_widget_is_not_shown_and_says_so_from_the_excluded_list",
+      "why": "★★ Found by testing rather than design, and kept. The DP takes an item only when it **strictly improves** the total, so a widget scoring exactly 0 never enters the selection. That is right — `K ≈ 4` is scarce and a card worth nothing is the noise a curated surface exists to remove — and it is **at parity** with the reference, whose `dp[c-w] + v > dp[c]` behaves identically. Nothing is hidden: it was considered, it is in `excluded` with its `0.0`, and `spent` is 0.",
+      "expect": "considered = 1, selected empty, excluded score 0.0, spent 0"
+    },
+    {
+      "name": "an_empty_field_selects_nothing_and_says_so",
+      "why": "No candidates yields two empty lists rather than an error or a fabricated placeholder — the same honest-empty treatment the surface's own design language already uses.",
+      "expect": "both lists empty"
+    }
+  ],
+
+  "read_only_cases": [
+    {
+      "name": "★_compose_changes_nothing",
+      "why": "★ Read-only **by signature** — shared references in, a `View` out, and no `Registry`, so there is nothing here that could run an operator. Asserted anyway across two calls, because a signature-only guarantee is worth exactly one refactor; the same doubled discipline EVT-15 applies to replay's effect suppression.",
+      "expect": "state and log byte-identical after two composes"
+    },
+    {
+      "name": "composing_twice_gives_the_same_view",
+      "why": "Resolved fresh on every call and **never stored**, so two calls on unchanged inputs must agree exactly — which also means candidate ordering is deterministic and the DP's tie-breaking is reproducible rather than incidental.",
+      "expect": "the two views are equal"
+    },
+    {
+      "name": "relevance_is_neutral_with_no_query_and_real_with_one",
+      "why": "0.5 with no query — the common case, since the usual question is *what needs me right now* rather than a search — and a real overlap fraction when there is one. The unrelated-query case doubles as the zero-score case above, which is how that behaviour was found.",
+      "expect": "0.5 / 1.0 / 0.0"
+    }
+  ]
+}
