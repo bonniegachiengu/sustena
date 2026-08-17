@@ -125,6 +125,7 @@ conformance/
     belief.json         belief under silence (no Kalman) (spec, R2)
     harmonics.json      cycle vs shift in the frequency   (spec, R2)
     windowing.json      tumbling / sliding / session      (spec, R2)
+    observability.json  reachability, not rank(O)         (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1137,3 +1138,56 @@ it is a bug** — nothing silently differs.
   **an open session's close is a watermark question, not a timeout** — there is
   deliberately no *expire after a while* path, because that would be the wall
   clock wearing a different name; and it is not wired into `MonitorEngine`.
+
+- **`observability.json` — rust-ahead on the native form, and the literal
+  matrix is DECLINED on both sides.** `observability`, `observable` and
+  `is_observable` are grep-0.
+  ★★ **§I's `rank([C; CA; …; CAⁿ⁻¹]) = n` is not built, and that is a position
+  rather than a gap** — the same one MON-2 takes on the Kalman filter, on
+  MON-11's ratified caveat that *"the observability and Kalman apparatus of
+  §I–II assumes a continuous linear system... a loose import, not a literal
+  fit."* Since that caveat names the two **together**, declining one and
+  importing the other would have been incoherent.
+  ★ **And the concrete reason, beyond the categorical one:** `CAᵏ` needs a
+  single `A` to take powers of, **and there is not one** — the dynamics here is
+  a *choice* (which operator someone runs), not a fixed linear map, so any `A`
+  would have to be picked and picking one would be a fabrication. MON-1's own
+  row says the rest: *a rough answer to a rank question is worse than none.*
+  ★★ **The replacement is a translation, term for term:** `C` → dimensions a
+  declared source measures · `A` → one operator (reads `X`, writes `Y` ⇒
+  `X → Y`) · `CAᵏ` → a measurement reachable in `k` operator hops ·
+  `rank(O) = n` → every governed dimension reaches a measurement. The edge
+  direction is the part worth stating carefully: an operator reading `X` and
+  writing `Y` makes `Y` carry information about `X`, so information flows
+  `X → Y` — getting that backwards would invert the analysis while still
+  producing a plausible-looking graph.
+  ★ **The counterweight has two halves, and neither is *the reference lacks
+  this*:** MON-8's `ungoverned()` shipped the simplest case hours earlier, and
+  the matrix is declined on both sides. What is new is the middle —
+  reachability through operator chains. ★ And the difference from
+  `ungoverned()` is kept sharp rather than called an extension: that is a
+  **runtime** question (*has anything spoken yet* — answerable by waiting),
+  this is a **structural** one (*could anything ever* — waiting will not help).
+  ★★ **Conservative where the effects are unsummarised, and it says so.** An
+  operator with no `EffectSummary` contributes **no edges**, so a dimension can
+  read unobservable that a summary would have shown observable — the safe
+  direction, the same discipline the Goodhart guard takes with support
+  matching. The verdict **carries the unsummarised operators**, and
+  `is_conservative()` says whether it rests on them, so *unobservable* and *we
+  could not see* stay distinguishable. **Over today's registry that is the
+  whole picture** — no shipped operator declares a summary (OP-3's finding from
+  a second angle), asserted so a future summarised operator breaks the test.
+  **Greppable false positives named:** `reachable` has **6 hits and all are
+  prose** — an account unreachable by a lowercase login, a scope name reachable
+  inside a quantifier body, a reachable database in a health check. Three
+  senses of the word, none of them graph reachability. `monitor` hits real
+  monitoring code that asks *what is this worth now*, never *could this be
+  known at all*.
+  **Honest limits, six, two load-bearing:** ★★ **the matrix is declined, not
+  deferred** — a future slice should not "finish" this by adding a fabricated
+  `A`; ★★ **conservative where effects are unsummarised**; ★ **root-name
+  granularity**, which is coarse in the *observable* direction — the **less
+  safe** one, and stated rather than hidden; an unparseable constraint
+  contributes no reads; **a path is not an estimator** (reachability does not
+  say how to invert the chain to recover a value); and it is not wired into
+  `MonitorEngine`.

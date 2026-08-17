@@ -1,0 +1,119 @@
+{
+  "conformance_version": 1,
+  "slice": "observability",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Monitor - Formal Execution.md, §I (Observability — What Can Be Known) + the ratified fit caveat (MON-11)",
+  "replayed_by": ["rust"],
+  "note": "★★ The observability MATRIX is a DECLINED IMPORT, exactly like the Kalman filter (MON-2) and for the same reason (MON-11's fit caveat). What ships is the discrete analogue — reachability to a measurement over the operator graph — and the correspondence to `O = [C; CA; …]` is a translation rather than an approximation.",
+  "★★_the_matrix_is_DECLINED_and_here_is_the_CONCRETE_reason": "§I's literal test is `rank([C; CA; CA²; …; CAⁿ⁻¹]) = n`. It is not built, and that is a **position** rather than a gap — the same one MON-2 takes on Kalman, resting on MON-11's ratified caveat: *'the observability and Kalman apparatus of §I–II assumes a continuous linear system ẋ = Ax + Bu. Sustena's state is discrete, typed, and event-sourced [...] the observability matrix and the Kalman filter are a loose import, not a literal fit.'* ★ And the concrete reason beyond the categorical one: **`CAᵏ` needs a single `A` to take powers of, and there is not one.** The dynamics here is a *choice* — which operator someone runs — not a fixed linear map, so any `A` would have to be picked, and picking one would be a fabrication. MON-1's own row says the rest: *a rough answer to a rank question is worse than none.*",
+  "★★_and_the_replacement_is_a_TRANSLATION_not_an_approximation": {
+    "C — what the sensors read": "dimensions a declared source measures directly",
+    "A — one step of the dynamics": "one operator: reads `X`, writes `Y` ⇒ `X → Y`",
+    "CAᵏ — the k-th block row": "a measurement reachable in `k` operator hops (`Inferable { hops }`)",
+    "rank(O) = n": "every governed dimension reaches some measurement (`completely_observable()`)",
+    "★_the_edge_direction_stated_carefully": "An operator that **reads `X` and writes `Y`** makes `Y` carry information about `X` — so observing `Y` tells you about `X`, information flows `X → Y`, and `X` is observable when some path from it lands on something measured. Getting this backwards would invert the whole analysis while still producing a plausible-looking graph."
+  },
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`observability`, `observable` and `is_observable` are grep-0 in apps/api/sustena/. Nothing asks whether a governed quantity can be known at all.",
+    "★_the_counterweight_the_SIMPLEST_CASE_shipped_hours_ago_and_the_MATRIX_is_declined_not_missing": "Two halves, and neither is *the reference lacks this*. **First:** MON-8's `BeliefTracker::ungoverned()` shipped earlier the same day and already answers the case that needs no graph — a declared-governed dimension no sensor has ever spoken about. **Second:** the literal matrix is **declined on both sides** for the same ratified reason the Kalman filter is, so its absence in the reference is not a shortfall there either. What is genuinely new is the middle: reachability through operator chains, which neither side had.",
+    "★★_and_the_difference_from_ungoverned_is_RUNTIME_versus_STRUCTURAL": "Worth keeping sharp rather than calling this an extension. `ungoverned()` asks *has anything spoken about this yet* — a **runtime** question, answerable by waiting. This asks *could anything ever* — a **structural** one, where waiting will not help because there is no path. A dimension can be `ungoverned()`-clean and still unobservable, and the reverse.",
+    "term_by_term": {
+      "★ the observability matrix": "DECLINED ON BOTH SIDES, and recorded as declined rather than pending — see MON-2's precedent and MON-11's caveat.",
+      "★ a governed dimension nothing has measured (runtime)": "AT PARITY as of MON-8, hours before this slice.",
+      "★★ reachability through operator chains (structural)": "RUST-AHEAD. Genuinely new, and the substance of this row.",
+      "partial observability → a distribution, not a point": "AT PARITY as of MON-8 — the distribution is the belief; this row says WHICH dimensions need one.",
+      "the operator effect summaries the analysis reads": "RUST-AHEAD as a declaration (`EffectSummary`, OP-3) and **empty in practice on both sides** — which is why every verdict over the real registry is conservative."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "monitor (many hits, none an observability question)": "`MonitorPanel`, `monitor.state_path`, `monitor.constraint`, `get_monitor_widgets` — real monitoring code that reads values and checks thresholds. It asks *what is this worth now*, never *could this be known at all*.",
+      "observable / observability / is_observable (0 hits each)": "Clean zeros.",
+      "reachable (6 hits, all prose)": "★ Named because it is the word this row's native form turns on, and every hit is unrelated: an account that was **unreachable** by a lowercase login, a scope name that stays **reachable** inside a quantifier body, and a **reachable** database in a health check. Three different senses of the word, none of them graph reachability over operators."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "Panels that read whatever is in state and flag what breaches a threshold. What it does not have is any way to notice that a quantity someone declared worth governing has no route to a sensor at all — which is the failure that never surfaces as a symptom, because an ungoverned dimension simply sits there looking fine.",
+    "the_honest_limits": "Six. (1) ★★ **THE MATRIX IS DECLINED, NOT DEFERRED** — this is not a partial implementation of `rank(O)`; it is the discrete analogue, and a future slice should not 'finish' it by adding a fabricated `A`. (2) ★★ **CONSERVATIVE WHERE EFFECTS ARE UNSUMMARISED** — an operator with no `EffectSummary` contributes no edges, so a dimension can read unobservable that a summary would have shown observable. The safe direction, and named in the verdict itself rather than left implicit. ★ **Over today's registry this is the whole picture** — no shipped operator carries a summary, so every non-measured dimension reads conservative, and a test asserts it so it cannot quietly stop being true. (3) ★ **ROOT-NAME GRANULARITY** — reads and writes are compared at the top-level dimension name, reusing `goodhart::referenced_dimensions`; `finances.liquid` and `finances.pockets` are one node. Coarse in the *observable* direction, which is the less safe one, and stated rather than hidden. (4) **AN UNPARSEABLE CONSTRAINT CONTRIBUTES NO READS**, conservative in the same direction as a missing summary. (5) **A PATH IS NOT AN ESTIMATOR** — knowing a value is reachable does not say how to invert the chain to recover it; that is a genuinely harder problem and is not claimed. (6) **NOT WIRED INTO `MonitorEngine`** — the same residual MON-8, MON-13 and MON-4 carry.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. The first step is not the analysis — it is the declarations it reads: an `EffectSummary` per operator, which is OP-3's own named residual.",
+    "not_a_divergence_in": "R1 behaviour. Purely additive: a new module reading the existing registry and reusing `goodhart::referenced_dimensions` and `predicate::parse_predicate`, with no change to either and no existing vector touched."
+  },
+  "fixture": {
+    "why": "A three-link chain with only the far end measured, so the two dimensions behind it are inferable at exactly 2 and 1 hops — the `CA²` and `CA¹` block rows, made concrete. Plus an island nobody carries, which is the finding the row exists to surface.",
+    "measured": {"source_id": "mpesa", "dimensions": ["finances"]},
+    "operators": [
+      {"name": "a.lift", "reads": ["sensor"], "writes": ["derived.level"]},
+      {"name": "b.carry", "reads": ["derived"], "writes": ["finances.liquid"]},
+      {"name": "d.island", "reads": ["orphan"], "writes": ["orphan.other"]}
+    ],
+    "governed": ["finances", "derived", "sensor", "orphan"]
+  },
+  "translation_cases": [
+    {
+      "name": "★_a_DIRECTLY_MEASURED_dimension_is_the_C_ROW",
+      "why": "★ The base case of the translation: what a declared source reads directly is exactly §I's `C`, and it needs no hops. The verdict names the source, because *which sensor tells us this* is the first thing a person asks when a reading looks wrong.",
+      "expect": {"observability": "Measured", "by": ["mpesa"]}
+    },
+    {
+      "name": "★★_a_dimension_ONE_operator_from_a_measurement_is_INFERABLE_at_ONE_hop",
+      "why": "★★ `CA¹`, concretely: `b.carry` reads `derived` and writes `finances`, so `finances` carries information about `derived` and observing the first tells you about the second. The hop count is the block row it would have appeared in — which is what makes this a translation of the matrix rather than a different question wearing its name.",
+      "expect": {"observability": "Inferable", "hops": 1, "reaches": "finances", "via": ["b.carry"]}
+    },
+    {
+      "name": "★★_a_CHAIN_of_two_operators_is_inferable_at_TWO_hops_and_names_the_chain",
+      "why": "★★ `CA²`. `sensor → derived → finances` — and the verdict carries the operator chain that does the carrying, so a person can check the claim rather than take the analysis's word for it. An answer of *yes, somehow* would be worth much less than an answer that names the route.",
+      "expect": {"observability": "Inferable", "hops": 2, "via": ["a.lift", "b.carry"], "reaches": "finances"}
+    },
+    {
+      "name": "★_the_search_is_BREADTH_FIRST_so_it_reports_the_FEWEST_hops",
+      "why": "★ *Which block row* is a question about the smallest `k`, so a shortcut must be found rather than whichever path the traversal happened to take first. With a one-hop route added alongside the two-hop chain, the reading must say 1.",
+      "expect": {"hops_with_shortcut": 1}
+    },
+    {
+      "name": "a_CYCLE_does_not_hang_the_search",
+      "why": "Two operators writing into each other's dimensions form a loop with no measurement in it. The traversal must terminate and report unobservable, rather than following the cycle forever — the same visited-set discipline the causal-graph walks already use.",
+      "expect": {"terminates": true, "observable": false}
+    }
+  ],
+  "conservative_cases": [
+    {
+      "name": "★★_an_operator_with_NO_EFFECT_SUMMARY_contributes_no_edges_AND_IS_NAMED",
+      "why": "★★ The honest boundary. Writes come from an `EffectSummary`, which is optional and absent by default (OP-3), and an operator without one contributes **no edges** — so a dimension can read unobservable that a summary would have shown observable. That is the **safe direction**, the same discipline the Goodhart guard takes with support matching: surfacing a finding that might be spurious beats hiding one that is real. But it is not left implicit — the verdict **carries the operators whose summaries were missing**, and `is_conservative()` says whether it rests on them, so *unobservable* and *we could not see* stay distinguishable.",
+      "expect": {"observable": false, "is_conservative": true, "unsummarised": ["a.opaque"], "describe_contains": "may exist that this analysis cannot see"}
+    },
+    {
+      "name": "★_DECLARING_the_effect_turns_the_SAME_dimension_observable",
+      "why": "★ The pair that makes the boundary legible rather than merely stated: same operator, same reads, same sources — the only difference is whether it said what it writes. One reading is conservative-unobservable and the other is observable, and the gap between them is a declaration.",
+      "expect": {"without_summary": false, "with_summary": true}
+    },
+    {
+      "name": "an_OPAQUE_change_still_makes_an_edge_because_opaque_is_about_the_VALUE",
+      "why": "`Change::Opaque` says *this fragment cannot express what the new value is* — not *we do not know whether the path was written*. So the edge is real even where `wp` cannot fold it, and treating Opaque as no-write would have lost every parameter-driven operator, which is most of them.",
+      "expect": {"observable": true}
+    },
+    {
+      "name": "★★_over_the_REAL_registry_EVERY_verdict_is_conservative",
+      "why": "★★ OP-3's finding seen from a second angle, and asserted so it cannot quietly stop being true: **no shipped operator declares an `EffectSummary`**, so the graph has no propagation edges at all and every non-measured dimension reads conservative. That is the honest reach of this analysis today — not zero, because the measured dimensions and the `unsummarised` list are both real, but far short of what it will report once effects are declared. A future summarised operator breaks this assertion and forces a look.",
+      "expect": {"unsummarised_nonempty": true, "observable": false, "is_conservative": true}
+    }
+  ],
+  "finding_cases": [
+    {
+      "name": "★★_a_GOVERNED_but_UNOBSERVABLE_dimension_is_a_DESIGN_FINDING",
+      "why": "★★ §I's implication made concrete — *'unmeasured state is ungoverned state.'* `orphan` is declared worth governing and nothing carries it to a measurement, so it is surfaced. This is the failure that never appears as a symptom: an ungoverned dimension simply sits there looking fine, and the only way to notice is to ask this question deliberately.",
+      "expect": {"declared_but_unobservable": ["orphan"], "completely_observable": false}
+    },
+    {
+      "name": "everything_reachable_reads_as_COMPLETELY_OBSERVABLE",
+      "why": "The discrete `rank(O) = n`: with the island excluded, every governed dimension reaches a measurement and the report says so. A checker that could only ever report problems would be untrustworthy about the ones it did report.",
+      "expect": {"completely_observable": true}
+    },
+    {
+      "name": "★★_an_UNOBSERVABLE_dimension_is_EXACTLY_one_that_needs_a_BELIEF",
+      "why": "★★ §I's *partial observability → a distribution, not a point*, wired to where that distribution already lives. MON-8 built the belief; MON-1 says **which** dimensions require one — precisely those where a point estimate would be a claim nobody can check. The two rows meet here rather than sitting beside each other.",
+      "expect": {"requiring_belief": ["orphan"], "measured_requires_belief": false}
+    },
+    {
+      "name": "★_with_NOTHING_measured_the_graph_REFUSES_rather_than_reporting_all_unobservable",
+      "why": "★ An empty `C` makes every answer trivially *unobservable*, which is a fact about the **declaration** rather than about the state — and a report full of findings would read as *this system is badly designed* when it means *you told me about no sensors*. So it is an error, not a report.",
+      "expect": {"error": "NothingMeasured"}
+    }
+  ]
+}

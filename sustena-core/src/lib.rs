@@ -85,6 +85,7 @@
 //! | Belief state under silence (no Kalman) | [`belief`] | R2 |
 //! | Harmonics · cycle vs shift (DFT) | [`harmonics`] | R2 |
 //! | Window typology · tumbling/sliding/session | [`windowing`] | R2 |
+//! | Observability · reachability (no matrix) | [`observability`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -123,6 +124,7 @@ pub mod operative;
 pub mod operator;
 pub mod path;
 pub mod period;
+pub mod observability;
 pub mod ooda;
 pub mod pincer;
 pub mod population;
@@ -195,6 +197,9 @@ pub use belief::{
     SilenceSpec,
 };
 pub use checkpoint::{events_applied, replay, replay_to, Checkpoint, ReplayError};
+pub use observability::{
+    MeasuredBy, Observability, ObservabilityError, ObservabilityGraph, ObservabilityReport,
+};
 pub use harmonics::{
     read as read_harmonics, spectrum, Component, HarmonicReading, HarmonicsError,
     CycleProvenance, CycleVerdict, HarmonicsSpec, KnownCycle,
