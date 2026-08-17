@@ -69,6 +69,8 @@
 //! | Division of labour · `rb > c` | [`division`] | R2 |
 //! | CRDT family · join-semilattice | [`crdt`] | R2 |
 //! | Operative ω · utility as a vector | [`operative`] | R2 |
+//! | Goodhart guard — invariant over U | [`goodhart`] | R2 |
+//! | Present the frontier, not the winner | [`presentation`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -85,6 +87,7 @@ pub mod ensemble;
 pub mod error;
 pub mod event;
 pub mod fold;
+pub mod goodhart;
 pub mod holarchy;
 pub mod inverse;
 pub mod kernel;
@@ -98,6 +101,7 @@ pub mod ooda;
 pub mod pincer;
 pub mod population;
 pub mod predicate;
+pub mod presentation;
 pub mod region;
 pub mod principal;
 pub mod router;
@@ -189,6 +193,11 @@ pub use version::{
 pub use ensemble::{
     DeadDrop, DeadDropBook, DecisionNode, Ensemble, EnsembleAnalysis, EnsembleError, InvariantSet,
     ModelTemplate, Prob, Resolution, RewardBasis, Scenario,
+};
+pub use goodhart::{coverage, referenced_dimensions, Coverage, GoodhartGuard, GuardError};
+pub use presentation::{
+    discharged_by_this_build, present, present_joint, CollapseRule, Collapsed, Discharge, Duty,
+    PresentationError, Presented,
 };
 pub use holarchy::{
     escalate, validate_holarchy, Breach, Capacity, Escalation, EscalationOutcome, HolarchyError,

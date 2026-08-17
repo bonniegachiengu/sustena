@@ -1,0 +1,129 @@
+{
+  "conformance_version": 1,
+  "slice": "goodhart_presentation",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Operative - Formal Execution.md, §XIV (The Goodhart Guard — O, U, and why the fix is not another operative) and §XV (Orchestrator = Mixture-of-Experts Gate + Presentation — the three duties, and present the frontier not the winner)",
+  "replayed_by": ["rust"],
+  "note": "Two halves of one boundary. §XIV moves a check OUT of the agent layer; §XV stops the surface undoing what the vector bought. Both consume what the previous slice landed — supp(u_i) and 𝒫(X) — and neither needs Π or memory.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`goodhart`, `unwatched`, `blind spot`, `unobserved`, `frontier`, `pareto`, `non-dominated`, `top-ranked`, `sparse` and `mixture` are ALL grep-0 in apps/api/sustena/. There is no notion of a dimension no score reads, and no surface that hands back a set of non-dominated options.",
+    "term_by_term": {
+      "★ U = dim(S) \\ O — the unwatched set": "RUST-AHEAD. grep-0. The reference has no way to ask which dimensions no operative's score reads, so it has no way to notice that damage there is invisible. §XIV's danger is not that such damage is unpunished — it is that it is UNOBSERVED BY EVERY SCORING FUNCTION, and a system that cannot compute U cannot know it has the problem.",
+      "★ the fix is a gate-enforced invariant, NOT another operative": "★ THE COUNTERWEIGHT, and it is a real one. **The mechanism the fix needs is AT PARITY**: `_check_enforcement_gate` exists (sustain_engine.py:478), sustains declare invariants, and the gate refuses a transition that would violate one before persisting. So the reference could enforce a Goodhart guard TODAY — what it lacks is the notion of U that says WHERE to declare one, and the discipline that says a guard belongs there rather than in a new scoring voice. The gap is a concept, not a mechanism.",
+      "the guard is not a scoring voice": "RUST-AHEAD as a STRUCTURE. `GoodhartGuard` is a `ConstraintDecl` with no utility, no vote, no score and no rank — there is nothing on the type that could become another voice, which is the distinction §XIV turns on. The reference has no type that could express the confusion either way, because it has neither concept.",
+      "★ 𝒫(X) presented rather than a winner": "RUST-AHEAD as a VECTOR frontier, **and the disclosure instinct is AT PARITY** — see the next entry, which is the honest half of this.",
+      "★ 'what did not make the cut travels with the answer'": "AT PARITY, and genuinely so. `knapsack_select` (curated_ui.py:221) returns `(selected, excluded)` — *'both with their score, so the caller can'* explain the cut — and the Orchie surface renders the excluded set as *'N other things stayed quiet'* with their scores. The reference already has the instinct §XV is about: a surface that shows a subset must disclose what it withheld. What it does NOT have is a vector: its salience is `ALPHA_URGENCY·urgency + LAMBDA_RELEVANCE·relevance` (0.75 / 0.25), a WEIGHTED SUM — precisely the scalarisation §II names, with the weights declared. So its cut is honest and its ranking is a convex-hull ranking. The disclosure is at parity; the thing being disclosed has already been collapsed.",
+      "Orchie's three duties": "RUST-AHEAD as a recorded set. `orchestrat` returns 3 hits and none is §XV's duties — a display label *'AI orchestrator'*, a comment about Mycelium being the orchestrator cockpit, and *'the engine just orchestrates'*.",
+      "the sparse MoE gate g(x,s)": "NOT BUILT HERE EITHER — it is OPV-28, and `discharged_by_this_build` says so rather than implying coverage. The reference's own gate is the crude honest form §XV describes: a hard 0/1 domain-overlap test on subject-matter tags (`CouncillorConfig.is_relevant`), which §XV explicitly calls *'a legitimate start — a declared gate is auditable where a learned one is not.'*"
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "winner (2 hits, 0 real)": "`winner_id` in `_supersede_pending_duplicate` — the surviving row when two ingest captures duplicate. A dedup winner, not a ranked option.",
+      "collapse (1 hit) — ★ a near-miss worth naming precisely, not dismissing": "orchie.py:153 reads *'Two separate steps, deliberately never collapsed into one.'* That is about infer and confirm being two authenticated calls — the approval-token discipline — not about collapsing a vector. Same word, different object. Worth naming because the reference already holds the INSTINCT not to collapse two things that must stay separate; it applies it to the write path, and §XV is asking for it on the read path.",
+      "top_k (2 hits, 0 real)": "`top_key` — a loop variable over restored state in control_ops.py. Substring.",
+      "orchestrat (3 hits, 0 real)": "A display label, a comment naming Mycelium as the dev cockpit, and 'the engine just orchestrates'."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "Two real things, and they are the two halves of the counterweight. For §XIV: a working enforcement gate over declared invariants, which is exactly the mechanism the fix uses — the reference could enforce a Goodhart guard today and simply has no way to know where one is needed. For §XV: a presentation layer that already discloses what it withheld, with scores, which is the instinct §XV cares about. What is absent in both cases is the thing the previous slice made computable: `supp(u_i)`, so U can be found, and a vector, so a frontier exists to present instead of a ranking.",
+    "the_honest_limits": "Four. (1) U IS COMPUTED AGAINST DECLARED DIMENSIONS — a quantity nothing in dim(S) names is invisible to this too, and no coverage report can find what the model does not contain. (2) ROOT-NAME GRANULARITY — a support is a dimension name and a predicate path's first segment is compared, so an operative reading `finances.liquid` counts as watching `finances`. Coarse in the SAFE direction: it can call something watched that is only partly watched, so the guard it wrongly refuses is one it should have allowed, and a refused real guard is visible where a silently accepted fake one would not be. (3) PRESENTATION IS NOT ORDERING — nothing here ranks the frontier, because an order over non-dominated options is a preference about preferences and inventing one would be the collapse wearing a different hat. (4) ONE UTILITY PER PRESENTATION — the joint surface is the union over a population's frontiers (`present_joint`); which of the two a given surface should show is a design decision this module does not make for it.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive. The guard calls the EXISTING gate (`admit_one`) rather than adding a second enforcement path, and the presentation consumes `𝒫(X)` from the previous slice without modifying it."
+  },
+  "fixture": {
+    "why": "A world with three dimensions where exactly one operative scores exactly one of them — so U is large and obvious — plus the same non-convex four-option set the previous slice used, so the presentation half can be shown deleting the very option 1001 weight vectors already deleted.",
+    "dimensions": ["savings", "sleep", "goodwill"],
+    "watched_by_mentor": "savings",
+    "guard": {"id": "sleep_floor", "expression": "sleep >= 6", "strategy": "refuse"},
+    "alternatives": {"a": [10.0, 0.0], "b": [0.0, 10.0], "c": [4.0, 4.0], "d": [1.0, 1.0]}
+  },
+  "coverage_cases": [
+    {
+      "name": "coverage_reports_O_and_U_and_nothing_else",
+      "why": "★ A read, not a remedy. §XIV is explicit that the fix for an unwatched dimension is not another operative, so `Coverage` has no method that adds one. `observed_fraction` is reported for legibility and named as a reading rather than a target — treating it as one would be Goodhart applied to the Goodhart guard.",
+      "expect": {"observed": ["savings"], "unwatched": ["goodwill", "sleep"], "has_blind_spot": true, "observed_fraction": 0.3333333333333333}
+    },
+    {
+      "name": "★_adding_an_operative_shrinks_U_without_emptying_it_and_a_new_dimension_refills_it",
+      "why": "★ §XIV's reason for refusing the obvious fix, demonstrated in BOTH directions rather than quoted. Adding an operative that scores `sleep` genuinely moves it from U to O and U shrinks — *'a benefit and not a solution'* — and it is still not empty. Then one step later S gains a dimension and a fresh U appears. The mechanism is shown; the article's conclusion follows from it.",
+      "expect": {"unwatched_before": 2, "unwatched_after": ["goodwill"], "still_has_blind_spot": true, "new_dimension_lands_in_U": "reputation"}
+    }
+  ],
+  "guard_cases": [
+    {
+      "name": "★★_damage_to_an_unwatched_dimension_is_seen_by_no_operative_and_caught_only_by_the_gate",
+      "why": "★★ THE PROOF OF VALUE, and it is a two-part assertion because §XIV's claim is a two-part claim. FIRST: sleep falls from 8 to 3 and **every** operative reads the two states as identical — u_i(before) == u_i(after) and Δu is the zero vector — so nothing in the agent layer could rank against it, no matter how many operatives are added. That is the defining property of U made observable. SECOND: the gate refuses it, through an ordinary declared invariant that happens to stand where no score is looking. Not a new enforcement path — `GoodhartGuard::check` is a thin call to `admit_one`, and if it did anything the gate does not, the module would have re-invented the thing §XIV says to reuse. The same guard admits the healthy state, so it is a floor and not a blanket refusal.",
+      "before": {"savings": 100, "sleep": 8},
+      "after": {"savings": 100, "sleep": 3},
+      "expect": {
+        "every_operative_sees_no_change": true,
+        "delta_is_zero_vector": true,
+        "guard_covers": ["sleep"],
+        "verdict_on_damage": "Refused",
+        "refusing_rule": "sleep_floor",
+        "verdict_on_healthy": "Admit"
+      }
+    },
+    {
+      "name": "a_guard_that_watches_nothing_unwatched_is_refused",
+      "why": "★ A constraint over a dimension some operative already scores is a redundant voice, not a guard. Letting it be called one would be false assurance about the exact blind spot §XIV is about — so it is refused at authoring time, where it is a mistake, rather than at 2 a.m., where it is a gap.",
+      "expect": {"error": "WatchesNothingUnwatched"}
+    },
+    {
+      "name": "a_malformed_guard_is_refused_at_authoring_time",
+      "why": "The guard goes through the same `typecheck_constraint` every other declared rule does — it is an ordinary constraint standing in an unusual place, not a special kind of rule with its own parser.",
+      "expect": {"error": "Malformed"}
+    },
+    {
+      "name": "referenced_dimensions_walks_the_whole_predicate",
+      "why": "A compound guard must be credited with every dimension it reads, or a rule that genuinely covers U could be refused for referencing a watched dimension in one conjunct. Literals and params are not dimensions of S and are correctly not counted.",
+      "expression": "sleep >= 6 AND goodwill >= 1",
+      "expect": {"references": ["goodwill", "sleep"]}
+    }
+  ],
+  "presentation_cases": [
+    {
+      "name": "★★_presentation_returns_the_frontier_not_a_winner",
+      "why": "★★ THE PROOF OF VALUE for §XV. `present` hands back all three non-dominated options and there is **no method on `Presented` that returns a single id on its own terms**. The genuinely dominated option is reported separately, because dropping it deletes nothing while dropping a frontier option deletes a trade-off — conflating the two is how a surface talks itself into collapsing.",
+      "expect": {"frontier": ["a", "b", "c"], "dominated": ["d"], "choices": 3, "would_reinstate_the_collapse": true}
+    },
+    {
+      "name": "★_collapsing_deletes_the_same_option_a_weight_vector_would",
+      "why": "★ §XV's claim tied back to §II by a real computation. The option a thousand weight vectors deleted in the previous slice is the option a single-winner surface hides here — *'a presentation bug with the consequences of an architecture bug'*, shown rather than asserted. `hidden` is not a courtesy field: it is the record of what a surface stopped showing, and it is non-empty exactly when there was a genuine choice.",
+      "expect": {"deleted_an_option": true, "hidden_contains": "c"}
+    },
+    {
+      "name": "★_sole_point_cannot_be_borrowed_to_justify_a_real_deletion",
+      "why": "★ The one honest reason to collapse — *there was only one option* — is exactly the reason a surface would most like to claim when there were four. So it is refused whenever the frontier holds more than one, and the refusal names how many there actually were.",
+      "expect": {"error": "NotASolePoint"}
+    },
+    {
+      "name": "sole_point_is_honest_when_there_genuinely_is_one",
+      "why": "The other side, so the refusal above is not mistaken for *collapsing is always wrong*. One option means nothing is being deleted, `hidden` is empty, and the description says so plainly.",
+      "expect": {"chosen": "only", "deleted_an_option": false}
+    },
+    {
+      "name": "a_person_choosing_within_the_frontier_is_the_one_reason_that_resolves_it",
+      "why": "★ §XV: `𝒫` is computed *precisely so a person can choose within it*. `HumanChose` is the one collapse rule that genuinely resolves a trade-off rather than deciding it by machine — and it still reports what the choice set out.",
+      "expect": {"chosen": "c", "hidden": ["a", "b"]}
+    },
+    {
+      "name": "choosing_a_dominated_option_is_refused",
+      "why": "Picking something outside the frontier is not resolving a trade-off, it is losing one — there was a strictly better option on every objective. Refused rather than recorded as a choice.",
+      "expect": {"error": "NotOnTheFrontier"}
+    },
+    {
+      "name": "presenting_nothing_is_refused_rather_than_returning_an_empty_frontier",
+      "why": "An empty frontier would read as *'there is no good choice'* when the truth is *'you gave me no choices'*. Two different statements to a person, and only one of them is true.",
+      "expect": {"error": "NothingToPresent"}
+    },
+    {
+      "name": "★_the_joint_surface_keeps_an_option_only_one_operative_finds_non_dominated",
+      "why": "★ §XV's *hold the whole*: the integrating view no councillor has. An option only one operative rates non-dominated is still a real choice, and dropping it because the others rank it lower is the same deletion at the population level rather than the individual one.",
+      "expect": {"frontier_contains": ["a", "b"], "would_reinstate_the_collapse": true}
+    },
+    {
+      "name": "the_three_duties_are_recorded_with_what_is_NOT_built",
+      "why": "★ §XV names three duties and this build discharges one and a half. `discharged_by_this_build` reports that plainly — Route is NotBuilt and names OPV-28, HoldTheWhole is Partial (the Cynefin domain reading shipped with ω; §VIII's criticality signal is OPV-14), PresentTheFrontier is Built. A status read, deliberately reporting the absences, because a declared-but-inert field reads as built and is worse than nothing.",
+      "expect": {"route": "NotBuilt", "route_names": "OPV-28", "hold_the_whole": "Partial", "hold_names": "OPV-14", "present": "Built"}
+    }
+  ]
+}

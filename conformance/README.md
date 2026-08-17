@@ -109,6 +109,8 @@ conformance/
     division.json       role assignment · rb > c        (spec, R2)
     crdt.json           G-counter · OR-set · RGA        (spec, R2)
     operative.json      ω · utility as a vector         (spec, R2)
+    goodhart_presentation.json
+                        U-guard · present the frontier  (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -564,3 +566,31 @@ it is a bug** — nothing silently differs.
   `R(s)` is over a **declared** transition relation. Also recorded: Nash takes
   **one scalar per party**, so applying it to vector utilities requires the
   very collapse §II warns against — frontier first, bargain second.
+
+- **`goodhart_presentation.json` — rust-ahead-of-python, with a real
+  counterweight on each half.** `goodhart`, `unwatched`, `blind spot`,
+  `unobserved`, `frontier`, `pareto`, `non-dominated`, `top-ranked`, `sparse`
+  and `mixture` are all grep-0. **For §XIV the MECHANISM is at parity:**
+  `_check_enforcement_gate` exists in the reference and refuses a transition
+  that violates a declared invariant, so it could enforce a Goodhart guard
+  today — what it lacks is the notion of `U` that says *where* one is needed.
+  The gap is a concept, not a mechanism. **For §XV the DISCLOSURE INSTINCT is
+  at parity:** `knapsack_select` already returns `(selected, excluded)` *"both
+  with their score"*, and the Orchie surface renders what stayed quiet. What it
+  lacks is a vector — its salience is `0.75·urgency + 0.25·relevance`, a
+  weighted sum, precisely the scalarisation §II names. The disclosure is
+  honest; the thing being disclosed has already been collapsed. Four false
+  positives named, and **one is a near-miss worth stating precisely rather than
+  dismissing**: `collapse` returns one hit, `orchie.py:153` — *"Two separate
+  steps, deliberately never collapsed into one"* — which is about infer and
+  confirm staying two authenticated calls, not about collapsing a vector. Same
+  word, different object, and worth naming because the reference already holds
+  the instinct not to collapse two things that must stay separate; it applies
+  it to the write path, and §XV asks for it on the read path. Also: `winner`
+  (2, a dedup `winner_id`), `top_k` (2, a `top_key` loop variable),
+  `orchestrat` (3, a display label and two comments). **OPV-28's sparse MoE
+  gate is not built here either**, and the file says so rather than implying
+  coverage — `discharged_by_this_build()` reports Route as `NotBuilt`. Four
+  limits disclosed, including that support matching is **root-name granular**
+  and errs in the **safe** direction: it can refuse a real guard, which is
+  visible, rather than silently accept a fake one.
