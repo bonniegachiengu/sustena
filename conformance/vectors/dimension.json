@@ -1,0 +1,144 @@
+{
+  "conformance_version": 1,
+  "slice": "dimension",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Events and Time - Formal Execution.md, §VII (The Convergence Theorem) + spec §4J.4 step 3 (declared dimension kind)",
+  "replayed_by": ["rust"],
+  "note": "Shapiro, Preguiça, Baquero & Zawirski (2011); Kleppmann (2017, ch. 5). ★★ The payoff of the row: LWW attaches to a snapshot dimension AUTOMATICALLY from its declaration, and delta-accumulation on one becomes a TYPE ERROR — the rule stops being remembered and starts being checked.",
+  "★★_the_type_error_is_proven_by_a_compile_fail_DOCTEST": "The strongest available form, and it is executed rather than described: `SnapshotDim` carries a ```compile_fail``` doctest that calls `.add(...)` on a balance read off an SMS. `cargo test --doc` runs it and it PASSES — which means the code genuinely does not build. There is no `add` on the type, so delta-accumulation is **unspellable** rather than refused at run time. ★ And the honest completion: a kind declared in a *spec* with an update arriving off a *wire* cannot be a Rust type error, so `DimensionSchema::check` refuses it there too. Both halves are needed, and claiming the compile-time one covered the declared-in-data case would be the dishonest version of this.",
+  "reconciliation_before_building": {
+    "★_vclock::Dimension_was_EXTENDED_not_forked": "The vector-clock slice already shipped a `Dimension` with `Snapshot`/`Contested` for merge resolution. §VII needs a third kind — `Accumulating` — so the variant was added to **that** enum rather than a parallel one being invented beside it. Adding it forced `MergeResolution::resolve`'s match open, which turned out to be the useful part.",
+    "★★_and_resolve_became_a_TYPED_outcome_because_of_it": "`resolve` returned a bare `Vec<Stamped<T>>` meaning two different things (one value = superseded, two = keep both). A third kind would have made it mean three, and a `Vec` that means three things is exactly the remembered rule this row exists to replace. It now returns `Resolved::{Superseded, BothCount, NeedsReconciliation}` — so a contested resolution can no longer be *mistaken* for a snapshot one, and an accumulating one can no longer be picked from. Three call sites were corrected in place.",
+    "★_the_total_order_was_REUSED_not_re_derived": "§VII's `(τ, id)` Lamport tie-break already ships on `event::Observation`, with its own tests. `SnapshotDim` wraps it; nothing here re-derives the tie-break, which matters because two observations at equal `τ` stop commuting without it.",
+    "★_and_the_law_checkers_too": "`crdt.rs`'s `laws_hold` and `converges` are used to prove the three laws and strong eventual consistency, rather than the laws being restated as bespoke assertions."
+  },
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "There is no declared dimension kind in apps/api/sustena/ — `snapshot`, `accumulating` and `dimension_kind` are all grep-0 as a declaration. Nothing checks that a delta is not being applied to an observed quantity; §VII's rule is remembered by whoever writes the operator.",
+    "★★_the_counterweight_and_it_is_the_STRONGEST_in_the_whole_set_the_BEHAVIOUR_is_at_parity_and_was_derived_FIRST_in_production": "§VII's own field note is the counterweight and it should be quoted, not paraphrased: *'VOS runs the LWW-by-event-time balance guard live. It was built empirically after out-of-order SMS clobbered a balance — before it had a name. And when the forwarding macro broke silently for a week and manual SMS-export replay carried ingest, balances stayed correct: §VII is why.'* So the LWW-for-snapshot **behaviour** shipped in the reference, correctly, and it shipped **before the theorem was written down about it**. §VII's closing line is exact: *'the convergence theorem is not being proposed to VOS; it is being written down about VOS.'* This row is not bringing a missing behaviour; it is turning a hard-won empirical rule into a checked one.",
+    "★_and_the_snapshot_vs_contested_distinction_ALREADY_EXISTED_in_this_core": "Half of the declaration was already here: `vclock.rs`'s `Dimension` shipped with `Snapshot`/`Contested` when vector clocks landed, precisely so a concurrent pair could be resolved correctly. What EVT-10 adds is the third kind, the automatic attachment, and the refusals.",
+    "term_by_term": {
+      "★★ LWW-by-event-time for an observed balance": "AT PARITY IN BEHAVIOUR, and derived there first — the staleness guard (§4J.2) is live in the reference.",
+      "the (τ, id) total order": "RUST-AHEAD in the tie-break specifically. The reference's guard compares event times; with no `t_event` on the record (EVT-5's gap, closed here today) it uses what it has, so an exact tie has no declared resolution there.",
+      "★★ the dimension KIND declared": "RUST-AHEAD. Nothing anywhere says *this dimension is an observation* or *this one accumulates*; the distinction lives in whoever wrote the operator.",
+      "★★ delta-on-snapshot refused": "RUST-AHEAD, and this is the row. In the reference it is a convention, correctly followed, and nothing would catch it being broken.",
+      "the accumulating kind as an id-keyed idempotent counter": "RUST-AHEAD. The reference's accumulating quantities (a pocket's `spent`) are raised by plain addition, made safe upstream by `ingest_engine`'s dedup key rather than by the dimension itself — which is a real defence and a different one: it dedupes the MESSAGE, not the apply.",
+      "★ contested → merge-CRDT, never LWW": "RUST-AHEAD on both sides of the boundary — `crdt.rs`'s OR-set exists here (MUL-10) and has no counterpart there."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "snapshot (89 hits, none a dimension kind)": "★ Named again for a different reason than in `checkpoint.json`: there almost every hit was `StateAccessor.snapshot()`; here the point is that none of them declares a *kind*. The word is thoroughly used and never for this.",
+      "balance_after (real, and genuinely the right idea)": "The transducer extracts `balance_after` from an M-Pesa SMS — an authoritative reading of an external quantity, i.e. **exactly a snapshot-valued observation**. It is parsed and carried in `parsed_fields`, and no operator applies it as one. So the *data* for the snapshot kind is already arriving; only the declaration is missing.",
+      "dimension (real hits, a different sense)": "`dim(S)` in the Cynefin/domain work and `state_schema` dimensions in the DSL sense. Neither is §VII's snapshot-vs-accumulating kind."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The right behaviour for the one dimension that mattered most, arrived at the hard way and running in production; message-level dedupe that protects accumulations upstream; and the balance reading already parsed out of every SMS. What it does not have is anything that says which kind a dimension is, or that would object if the wrong apply were used.",
+    "the_honest_limits": "Five. (1) ★★ THE DSL AUTHORING SURFACE IS NOT BUILT — declaring a kind in a spec is M-DSL's syntax (Phase 4); this row builds the declaration, the attachment and the refusals, and names the authoring surface as the downstream consumer. (2) ★ NO STATE-TREE INTEGRATION — `DimensionSchema` is keyed by path and is not yet wired into `State`/`StateAccessor`, so nothing forces an operator through it; that wiring is real follow-on work and is not claimed. (3) ★ THE CONTESTED KIND REFUSES AUTOMATIC APPLY ENTIRELY, which is deliberate but blunt — a real reconciliation UI or policy is a separate thing, and the refusal is a placeholder for it rather than a substitute. (4) THE ACCUMULATING KIND'S METADATA IS GENUINELY UNBOUNDED — that is §VII's stated price, not a defect, and it is measured rather than hidden; compaction (dropping ids past a watermark) would be a real further row and would need EVT-6 to say when. (5) A DECLARED KIND CANNOT BE CHANGED — redeclaration is refused, because a dimension that changed kind under a running log would invalidate every apply already made to it; a genuine migration path is EDIT/EVT-15 territory.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. The cheapest first step is not the checker — it is the declaration: mark `finances.liquid.balance` snapshot-valued, since `balance_after` is already being parsed out of every SMS and thrown away.",
+    "not_a_divergence_in": "R1 behaviour. `vclock::Dimension` gained a variant and `resolve` gained a typed return — both additive to the R2 layer, with the three call sites corrected in place. No `Event` change, no operator change, no existing vector's expectations altered."
+  },
+  "fixture": {
+    "why": "The household's own two quantities, which happen to be one of each kind: a balance READ OFF an M-Pesa SMS (an observation of an external authority) and a pocket's spend total RAISED BY increments. Plus a shared plan, which is neither.",
+    "snapshot": {"path": "finances.liquid.balance",
+                 "readings": [[1200, 100, "sms-1"], [1150, 200, "sms-2"], [9999, 50, "sms-0"]],
+                 "note": "★ the third is a STALE reading arriving late — it must not clobber"},
+    "accumulating": {"path": "pawa.spent", "deltas": [["tx-1", 50], ["tx-2", 30]]},
+    "contested": {"path": "plan.dinner_time", "edits": ["meet at 4", "meet at 6"]}
+  },
+  "convergence_cases": [
+    {
+      "name": "★★_LWW_converges_under_ANY_permutation_and_ANY_repetition",
+      "why": "★★ §VII's corollary, and the one that matters operationally: *'two phones, offline, receiving the same SMS backlog in different orders, land on the same balance.'* Checked with `crdt.rs`'s own `converges`, which folds **every** permutation and then folds every permutation again with each update delivered **twice** — so order-independence and duplication-freedom are both established over the whole set rather than sampled.",
+      "expect": {"order_independent": true, "duplication_free": true, "strongly_eventually_consistent": true, "value": 30}
+    },
+    {
+      "name": "the_snapshot_join_obeys_the_three_laws",
+      "why": "Idempotent, commutative, associative — the join-semilattice conditions §VII's proof turns on. Checked with the existing law checker rather than restated as three bespoke assertions.",
+      "expect": {"commutative": true, "associative": true, "idempotent": true}
+    },
+    {
+      "name": "★_a_STALE_reading_arriving_late_does_not_clobber_the_newer_one",
+      "why": "★ The production failure the reference hit and fixed empirically: out-of-order SMS clobbering a balance. Ordering on `t_event` rather than arrival is what prevents it — the 9999 reading stamped at τ=50 arrives last and loses to the 1150 stamped at τ=200.",
+      "expect": {"after_stale": 1150}
+    },
+    {
+      "name": "★_an_EQUAL_event_time_breaks_on_the_id_so_the_order_stays_TOTAL",
+      "why": "★ §VII is explicit that `≻` must be total: two observations with equal event time stop commuting without a tie-break, and the merge stops being a join. Reused from `Observation`'s existing `(τ, id)` rather than re-derived, and checked by asserting the join commutes at an exact tie.",
+      "expect": {"commutes_at_a_tie": true}
+    },
+    {
+      "name": "★_snapshot_metadata_is_O(1)_however_many_readings_arrive",
+      "why": "★ One half of §VII's cost argument, as a number rather than a claim: 500 readings later a snapshot dimension still carries exactly one. This is what LWW buys, and it is the reason the theorem prefers it where it is correct.",
+      "expect": {"metadata_len_after_500": 1}
+    }
+  ],
+  "derived_not_decreed_cases": [
+    {
+      "name": "★★_NAIVE_ADDITION_IS_NOT_IDEMPOTENT_which_is_the_whole_argument",
+      "why": "★★ §VII's counter-example, run rather than quoted: `apply(apply(x,δ),δ) = x + 2δ ≠ x + δ`. Under §V's at-least-once delivery that is not a theoretical blemish, **it is a wrong balance**. Written as plain arithmetic in the test because the shipped type deliberately offers no way to do it — which is itself the point.",
+      "expect": {"x_plus_2delta_ne_x_plus_delta": true}
+    },
+    {
+      "name": "★★_carrying_the_APPLIED_IDS_makes_it_idempotent_AND_THAT_IS_THE_COST",
+      "why": "★★ The other half, and where the rule comes from. Made safe, an accumulation **is** the grow-only counter: a redelivered delta counts once, and the state is byte-identical rather than merely equal in total. The price is that the applied-id map grows with every distinct delta — 200 deltas, 200 entries — against LWW's constant 1. ∴ *'snapshot-authoritative, never accumulate deltas'* is a **consequence** of requiring convergence under at-least-once, out-of-order delivery, not a decree.",
+      "expect": {"total_after_redelivery": 80, "state_unchanged": true, "metadata_len_after_200": 200}
+    },
+    {
+      "name": "the_accumulating_join_also_obeys_the_three_laws",
+      "why": "The id-keyed union is itself a join-semilattice, so an accumulating dimension converges too — just at a metadata cost the snapshot kind does not pay.",
+      "expect": {"commutative": true, "associative": true, "idempotent": true, "joined_total": 35}
+    }
+  ],
+  "type_error_cases": [
+    {
+      "name": "★★_a_DELTA_on_a_SNAPSHOT_dimension_DOES_NOT_COMPILE",
+      "why": "★★ THE ROW. §4J.4 step 3 asks for a type error and this is one — a ```compile_fail``` doctest on `SnapshotDim` that calls `.add(...)` on a balance read off an SMS. `cargo test --doc` runs it and it passes, which means it genuinely does not build. There is no `add` on the type: the mistake is **unspellable**, not caught. *'The rule stops being remembered and starts being checked.'*",
+      "expect": {"doctest_is_compile_fail": true, "doc_tests_run": true}
+    },
+    {
+      "name": "★_a_snapshot_hands_out_NO_HANDLE_that_could_add",
+      "why": "★ The value-level mirror of the compile-time proof: `DimensionValue::as_accumulating()` returns `None` for a snapshot, so reaching an accumulating apply requires first establishing that the dimension **is** accumulating. There is no route from a declared snapshot to a delta.",
+      "expect": {"as_accumulating": null, "as_snapshot": "some", "kind": "Snapshot"}
+    },
+    {
+      "name": "★★_a_delta_declared_against_a_snapshot_dimension_is_REFUSED_from_DATA",
+      "why": "★★ The honest completion, and the half a type system cannot reach: a kind declared in a spec, an update arriving off a wire. `DimensionSchema::check` refuses it by name, and **the reason travels with the refusal** — *not idempotent, so a redelivered one would be a wrong balance* — because a caller who is told only *no* learns nothing about why the rule exists.",
+      "expect": {"error": "DeltaOnSnapshot", "by": 50, "reason_mentions": "not idempotent"}
+    },
+    {
+      "name": "an_OBSERVATION_against_an_ACCUMULATING_dimension_is_refused_too",
+      "why": "The mirror image, which matters because the rule is not *observations are always safe*: replacing a running total with a reading would discard every contribution already counted. Both directions are wrong, and both are named.",
+      "expect": {"error": "ObservationOnAccumulating"}
+    },
+    {
+      "name": "an_UNDECLARED_dimension_is_an_error_not_a_DEFAULT",
+      "why": "Defaulting to a kind would be the remembered rule again, wearing a different hat — and defaulting to *snapshot* in particular would silently make every unconsidered dimension LWW. The kind must be declared before anything is applied.",
+      "expect": {"error": "Undeclared"}
+    },
+    {
+      "name": "★_a_dimension_cannot_be_REDECLARED_as_a_different_kind",
+      "why": "★ A dimension that changed kind under a running log would invalidate every apply already made to it — the earlier LWW collapses cannot be reinterpreted as increments after the fact. Redeclaring the *same* kind is a no-op; redeclaring a different one is refused, naming both.",
+      "expect": {"same_kind_ok": true, "different_kind": "AlreadyDeclared"}
+    }
+  ],
+  "scoping_cases": [
+    {
+      "name": "★_declaring_the_kind_is_ENOUGH_the_apply_ATTACHES_ITSELF",
+      "why": "★ The payoff §4J.4 step 3 asks for: the caller declares `snapshot` and never chooses LWW — `DimensionSchema::apply` attaches it. The stale-reading case runs through the schema too, so the guard the reference discovered empirically is here a consequence of one declaration.",
+      "expect": {"after_two_readings": 1150, "after_stale": 1150}
+    },
+    {
+      "name": "★★_a_CONTESTED_dimension_keeps_BOTH_edits_where_LWW_would_keep_ONE",
+      "why": "★★ §VII's emphatic limit, made side-by-side: *'LWW converges; convergence is not correctness... two genuinely concurrent edits to the same field under LWW means one is silently discarded — the single easiest way to turn a correct theorem into a lost transaction.'* The same two concurrent changes: as a contested dimension both survive through the OR-set; as a snapshot exactly one does. Only one of those is right for a shared plan, and the declaration is what decides.",
+      "expect": {"contested_live": 2, "snapshot_metadata_len": 1}
+    },
+    {
+      "name": "★_a_contested_dimension_refuses_AUTOMATIC_APPLY_entirely",
+      "why": "★ Neither an observation nor a delta applies to a contested dimension, and refusing both is the point: any automatic apply is a machine deciding which human was right. Reconciliation goes through the merge-CRDT, which is why `crdt.rs`'s OR-set is the payload rather than a second structure invented here.",
+      "expect": {"observe": "AutomaticApplyOnContested", "delta": "AutomaticApplyOnContested"}
+    },
+    {
+      "name": "the_contested_join_also_obeys_the_three_laws",
+      "why": "The OR-set is a join-semilattice too, so a contested dimension converges on the SET of live edits — convergence and correctness kept apart exactly as §VII asks: replicas agree on what is outstanding without anyone's edit being chosen for them.",
+      "expect": {"commutative": true, "associative": true, "idempotent": true}
+    }
+  ]
+}

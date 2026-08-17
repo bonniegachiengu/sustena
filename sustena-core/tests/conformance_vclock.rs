@@ -312,7 +312,12 @@ fn two_concurrent_edits_are_detected_and_both_survive() {
         "★★ detectable only with a vector clock"
     );
 
-    let kept = r.resolve(Dimension::Contested);
+    let resolved = r.resolve(Dimension::Contested);
+    // ★ EVT-10 made this a typed outcome: a contested resolution can no longer
+    // be mistaken for a snapshot one, which is the distinction §VII warns
+    // about turning a correct theorem into a lost transaction.
+    assert!(matches!(resolved, sustena_core::Resolved::NeedsReconciliation(_)));
+    let kept = resolved.values();
     assert_eq!(
         kept.len(),
         e["contested_count"].as_u64().unwrap() as usize,
@@ -340,7 +345,11 @@ fn the_same_pair_under_snapshot_semantics_collapses_and_that_is_correct() {
 
     assert_eq!(r.is_concurrent(), e["concurrent"].as_bool().unwrap(), "concurrent either way");
 
-    let kept = r.resolve(Dimension::Snapshot);
+    let resolved = r.resolve(Dimension::Snapshot);
+    // ★ EVT-10: a snapshot resolution is now its own variant, so "the newer
+    // reading supersedes" cannot be confused with "both were kept".
+    assert!(matches!(resolved, sustena_core::Resolved::Superseded(_)));
+    let kept = resolved.values();
     assert_eq!(kept.len(), e["snapshot_count"].as_u64().unwrap() as usize);
     assert_eq!(
         kept[0].value,

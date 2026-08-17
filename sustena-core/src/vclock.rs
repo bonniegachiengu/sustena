@@ -79,6 +79,7 @@
 //!   vector keeps passing untouched. A cycle in the declared causes is refused
 //!   — an event cannot depend on its own consequence.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
@@ -184,7 +185,8 @@ pub enum CausalVerdict {
 
 /// Which kind of dimension this value is, and therefore what a concurrent pair
 /// means (§VII).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Dimension {
     /// An **observation of an authoritative external quantity** — a balance
     /// read off an SMS, a level off a sensor.
@@ -197,6 +199,15 @@ pub enum Dimension {
     ///
     /// LWW is the wrong structure: it would silently discard one of them.
     Contested,
+    /// An **accumulating** quantity — a running total raised by increments.
+    ///
+    /// ★ Added by EVT-10. Neither of the other two answers is right for it:
+    /// collapsing by the physical order would *drop a contribution*, and
+    /// handing both back for reconciliation invites a human to pick one, which
+    /// also drops a contribution. Both count, and the merge is arithmetic —
+    /// see [`crate::dimension::AccumulatingDim`], which carries the applied-id
+    /// set that makes it idempotent.
+    Accumulating,
 }
 
 /// A value with both stamps §VI says are needed.
@@ -236,6 +247,37 @@ pub enum MergeResolution<T> {
     Concurrent { left: Stamped<T>, right: Stamped<T> },
     /// The same point in causal history — idempotent re-delivery.
     Same(Stamped<T>),
+}
+
+/// What a merge means once the dimension's declared kind is applied.
+///
+/// ★★ Three variants because §VII's three kinds are three different answers,
+/// and collapsing them into one `Vec` is how a contested edit gets silently
+/// discarded — *"the single easiest way to turn a correct theorem into a lost
+/// transaction."*
+#[derive(Debug, Clone, PartialEq)]
+pub enum Resolved<T> {
+    /// `Snapshot`: the newer reading supersedes, and that is **correct** — for
+    /// an observation of an external authority the older reading is not lost
+    /// data, it is superseded data.
+    Superseded(Stamped<T>),
+    /// `Accumulating`: **both contributions count.** Join them arithmetically
+    /// through the counter; picking one drops a contribution.
+    BothCount(Vec<Stamped<T>>),
+    /// `Contested`: both are kept for a **human or a merge-CRDT** to
+    /// reconcile. Never summed, never picked automatically.
+    NeedsReconciliation(Vec<Stamped<T>>),
+}
+
+impl<T> Resolved<T> {
+    /// Everything that survived, whatever the kind — for a caller that only
+    /// needs the values and has already honoured the distinction.
+    pub fn values(&self) -> &[Stamped<T>] {
+        match self {
+            Resolved::Superseded(x) => std::slice::from_ref(x),
+            Resolved::BothCount(v) | Resolved::NeedsReconciliation(v) => v,
+        }
+    }
 }
 
 impl<T: Clone> MergeResolution<T> {
@@ -281,12 +323,17 @@ impl<T: Clone> MergeResolution<T> {
 
     /// What this resolution means for a declared dimension kind.
     ///
-    /// The one place §VII's scoping is applied: `Snapshot` collapses,
-    /// `Contested` keeps both.
-    pub fn resolve(&self, kind: Dimension) -> Vec<Stamped<T>> {
+    /// ★★ The one place §VII's scoping is applied — and it returns a **typed**
+    /// outcome rather than a bare list, because the three kinds mean three
+    /// genuinely different things and a `Vec` that means all three is exactly
+    /// the remembered rule EVT-10 exists to replace. A `Contested` result can
+    /// no longer be mistaken for a `Snapshot` one, and an `Accumulating` result
+    /// can no longer be picked from.
+    pub fn resolve(&self, kind: Dimension) -> Resolved<T> {
         match kind {
-            Dimension::Snapshot => vec![self.as_snapshot()],
-            Dimension::Contested => self.as_contested(),
+            Dimension::Snapshot => Resolved::Superseded(self.as_snapshot()),
+            Dimension::Contested => Resolved::NeedsReconciliation(self.as_contested()),
+            Dimension::Accumulating => Resolved::BothCount(self.as_contested()),
         }
     }
 }
@@ -529,6 +576,7 @@ mod tests {
         assert!(r.is_concurrent(), "★ detectable only with a vector clock");
 
         let kept = r.resolve(Dimension::Contested);
+        let kept = kept.values();
         assert_eq!(kept.len(), 2, "★★ both survive — never erase the node");
         let values: Vec<&str> = kept.iter().map(|s| s.value.as_str()).collect();
         assert!(values.contains(&"go monday") && values.contains(&"go friday"));
@@ -547,6 +595,7 @@ mod tests {
         assert!(r.is_concurrent(), "concurrent by causality either way");
 
         let kept = r.resolve(Dimension::Snapshot);
+        let kept = kept.values();
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].value, "1350", "the newer READING supersedes by definition");
     }

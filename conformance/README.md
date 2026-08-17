@@ -121,6 +121,7 @@ conformance/
     watermark.json      W(τ) · windows · lateness policy (spec, R2)
     period.json         RRULE · zone anchoring · [a,b)  (spec, R2)
     checkpoint.json     replay · (s_k,k) · O(n-k)        (spec, R2)
+    dimension.json      declared kind · LWW attaches     (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -955,3 +956,49 @@ it is a bug** — nothing silently differs.
   precondition stated rather than assumed; ★ **replay-under-`D′` is not built** —
   §IX's *second* consumer (Editing) is EVT-15/EDIT-11, and only Tenet's prefix
   replay is answered here; and effect journaling (EVT-14) is untouched.
+
+- **`dimension.json` — rust-ahead-of-python, and the counterweight is the
+  strongest in the whole set, because the BEHAVIOUR shipped in the reference
+  first.** `dimension_kind`, `snapshot_valued` and `accumulating` are grep-0 as
+  a declaration: nothing says which kind a dimension is, and nothing would
+  object if the wrong apply were used.
+  ★★ **But §VII's own field note is the counterweight and deserves quoting
+  rather than paraphrasing:** *"VOS runs the LWW-by-event-time balance guard
+  live. It was built empirically after out-of-order SMS clobbered a balance —
+  before it had a name... the convergence theorem is not being proposed to VOS;
+  it is being written down about VOS."* So the LWW-for-snapshot behaviour is at
+  parity, and it was **derived first, in production, the hard way**. This row
+  brings no missing behaviour — it turns a hard-won empirical rule into a
+  checked one.
+  ★ **A second credit:** `balance_after` is already extracted from every M-Pesa
+  and KCB SMS by the transducer and carried in `parsed_fields` — an
+  authoritative reading of an external quantity, i.e. exactly a snapshot-valued
+  observation. The *data* for the snapshot kind is already arriving there; only
+  the declaration is missing.
+  ★ **And half the declaration already existed here:** `vclock.rs` shipped
+  `Dimension::{Snapshot, Contested}` with the vector-clock slice. EVT-10 added
+  the third kind, the automatic attachment and the refusals — extending that
+  enum rather than forking a parallel one, which forced `resolve` open and
+  turned a bare `Vec` meaning two things into a typed
+  `Resolved::{Superseded, BothCount, NeedsReconciliation}`.
+  ★★ **The type error is proven by a `compile_fail` doctest**, which is the
+  strongest available form and is *executed*: `cargo test --doc` builds a
+  snippet calling `.add(...)` on a balance and the test passes because it
+  genuinely does not compile. ★ The declared-in-a-spec half cannot be a Rust
+  type error, so `DimensionSchema::check` refuses it there — both halves, and
+  neither pretended to cover the other.
+  **Greppable false positives named:** `snapshot` (89 hits) is thoroughly used
+  and never for a *kind* — named again here for a different reason than in
+  `checkpoint.json`. `dimension` hits `dim(S)` in the Cynefin work and
+  `state_schema` dimensions in the DSL sense, neither of which is §VII's kind.
+  **Honest limits, five:** ★★ **the DSL authoring surface is not built** —
+  declaring a kind in a spec is M-DSL's syntax (Phase 4), named as the
+  downstream consumer; ★ **`DimensionSchema` is not wired into
+  `State`/`StateAccessor`**, so nothing yet *forces* an operator through it, and
+  that wiring is real follow-on work rather than something claimed; the
+  contested kind refuses automatic apply entirely, which is deliberate but
+  blunt and stands in for a real reconciliation policy; the accumulating kind's
+  metadata is genuinely unbounded — §VII's stated price, measured rather than
+  hidden, with compaction needing EVT-6 to say when; and a declared kind cannot
+  be changed, because a dimension that changed kind under a running log would
+  invalidate every apply already made to it.

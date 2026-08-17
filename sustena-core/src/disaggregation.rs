@@ -301,7 +301,7 @@ impl Assembly {
                 _ => {
                     let mut next: Vec<Stamped<Value>> = Vec::new();
                     for existing in &settled {
-                        next.extend(merge(existing, p).resolve(self.dimension));
+                        next.extend(merge(existing, p).resolve(self.dimension).values().iter().cloned());
                     }
                     dedupe_by_id(next)
                 }

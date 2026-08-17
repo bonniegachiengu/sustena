@@ -94,6 +94,7 @@
 //!   [`PERMUTATION_LIMIT`] rather than sampling — a convergence proof over a
 //!   sample is not a proof.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
@@ -393,7 +394,7 @@ impl JoinSemilattice for PnCounter {
 /// `(node, seq)` rather than a random id, because this crate has **no random
 /// source** — and a replica already has its own id and a monotone counter,
 /// which is exactly what uniqueness needs.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Tag {
     pub seq: u64,
     pub node: String,
@@ -417,7 +418,7 @@ impl Tag {
 /// resolve deterministically: the concurrent add minted a tag the remover
 /// never observed, so **add wins** — not by a tie-break rule, but because the
 /// remove was never about that add.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OrSet {
     adds: BTreeMap<String, BTreeSet<Tag>>,
     removes: BTreeSet<Tag>,

@@ -81,6 +81,7 @@
 //! | Watermarks · windows · declared lateness | [`watermark`] | R2 |
 //! | Periods · RRULE · zone-id anchoring | [`period`] | R2 |
 //! | Replay · checkpoints (s_k, k) | [`checkpoint`] | R2 |
+//! | Declared dimension kind · LWW attaches | [`dimension`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -95,6 +96,7 @@ pub mod council;
 pub mod criticality;
 pub mod cynefin;
 pub mod detect;
+pub mod dimension;
 pub mod disaggregation;
 pub mod division;
 pub mod editing;
@@ -184,6 +186,10 @@ pub use editing::{
 };
 pub use checkpoint::{events_applied, replay, replay_to, Checkpoint, ReplayError};
 pub use clocks::{clock_findings, skew_of, ClockFinding, Skew, Suspect};
+pub use dimension::{
+    AccumulatingDim, ContestedDim, DimensionError, DimensionSchema, DimensionValue,
+    SnapshotDim, Update,
+};
 pub use period::{
     partitions, Anchor, CivilDateTime, DstPolicy, Freq, LocalResolution, Period, PeriodError,
     Recurrence, TzError, TzProvider, Weekday,
@@ -238,7 +244,7 @@ pub use router::{
 pub use schema::{bind, preserves_shape, validate, DimType, Schema};
 pub use state::State;
 pub use vclock::{
-    assign_clocks, merge as merge_stamped, CausalVerdict, ClockError, Dimension, MergeResolution,
+    assign_clocks, merge as merge_stamped, CausalVerdict, ClockError, Dimension, MergeResolution, Resolved,
     Stamped, VectorClock,
 };
 pub use version::{
