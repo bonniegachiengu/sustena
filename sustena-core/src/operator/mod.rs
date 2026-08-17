@@ -570,6 +570,7 @@ mod tests {
             pawa_cost: 0,
             protocol: crate::operator::meta::Protocol::Rpc,
             min_privilege: 1,
+            effect: None,
             run: admit_member,
         });
         r
@@ -759,6 +760,76 @@ mod tests {
                       ("entry_id", json!("e3"))]),
         );
         assert_eq!(ex.result.status, meta::OperatorStatus::Ok, "{:?}", ex.result);
+    }
+
+    // ── the author-time obligation: it FLAGS, it does not block ──────────────
+
+    /// A genuinely unsound Enzyme: its effect sets the pocket negative while
+    /// its postcondition declares the opposite. Registered rather than hidden
+    /// so the audit and the gate can both be run against the same real thing.
+    fn unsound_op() -> crate::operator::meta::OperatorMeta {
+        crate::operator::meta::OperatorMeta {
+            name: "test.unsound",
+            description: "Declares a postcondition its own effect makes impossible.",
+            constraints: vec![],
+            post_constraints: vec!["finances.pockets.food.allocated >= 0".into()],
+            side_effects: vec![],
+            pawa_cost: 0,
+            protocol: crate::operator::meta::Protocol::Rpc,
+            min_privilege: 0,
+            effect: Some(crate::compose::EffectSummary::new().with(
+                "finances.pockets.food.allocated",
+                crate::compose::Change::SetTo(json!(-999.0)),
+            )),
+            run: |state, _p, _e, _m| {
+                let _ = state.set("finances.pockets.food.allocated", json!(-999.0));
+                OperatorResult::ok(json!({}))
+            },
+        }
+    }
+
+    /// ★★ Both halves of §III at once: the static check **flags** it at author
+    /// time, and it **still runs**, with the dynamic check catching it after
+    /// the fact — *"the postcondition then catches it after the fact rather
+    /// than preventing it. Both are useful, and they are not the same thing."*
+    #[test]
+    fn an_unsound_operator_is_flagged_at_author_time_and_still_runs() {
+        let meta = unsound_op();
+
+        // Static: flagged.
+        let report = crate::obligation::check_obligation(&meta);
+        assert!(report.is_flagged(), "{}", report.describe());
+
+        // Dynamic: it runs, and the post-condition catches it after the fact.
+        let mut reg = Registry::default();
+        reg.register(meta);
+        let before = json!({"finances": {"pockets": {"food": {"allocated": 10.0}}}});
+        let ex = execute(
+            &reg, &reg.names(), &Enforcement::default(), &before,
+            "test.unsound", &params(&[]),
+        );
+        assert!(!ex.committed(), "the DYNAMIC check should catch it");
+        // The post-condition refusal shares the gate's tag; the reason names
+        // which post-condition it was.
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("enforcement_gate"));
+        assert!(
+            ex.result.reason.as_deref().unwrap_or("").contains("post-condition"),
+            "{:?}", ex.result.reason
+        );
+
+        // ★ And the flag is not a gate: nothing in `execute` consulted it.
+        //   A sound operator with the same shape commits normally.
+        let mut sound = unsound_op();
+        sound.name = "test.sound";
+        sound.post_constraints = vec!["finances.pockets.food.allocated <= 0".into()];
+        assert!(!crate::obligation::check_obligation(&sound).is_flagged());
+        let mut reg2 = Registry::default();
+        reg2.register(sound);
+        let ok = execute(
+            &reg2, &reg2.names(), &Enforcement::default(), &before,
+            "test.sound", &params(&[]),
+        );
+        assert!(ok.committed(), "{:?}", ok.result);
     }
 
     #[test]
@@ -965,6 +1036,7 @@ mod tests {
             pawa_cost: 0,
             protocol: Protocol::Rpc,
             min_privilege: 0,
+            effect: None,
             run: |state, _p, events, _movements| {
                 // Replace the whole finances record with one missing `liquid`.
                 let _ = state.set("finances", json!({"pockets": {}, "income": {}}));
@@ -1193,6 +1265,7 @@ mod tests {
             pawa_cost: 0,
             protocol: Protocol::Rpc,
             min_privilege: 0,
+            effect: None,
             run: |state, _p, events, _movements| {
                 let _ = state.set("finances.pockets.food.allocated", json!(25000));
                 events.push(EmittedEvent { name: "event.test.minted".into(), payload: json!({}) });

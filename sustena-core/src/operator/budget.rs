@@ -296,6 +296,7 @@ pub fn register(registry: &mut Registry) {
         pawa_cost: 0,
         protocol: Protocol::Rpc,
         min_privilege: 1,
+        effect: None,
         run: record_income,
     });
 
@@ -311,6 +312,7 @@ pub fn register(registry: &mut Registry) {
         pawa_cost: 0,
         protocol: Protocol::Rpc,
         min_privilege: 1,
+        effect: None,
         run: allocate,
     });
 
@@ -323,6 +325,7 @@ pub fn register(registry: &mut Registry) {
         pawa_cost: 0,
         protocol: Protocol::Rpc,
         min_privilege: 1,
+        effect: None,
         run: add_pocket,
     });
 
@@ -335,6 +338,7 @@ pub fn register(registry: &mut Registry) {
         pawa_cost: 0,
         protocol: Protocol::Rpc,
         min_privilege: 1,
+        effect: None,
         run: spend,
     });
 
@@ -351,6 +355,7 @@ pub fn register(registry: &mut Registry) {
         pawa_cost: 0,
         protocol: Protocol::Rpc,
         min_privilege: 0,
+        effect: None,
         run: |state, _params, events, _movements| {
             let _ = state.set(
                 "finances.pockets.food",

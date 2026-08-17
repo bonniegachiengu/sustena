@@ -116,6 +116,7 @@ conformance/
     cynefin.json        suited domains · coverage · disorder (spec, R2)
     boundary.json       B = ⟨scope, μ⟩ · closure law     (spec, R2)
     flow.json           F(φ,s) — what crosses B          (spec, R2)
+    obligation.json     g ⟹ wp(e,Q) at author time      (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -752,3 +753,31 @@ it is a bug** — nothing silently differs.
   one side of a crossing is precisely §III's money-minting move, so a
   whole-transition clamp is the follow-on rather than something shipped
   half-safe.
+
+- **`obligation.json` — rust-ahead-of-python, with the DYNAMIC half at parity
+  and the article agreeing that is the honest position.** `weakest
+  precondition`, `wp`, `dijkstra`, `hoare`, `obligation`, `static check` and
+  `lint` are grep-0. ★ **But the counterweight is exact:** `post_constraints`
+  returns 12 hits and `sustain_engine.py:497` genuinely evaluates each one
+  against the candidate before commit — the same per-call check this core
+  runs — and §III itself says *"the honest position for Sustena today is the
+  dynamic one, with the static obligation named as the thing to want."* The gap
+  is not that postconditions go unchecked; it is that nothing asks, once,
+  whether the guard could ever have guaranteed them. ★ **A near-miss worth
+  naming:** `author time` returns one hit and it is real —
+  *"type-checked at author time (Γ ⊢ r)"*, the ParseRule well-formedness
+  judgment. The reference already holds the idea that some claims are provable
+  once at authoring; it applies it to parse rules and not to Enzymes, which
+  makes this an unapplied concept rather than a missing one. **★★ And the
+  finding from running it:** every operator this core ships reports
+  `Unavailable`, because Sustena's effects are **parameter-driven** and the
+  predicate fragment names that `Opaque` itself — so the static obligation's
+  reach today is zero operators proven either way. That does not contradict
+  §III's sentence about the dynamic position; **running the check is what
+  demonstrates it**, and the finding is asserted in a test so a future
+  summarisable operator breaks it and forces a look. Four limits, two of them
+  load-bearing: **it flags and does not block** (a test asserts a flagged
+  operator still runs and is caught dynamically), and **a summary is a
+  declaration that can be wrong** — checking it against the body is a separate,
+  larger row, which is why `EffectSummary` is optional and absent by default
+  rather than inferred.

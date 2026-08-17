@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 
 use crate::operator::EmittedEvent;
+use crate::compose::EffectSummary;
 use crate::flow::Movement;
 use crate::state::State;
 
@@ -92,6 +93,14 @@ pub struct OperatorMeta {
     /// an open gap (ENZYME / TOLERANCE) carried here as data so R2 can enforce
     /// it without changing the operator declarations again.
     pub min_privilege: u8,
+    /// ★ What the body does, declared symbolically — Operator §III's `e_o` in
+    /// the form `wp` can pull a postcondition back through.
+    ///
+    /// **Optional and absent by default.** A summary is a *claim* about the
+    /// body, and checking the claim against the body is a different, larger
+    /// row — so an operator without one yields `Unavailable` rather than a
+    /// guess. See [`crate::obligation`].
+    pub effect: Option<EffectSummary>,
     pub run: OperatorFn,
 }
 

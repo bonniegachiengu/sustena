@@ -76,6 +76,7 @@
 //! | Suited domains · coverage · disorder | [`cynefin`] | R2 |
 //! | Boundary B · autopoietic closure | [`boundary`] | R2 |
 //! | Firewall F — what crosses B | [`flow`] | R2 |
+//! | wp obligation — author-time | [`obligation`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -104,6 +105,7 @@ pub mod migrate;
 pub mod mixture;
 pub mod monitor;
 pub mod mutation;
+pub mod obligation;
 pub mod operative;
 pub mod operator;
 pub mod path;
@@ -186,13 +188,17 @@ pub use kernel::{
 };
 pub use migrate::{Applied, Compatibility, Emc, EmcVersionIds, MigrateError, Mu, StateMove};
 pub use mutation::Mutation;
+pub use obligation::{
+    audit, check_obligation, flagged, ObligationError, ObligationReport, Soundness,
+};
 pub use operative::{
     dominance, geometric_mean, nash_product, pareto_frontier, scalarise, Alternative, Cynefin,
     Dominance, LegalMove, NashOutcome, Objective, Omega, Operative, OperativeError, Proposal,
     Ranking, Sense, Shared, StatePoint, Utility,
 };
 pub use operator::{
-    execute, execute_admitted, execute_as, Authorization, Enforcement, Execution, OperatorResult,
+    execute, execute_admitted, execute_as, Authorization, Enforcement, Execution, OperatorMeta,
+    OperatorResult,
     Registry,
 };
 pub use principal::{effective_privilege, permitted, Denial, MembershipEdge, Memberships, Tier};

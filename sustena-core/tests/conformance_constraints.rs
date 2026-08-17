@@ -245,6 +245,7 @@ fn gate_vectors() {
         pawa_cost: 0,
         protocol: Protocol::Rpc,
         min_privilege: 0,
+        effect: None,
         run: |state, _p, events, _movements| {
             let _ = state.set("finances.pockets.food.allocated", json!(25000));
             events.push(EmittedEvent { name: "event.test.minted".into(), payload: json!({}) });

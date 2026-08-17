@@ -1,0 +1,77 @@
+{
+  "conformance_version": 1,
+  "slice": "obligation",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Operator - Formal Execution.md, §III (the Hoare triple {g}e{Q}, partial correctness, and the obligation g_o ⟹ wp(e_o, Q_o))",
+  "replayed_by": ["rust"],
+  "note": "Hoare (1969); Dijkstra (1976). ★ This FLAGS, it does not block — §III asks for a diagnostic (*'should at least be flagged, not silently trusted'*), not a gate term, and the per-call dynamic check stays exactly where it was.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`weakest precondition`, `wp`, `dijkstra`, `hoare`, `obligation`, `static check` and `lint` are ALL grep-0 in apps/api/sustena/. There is no author-time claim about an operator anywhere — a postcondition is declared and then trusted until a call proves otherwise.",
+    "★_the_counterweight_the_DYNAMIC_half_is_at_parity_and_the_article_says_it_is_the_honest_position": "Exact and important. `post_constraints` returns 12 hits, and `sustain_engine.py:497` genuinely evaluates each one against the candidate before commit — the same per-call check `operator::execute` runs. So the DYNAMIC half is at parity, and §III itself says *'the honest position for Sustena today is the dynamic one, with the static obligation named as the thing to want.'* The gap is not that the reference fails to check postconditions; it checks them exactly when the article says to. The gap is that nothing asks, once, whether the guard could ever have guaranteed them.",
+    "★_a_near_miss_worth_naming_the_reference_DOES_have_an_author_time_discipline_elsewhere": "`author time` returns one hit, and it is real: `sustain_engine.py:768` — *'type-checked at author time (Γ ⊢ r)'* — the ParseRule well-formedness judgment. So the reference already holds the idea that some claims are provable once at authoring rather than per use; it applies it to parse rules and not to Enzymes. That makes this less a missing concept than an unapplied one, which is a smaller and more actionable gap than absence.",
+    "term_by_term": {
+      "the Hoare triple's shape": "AT PARITY. §III says so itself — *'it is the shape Sustena's `OperatorMeta` already has: `constraints` is the precondition, the body is the command, `post_constraints` is the postcondition.'* Both engines carry all three.",
+      "evaluating Q per call (dynamic)": "AT PARITY — see the counterweight.",
+      "★ g ⟹ wp(e, Q) (static, author-time)": "RUST-AHEAD. `wp` itself already existed in `compose.rs` (R2 #16) as the pullback for chained pathways; what is new is turning it on a SINGLE Enzyme's own triple, which needed an `EffectSummary` on `OperatorMeta`.",
+      "an EffectSummary on the metadata": "RUST-AHEAD, and additive — `Option`, absent by default, so no existing operator was force-touched and none of their behaviour changed.",
+      "partial correctness": "AT PARITY, and correctly so on both sides. Hoare's triple says nothing about termination, and §III assigns that to the engine catching exceptions and persisting nothing — which both engines do."
+    },
+    "★★_what_running_it_over_the_real_registry_FOUND": "Every operator this core ships reports `Unavailable`, and that is a finding rather than a shortfall. `wp` is computable only where a change stays inside the predicate fragment — a `SetTo` constant-folds, a `ShiftBy` moves the literal — and Sustena's real operators are **parameter-driven**: the amount comes from the call, not the declaration, which the fragment itself names `Opaque`. So the static obligation's reach over today's registry is **zero operators proven either way**. That is precisely why §III says the honest position today is the dynamic one — the check does not contradict that sentence, running it is what DEMONSTRATES it. A test asserts the finding, so if a future operator becomes summarisable the assertion fails and someone has to look.",
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "wp (0 hits, and the zero is the point)": "Worth stating as a zero rather than omitting: `wp` is short enough to hit substrings, and it hits none. There is no weakest-precondition machinery under another name either — `dijkstra`, `hoare`, `weakest` all return nothing.",
+      "obligation (0 hits)": "Named because `check_definition_edit_safety` is the reference's nearest relative in spirit — a real safety check run before an edit — but it is about live instances stranded by a definition change, not about a guard being strong enough for a postcondition. Different question, and a genuinely good implementation of its own."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The triple's shape, the dynamic check run faithfully per call, and — in a different corner — the idea that some judgments belong at author time. What it does not have is anyone asking the static question about an Enzyme. And there is one adjacent difference worth recording rather than claiming as this row's: a `post_constraint` that fails to COMPILE is logged as a warning there and skipped, where Rust refuses — that is R2 #8/#9's fail-open gap, already recorded, not something this slice closed.",
+    "the_honest_limits": "Four. (1) ★ IT FLAGS, IT DOES NOT BLOCK — §III asks for a diagnostic and taking a stronger posture silently would be the wrong way to take it. Nothing here is called from `execute`, and a test asserts a flagged operator STILL RUNS with the dynamic check catching it. (2) THE FRAGMENT IS THE FRAGMENT — a guard or postcondition outside path-versus-literal comparisons is `Unavailable`, not wrong; widening it is the SMT-shaped decision `compose.rs` already declined for a stated reason, and this row does not reopen it. (3) PARTIAL CORRECTNESS ONLY, as Hoare's triple is. (4) ★ A SUMMARY IS A DECLARATION AND CAN BE WRONG — `EffectSummary` says what the author claims the body does, and checking the claim against the body is a different, larger row. That is exactly why it is optional and absent by default rather than guessed at: a wrong summary yields a wrong verdict, and inferring one would manufacture them at scale.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive and entirely off the execution path: `OperatorMeta` gains an `Option<EffectSummary>` defaulting to `None`, no operator's behaviour changed, and the dynamic post-condition check is untouched."
+  },
+  "fixture": {
+    "why": "One real registered operator, `test.force_negative`, whose whole declared purpose is to be unsound — it sets a pocket to −999. Its effect is a CONSTANT, so the fragment can summarise it, which makes it the one shipped-shaped subject on which the static claim is actually available. Two postconditions are put to it: one its effect makes impossible, one its effect guarantees. Same operator, same guard, so the verdict isolates to the postcondition.",
+    "effect": ["finances.pockets.food.allocated", "SetTo", -999.0],
+    "impossible_post": "finances.pockets.food.allocated >= 0",
+    "guaranteed_post": "finances.pockets.food.allocated <= 0"
+  },
+  "obligation_cases": [
+    {
+      "name": "★★_an_operator_whose_effect_defeats_its_own_postcondition_is_FLAGGED",
+      "why": "★★ THE WORKED PROOF, and §III's own sentence made executable: *'an Enzyme that declares a postcondition its guard cannot guarantee should at least be flagged, not silently trusted.'* The effect sets the pocket to −999 and the postcondition declares it non-negative, so `wp` constant-folds to `Never` — no pre-state establishes it, meaning **no guard could be strong enough**. The finding says so and says what it costs: the Enzyme can fire legally and land wrong, and the dynamic check catches it after the fact rather than preventing it.",
+      "expect": {"flagged": true, "count": 1, "describe_contains": ["FLAGGED", "catch it after the fact"]}
+    },
+    {
+      "name": "★_the_SAME_operator_with_an_achievable_postcondition_is_sound",
+      "why": "★ The verdict isolates to the postcondition, which is what makes the flag trustworthy. Same operator, same effect, same (empty) guard — and a postcondition its effect does guarantee folds to `Always` and passes. A checker that flagged this too would be reporting the operator rather than the claim.",
+      "expect": {"flagged": false, "soundness": "Sound"}
+    },
+    {
+      "name": "★★_an_unsummarised_effect_is_UNAVAILABLE_neither_trusted_nor_flagged",
+      "why": "★★ The third outcome, and the reason there are three. Both other readings of *'we cannot tell'* are wrong: silently passing an unsummarisable effect is exactly the *'silently trusted'* this row exists to prevent, and flagging one would report a defect that has not been shown. **An unknown effect is not a proven-wrong one.** The finding says *not a pass and not a flag* in as many words.",
+      "expect": {"flagged": false, "unavailable": 1, "describe_contains": "not a pass and not a flag"}
+    },
+    {
+      "name": "a_param_driven_change_is_opaque_and_therefore_unavailable",
+      "why": "The case that turns out to be the whole registry. A change whose amount comes from the call is `Opaque` by the fragment's own declaration — *'a change by a param'* — so `wp` has nothing to pull back and the static claim is unavailable rather than either verdict.",
+      "expect": {"flagged": false, "unavailable": 1}
+    },
+    {
+      "name": "an_operator_with_no_postcondition_has_nothing_to_be_unsound_about",
+      "why": "Vacuously fine, and said rather than implied — an audit that reported nothing for an operator with no postconditions would be indistinguishable from one that skipped it.",
+      "expect": {"findings": 0, "flagged": false}
+    }
+  ],
+  "registry_cases": [
+    {
+      "name": "★★_every_operator_this_core_ships_is_currently_UNAVAILABLE",
+      "why": "★★ THE FINDING, asserted so it cannot quietly stop being true. Running the check over the real registry proves zero operators either way, because every shipped effect is parameter-driven. This is not the check failing — it is the check demonstrating §III's own claim that *'the honest position for Sustena today is the dynamic one.'* Asserting it means a future operator that becomes summarisable breaks this test and forces a look, which is the only way a finding like this stays honest as the registry grows.",
+      "expect": {"reports_nonempty": true, "flagged": 0, "all_findings_unavailable": true}
+    }
+  ],
+  "posture_cases": [
+    {
+      "name": "★★_an_unsound_operator_is_FLAGGED_at_author_time_and_STILL_RUNS",
+      "why": "★★ Both halves of §III in one case, and the proof that this is a diagnostic rather than a gate term. The static check flags the operator; the operator then **executes anyway**, and the DYNAMIC post-condition catches it after the fact — *'the postcondition then catches it after the fact rather than preventing it. Both are useful, and they are not the same thing.'* Nothing in `execute` consults the audit, and a sound operator of the identical shape commits normally, so the flag is demonstrably not on the execution path. Turning it into a refusal would be a stronger posture than §III takes; taking that posture silently would be the wrong way to take it.",
+      "expect": {"statically_flagged": true, "still_runs_and_is_caught_dynamically": true, "sound_variant_commits": true}
+    }
+  ]
+}
