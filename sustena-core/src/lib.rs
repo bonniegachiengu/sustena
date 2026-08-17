@@ -87,6 +87,7 @@
 //! | Window typology · tumbling/sliding/session | [`windowing`] | R2 |
 //! | Observability · reachability (no matrix) | [`observability`] | R2 |
 //! | Damping · settles vs rings | [`damping`] | R2 |
+//! | ★ the four wired into [`monitor`] (Phase 2 close) | [`monitor`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -297,7 +298,7 @@ pub use mixture::{
     MixtureError, Ticket, Withheld, WithheldReason,
 };
 pub use monitor::{
-    Driven, Ingested, MonitorEngine, MonitorError, SustainWatch,
+    Driven, Ingested, MonitorEngine, MonitorError, SustainWatch, TimedReading,
 };
 pub use ooda::{
     Candidate, Ooda, OodaError, OodaObservation, OodaPhase, OodaStep, Orientation, StayReason,

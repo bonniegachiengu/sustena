@@ -32,6 +32,45 @@
 //! stage here would add an estimator for noise this state model does not have,
 //! in front of a detector that does not need it.
 //!
+//! ## ★★ The four Phase-2 readings, wired (2026-08-17)
+//!
+//! MON-8's belief tracker, MON-13's harmonics, MON-4's window typology and
+//! MON-1's observability graph were each built and each named *"not wired into
+//! `MonitorEngine`"* as their residual. They are wired here — **as wiring, not
+//! as new mechanism**: every one of them is the module it already was, reached
+//! through per-sustain declarations on [`SustainWatch`].
+//!
+//! ★ **All four declarations are `Option` and absent by default**, so a sustain
+//! that declares none behaves exactly as it did before this slice.
+//!
+//! ★★ **What actually runs, and when — stated plainly, because three different
+//! answers are true and implying one live computation would be dishonest:**
+//!
+//! | reading | when it runs | why |
+//! |---|---|---|
+//! | **harmonics** (MON-13) | **per tick**, inside [`ingest`](MonitorEngine::ingest) | it reads the `W` series the pipeline is already producing |
+//! | **belief** (MON-8) | **per tick — but only through [`ingest_at`](MonitorEngine::ingest_at)** | a belief collapses on an *observation*, which needs an event time; `ingest` has none to give |
+//! | **windowing** (MON-4) | **on demand**, over the timed readings | the engine holds readings, not an event log; a window groups what it has |
+//! | **observability** (MON-1) | **on demand, and structural** | it reads the operator graph, not this sustain's state — and over today's registry every verdict is conservative (OP-3) |
+//!
+//! ★★ **Belief needs a time, and `ingest` does not have one.** Rather than
+//! invent one — there is no clock in this core — [`ingest_at`] is the door that
+//! carries an event time, and `ingest` **documents that it does not update
+//! beliefs**. A caller that never uses `ingest_at` has beliefs that were never
+//! observed, which is exactly what `ungoverned()` will say about them.
+//!
+//! ## ★ One escalation boundary, and a suppression that is never silent
+//!
+//! Belief's `SENSOR_SILENT` and harmonics' genuine-shift do **not** open
+//! parallel alarm channels: both cross through `Severity::escalates()`, the one
+//! function that already draws the Monitor→Controller line.
+//!
+//! ★★ And MON-13's suppression is honoured **visibly**. A CUSUM alert explained
+//! by a known cycle does not escalate — that is the whole point of the row —
+//! but [`Ingested::suppressed_by_cycle`] says so, so a suppressed escalation is
+//! *reported as suppressed* rather than vanishing. A suppression nobody can see
+//! is indistinguishable from a detector that failed.
+//!
 //! ## Watching never stops — and it does not interrupt looking
 //!
 //! §III: *"Monitor is always running at OBSERVE. Controller only surfaces when
@@ -81,11 +120,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::belief::{BeliefReading, BeliefTracker, SilenceAlert, SilenceSpec};
 use crate::detect::{Cusum, CusumSpec, DetectorError, Ewma, Reading, Severity, Watch};
+use crate::harmonics::{read as read_harmonics, CycleVerdict, HarmonicsSpec};
+use crate::observability::{MeasuredBy, ObservabilityError, ObservabilityGraph, ObservabilityReport};
 use crate::ooda::{Ooda, OodaError, OodaObservation, OodaPhase, OodaStep};
+use crate::operator::Registry;
 use crate::pincer::{MonitorReport, PincerError, Signal, SignalMonitor};
 use crate::region::{Region, RegionError};
 use crate::signal::SignalSpec;
+use crate::watermark::Window;
+use crate::windowing::Sliding;
 
 /// One sustain's declared detection parameters (§IX's per-sustain maps).
 ///
@@ -106,6 +151,13 @@ pub struct SustainWatch {
     pub cusum: CusumSpec,
     pub signals: Vec<Signal>,
     pub signal_spec: SignalSpec,
+    /// ★ MON-8's belief policy. `None` — the default — means this sustain
+    /// keeps no belief state, not that it keeps an empty one.
+    pub belief: Option<SilenceSpec>,
+    /// ★ MON-13's declared cycles, read over the `W` series per tick.
+    pub harmonics: Option<HarmonicsSpec>,
+    /// ★ MON-4's window spec, available on demand over the timed readings.
+    pub windowing: Option<Sliding>,
 }
 
 impl SustainWatch {
@@ -118,6 +170,9 @@ impl SustainWatch {
             cusum,
             signals: Vec::new(),
             signal_spec: SignalSpec::new(1.0, 3).expect("a real medium"),
+            belief: None,
+            harmonics: None,
+            windowing: None,
         }
     }
 
@@ -131,6 +186,36 @@ impl SustainWatch {
         self.signal_spec = spec;
         self
     }
+
+    /// Declare MON-8's belief policy for this sustain.
+    pub fn believing(mut self, spec: SilenceSpec) -> Self {
+        self.belief = Some(spec);
+        self
+    }
+
+    /// Declare MON-13's known cycles for this sustain's `W` series.
+    pub fn with_cycles(mut self, spec: HarmonicsSpec) -> Self {
+        self.harmonics = Some(spec);
+        self
+    }
+
+    /// Declare MON-4's window spec for this sustain.
+    pub fn windowed(mut self, spec: Sliding) -> Self {
+        self.windowing = Some(spec);
+        self
+    }
+}
+
+/// One recorded pass, as the wired readings consume it.
+///
+/// ★ `t_event` is `None` for a pass through [`MonitorEngine::ingest`], which
+/// has no event time to give. Harmonics reads the `w`s in order and does not
+/// need one; windowing reads only the timed ones, because **a reading with no
+/// event time cannot honestly be placed in a window**.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TimedReading {
+    pub t_event: Option<i64>,
+    pub w: f64,
 }
 
 /// What one pass of the native pipeline produced.
@@ -145,6 +230,9 @@ pub struct Ingested {
     /// (covered by the CUSUM alone), not a missing result. Fabricating an empty
     /// report would invent a signal pass that never ran.
     pub signals: Option<MonitorReport>,
+    /// ★ MON-13's reading over the `W` series, when this sustain declared
+    /// cycles. `None` means none were declared — not that none were found.
+    pub cycle: Option<CycleVerdict>,
 }
 
 impl Ingested {
@@ -162,8 +250,29 @@ impl Ingested {
     /// condition `OodaObservation::escalates` applies, reused rather than
     /// restated.
     pub fn escalates(&self) -> bool {
+        if self.suppressed_by_cycle() {
+            return false;
+        }
+        self.detected() || self.cycle.as_ref().is_some_and(|c| c.escalates())
+    }
+
+    /// What the time-domain detectors alone said, before MON-13 refines it.
+    ///
+    /// Kept separate so the suppression below is a *visible* refinement rather
+    /// than a detector that quietly stopped firing.
+    pub fn detected(&self) -> bool {
         self.reading.escalates()
             || self.signals.as_ref().is_some_and(|s| !s.triggered.is_empty())
+    }
+
+    /// ★★ **A detection explained by a known season, and saying so.**
+    ///
+    /// MON-13's whole purpose: a monthly bill arriving on schedule must not
+    /// fire a *spend is up* alarm. But the suppression is **reported** rather
+    /// than silent — a suppression nobody can see is indistinguishable from a
+    /// detector that failed.
+    pub fn suppressed_by_cycle(&self) -> bool {
+        self.detected() && self.cycle.as_ref().is_some_and(|c| c.is_expected_cycle())
     }
 
     /// **The only route from watching to looking.**
@@ -171,6 +280,15 @@ impl Ingested {
     /// `None` unless this reading crossed. There is no way to walk a quiet
     /// ingest into OBSERVE through this engine.
     pub fn observation(&self) -> Option<OodaObservation> {
+        // ★★ A seam the wiring revealed, and the reason integration is not the
+        // same thing as four passing unit suites: this gated on the
+        // OodaObservation's OWN `escalates()`, so a detection explained by a
+        // known season would have been suppressed by `Ingested::escalates()`
+        // and still handed to OBSERVE here. Two answers disagreeing about the
+        // same reading is exactly the bug MON-13 exists to prevent.
+        if self.suppressed_by_cycle() {
+            return None;
+        }
         let obs = match &self.signals {
             Some(report) => OodaObservation::from_monitor(self.severity(), report),
             None => OodaObservation::from_severity(self.severity()),
@@ -205,6 +323,15 @@ pub struct MonitorEngine {
     watches: BTreeMap<String, Watch>,
     monitors: BTreeMap<String, SignalMonitor>,
     histories: BTreeMap<String, Vec<Value>>,
+    /// ★ MON-8, per sustain. Absent unless the sustain declared a policy.
+    beliefs: BTreeMap<String, BeliefTracker>,
+    /// ★ MON-13's declared cycles, per sustain.
+    cycles: BTreeMap<String, HarmonicsSpec>,
+    /// ★ MON-4's declared window spec, per sustain.
+    windowing: BTreeMap<String, Sliding>,
+    /// The `W` trajectory the wired readings consume — the same numbers the
+    /// chain already computes, kept rather than discarded.
+    series: BTreeMap<String, Vec<TimedReading>>,
 }
 
 impl MonitorEngine {
@@ -265,6 +392,10 @@ impl MonitorEngine {
         let mut watches = BTreeMap::new();
         let mut monitors = BTreeMap::new();
         let mut histories = BTreeMap::new();
+        let mut beliefs = BTreeMap::new();
+        let mut cycles = BTreeMap::new();
+        let mut windowing = BTreeMap::new();
+        let mut series = BTreeMap::new();
 
         for d in declarations {
             let ewma = Ewma::new(d.alpha)?;
@@ -278,13 +409,35 @@ impl MonitorEngine {
                 );
             }
             histories.insert(d.sustain_id.clone(), Vec::new());
+            series.insert(d.sustain_id.clone(), Vec::new());
+
+            // ★ Each of the four is entered ONLY if declared. A sustain that
+            // declared none keeps none — an empty tracker would read as
+            // built-and-idle rather than absent, which is the distinction this
+            // engine's own notes already insisted on before they were wired.
+            if let Some(spec) = d.belief {
+                let mut t = BeliefTracker::new(spec);
+                // The region's declared intervals ARE the dimensions this
+                // sustain governs, so §I's list needs no second declaration.
+                for i in &d.region.intervals {
+                    t.govern(i.dim.clone());
+                }
+                beliefs.insert(d.sustain_id.clone(), t);
+            }
+            if let Some(spec) = d.harmonics {
+                cycles.insert(d.sustain_id.clone(), spec);
+            }
+            if let Some(spec) = d.windowing {
+                windowing.insert(d.sustain_id.clone(), spec);
+            }
+
             if let Some(p) = d.parent {
                 parents.insert(d.sustain_id.clone(), p);
             }
             regions.insert(d.sustain_id, d.region);
         }
 
-        Ok(Self { order, parents, regions, watches, monitors, histories })
+        Ok(Self { order, parents, regions, watches, monitors, histories, beliefs, cycles, windowing, series })
     }
 
     /// One sustain, for the common case.
@@ -336,6 +489,36 @@ impl MonitorEngine {
     /// over this sustain's accumulated history. No Kalman stage; see the module
     /// docs.
     pub fn ingest(&mut self, sustain_id: &str, state: &Value) -> Result<Ingested, MonitorError> {
+        self.pass(sustain_id, state, None, None)
+    }
+
+    /// ★★ Ingest **with an event time**, so the belief can collapse.
+    ///
+    /// A belief collapses on an *observation*, and an observation is a value
+    /// **at a time** (EVT-10). `ingest` has no time to give and there is no
+    /// clock in this core, so this is the door that carries one — and every
+    /// dimension the region declares is offered to the tracker, through
+    /// `BeliefTracker::observe`, which is EVT-10's snapshot supersede itself.
+    ///
+    /// A stale reading therefore does not collapse a belief **here** for the
+    /// same reason it does not on the state dimension: it loses on `(τ, id)`.
+    pub fn ingest_at(
+        &mut self,
+        sustain_id: &str,
+        state: &Value,
+        t_event: i64,
+        observation_id: &str,
+    ) -> Result<Ingested, MonitorError> {
+        self.pass(sustain_id, state, Some(t_event), Some(observation_id))
+    }
+
+    fn pass(
+        &mut self,
+        sustain_id: &str,
+        state: &Value,
+        t_event: Option<i64>,
+        observation_id: Option<&str>,
+    ) -> Result<Ingested, MonitorError> {
         let region = self
             .regions
             .get(sustain_id)
@@ -358,7 +541,137 @@ impl MonitorEngine {
             None => None,
         };
 
-        Ok(Ingested { sustain_id: sustain_id.to_string(), reading, signals })
+        // ★ MON-8, but only where an event time was actually supplied. With
+        // none, nothing is observed — and that is what `ungoverned()` will say.
+        if let (Some(t), Some(id)) = (t_event, observation_id) {
+            let dims: Vec<String> = self
+                .regions
+                .get(sustain_id)
+                .map(|r| r.intervals.iter().map(|i| i.dim.clone()).collect())
+                .unwrap_or_default();
+            if let Some(tracker) = self.beliefs.get_mut(sustain_id) {
+                for dim in dims {
+                    if let Some(v) = read_path(state, &dim) {
+                        tracker.observe(dim, v, t, id);
+                    }
+                }
+            }
+        }
+
+        // ★ The W the chain just computed, kept rather than discarded — this is
+        // the series MON-13 reads and MON-4 windows.
+        let series = self.series.get_mut(sustain_id).expect("declared together");
+        series.push(TimedReading { t_event, w });
+
+        // ★ MON-13, per tick. `None` when no cycles were declared; also `None`
+        // while the window is too short for `spectrum` to read at all, which is
+        // an honest *not yet* rather than a fabricated verdict.
+        let cycle = self.cycles.get(sustain_id).and_then(|spec| {
+            let ws: Vec<f64> = series.iter().map(|r| r.w).collect();
+            read_harmonics(&ws, spec).ok().map(|r| r.verdict)
+        });
+
+        Ok(Ingested { sustain_id: sustain_id.to_string(), reading, signals, cycle })
+    }
+
+    // ── the wired readings ────────────────────────────────────────────────
+
+    /// ★ MON-8: what this sustain currently believes about a dimension.
+    ///
+    /// `None` unless the sustain declared a belief policy **and** something has
+    /// been observed through [`ingest_at`](Self::ingest_at).
+    pub fn belief(&self, sustain_id: &str, dimension: &str, now: i64) -> Option<BeliefReading> {
+        self.beliefs.get(sustain_id)?.read(dimension, now)
+    }
+
+    /// ★ MON-8: everything that has gone quiet past its declared threshold, at
+    /// `now`.
+    ///
+    /// A **query at a time**, not a per-tick computation — there is no clock in
+    /// this core, so *how long has it been* is a question only the host can
+    /// pose.
+    pub fn silent(&self, now: i64) -> Vec<(String, SilenceAlert)> {
+        self.beliefs
+            .iter()
+            .flat_map(|(sid, t)| t.silent(now).into_iter().map(|a| (sid.clone(), a)))
+            .collect()
+    }
+
+    /// ★ MON-8's silence, crossing the **same** Monitor→Controller boundary.
+    ///
+    /// Not a parallel alarm channel: a silence alert becomes an
+    /// [`OodaObservation`] through `Severity`, exactly as a CUSUM alert does.
+    pub fn silence_observations(&self, now: i64) -> Vec<(String, OodaObservation)> {
+        self.silent(now)
+            .into_iter()
+            .filter(|(_, a)| a.escalates())
+            .map(|(sid, a)| (sid, OodaObservation::from_severity(a.severity)))
+            .collect()
+    }
+
+    /// ★ §I, via MON-8's runtime half: governed dimensions this sustain has
+    /// never heard about. Structural blindness is [`observability`](Self::observability).
+    pub fn ungoverned(&self, sustain_id: &str) -> Vec<String> {
+        self.beliefs.get(sustain_id).map(BeliefTracker::ungoverned).unwrap_or_default()
+    }
+
+    /// The `W` trajectory this sustain has produced — what MON-13 reads.
+    pub fn series(&self, sustain_id: &str) -> &[TimedReading] {
+        self.series.get(sustain_id).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// ★ MON-4, **on demand**: the declared windows over a span.
+    ///
+    /// `None` unless this sustain declared a window spec. The engine holds
+    /// readings rather than an event log, so a window here groups what the
+    /// engine actually has.
+    pub fn windows(
+        &self,
+        sustain_id: &str,
+        origin: i64,
+        from: i64,
+        to: i64,
+    ) -> Option<Result<Vec<Window>, crate::windowing::WindowingError>> {
+        Some(self.windowing.get(sustain_id)?.windows(origin, from, to))
+    }
+
+    /// ★ MON-4: which recorded readings fall inside a window.
+    ///
+    /// **Only timed readings can answer** — a pass through `ingest` carries no
+    /// event time, and placing it in a window would be inventing one.
+    pub fn readings_in(&self, sustain_id: &str, window: &Window) -> Vec<TimedReading> {
+        self.series(sustain_id)
+            .iter()
+            .filter(|r| {
+                r.t_event.is_some_and(|t| t >= window.start() && t < window.end())
+            })
+            .copied()
+            .collect()
+    }
+
+    /// ★★ MON-1, **on demand and structural**.
+    ///
+    /// It reads the *operator graph* rather than this sustain's state, so it is
+    /// not a per-tick computation and running it every ingest would burn work
+    /// on an answer that cannot have changed. The governed set is the region's
+    /// own declared intervals.
+    ///
+    /// ★ Over today's registry every verdict is **conservative** — no shipped
+    /// operator declares an `EffectSummary` (OP-3) — and the report says so per
+    /// finding rather than in a footnote.
+    pub fn observability(
+        &self,
+        sustain_id: &str,
+        registry: &Registry,
+        sources: &[MeasuredBy],
+    ) -> Result<ObservabilityReport, MonitorError> {
+        let region = self
+            .regions
+            .get(sustain_id)
+            .ok_or_else(|| MonitorError::UnknownSustain(sustain_id.to_string()))?;
+        let graph = ObservabilityGraph::build(registry, sources)?;
+        let governed: Vec<&str> = region.intervals.iter().map(|i| i.dim.as_str()).collect();
+        Ok(graph.report(&governed))
     }
 
     /// **Ingest, and drive the OODA loop's OBSERVE when it escalates.**
@@ -408,16 +721,34 @@ pub enum MonitorError {
     #[error(transparent)]
     Region(#[from] RegionError),
     #[error(transparent)]
+    Observability(#[from] ObservabilityError),
+    #[error(transparent)]
     Signal(#[from] PincerError),
     #[error(transparent)]
     Ooda(#[from] OodaError),
 }
 
+/// Read a dot-path out of a state value as a number.
+///
+/// The one small adapter this wiring needed: the belief tracker speaks in
+/// `(dimension, value)` and the engine is handed a whole state. Named as an
+/// adapter rather than folded in silently.
+fn read_path(state: &Value, path: &str) -> Option<f64> {
+    let mut cur = state;
+    for seg in path.split('.') {
+        cur = cur.get(seg)?;
+    }
+    cur.as_f64()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::belief::Dynamics;
+    use crate::harmonics::KnownCycle;
     use crate::pincer::Trajectory;
     use crate::region::Interval;
+    use crate::watermark::Lateness;
     use serde_json::json;
 
     fn region() -> Region {
@@ -443,6 +774,199 @@ mod tests {
 
     fn decl(id: &str) -> SustainWatch {
         SustainWatch::new(id, region(), 0.5, cusum())
+    }
+
+    // ── ★★ the four Phase-2 readings, running together in the engine ───────
+
+    const HOUR: i64 = 3_600_000;
+
+    /// A sustain declaring all four: belief, cycles, windows — on top of the
+    /// detection chain it already had.
+    fn fully_wired(id: &str, cycle_period: f64) -> SustainWatch {
+        decl(id)
+            .believing(
+                SilenceSpec::new(2.0, Dynamics::Unknown, 6 * HOUR, Severity::Warning).unwrap(),
+            )
+            .with_cycles(
+                HarmonicsSpec::new(
+                    vec![KnownCycle::declared("monthly_bill", cycle_period)],
+                    0.35,
+                    2,
+                )
+                .unwrap(),
+            )
+            .windowed(Sliding::new(4 * HOUR, HOUR, Lateness::Drop).unwrap())
+    }
+
+    #[test]
+    fn declaring_none_of_the_four_leaves_the_engine_exactly_as_it_was() {
+        // ★ The additive guarantee: every declaration is `Option` and absent by
+        // default, so a sustain from before this slice behaves identically.
+        let mut e = MonitorEngine::watching(decl("h")).unwrap();
+        let got = e.ingest("h", &state(5000.0)).unwrap();
+
+        assert!(got.cycle.is_none(), "no cycles declared is not an empty verdict");
+        assert!(e.belief("h", "balance", 0).is_none(), "no belief policy is no tracker");
+        assert!(e.windows("h", 0, 0, HOUR).is_none());
+        assert!(e.silent(99 * HOUR).is_empty());
+    }
+
+    #[test]
+    fn an_observation_through_ingest_at_collapses_the_belief_and_ingest_alone_does_not() {
+        // ★★ The seam, stated honestly rather than papered over: a belief
+        // collapses on an OBSERVATION, which needs an event time. `ingest` has
+        // none to give, so it updates no belief — and says so.
+        let mut e = MonitorEngine::watching(fully_wired("h", 4.0)).unwrap();
+
+        e.ingest("h", &state(5000.0)).unwrap();
+        assert!(e.belief("h", "balance", 0).is_none(), "no time, no observation");
+        assert_eq!(e.ungoverned("h"), ["balance"], "and §I says exactly that about it");
+
+        e.ingest_at("h", &state(5000.0), 0, "obs-1").unwrap();
+        let b = e.belief("h", "balance", 0).expect("now it has been observed");
+        assert_eq!(b.estimated, 5000.0);
+        assert_eq!(b.uncertainty, 0.0, "a point mass at the moment of the reading");
+        assert!(e.ungoverned("h").is_empty());
+    }
+
+    #[test]
+    fn a_stale_reading_does_not_collapse_the_belief_inside_the_engine_either() {
+        // ★★ The wiring runs EVT-10's supersede itself, so the property holds
+        // here for the same reason it holds on the state dimension.
+        let mut e = MonitorEngine::watching(fully_wired("h", 4.0)).unwrap();
+        e.ingest_at("h", &state(5000.0), 200, "sms-2").unwrap();
+        e.ingest_at("h", &state(9999.0), 50, "sms-0").unwrap();
+
+        assert_eq!(e.belief("h", "balance", 200).unwrap().estimated, 5000.0);
+    }
+
+    #[test]
+    fn silence_widens_the_belief_and_escalates_through_the_existing_boundary() {
+        // ★ Not a parallel alarm channel: the silence alert becomes an
+        // `OodaObservation` through `Severity`, exactly as a CUSUM alert does.
+        let mut e = MonitorEngine::watching(fully_wired("h", 4.0)).unwrap();
+        e.ingest_at("h", &state(5000.0), 0, "obs-1").unwrap();
+
+        assert!(e.silent(5 * HOUR).is_empty(), "inside the declared threshold");
+        let quiet = e.silent(7 * HOUR);
+        assert_eq!(quiet.len(), 1);
+        assert_eq!(quiet[0].0, "h");
+        assert!(quiet[0].1.uncertainty > 0.0, "the reason travels with it");
+
+        let obs = e.silence_observations(7 * HOUR);
+        assert_eq!(obs.len(), 1, "and it crosses the one boundary");
+        assert!(obs[0].1.escalates());
+    }
+
+    #[test]
+    fn a_known_season_is_suppressed_and_the_suppression_is_visible() {
+        // ★★ MON-13 inside the engine: the CUSUM fires on the seasonal spike
+        // and the escalation is suppressed — VISIBLY, because a suppression
+        // nobody can see is indistinguishable from a detector that failed.
+        let mut e = MonitorEngine::watching(fully_wired("h", 4.0)).unwrap();
+
+        let mut last = None;
+        for i in 0..32 {
+            // Every 4th tick the balance dips far below V — a monthly bill.
+            let bal = if i % 4 == 0 { 200.0 } else { 900.0 };
+            last = Some(e.ingest("h", &state(bal)).unwrap());
+        }
+        // ★ End ON the spike: the CUSUM resets after firing, so `detected()`
+        // reports THIS tick's alert rather than a standing state.
+        let got = e.ingest("h", &state(200.0)).unwrap();
+        assert!(last.is_some());
+
+        assert!(got.detected(), "the time-domain chain fires on the season");
+        assert!(got.suppressed_by_cycle(), "and MON-13 explains it");
+        assert!(!got.escalates(), "so nobody is interrupted");
+        assert!(got.observation().is_none(), "and no OBSERVE hand-off is offered");
+    }
+
+    #[test]
+    fn an_off_cycle_shift_of_the_same_magnitude_still_escalates() {
+        // ★ The pair — suppression is not a mute. Same spike, a period the
+        // declared cycle does not explain.
+        let mut e = MonitorEngine::watching(fully_wired("h", 4.0)).unwrap();
+
+        let mut last = None;
+        for i in 0..32 {
+            let bal = if i % 5 == 0 { 200.0 } else { 900.0 };
+            last = Some(e.ingest("h", &state(bal)).unwrap());
+        }
+        let got = e.ingest("h", &state(200.0)).unwrap();
+        assert!(last.is_some());
+
+        assert!(got.detected());
+        assert!(!got.suppressed_by_cycle(), "the cycle does not explain this one");
+        assert!(got.escalates());
+    }
+
+    #[test]
+    fn windows_group_the_timed_readings_and_ignore_the_untimed_ones() {
+        // ★ MON-4 on demand, over what the engine actually holds — and an
+        // untimed pass cannot be placed in a window without inventing a time.
+        let mut e = MonitorEngine::watching(fully_wired("h", 4.0)).unwrap();
+        for i in 0..6 {
+            e.ingest_at("h", &state(5000.0), i * HOUR, &format!("obs-{i}")).unwrap();
+        }
+        e.ingest("h", &state(5000.0)).unwrap(); // untimed
+
+        assert_eq!(e.series("h").len(), 7);
+        let windows = e.windows("h", 0, 0, 6 * HOUR).unwrap().unwrap();
+        assert!(!windows.is_empty());
+
+        let first = &windows[0]; // [0, 4h)
+        let inside = e.readings_in("h", first);
+        assert_eq!(inside.len(), 4, "hours 0..3 — and never the untimed one");
+        assert!(inside.iter().all(|r| r.t_event.is_some()));
+    }
+
+    #[test]
+    fn observability_runs_on_demand_and_reports_its_own_conservatism() {
+        // ★★ Structural, not per-tick: it reads the OPERATOR graph, which this
+        // sustain's state cannot change. And over today's registry every
+        // verdict is conservative — no shipped operator declares an
+        // `EffectSummary` — which the report says per finding.
+        let e = MonitorEngine::watching(fully_wired("h", 4.0)).unwrap();
+        let sources = [MeasuredBy::new("mpesa", &["finances"])];
+
+        let report = e.observability("h", &Registry::with_builtins(), &sources).unwrap();
+        assert_eq!(report.declared_but_unobservable(), ["balance"]);
+        assert_eq!(report.conservative(), ["balance"], "and it says the verdict rests on that");
+        assert_eq!(report.requiring_belief(), ["balance"], "so a belief is the honest answer");
+    }
+
+    #[test]
+    fn all_four_run_together_on_one_sustain() {
+        // ★★★ THE CONSOLIDATION PROOF: one engine, one sustain, one pass —
+        // detection, belief, harmonics and windowing all live, with
+        // observability answerable alongside them.
+        let mut e = MonitorEngine::watching(fully_wired("h", 4.0)).unwrap();
+        for i in 0..32 {
+            let bal = if i % 4 == 0 { 200.0 } else { 900.0 };
+            e.ingest_at("h", &state(bal), i * HOUR, &format!("obs-{i}")).unwrap();
+        }
+
+        // 1. detection ran, 2. harmonics explained it, 3. so nothing escalated
+        let got = e.ingest_at("h", &state(200.0), 32 * HOUR, "obs-32").unwrap();
+        assert!(got.detected() && got.suppressed_by_cycle() && !got.escalates());
+
+        // 4. the belief collapsed on the latest observation
+        assert_eq!(e.belief("h", "balance", 32 * HOUR).unwrap().estimated, 200.0);
+
+        // 5. and widens once the source goes quiet, escalating past threshold
+        assert!(!e.silence_observations(39 * HOUR).is_empty());
+
+        // 6. windowing groups the readings the engine recorded
+        let w = e.windows("h", 0, 0, 8 * HOUR).unwrap().unwrap();
+        assert!(!e.readings_in("h", &w[0]).is_empty());
+
+        // 7. and the structural check answers alongside, conservatively
+        let sources = [MeasuredBy::new("mpesa", &["finances"])];
+        assert!(!e
+            .observability("h", &Registry::with_builtins(), &sources)
+            .unwrap()
+            .completely_observable());
     }
 
     // ── the engine owns the chain ───────────────────────────────────────────
