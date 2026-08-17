@@ -1,0 +1,121 @@
+{
+  "conformance_version": 1,
+  "slice": "capability",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Immune - Formal Execution.md, §IV (Authentication, Authorization, and the Confused Deputy); Dennis & Van Horn 1966; Hardy 1988; Miller, Yee & Shapiro 2003; Harrison, Ruzzo & Ullman 1976",
+  "replayed_by": ["rust"],
+  "note": "★★ IMM-7's row has THREE clauses and two of them were already built. The approval token (`valid_token(approve(o,principal))`) shipped 2026-08-12 as OPV-30/31 and is wired into `execute_admitted`. `permitted(α,o,Σ)` with per-membership-edge privileges shipped the SAME DAY as `principal.rs` (commit 6924f69, tracked under IMM-6). The genuinely unbuilt clause is the third: **the confused-deputy risk, fixed by passing authority WITH the request as a capability.** That is what this vector is about — plus the one residual IMM-6 correctly flagged, `skins`, which shipped as a declared field nothing read.",
+
+  "★★_the_STEP_0_reconcile_what_was_ALREADY_THERE": {
+    "1_the_approval_token_is_BUILT_do_not_rebuild": "`approval.rs` — `ApprovalToken` with no public constructor (reachable only through `Simulated` → `Voted` → `Voted::approve`), `EffectClass::{Sandbox, Live, Unchecked}`, `NonceLedger` for single-use, and `validate()` checking binding/principal/expiry. Wired as a real conjunct in `execute_admitted`, checked BEFORE the operator body (no reason to compute an effect nobody approved) and the nonce spent AT COMMIT (a refused call must not consume an approval). ✅ OPV-30/31, 2026-08-12.",
+    "2_permitted_is_BUILT_TOO_and_this_is_the_correction": "★★ The slice brief expected `permitted(α,o,Σ)` to be the gap. **It is not.** `principal.rs` shipped 2026-08-12 with `Memberships`, `MembershipEdge`, `effective_privilege` (weakest-link across the nesting path), `permitted`, `Denial::{NoEdge, InsufficientTier}` — and it is wired into `execute_admitted` as a conjunct that refuses with state untouched, reading the operator's real `min_privilege`. Per-edge authority, monotone `⊕`, and the HRU limit were all already there. Recorded rather than rebuilt.",
+    "★_3_which_tracker_row_was_stale": "**IMM-6 was right** — it already says `min_privilege` is enforced edge-based and monotone, with `skins ⬜`. **IMM-7 was stale** — it read `⬜ not started (app-layer propose→confirm is a seed)` while its first clause had shipped as OPV-30/31 five days earlier. So the reconcile corrected the tracker, not the code, on the token; and corrected the *brief* on `permitted`.",
+    "4_what_was_genuinely_missing": "Two things. ★★ **Capabilities** — every authorization path was ambient, so a deputy acting on untrusted input applied the whole of its principal's authority to a name it did not choose. ★ **Skin resolution** — `Skin` shipped as a struct with a `name` and a `tier`, referenced by `MembershipEdge.skin`, and **read by nothing**: grep it and the only hits are the docstring and the declaration. That is *'a field, not a check'* — the exact defect `principal.rs`'s own header criticises `min_privilege` for in the reference."
+  },
+
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "The reference has no object-capability model and no principal check at the gate. `execute_operator` verifies the operator is allow-listed by the sustain's spec and registered in `OPERATOR_REGISTRY`, then executes. `min_privilege` is declared on the dataclass (`core/operator.py:60`), accepted by the decorator (`:198`) and stored (`:231`) — and read nowhere. `access_policy.owner_ids` is templated into both shipped specs (`habitat.json:141`, `homestead.json:509`) and set from route params, and consulted by no authorization decision. The gate mediates STATE, not PRINCIPALS.",
+    "★_the_counterweight_TWO_things_and_the_first_is_at_genuine_parity": "**Authentication is at parity and is good.** IMM-5: PBKDF2-HMAC-SHA256 at 260k iterations with a per-user salt and a constant-time compare, JWT carrying `token_version` so logout is *real revocation* rather than client-side token deletion. That is solid, app-layer, and nothing here improves on it — and the distinction matters, because §IV's whole point is that `auth` and `permitted` are separate conjuncts. Knowing who someone is tells you nothing about what they may do. ★★ **And the substrate the edge model attaches to is at parity too**: SUS-7's boundary `μ` made private-vs-shared structural on BOTH sides, which is what gives a membership edge something to be an edge OF. Per-edge privilege is not built on sand here.",
+    "★_the_reference_DOES_have_one_real_ownership_check_and_it_is_worth_naming_precisely": "`_assert_owns_sustain()` (ingest.py:49, and `sustains.py`'s `_assert_owns`) compares the caller against `sustains.user_id` and 404s for both not-found and not-owned, deliberately, so an unauthorised caller cannot enumerate sustain ids. That is careful, real work. ★ Its three limits are what this row is about: it is **single-owner** (the sustain's *creator*, so a household of six has one principal who counts), **binary** (owner or nothing — no tiers, no `min_privilege` binding), and **at the route layer** rather than a conjunct of `admit()`, so any path that does not call it is unmediated by construction.",
+    "term_by_term": {
+      "authentication (who)": "AT PARITY, and the reference's is the real implementation — PBKDF2 + JWT + `token_version` revocation. Not core-engine on either side.",
+      "authorization as a GATE CONJUNCT": "RUST-AHEAD since 2026-08-12 (`principal.rs`), not this slice.",
+      "per-membership-edge privilege": "RUST-AHEAD since 2026-08-12. The reference's model is per-*sustain*-creator.",
+      "`min_privilege` evaluated": "RUST-AHEAD since 2026-08-12. Declared on both sides; read only here.",
+      "★ skins / RBAC bundles": "**THIS SLICE.** Declared in Rust 2026-08-12 and read by nothing until now; grep-0 in the reference (see the false positives).",
+      "★★ capability = designation + rights in one unforgeable token": "**THIS SLICE, and the row's genuinely unbuilt clause.** Neither side had one.",
+      "★★ attenuation (weaken, never strengthen)": "**THIS SLICE.** `attenuat` is grep-0 in the reference.",
+      "no-ambient-authority (Miller-Yee-Shapiro)": "**THIS SLICE**, and structural: `Authorization::Capability` carries no `&Memberships`, so the fallback is absent rather than merely unused.",
+      "the approval token": "RUST-AHEAD since 2026-08-12 (OPV-30/31). The reference's propose→confirm is a real seed but is a UI flow, not a term inside `admit()`.",
+      "cross-process / on-the-wire capabilities": "NEITHER SIDE. A named host-layer slot — see the limits."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "★★ skin (16 hits, ZERO real — every one is the substring in *asking*)": "★★ The sharpest false positive since CTL-11's `gain`/*again*. All sixteen are `asking`: *'asking which pocket'*, *'asking again'*, *'always permitted'* nearby. A reviewer grepping `skin` sees a healthy-looking count and there is **nothing there**. The reference has no RBAC bundles at all.",
+      "capability (2 hits, ZERO real — and both are the same line)": "`core/egress.py:8`, *'EgressQueue has no send capability whatsoever'* — the English word, in a safety docstring, plus its own `.pyc`. Zero object-capability content.",
+      "★ permitted (11 hits, and the ONE that matters means something else)": "★★ Worth reading rather than counting. `sustain_engine.py:1618` — *'Check operator is permitted by this sustain's spec'* — is the **allow-list**, not a principal check. That is precisely the conflation §IV is about: in the reference, *permitted* means **the sustain allows this operator**, never **this person may run it**. The other hits are docstrings saying a read-only operator is *'always permitted'*, which is the same conflation stated more plainly.",
+      "owner_ids (21 hits, all inert)": "Templated into both specs, defaulted from route params, instantiated into state — and read by no authorization decision anywhere. Present and consulted by nothing, exactly as the article's audit says.",
+      "confused / deputy / attenuat / ambient (grep-0 each)": "Named so the zeros are recorded as checked rather than assumed."
+    },
+    "the_honest_limits": "★★ UNFORGEABILITY HERE IS STRUCTURAL, NOT CRYPTOGRAPHIC — a `Capability` has no public fields, no public constructor, no `From` and no `Deserialize`, so it cannot be written down in this process; but that is not a signature, and a capability crossing a wire needs a MAC or a signature, which needs a key and probably a nonce. ADR-0001 keeps RNG and I/O out of this core, so the cross-boundary form is a **host-layer slot**, the same relocation CTL-6 took. It is a slot rather than a gap because the confused deputy runs IN-PROCESS, which is where this holds. · ★★ THIS IS NOT REVOCATION — a capability, once issued, is valid until dropped; there is no revocation list and no expiry on it. The approval token has both (`expiry`, `NonceLedger`) because it authorises ONE act; a capability authorises a standing relationship, and revoking one needs a mechanism this slice does not build. Revoking the underlying EDGE does not invalidate a capability already issued from it, and that is stated rather than left to be discovered. · ★ NOTHING ISSUES CAPABILITIES TO SYMBIONTS YET — the operative layer still calls the gate with `Authorization::Unchecked` or a principal. The mechanism is built and proven at the gate; threading it through `operative.rs` so a Symbiont can only ever hold an attenuated capability is the sequenced next step, and until it lands the confused-deputy fix is available rather than in force. · ★ HRU: THE SAFETY QUESTION IS UNDECIDABLE — Harrison, Ruzzo & Ullman proved that whether right `r` can ever leak to subject `s` is undecidable in the general access-matrix model. So this model is not verified for what it permits over all futures and cannot be; it is kept small enough to reason about instead. Four fields and two operations, deliberately. Same conclusion Rice's theorem forced on the constraint layer. · SKINS ARE TIER-ONLY — a `Skin` bundles a tier, not a set of operators. A richer bundle (per-operator rights in the skin) is representable and is not built, because economy of mechanism says do not grow the model before something needs it. · THE APPROVAL TOKEN AND THE CAPABILITY ARE NOT UNIFIED — they are different conjuncts answering different questions (one act versus a standing designation) and are deliberately left separate; a capability does not imply an approval and an approval does not imply a capability."
+  },
+
+  "confused_deputy_cases": [
+    {
+      "name": "ambient_authority_lets_the_deputy_reach_an_unauthorised_object",
+      "why": "The vulnerability, asserted so the fix has something to be a fix OF. Bonnie owns both his habitat and the household. A Symbiont acts on his authority over a parsed message; the untrusted text names the sustain. Under `Authorization::Principal` the call COMMITS against the household, because ambient authority has no way to tell which object the task was about. This is Hardy's compiler writing the billing file — nothing forged, every check passed, the deputy simply confused about whose authority it was exercising.",
+      "expect": "committed = true"
+    },
+    {
+      "name": "a_capability_refuses_the_same_deputy_the_same_input",
+      "why": "Same principal, same untrusted input, same registry, same operator. Bonnie issues a capability designating the habitat and attenuates it to the one operator the task needs. The call naming the household is REFUSED with `capability_designates`, no mutations, no events, state byte-identical. The only thing that changed is that authority travelled WITH the request instead of being held ambiently — which is the whole of Dennis & Van Horn's point in one diff.",
+      "expect": "refused, rule = capability_designates, state untouched"
+    },
+    {
+      "name": "the_authorised_task_is_unaffected",
+      "why": "A fix that also breaks the legitimate call is not a fix, it is an outage. The same capability acting on the habitat it designates commits normally. Asserted in the same test as the refusal so the two can never drift apart.",
+      "expect": "committed = true"
+    },
+    {
+      "name": "a_capability_narrowed_to_one_operator_refuses_the_others",
+      "why": "Designation is not the only axis. A capability carrying only `budget.summary` is refused for `budget.allocate` with `capability_carries` — kept distinct from `capability_designates` and from `insufficient_privilege`, because narrowing rights, pointing at the wrong object and holding too little authority are three different repairs.",
+      "expect": "refused, rule = capability_carries"
+    }
+  ],
+
+  "attenuation_cases": [
+    {
+      "name": "attenuation_weakens_and_REFUSES_to_strengthen",
+      "why": "An owner-tier capability attenuates to contributor. Asking the contributor capability back up to owner returns `Amplification::Tier { held, requested }` — refused and NAMED, not silently bounded to what was held. Silently clamping is the trap `admission.rs` warns about one layer down: it hides that someone asked for more than they had.",
+      "expect": "Err(Amplification::Tier)"
+    },
+    {
+      "name": "rights_narrow_and_cannot_widen",
+      "why": "`Only{budget.spend}` cannot attenuate back to `All`, nor sideways to `Only{budget.allocate}`. Subset-or-refuse, with the sideways case included because it is the one a naive `len()` check would let through.",
+      "expect": "Err(Amplification::Rights) for both"
+    },
+    {
+      "name": "★★_redesignation_is_UNREPRESENTABLE",
+      "why": "★★ The strongest property in the slice. `Attenuation` carries **no sustain field**, so pointing a capability at a different object cannot be *expressed* — there is no call to refuse because there is no call to write. That is the confused deputy's own move removed from the vocabulary rather than guarded against, which is the same discipline as EVT-6's missing `close_at(tau)` and EVT-10's `SnapshotDim` with no `add`.",
+      "expect": "no API exists; the designation survives every weakening"
+    },
+    {
+      "name": "★_issuing_is_a_TRANSFER_never_a_MINT",
+      "why": "★ `Capability::issue` consults a real membership edge, so a capability cannot designate authority nobody holds — a stranger issuing over the habitat gets `Denial::NoEdge`. IMM-13 makes the same grant-must-be-a-transfer distinction against Sybil attacks, for the same reason, and it is honoured here rather than restated.",
+      "expect": "Err(Denial::NoEdge) for a principal with no edge"
+    },
+    {
+      "name": "issuing_across_a_path_takes_the_weakest_link",
+      "why": "Issuing reuses `effective_privilege_with` rather than reading the edge directly, so a capability cannot route around the monotone `⊕` rule that governs the ambient path. Owner of a habitat inside a household it only observes yields an OBSERVER capability over the habitat. If issuing read the edge directly this would have been a promotion route, which is why it does not.",
+      "expect": "tier = OBSERVER, sustain = habitat"
+    },
+    {
+      "name": "★★_a_capability_cannot_be_forged_from_JSON",
+      "why": "★★ Proven by a `compile_fail` doctest that `cargo test --doc` executes, not asserted in prose: `Capability` derives no `Deserialize`, so `serde_json::from_str::<Capability>` does not build. Same structural-proof idiom as EVT-10's delta-on-a-snapshot-dimension. ★ And the limit is stated in the same breath: this is in-process unforgeability, not a signature.",
+      "expect": "does not compile"
+    }
+  ],
+
+  "skin_cases": [
+    {
+      "name": "a_skin_restricts_an_edge_that_would_otherwise_be_stronger",
+      "why": "An edge at owner tier carrying the `guest` skin resolves to observer: where both are present the WEAKER wins, `max`, the same weakest-link algebra the path walk uses. This is the field finally being read — `Skin` shipped with the edge model and nothing consulted it, which is the same 'a field, not a check' defect the module's own header criticises `min_privilege` for in the reference.",
+      "expect": "effective tier = OBSERVER"
+    },
+    {
+      "name": "a_skin_cannot_WIDEN_an_edge_it_is_attached_to",
+      "why": "An observer edge carrying an `admin` skin stays observer. A bundle must not be a promotion route — same reason nesting cannot widen authority, and the same `max`.",
+      "expect": "effective tier = OBSERVER"
+    },
+    {
+      "name": "★_an_unresolvable_skin_REFUSES_rather_than_falling_back",
+      "why": "★ Fail-closed, and this is the case that decides whether the feature is safe. An owner-tier edge carrying a MISTYPED skin name (`gest` for `guest`) is refused with `Denial::UnresolvedSkin`. The tempting alternative — fall back to the edge's raw tier — is exactly how a typo'd role becomes owner-by-accident: the bundle meant to RESTRICT the edge silently stops applying and nothing says so. IMM-4's rule (an unreadable rule refuses, never silently skips) is the same rule one layer up.",
+      "expect": "Err(Denial::UnresolvedSkin)"
+    },
+    {
+      "name": "an_edge_without_a_skin_is_unaffected_by_the_registry",
+      "why": "The pre-skin behaviour is preserved exactly: every edge shipped so far carries `skin: None`, and `effective_privilege` and `effective_privilege_with` must agree on all of them. Asserted directly rather than assumed, because adding a resolution step to a live authorization path is precisely where a silent behaviour change would hurt most.",
+      "expect": "identical tier from both functions"
+    }
+  ]
+}

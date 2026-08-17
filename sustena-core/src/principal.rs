@@ -33,8 +33,21 @@
 //! and observe an organisation read-only — three edges, three authorities, one
 //! person. A privilege attached to the person could not express that.
 //!
-//! `Skin` is a named bundle of edge privileges — role-based access control,
-//! with `min_privilege` as the per-action binding.
+//! [`Skin`] is a named bundle of edge privileges — role-based access control,
+//! with `min_privilege` as the per-action binding. It is resolved through a
+//! [`SkinRegistry`], and where an edge carries both a tier and a skin the
+//! **weaker** of the two wins: a bundle meant to restrict an edge must not be
+//! able to widen it. An edge naming a skin nothing resolves is **refused**
+//! rather than quietly demoted to its raw tier.
+//!
+//! ## Ambient authority, and where it stops being right
+//!
+//! Everything in this module answers *may this principal act here* from
+//! **ambient** authority: the principal is named, and all of what it holds is
+//! in force. That is correct when the principal is the one deciding, and it is
+//! precisely wrong when a **deputy** acts on its behalf over inputs it did not
+//! choose. See [`crate::capability`] for the confused-deputy case and the form
+//! of authority that travels *with* a request instead.
 //!
 //! ## Defence in depth is `⊕`, and it is monotone
 //!
@@ -142,6 +155,27 @@ pub enum Denial {
         held: Tier,
         required: Tier,
     },
+    /// An edge names a skin that no registry resolves.
+    ///
+    /// **Fail-closed, deliberately.** The tempting alternative is to fall back
+    /// to the edge's own `tier`, and that is exactly how a typo'd role name
+    /// becomes owner-by-accident: the bundle that was meant to *restrict* the
+    /// edge silently stops applying, and nothing says so. IMM-4's rule — an
+    /// unreadable rule refuses, it is never silently skipped — is the same rule
+    /// one layer over.
+    UnresolvedSkin {
+        principal: String,
+        sustain: String,
+        skin: String,
+    },
+    /// *Not that object* — a capability was presented that designates a
+    /// different sustain. **This is the confused deputy's refusal**: the
+    /// authority in force did not name the thing the request named.
+    NotDesignated { held: String, attempted: String },
+    /// A capability designates the right object but does not carry this
+    /// operator. Distinct from insufficient tier: narrowing rights and
+    /// weakening authority are different attenuations and different repairs.
+    RightNotHeld { sustain: String, operator: String },
 }
 
 impl std::fmt::Display for Denial {
@@ -156,7 +190,68 @@ impl std::fmt::Display for Denial {
                 "principal '{principal}' holds tier {held} on sustain '{sustain}', \
                  but this operation requires tier {required} or stronger"
             ),
+            Denial::UnresolvedSkin { principal, sustain, skin } => write!(
+                f,
+                "principal '{principal}' holds sustain '{sustain}' through skin \
+                 '{skin}', which no skin registry resolves"
+            ),
+            Denial::NotDesignated { held, attempted } => write!(
+                f,
+                "the capability presented designates sustain '{held}', \
+                 not '{attempted}'"
+            ),
+            Denial::RightNotHeld { sustain, operator } => write!(
+                f,
+                "the capability presented over sustain '{sustain}' does not \
+                 carry operator '{operator}'"
+            ),
         }
+    }
+}
+
+/// The skins in force — named bundles of edge privilege, i.e. RBAC.
+///
+/// Deliberately a lookup and nothing more. `Skin` shipped with the edge model
+/// as a declared field that nothing read — the same *"a field, not a check"*
+/// defect this module's own header criticises `min_privilege` for. This is what
+/// reads it.
+#[derive(Debug, Clone, Default)]
+pub struct SkinRegistry {
+    skins: BTreeMap<String, Skin>,
+}
+
+impl SkinRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// No skins defined. An edge naming one will be refused, not ignored.
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// A shared empty registry, for the common case of a host that declares no
+    /// skins at all. Saves every such call site keeping one alive purely to
+    /// borrow from.
+    pub fn none() -> &'static SkinRegistry {
+        static NONE: std::sync::OnceLock<SkinRegistry> = std::sync::OnceLock::new();
+        NONE.get_or_init(SkinRegistry::default)
+    }
+
+    pub fn define(&mut self, skin: Skin) {
+        self.skins.insert(skin.name.clone(), skin);
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Skin> {
+        self.skins.get(name)
+    }
+
+    pub fn len(&self) -> usize {
+        self.skins.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.skins.is_empty()
     }
 }
 
@@ -172,6 +267,25 @@ impl std::fmt::Display for Denial {
 /// exactly the direction the algebra forbids.
 pub fn effective_privilege(
     memberships: &Memberships,
+    principal: &str,
+    path: &[String],
+) -> Result<Tier, Denial> {
+    effective_privilege_with(memberships, &SkinRegistry::empty(), principal, path)
+}
+
+/// [`effective_privilege`], with the skins in force.
+///
+/// An edge may carry a skin (a named RBAC bundle) as well as its own tier.
+/// Where both are present the **weaker** wins — `max`, the same weakest-link
+/// algebra the path walk uses, for the same reason: a bundle meant to restrict
+/// an edge must not be able to widen it, and an edge must not be able to
+/// escape its bundle.
+///
+/// An edge naming a skin the registry cannot resolve is **refused**
+/// ([`Denial::UnresolvedSkin`]), never quietly demoted to its raw tier.
+pub fn effective_privilege_with(
+    memberships: &Memberships,
+    skins: &SkinRegistry,
     principal: &str,
     path: &[String],
 ) -> Result<Tier, Denial> {
@@ -191,8 +305,22 @@ pub fn effective_privilege(
                     sustain: sustain.clone(),
                 })
             }
-            // Higher number = less authority, so max() is the weakest link.
-            Some(edge) => weakest = weakest.max(edge.tier),
+            Some(edge) => {
+                // Higher number = less authority, so max() is the weakest link.
+                weakest = weakest.max(edge.tier);
+                if let Some(name) = &edge.skin {
+                    match skins.get(name) {
+                        Some(skin) => weakest = weakest.max(skin.tier),
+                        None => {
+                            return Err(Denial::UnresolvedSkin {
+                                principal: principal.to_string(),
+                                sustain: sustain.clone(),
+                                skin: name.clone(),
+                            })
+                        }
+                    }
+                }
+            }
         }
     }
     Ok(weakest)
@@ -209,7 +337,18 @@ pub fn permitted(
     path: &[String],
     required: Tier,
 ) -> Result<(), Denial> {
-    let held = effective_privilege(memberships, principal, path)?;
+    permitted_with(memberships, &SkinRegistry::empty(), principal, path, required)
+}
+
+/// [`permitted`], with the skins in force.
+pub fn permitted_with(
+    memberships: &Memberships,
+    skins: &SkinRegistry,
+    principal: &str,
+    path: &[String],
+    required: Tier,
+) -> Result<(), Denial> {
+    let held = effective_privilege_with(memberships, skins, principal, path)?;
     if held <= required {
         Ok(())
     } else {
@@ -322,6 +461,74 @@ mod tests {
             permitted(&m, "cira", &["household".into()], TIER_MEMBER),
             Err(Denial::NoEdge { .. })
         ));
+    }
+
+    // ── skins: the named bundles, now actually read ──────────────────────────
+
+    fn skinned(principal: &str, sustain: &str, tier: Tier, skin: &str) -> MembershipEdge {
+        MembershipEdge {
+            principal: principal.into(),
+            sustain: sustain.into(),
+            tier,
+            skin: Some(skin.into()),
+        }
+    }
+
+    #[test]
+    fn a_skin_restricts_an_edge_that_would_otherwise_be_stronger() {
+        let mut m = Memberships::new();
+        m.grant(skinned("frankie", "household", TIER_OWNER, "guest"));
+        let mut s = SkinRegistry::new();
+        s.define(Skin { name: "guest".into(), tier: TIER_OBSERVER });
+
+        // The edge says owner; the bundle says observer. The weaker wins.
+        assert_eq!(
+            effective_privilege_with(&m, &s, "frankie", &["household".into()]).unwrap(),
+            TIER_OBSERVER
+        );
+        assert!(permitted_with(&m, &s, "frankie", &["household".into()], TIER_MEMBER).is_err());
+    }
+
+    #[test]
+    fn a_skin_cannot_widen_an_edge_it_is_attached_to() {
+        let mut m = Memberships::new();
+        m.grant(skinned("kui", "household", TIER_OBSERVER, "admin"));
+        let mut s = SkinRegistry::new();
+        s.define(Skin { name: "admin".into(), tier: TIER_OWNER });
+
+        // A bundle must not be a promotion route.
+        assert_eq!(
+            effective_privilege_with(&m, &s, "kui", &["household".into()]).unwrap(),
+            TIER_OBSERVER
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_skin_refuses_rather_than_falling_back_to_the_raw_tier() {
+        let mut m = Memberships::new();
+        // Owner tier, but the bundle that was meant to restrict it is missing.
+        // Falling back to the tier would silently promote.
+        m.grant(skinned("mum", "household", TIER_OWNER, "gest"));
+        let s = SkinRegistry::empty();
+
+        assert!(matches!(
+            permitted_with(&m, &s, "mum", &["household".into()], TIER_OWNER),
+            Err(Denial::UnresolvedSkin { .. })
+        ));
+    }
+
+    #[test]
+    fn an_edge_without_a_skin_is_unaffected_by_the_registry() {
+        // The pre-skin behaviour is preserved exactly: every existing edge
+        // carries `skin: None` and must decide identically.
+        let m = setup();
+        let mut s = SkinRegistry::new();
+        s.define(Skin { name: "guest".into(), tier: TIER_OBSERVER });
+
+        assert_eq!(
+            effective_privilege(&m, "cira", &["household".into()]).unwrap(),
+            effective_privilege_with(&m, &s, "cira", &["household".into()]).unwrap(),
+        );
     }
 
     #[test]

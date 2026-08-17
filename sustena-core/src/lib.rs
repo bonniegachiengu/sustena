@@ -45,6 +45,7 @@
 //! | Operators | [`operator`] | R1 |
 //! | Council | [`council`] | R1 |
 //! | Approval token | [`approval`] | R2 |
+//! | Capabilities (confused deputy) | [`capability`] | R2 |
 //! | Edit authority | [`editing`] | R2 |
 //! | Transition constraints | [`transition`] | R2 |
 //! | Checked composition | [`compose`] | R2 |
@@ -92,6 +93,7 @@
 
 pub mod admission;
 pub mod approval;
+pub mod capability;
 pub mod belief;
 pub mod boundary;
 pub mod checkpoint;
@@ -264,7 +266,11 @@ pub use operator::{
     OperatorResult,
     Registry,
 };
-pub use principal::{effective_privilege, permitted, Denial, MembershipEdge, Memberships, Tier};
+pub use capability::{Amplification, Attenuation, Capability, Rights};
+pub use principal::{
+    effective_privilege, effective_privilege_with, permitted, permitted_with, Denial,
+    MembershipEdge, Memberships, Skin, SkinRegistry, Tier,
+};
 pub use population::{
     sweep, Cascade, LocalView, PhaseTransition, Population, PopulationError, PopulationSpec,
     StepOutcome,

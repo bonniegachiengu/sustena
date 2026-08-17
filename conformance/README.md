@@ -128,6 +128,7 @@ conformance/
     observability.json  reachability, not rank(O)         (spec, R2)
     damping.json        settles vs rings                  (spec, R2)
     semantic.json       replay under D vs D'              (spec, R2)
+    capability.json     the confused deputy, fixed        (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1291,3 +1292,96 @@ when an operator runs); and `boundary`/`firewall` are not part of a
 `Definition`, so a `D′` replay checks schema, invariants and the allow-list —
 **not `μ` or `F`**. EVT-12's checkpoints deliberately do not transfer: a
 checkpoint under `D` is not one under `D′`.
+
+### `capability.json` — the confused deputy (IMM-7, Immune §IV)
+**14 cases, R2 (spec).** Authority that travels **with** the request, plus the
+`skins` residual IMM-6 correctly flagged.
+
+★★ **STEP-0 turned this slice around before a line was written.** IMM-7's row
+names three clauses and **two were already built**: the approval token shipped
+2026-08-12 as **OPV-30/31** (`approval.rs`), and **`permitted(α,o,Σ)` shipped
+the same day** as `principal.rs` — per-membership-edge privileges, weakest-link
+`⊕` across the nesting path, `min_privilege` genuinely read, wired into
+`execute_admitted` as a conjunct that refuses with state untouched. The row's
+*status* had read `⬜ not started` for five days after the first landed, so the
+reconcile corrected **the tracker, not the code** — and corrected the brief,
+which expected authorization to be the gap. IMM-6's row was already right.
+
+★★ **The unbuilt clause was the confused deputy** (Hardy 1988). A Symbiont acts
+on a person's authority over inputs **it did not choose** — a parsed SMS, an
+Arena artefact — so ambient authority applies everything that person holds to a
+name that arrived in untrusted text. The vulnerability is **asserted at the
+gate**, not described: the same principal, the same untrusted target and the
+same operator **commit** under `Authorization::Principal` and are **refused**
+(`capability_designates`, state byte-identical) under
+`Authorization::Capability` — with the authorised task still committing in the
+same test, so the fix cannot quietly become an outage.
+
+★★ **No ambient authority, as a property of the type.** The `Capability`
+variant carries **no `&Memberships`**: the fallback is *absent*, not merely
+unused, and cannot be written without changing the enum. That is Miller, Yee &
+Shapiro's sharpening — a capability system that still consults an ambient table
+on the side has fixed nothing.
+
+★★ **Three moves are unrepresentable rather than guarded:** redesignating a
+capability at another object (`Attenuation` carries no sustain — the deputy's
+own move removed from the vocabulary), widening rights (no such method), and
+forging one (no public fields, no constructor, **no `Deserialize`** — proven by
+a `compile_fail` doctest, the EVT-10 idiom). Asking for a stronger **tier** *is*
+representable, because a caller may sincerely ask, and is **refused and named**
+rather than silently bounded: clamping would hide that someone asked for more
+than they had, the trap `admission.rs` warns about a layer down.
+
+★ **Issuing is a transfer, never a mint** — it consults a real edge, and reuses
+`effective_privilege_with` so a capability cannot route around `⊕`. An owner of
+a habitat inside a household they only observe gets an **observer** capability.
+
+★ **Skins, finally read.** `Skin` shipped 2026-08-12 as a struct
+`MembershipEdge` referenced and **nothing consulted** — *"a field, not a
+check"*, the exact defect `principal.rs`'s header criticises `min_privilege`
+for in the reference, turned back on this codebase. Where an edge carries both
+a tier and a skin the **weaker wins**, so a bundle is not a promotion route; and
+an unresolvable skin name **refuses**, because falling back to the raw tier is
+how a typo'd role (`gest` for `guest`) becomes owner-by-accident.
+
+**Divergence.** R2, rust-ahead. The reference's gate mediates **state, not
+principals**: `min_privilege` is declared (`core/operator.py:60`), accepted
+(`:198`) and stored (`:231`) — and read nowhere; `access_policy.owner_ids` is
+templated into both shipped specs and consulted by no authorization decision.
+★★ **The counterweight is two things and the first is genuine parity:**
+authentication is the reference's and is good — PBKDF2-HMAC-SHA256, 260k
+iterations, per-user salt, constant-time compare, JWT with `token_version` so
+logout is **real revocation** — which is exactly §IV's point that `auth` and
+`permitted` are separate conjuncts; and SUS-7's boundary `μ` is at parity on
+both sides, which is what gives a membership edge something to be an edge *of*.
+★ And the reference's one real ownership check is credited precisely:
+`_assert_owns_sustain()` 404s for both not-found and not-owned so ids cannot be
+enumerated — careful work, and **single-owner** (the creator), **binary**, and
+**at the route layer** rather than a conjunct of `admit()`.
+
+**Greppable false positives named:** ★★ `skin` — **16 hits, zero real**, every
+one the substring in *asking*; the sharpest since CTL-11's `gain`/*again*, and
+a re-grepper sees a healthy count with nothing behind it. `capability` — 2
+hits, both the same line, the English word in an egress safety docstring. ★
+`permitted` — 11 hits, and the one that matters means something else:
+`sustain_engine.py:1618`, *"operator is permitted by this sustain's spec"*, is
+the **allow-list**. That is §IV's conflation stated out loud in the reference's
+own comment. `confused` / `deputy` / `attenuat` / `ambient` — grep-0 each,
+recorded as checked rather than assumed.
+
+**Honest limits, six.** ★★ Unforgeability is **structural, not
+cryptographic** — a capability cannot be written down *in this process*, but
+that is not a signature; a wire form needs a MAC and a key, and ADR-0001 keeps
+RNG and I/O out of the core, so the cross-boundary form is a **host-layer
+slot** (the CTL-6 relocation) — a slot rather than a gap, because the deputy
+runs in-process. ★★ **This is not revocation**: a capability is valid until
+dropped, and revoking the underlying edge does **not** invalidate one already
+issued. ★ **Nothing issues capabilities to Symbionts yet** — the operative
+layer still calls with `Unchecked`/`Principal`, so the fix is **available
+rather than in force**; threading it through `operative.rs` is the sequenced
+next step. ★ **HRU**: the safety question is undecidable in the general
+access-matrix model, so this is not verified over all futures and cannot be —
+it is kept small enough to reason about instead (four fields, two operations),
+the same conclusion Rice's theorem forced on constraints. Skins bundle a
+**tier only**. And the approval token and the capability are **deliberately not
+unified**: one authorises a single act, the other a standing designation.

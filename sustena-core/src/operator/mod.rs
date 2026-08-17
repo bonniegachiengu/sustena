@@ -41,7 +41,8 @@ pub use meta::{OperatorFn, OperatorMeta, OperatorResult, Registry};
 
 use crate::approval::{Binding, EffectClass, NonceLedger};
 use crate::mutation::Mutation;
-use crate::principal::{permitted, Denial, Memberships, Tier};
+use crate::capability::Capability;
+use crate::principal::{permitted_with, Denial, Memberships, SkinRegistry, Tier};
 use crate::predicate;
 use crate::boundary::{preserves_closure, BoundaryDecl, ClosureViolation};
 use crate::flow::{check_flows, flows_of, FlowRule, Movement};
@@ -123,12 +124,33 @@ pub struct Enforcement {
 pub enum Authorization<'a> {
     /// No principal model in force — the host has already decided.
     Unchecked,
-    /// Check `permitted(α, o, Σ)` across the whole nesting path.
+    /// Check `permitted(α, o, Σ)` across the whole nesting path, from the
+    /// principal's **ambient** authority — everything it holds anywhere is in
+    /// force for this call.
     Principal {
         id: &'a str,
         memberships: &'a Memberships,
         /// Outermost containing sustain first, target last.
         path: &'a [String],
+        /// The skins in force. An edge naming one nothing resolves refuses.
+        skins: &'a SkinRegistry,
+    },
+    /// Check the authority that arrived **with the request** — the
+    /// confused-deputy fix (Immune §IV; Hardy 1988).
+    ///
+    /// ★ Note what this variant does **not** carry: there is no
+    /// `&Memberships`. The ambient set is not merely unconsulted here, it is
+    /// *absent*, so a deputy holding a capability cannot fall back on the
+    /// issuer's wider authority even by mistake — Miller, Yee & Shapiro's *no
+    /// ambient authority* made a property of the type rather than a rule
+    /// somebody has to keep. `target` is the sustain the request named, which
+    /// is what the capability is checked against.
+    Capability {
+        capability: &'a Capability,
+        /// The sustain this call names — often from untrusted input, which is
+        /// exactly why it is checked against the capability rather than
+        /// trusted.
+        target: &'a str,
     },
 }
 
@@ -239,19 +261,37 @@ pub fn execute_admitted(
 
     // ── permitted(α, o, Σ) ───────────────────────────────────────────────────
     // The conjunct the reference declares on every operator and reads nowhere.
-    if let Authorization::Principal { id, memberships, path } = authorization {
-        if let Err(denial) = permitted(memberships, id, path, meta.min_privilege as Tier) {
-            let rule = match denial {
-                Denial::NoEdge { .. } => "not_a_member",
-                Denial::InsufficientTier { .. } => "insufficient_privilege",
-            };
-            return Execution {
-                result: OperatorResult::fail(denial.to_string(), rule),
-                mutations: vec![],
-                events: vec![],
-                state: state.clone(),
-            };
+    //
+    // Two ways to satisfy it, and they are genuinely different questions rather
+    // than one with a shortcut. `Principal` asks it of ambient authority — who
+    // are you, and what do you hold. `Capability` asks it of the authority that
+    // arrived with the request, which is the only form that is safe when a
+    // deputy is acting on inputs it did not choose.
+    let denied = match authorization {
+        Authorization::Unchecked => None,
+        Authorization::Principal { id, memberships, path, skins } => {
+            permitted_with(memberships, skins, id, path, meta.min_privilege as Tier).err()
         }
+        Authorization::Capability { capability, target } => capability
+            .permits(target, operator_name, meta.min_privilege as Tier)
+            .err(),
+    };
+    if let Some(denial) = denied {
+        // Six refusals, six names. Collapsing these would tell whoever reads
+        // the log to fix the wrong thing.
+        let rule = match denial {
+            Denial::NoEdge { .. } => "not_a_member",
+            Denial::InsufficientTier { .. } => "insufficient_privilege",
+            Denial::UnresolvedSkin { .. } => "skin_resolves",
+            Denial::NotDesignated { .. } => "capability_designates",
+            Denial::RightNotHeld { .. } => "capability_carries",
+        };
+        return Execution {
+            result: OperatorResult::fail(denial.to_string(), rule),
+            mutations: vec![],
+            events: vec![],
+            state: state.clone(),
+        };
     }
 
     // ── valid_token(approve(o, principal)) ───────────────────────────────────
@@ -265,6 +305,11 @@ pub fn execute_admitted(
     if let EffectClass::Live { token, now } = effect {
         let acting = match authorization {
             Authorization::Principal { id, .. } => Some(*id),
+            // A capability is a *transfer* of someone's authority, so the act
+            // is approved against the principal whose authority it carries —
+            // not the deputy holding it. That is the whole point of keeping
+            // `issued_to` on the token.
+            Authorization::Capability { capability, .. } => Some(capability.issued_to()),
             Authorization::Unchecked => None,
         };
         let attempted = Binding::new(operator_name, params);
@@ -905,7 +950,7 @@ mod tests {
     }
 
     fn as_principal<'a>(id: &'a str, m: &'a crate::principal::Memberships, path: &'a [String]) -> Authorization<'a> {
-        Authorization::Principal { id, memberships: m, path }
+        Authorization::Principal { id, memberships: m, path, skins: SkinRegistry::none() }
     }
 
     #[test]
@@ -966,6 +1011,98 @@ mod tests {
                                       ("period", json!("monthly"))]),
                             &as_principal("epha", &m, &nested));
         assert!(!ex.committed(), "adding a containing sustain can only shrink authority");
+    }
+
+    // ── the confused deputy, run at the gate ─────────────────────────────────
+
+    /// A Symbiont acting on Bonnie's authority over an input it did not choose.
+    ///
+    /// The untrusted text names the sustain. Under ambient authority the deputy
+    /// applies everything Bonnie holds to that name — Hardy's compiler, exactly.
+    /// Under a capability the same deputy, the same principal and the same input
+    /// are refused, because the authority arrived *with* the request and
+    /// designates one object.
+    fn deputy_setup() -> Memberships {
+        use crate::principal::{MembershipEdge, TIER_OWNER};
+        let mut m = Memberships::new();
+        m.grant(MembershipEdge { principal: "bonnie".into(), sustain: "house".into(), tier: TIER_OWNER, skin: None });
+        m.grant(MembershipEdge { principal: "bonnie".into(), sustain: "habitat".into(), tier: TIER_OWNER, skin: None });
+        m
+    }
+
+    fn spend_params() -> Map<String, Value> {
+        params(&[("pocket_name", json!("food")), ("amount", json!(10.0)),
+                 ("period", json!("monthly"))])
+    }
+
+    #[test]
+    fn ambient_authority_lets_a_deputy_reach_what_the_request_never_authorised() {
+        let m = deputy_setup();
+        let reg = Registry::default();
+
+        // The task was about the habitat. The untrusted input says otherwise,
+        // and ambient authority has no way to know the difference.
+        let untrusted_target = "house".to_string();
+        let path = vec![untrusted_target];
+
+        let ex = execute_as(&reg, &allowed(), &armed(), &homestead_state(), "budget.allocate",
+                            &spend_params(), &as_principal("bonnie", &m, &path));
+        assert!(
+            ex.committed(),
+            "this is the vulnerability, asserted so the fix has something to be a fix OF"
+        );
+    }
+
+    #[test]
+    fn a_capability_refuses_the_same_deputy_the_same_input() {
+        use crate::capability::{Attenuation, Capability, Rights};
+        use crate::principal::{SkinRegistry, TIER_OWNER};
+        let m = deputy_setup();
+        let reg = Registry::default();
+
+        // Bonnie hands the Symbiont authority over the habitat ONLY, narrowed
+        // to the one operator the task needs.
+        let cap = Capability::issue(&m, SkinRegistry::none(), "bonnie", "habitat")
+            .unwrap()
+            .attenuate(&Attenuation::to_rights(Rights::only(["budget.allocate"])))
+            .unwrap();
+        assert_eq!(cap.tier(), TIER_OWNER);
+
+        // Same untrusted input. Same principal's authority. Refused.
+        let before = homestead_state();
+        let ex = execute_as(&reg, &allowed(), &armed(), &before, "budget.allocate",
+                            &spend_params(),
+                            &Authorization::Capability { capability: &cap, target: "house" });
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("capability_designates"));
+        assert!(ex.mutations.is_empty(), "a refusal changes nothing");
+        assert!(ex.events.is_empty());
+        assert_eq!(ex.state, before, "state untouched");
+
+        // And it still does the job it WAS given.
+        let ex = execute_as(&reg, &allowed(), &armed(), &homestead_state(), "budget.allocate",
+                            &spend_params(),
+                            &Authorization::Capability { capability: &cap, target: "habitat" });
+        assert!(ex.committed(), "the authorised task is unaffected");
+    }
+
+    #[test]
+    fn a_capability_narrowed_to_one_operator_refuses_the_others() {
+        use crate::capability::{Attenuation, Capability, Rights};
+        use crate::principal::SkinRegistry;
+        let m = deputy_setup();
+        let reg = Registry::default();
+
+        let cap = Capability::issue(&m, SkinRegistry::none(), "bonnie", "habitat")
+            .unwrap()
+            .attenuate(&Attenuation::to_rights(Rights::only(["budget.summary"])))
+            .unwrap();
+
+        let ex = execute_as(&reg, &allowed(), &armed(), &homestead_state(), "budget.allocate",
+                            &spend_params(),
+                            &Authorization::Capability { capability: &cap, target: "habitat" });
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("capability_carries"));
     }
 
     #[test]
