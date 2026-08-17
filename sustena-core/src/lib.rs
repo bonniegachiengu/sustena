@@ -79,6 +79,7 @@
 //! | wp obligation — author-time | [`obligation`] | R2 |
 //! | Two clocks · skew · negative skew surfaced | [`clocks`] | R2 |
 //! | Watermarks · windows · declared lateness | [`watermark`] | R2 |
+//! | Periods · RRULE · zone-id anchoring | [`period`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -112,6 +113,7 @@ pub mod obligation;
 pub mod operative;
 pub mod operator;
 pub mod path;
+pub mod period;
 pub mod ooda;
 pub mod pincer;
 pub mod population;
@@ -179,6 +181,10 @@ pub use editing::{
     Stranded,
 };
 pub use clocks::{clock_findings, skew_of, ClockFinding, Skew, Suspect};
+pub use period::{
+    partitions, Anchor, CivilDateTime, DstPolicy, Freq, LocalResolution, Period, PeriodError,
+    Recurrence, TzError, TzProvider, Weekday,
+};
 pub use watermark::{
     estimate_heuristic, Advance, Closing, LateOutcome, LateRecord, Lateness, SourceGuarantee,
     Watermark, WatermarkError, WatermarkKind, WatermarkTracker, Window, WindowError,

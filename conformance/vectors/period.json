@@ -1,0 +1,165 @@
+{
+  "conformance_version": 1,
+  "slice": "period",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Events and Time - Formal Execution.md, §VIII (Periods: Half-Open Windows and Recurrence)",
+  "replayed_by": ["rust"],
+  "note": "RFC-5545. ★★ Two requirements with teeth: STORE THE RULE and recompute the expansion, because the tz database is versioned; and ANCHOR TO A ZONE ID, never a bare offset, for the same reason. §VIII: periods and watermarks are 'the same object seen twice' — EVT-6 built `W ≥ b` and the bare interval, this builds `[a,b)`.",
+  "the_dependency_decision": {
+    "question": "RRULE expansion with real zone ids needs a tz database. ADR-0001 keeps clocks and I/O out of the core; the crate ships `serde`/`serde_json`/`thiserror` and compiles to WASM, Android, iOS and desktop from one source.",
+    "★★_decided_INJECTED_not_bundled_and_§VIII's_own_argument_is_why": "A `TzProvider` trait the host implements, exactly as identity and time already come from the host (EVT-13). This is not merely the ADR-compliant option — **it is what §VIII's own reasoning asks for.** The section's stated reason to insist on a zone id is that *'the tz database is itself a versioned, revisable record: a period computed under one tzdata release can differ from the same period computed under another.'* A core that BUNDLED a tz database would pin one release **invisibly**, hiding precisely the versioning the section is warning about. Supplied, the release is nameable — and every derived period records `tzdata_version`, so which release produced an instant is always answerable.",
+    "★_the_line_is_drawn_where_the_VERSIONING_is_not_where_the_difficulty_is": "Civil-calendar arithmetic (leap years, month lengths, weekday-from-date) is a **fixed algorithm** — the Gregorian rules do not get revised — so it is computed here, using Howard Hinnant's `days_from_civil`/`civil_from_days` with a round-trip test. Timezone offsets are **versioned data** and are never computed here; they are asked for. That is the difference between hand-rolling calendar maths (fine, and tested) and hand-rolling timezone maths (which the brief forbids, and which nothing here does).",
+    "no_new_dependency_was_added": "`Cargo.toml` is unchanged."
+  },
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`RRULE`, `DTSTART`, `TZID`, `rrule` and `dateutil` are grep-0. There is no recurrence rule anywhere in the reference — the article's own audit says it: *'`operators/calendar.py` keeps ad-hoc entries under `state.calendar` (add / upcoming / remove); no half-open period, no `RRULE`, no timezone anchoring. Budgets and meal plans each hard-code their own window.'*",
+    "★_the_counterweight_half_of_§VIII_ALREADY_LANDED_hours_ago_in_EVT_6": "The honest framing: this row was never wholly open. EVT-6 built `W ≥ b` — *when we may answer* — plus the bare half-open `Window` that *which events belong* needs, with the boundary-belongs-to-the-next-window property already asserted there. So the gap this slice closed is specifically **recurrence + zone anchoring + store-the-rule**, not periods from nothing.",
+    "★_and_the_reference's_calendar_is_REAL_just_ad_hoc": "`operators/calendar.py` genuinely works — `calendar.add`, `calendar.upcoming`, `calendar.remove` over `state.calendar.events`, with ISO-8601 parsing, a UTC normalisation step (`ev_dt.astimezone(timezone.utc)`), and malformed entries skipped rather than crashing. It is careful code. What it is not is a **rule**: every event is a stored instant, so there is nothing to recompute when tz data is revised, and `upcoming`'s window is the same `ctx.timestamp`-bounded one EVT-6 already flagged.",
+    "★★_and_a_stored_instant_is_the_exact_failure_this_row_names": "Worth stating plainly rather than as a stylistic preference. `state.calendar.events` holds expanded instants as the source of truth. §VIII says *'the rule is what should be stored, and the expansion recomputed'* — so the reference is on the wrong side of that sentence by construction, not by oversight, and a revised tz release would leave its stored instants quietly wrong with nothing to detect it.",
+    "term_by_term": {
+      "half-open [a,b)": "AT PARITY as of EVT-6 (2026-08-17) — landed hours before this slice, along with the boundary-belongs-to-the-next-window test.",
+      "★★ RRULE recurrence": "RUST-AHEAD. `FREQ=DAILY|WEEKLY|MONTHLY` + `INTERVAL` + `BYMONTHDAY` + `BYDAY` ship; the rest of the grammar is a named slot, not a claim.",
+      "★★ DTSTART;TZID anchored to a zone id": "RUST-AHEAD. The reference stores instants that have already been normalised to UTC, so the zone is gone by the time anything is stored — there is nothing left to anchor.",
+      "★★ store the rule, recompute the expansion": "RUST-AHEAD, and the sharpest of the three: `state.calendar.events` stores expanded instants as truth.",
+      "one primitive, many consumers": "RUST-AHEAD in a small way, and honestly so — the reference's budgets, tasks and calendar each carry their own window arithmetic, which §VIII names. Here they would share `Period`, though **no consumer has been migrated onto it yet**, so this is a primitive that is ready rather than one that is in use.",
+      "DST correctness": "VACUOUS at parity for the household — `Africa/Nairobi` is EAT, UTC+03:00, no DST, so the local case really is empty on both sides. That is exactly why the machinery is exercised by a DST-observing counterparty instead."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "calendar (real hits, and it is real code)": "`operators/calendar.py` and `state.calendar` exist and work. Named so the zero on RRULE is not misread as *there is no calendar* — there is one; it stores instants rather than rules.",
+      "timezone (real hits, doing something else)": "`timezone.utc` appears throughout `calendar.py` and `tasks.py` — a normalisation to UTC, not a zone anchoring. Normalising to UTC is the opposite move: it **discards** the zone, which is the information §VIII wants kept.",
+      "period (real hits, a different sense)": "`budget.allocate` takes a `period` param — the free-text string `'monthly'`/`'once'` on a pocket. A label, not an interval, and nothing expands it.",
+      "recurrence / rrule / dateutil / RRULE / DTSTART / TZID (0 hits each)": "Clean zeros, all six. No recurrence machinery under another name.",
+      "recurring (4 hits, all prose)": "★ Named because it reads topical and none of it is: two doc comments about recurring FRICTION and a recurring BILL, one about a polling schedule, one about a repeated parse template. No recurrence rule."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "A working ad-hoc calendar with careful ISO parsing and UTC normalisation, and per-consumer window arithmetic in budgets and tasks. What it does not have is a rule to recompute from, or a zone to recompute it in.",
+    "the_honest_limits": "Six. (1) ★★ THE RRULE GRAMMAR IS PARTIAL — `FREQ=DAILY|WEEKLY|MONTHLY`, `INTERVAL`, `BYMONTHDAY`, `BYDAY` ship. **`COUNT`, `UNTIL`, `BYSETPOS`, `FREQ=YEARLY|HOURLY`, `BYMONTH`, `BYWEEKNO`, `BYYEARDAY`, `WKST`, `EXDATE`/`RDATE` and multi-value BY- lists do not**, and are a named slot rather than a claim. (2) ★ NO RRULE TEXT PARSER — the rule is a typed value, not a parsed `RRULE:` string; ingesting iCalendar text is separate work. (3) ★ THE TZ DATA IS THE HOST'S PROBLEM AND ITS CORRECTNESS IS NOT CHECKED HERE — a provider that returns wrong offsets produces wrong periods, which is the honest cost of injection; what the core does guarantee is that the release is recorded. (4) NO CONSUMER MIGRATED — budgets and Monitor could read this and do not yet. (5) ★ THE DST POLICY RESOLVES, IT DOES NOT PREDICT — it says what to do with a local time that does not exist or happens twice; it cannot know which the author meant. (6) A FIXED-OFFSET ANCHOR IS KEPT — as a labelled lesser thing, since real data arrives carrying only an offset and refusing it outright would be dishonest about that.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. The first step is small and is not RRULE: store `state.calendar` entries as rules rather than instants, so there is something to recompute.",
+    "not_a_divergence_in": "R1 behaviour. Purely additive: a new module, no call site in `execute`, no change to `Event` or `Window`, no new crate dependency, and no existing vector touched."
+  },
+  "fixture": {
+    "why": "The household's real anchor and a DST-observing counterparty, because Nairobi cannot exercise the machinery it makes vacuous. Two tzdata releases of the same zone, because that is the whole reason the expansion is not stored.",
+    "dtstart": {"year": 2026, "month": 8, "day": 1, "hour": 0, "minute": 0, "second": 0},
+    "tzid": "Africa/Nairobi",
+    "rrule": "FREQ=MONTHLY;BYMONTHDAY=1",
+    "providers": {
+      "nairobi_2026a": {"version": "2026a", "offset_hours": 3,
+                        "note": "EAT, +03:00, no DST — §VIII's vacuous local case"},
+      "nairobi_2027b": {"version": "2027b", "offset_hours": 4,
+                        "note": "★ a LATER release in which the zone's offset changed"},
+      "berlin_2026a": {"version": "2026a",
+                       "note": "★ the DST-observing counterparty. Spring forward 2026-03-29 02:00→03:00; fall back 2026-10-25 03:00→02:00"}
+    }
+  },
+  "partition_cases": [
+    {
+      "name": "★★_a_YEAR_is_the_SUM_OF_ITS_TWELVE_MONTHS_and_not_one_instant_more",
+      "why": "★★ Dijkstra (EWD831) at the place it actually matters — the roll-up ρ correctness point. Twelve half-open months must cover the year exactly: the durations sum to the span, each period's end IS the next one's start, and no boundary instant is counted twice. Closed intervals would give the year the months **plus twelve boundary instants**, which is how a monthly total quietly stops adding up to an annual one.",
+      "expect": {"periods": 12, "span_days": 365, "durations_sum_to_span": true, "partitions": true,
+                 "first_start_local": "2026-08-01", "last_end_local": "2027-08-01"}
+    },
+    {
+      "name": "★★_a_boundary_instant_belongs_to_EXACTLY_ONE_month",
+      "why": "★★ The concrete form of *not the months plus twelve boundary instants*, asserted over every boundary rather than argued once. An event at exactly a month start is in that month and in no other; the very last end lies outside the covered span, which is correct for a half-open partition — it belongs to the thirteenth month, not to none.",
+      "expect": {"every_interior_boundary_hits_exactly_one": true, "no_boundary_hits_two": true}
+    },
+    {
+      "name": "★_the_partition_is_STRUCTURAL_not_checked",
+      "why": "★ The expansion emits `[occ[i], occ[i+1])`, so each period's end *is* the next one's start — a gap or an overlap is not something the code avoids, it is something the construction cannot express. `partitions()` exists for a consumer assembling periods from elsewhere, which has no such guarantee.",
+      "expect": {"holds_for_daily_across_a_dst_transition": true, "holds_at_interval_3": true}
+    }
+  ],
+  "store_the_rule_cases": [
+    {
+      "name": "★★_THE_SAME_RULE_EXPANDS_DIFFERENTLY_under_a_different_tzdata_release",
+      "why": "★★ THE REASON THE EXPANSION IS NOT STORED, run rather than described. One rule, two releases of the same zone, two different instants — while the LOCAL time is identical in both, which is the point: the rule still says *the 1st at midnight in Nairobi*, and what that means in UTC moved. A persisted expansion would have kept the older answer with nothing to detect it, which is exactly what `state.calendar.events` does today.",
+      "expect": {"local_times_identical": true, "instants_differ": true, "shift_hours": -1,
+                 "old_version": "2026a", "new_version": "2027b"}
+    },
+    {
+      "name": "★★_the_stored_rule_holds_NO_INSTANTS",
+      "why": "★★ Structural rather than conventional: `Recurrence` has no field of expanded periods and no constructor that accepts one, so *store the rule* is a property of the type rather than something a reviewer has to keep enforcing. Checked through serialisation, since the stored form is what would go in a database — the JSON carries the whole recurrence and no window.",
+      "expect": {"round_trips": true, "json_contains_no_window": true, "expands_identically_after_round_trip": true}
+    },
+    {
+      "name": "expansion_is_a_pure_function_of_the_rule_and_the_tz_data",
+      "why": "The other half of *recompute*: with the same provider the answer is byte-identical every time, so recomputing is free of surprise. Determinism is what makes deriving-on-demand a viable substitute for storing.",
+      "expect": {"two_calls_equal": true}
+    }
+  ],
+  "zone_anchor_cases": [
+    {
+      "name": "★_a_ZONE_ANCHORED_period_records_the_tzdata_that_derived_it",
+      "why": "★ §VIII's versioning point made answerable: given a period, which tz release produced it? A zone-anchored one can say. That is what makes the difference between the two releases above **diagnosable** rather than merely real.",
+      "expect": {"tzdata_version": "2026a", "tzid": "Africa/Nairobi"}
+    },
+    {
+      "name": "★★_a_FIXED_OFFSET_anchor_is_a_DISTINCT_LESSER_THING_not_a_silent_equal",
+      "why": "★★ The brief's requirement, and the honest reading of it. A bare `+03:00` is kept — real data arrives carrying only an offset, and refusing it outright would be dishonest about that — but it is **never mistakable** for the real thing: it consults no tz data at all, and its periods carry `tzdata_version: None`, so a period whose derivation cannot be traced to a release is always distinguishable from one that can. ★ And the trap is shown rather than warned about: today the fixed offset agrees with the zone exactly, and under the revised release the zone-anchored period moves while the fixed-offset one does not. Agreeing today is precisely why it would be adopted, and precisely why it is wrong.",
+      "expect": {"tzdata_version": null, "tzid": null, "agrees_with_zone_today": true,
+                 "diverges_under_the_revised_release": true}
+    },
+    {
+      "name": "an_unknown_zone_is_refused_by_the_supplied_tz_data",
+      "why": "The provider is the authority on which zones exist, and it says so with its own version attached — a zone that is unknown under one release may be known under another, and the error records which release did not know it.",
+      "expect": {"error": "UnknownZone"}
+    }
+  ],
+  "dst_cases": [
+    {
+      "name": "★★_the_DST_machinery_is_exercised_by_a_DST_OBSERVING_COUNTERPARTY",
+      "why": "★★ §VIII is explicit that Nairobi's local DST case is **vacuous** — EAT observes none — and that the machinery must still be tested. So it is tested where it is not vacuous: daily periods across Berlin's 2026 spring-forward give a **23-hour day**, and across its fall-back a **25-hour day**. Both still partition exactly, short and long hour and all, which is the property that would break first if the offset were applied at the wrong end.",
+      "expect": {"spring_forward_day_hours": 23, "neighbour_day_hours": 24,
+                 "fall_back_day_hours": 25, "still_partitions": true}
+    },
+    {
+      "name": "★_a_NONEXISTENT_local_start_is_refused_under_a_policy_that_says_so",
+      "why": "★ 02:30 on a spring-forward morning is not a time that happened. Under `Refuse` the expansion says so and names the gap, rather than quietly picking an instant — for a period **boundary**, which decides which events belong, an invented instant silently reassigns data.",
+      "expect": {"error": "NonexistentLocalTime"}
+    },
+    {
+      "name": "★★_an_AMBIGUOUS_local_start_resolves_by_the_DECLARED_policy_never_a_default",
+      "why": "★★ 02:30 on a fall-back morning happens twice, and there is no correct answer — only a declared one. `DstPolicy` implements no `Default`, the same discipline EVT-6 applies to `Lateness`: an awkward case that has not been decided is not the same as one decided quietly. The case runs the same local time under three declared policies and gets three real answers, the two instants genuinely an hour apart.",
+      "expect": {"use_earlier_and_use_later_differ_by_hours": 1, "refuse_errors": true, "has_no_default": true}
+    }
+  ],
+  "grammar_cases": [
+    {
+      "name": "★_MONTHLY_SKIPS_a_month_with_no_such_day_rather_than_clamping",
+      "why": "★ RFC-5545 skips invalid dates. Clamping 31 January to 28 February would **invent an occurrence the rule never selected** — and a budget period that silently appeared three days early is a wrong answer, not a rounding. `BYMONTHDAY=31` from January therefore yields January, March, May.",
+      "expect": {"starts": ["2026-01-31", "2026-03-31", "2026-05-31"], "february_skipped": true}
+    },
+    {
+      "name": "weekly_byday_lands_on_the_declared_weekday",
+      "why": "`BYDAY=MO` from a Saturday `DTSTART` starts at the following Monday, not at `DTSTART`, and every period is exactly seven days.",
+      "expect": {"first_start_local": "2026-08-03", "weekday": "MO", "period_days": 7}
+    },
+    {
+      "name": "interval_spaces_the_periods_out_and_the_partition_survives_it",
+      "why": "`INTERVAL=3` makes quarters out of the monthly rule — and they still partition, because the end of each is still the start of the next whatever the spacing.",
+      "expect": {"first_start_local": "2026-08-01", "first_end_local": "2026-11-01", "partitions": true}
+    },
+    {
+      "name": "a_nonsense_rule_is_refused_at_expansion_rather_than_looping_or_guessing",
+      "why": "`INTERVAL=0` would repeat one instant forever; `BYMONTHDAY=32` is not a day of any month; a `DTSTART` of 30 February is not a date. Each is a distinct named error rather than an empty result, because an empty answer and a malformed rule are different facts.",
+      "expect": {"zero_interval": "ZeroInterval", "bad_month_day": "BadMonthDay", "bad_dtstart": "BadDtStart"}
+    },
+    {
+      "name": "zero_periods_is_an_empty_answer_not_an_error",
+      "why": "Asking for none is a legitimate question with a legitimate answer. Erroring would conflate *you asked for nothing* with *the rule is broken*.",
+      "expect": {"empty": true}
+    }
+  ],
+  "one_primitive_cases": [
+    {
+      "name": "★_a_period_hands_out_an_EVT_6_WINDOW_carrying_the_declared_lateness",
+      "why": "★ Not a second interval type — a consumer that already knows how to close a window on a watermark needs nothing new, which is the whole of *one primitive, many consumers*. And EVT-6's mandatory lateness rides through from the rule: because a window cannot exist without a policy, neither can a recurring period, which is the coupling working rather than being described.",
+      "expect": {"window_lateness_matches_the_rule": true}
+    },
+    {
+      "name": "★★_a_period_closes_ONLY_on_a_watermark_reaching_its_end",
+      "why": "★★ §VIII's *same object seen twice*, completed and checked in one place: `[a,b)` decided which events belong, and `W ≥ b` decides when we may answer. A watermark taken at the period's own end but carrying an honest out-of-orderness bound does **not** close it — the period's boundary passing on the clock is not permission to answer, exactly as EVT-6 requires.",
+      "expect": {"short_watermark_does_not_close": true, "reaching_watermark_closes": true}
+    }
+  ]
+}

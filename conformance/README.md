@@ -119,6 +119,7 @@ conformance/
     obligation.json     g ⟹ wp(e,Q) at author time      (spec, R2)
     clocks.json         two clocks · skew · provenance   (spec, R2)
     watermark.json      W(τ) · windows · lateness policy (spec, R2)
+    period.json         RRULE · zone anchoring · [a,b)  (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -863,3 +864,50 @@ it is a bug** — nothing silently differs.
   anchoring are EVT-11 and deliberately not started; and a retraction is
   **offered, not enforced** — a downstream that ignores it is still wrong, and
   nothing here can make it subtract.
+
+- **`period.json` — rust-ahead-of-python, with half of §VIII already landed and
+  the reference's calendar credited before it is faulted.** `RRULE`, `DTSTART`,
+  `TZID`, `rrule`, `dateutil` and `recurrence` are grep-0 — six clean zeros, and
+  the four `recurring` hits are all prose (a recurring *bill*, a recurring
+  *friction*, a polling schedule, a repeated parse template).
+  ★ **The counterweight is that this row was never wholly open:** EVT-6 built
+  `W ≥ b` and the bare half-open `Window` hours earlier, so what this slice
+  closed is specifically **recurrence + zone anchoring + store-the-rule**, not
+  periods from nothing.
+  ★ **And the reference's calendar is real code, not a stub.**
+  `operators/calendar.py` genuinely works — add/upcoming/remove over
+  `state.calendar.events`, ISO-8601 parsing, a UTC normalisation step, malformed
+  entries skipped rather than crashing. What it is not is a *rule*.
+  ★★ **A stored instant is the exact failure this row names**, which is worth
+  stating plainly rather than as a stylistic preference: `state.calendar.events`
+  holds expanded instants as truth, and §VIII says *"the rule is what should be
+  stored, and the expansion recomputed"* — so a revised tz release would leave
+  those instants quietly wrong with nothing to detect it. The conformance case
+  demonstrates precisely that failure: one rule, two releases, two instants,
+  identical local time.
+  ★★ **The dependency decision, recorded:** the tz database is **injected**
+  (`TzProvider`) rather than bundled, and §VIII's own argument is the reason
+  rather than ADR-0001 alone — a bundled database pins one release *invisibly*,
+  hiding the versioning the section exists to warn about. Supplied, the release
+  is nameable, and every derived period records the `tzdata_version` that
+  produced it. The line is drawn where the versioning is: **civil-calendar
+  arithmetic is a fixed algorithm** (leap years and month lengths do not get
+  revised) and is computed here with a round-trip test; **timezone offsets are
+  versioned data** and are never computed, only asked for. **No new crate
+  dependency was added.**
+  **Greppable false positives named:** `calendar` hits real, working code —
+  named so the RRULE zero is not misread as *there is no calendar*.
+  `timezone.utc` appears 36 times and is a normalisation **to** UTC, which is
+  the opposite move from anchoring: it discards the zone §VIII wants kept.
+  `budget.allocate`'s `period` param is a free-text label (`'monthly'`), not an
+  interval, and nothing expands it.
+  **Honest limits, six, one load-bearing:** ★★ **the RRULE grammar is partial** —
+  `FREQ=DAILY|WEEKLY|MONTHLY`, `INTERVAL`, `BYMONTHDAY`, `BYDAY` ship;
+  `COUNT`, `UNTIL`, `BYSETPOS`, `YEARLY`, `BYMONTH`, `BYWEEKNO`, `BYYEARDAY`,
+  `WKST`, `EXDATE`/`RDATE` and multi-value BY- lists do not, and are a named
+  slot rather than a claim. There is no `RRULE:` text parser (the rule is a
+  typed value); the supplied tz data's correctness is the host's problem and is
+  not checked here (what is guaranteed is that the release is recorded); **no
+  consumer has been migrated onto the primitive**, so it is ready rather than in
+  use; the DST policy resolves rather than predicts; and a fixed-offset anchor
+  is kept, as a labelled lesser thing.
