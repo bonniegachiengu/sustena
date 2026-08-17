@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use sustena_core::{
     curated::{
         attention_cost, compose_view, knapsack_select, BindingKey, BindingTable, Eligibility,
-        PolicyError, Request, SaliencePolicy, UrgencyBasis, WidgetCandidate,
+        rank_selection, PolicyError, Request, SaliencePolicy, UrgencyBasis, WidgetCandidate,
     },
     editing::Definition,
     event::{CausalStamp, Event, Provenance},
@@ -91,6 +91,7 @@ fn candidate(id: &str, cost: usize, score: f64) -> WidgetCandidate {
         cost,
         urgency: score,
         basis: UrgencyBasis::Bounded,
+        rank: 0,
         relevance: 0.0,
         score,
         why: Eligibility::AlwaysEligible,
@@ -431,6 +432,118 @@ fn an_empty_field_selects_nothing_and_says_so() {
     assert!(selected.is_empty() && excluded.is_empty());
 }
 
+// ── UI-13: the third salience surface — ORDERING ─────────────────────────────
+
+/// Two widgets that tie on score, urgency and cost.
+fn tied_pair(first: &str, second: &str) -> WidgetSet {
+    load(vec![
+        WidgetDecl::new(first, "card").unit().reading("balance"),
+        WidgetDecl::new(second, "card").unit().reading("stock"),
+    ])
+}
+
+fn tied_state() -> Value {
+    json!({"balance": 160.0, "stock": 160.0, "mood": 50.0})
+}
+
+fn compose_tied(set: &WidgetSet) -> sustena_core::curated::View {
+    compose_view(
+        set,
+        &region(),
+        &tied_state(),
+        &[],
+        &Request::default(),
+        &SaliencePolicy::default(),
+    )
+}
+
+#[test]
+fn ordering_follows_the_score_a_widget_cannot_set() {
+    let set = load(vec![
+        WidgetDecl::new("zzz_urgent", "card").unit().reading("balance"),
+        WidgetDecl::new("aaa_calm", "card").unit().reading("mood"),
+    ]);
+    let view = compose_view(
+        &set,
+        &region(),
+        &json!({"balance": 160.0, "stock": 50.0, "mood": 50.0}),
+        &[],
+        &Request::default(),
+        &SaliencePolicy::default(),
+    );
+    assert_eq!(view.selected[0].id, "zzz_urgent", "alphabetically last, by score first");
+    assert!(view.selected[0].rank < view.selected[1].rank);
+}
+
+#[test]
+fn renaming_a_widget_changes_neither_its_rank_nor_its_position() {
+    // ★★★ THE PROPERTY. Two peers; rename one to sort first alphabetically.
+    let before = compose_tied(&tied_pair("m_one", "m_two"));
+    let after = compose_tied(&tied_pair("m_one", "aaa_two"));
+    assert_eq!(before.selected[0].id, "m_one");
+    assert_eq!(after.selected[0].id, "m_one", "a rename must not stage a position");
+    assert_eq!(
+        before.selected.iter().map(|c| c.rank).collect::<Vec<_>>(),
+        after.selected.iter().map(|c| c.rank).collect::<Vec<_>>(),
+    );
+}
+
+#[test]
+fn a_tie_is_declared_rather_than_broken() {
+    let view = compose_tied(&tied_pair("m_one", "m_two"));
+    assert_eq!(view.selected.len(), 2);
+    assert_eq!(view.selected[0].score, view.selected[1].score);
+    assert_eq!(view.selected[0].rank, view.selected[1].rank, "peers, and it says so");
+}
+
+#[test]
+fn the_residual_order_is_the_households_declaration_order() {
+    // ★ The household may reorder peers; the widget may not.
+    let a = compose_tied(&tied_pair("m_one", "m_two"));
+    let b = compose_tied(&tied_pair("m_two", "m_one"));
+    assert_eq!(a.selected[0].id, "m_one");
+    assert_eq!(b.selected[0].id, "m_two");
+    assert_eq!(a.selected[0].rank, b.selected[0].rank, "and the rank is unmoved either way");
+}
+
+#[test]
+fn cost_breaks_a_score_tie_and_cost_is_derived() {
+    let mut cheap = candidate("cheap", 1, 0.5);
+    cheap.urgency = 0.5;
+    let mut dear = candidate("dear", 4, 0.5);
+    dear.urgency = 0.5;
+    let mut items = vec![dear, cheap];
+    rank_selection(&mut items);
+    assert_eq!(items[0].id, "cheap");
+    assert!(items[0].rank < items[1].rank);
+}
+
+#[test]
+fn urgency_breaks_a_score_tie_before_a_query_can() {
+    let mut urgent = candidate("urgent", 2, 0.5);
+    urgent.urgency = 0.6;
+    urgent.relevance = 0.2;
+    let mut relevant = candidate("relevant", 2, 0.5);
+    relevant.urgency = 0.2;
+    relevant.relevance = 0.9;
+    let mut items = vec![relevant, urgent];
+    rank_selection(&mut items);
+    assert_eq!(items[0].id, "urgent", "a search term cannot outrank distance-to-V");
+}
+
+#[test]
+fn ranks_are_positions_not_a_dense_sequence() {
+    let mut a = candidate("a", 1, 0.9);
+    a.urgency = 0.9;
+    let mut b = candidate("b", 1, 0.9);
+    b.urgency = 0.9;
+    let mut c = candidate("c", 1, 0.1);
+    c.urgency = 0.1;
+    let mut items = vec![a, b, c];
+    rank_selection(&mut items);
+    assert_eq!(items.iter().map(|i| i.rank).collect::<Vec<_>>(), vec![0, 0, 2]);
+}
+
 // ── read-only ────────────────────────────────────────────────────────────────
 
 #[test]
@@ -517,6 +630,18 @@ fn the_recorded_divergence_keeps_its_counterweight() {
     let weights = d["★★_the_weights_are_now_DECLARED_POLICY_not_a_module_constant"].as_str().unwrap();
     assert!(weights.contains("may not argue urgency into second place"));
 
+    // ★★★ UI-13: the third surface, and that it was genuinely open.
+    let ordering = d["★★★_UI_13_the_THIRD_surface_was_ORDERING_and_it_was_genuinely_open"]
+        .as_str()
+        .unwrap();
+    assert!(ordering.contains("BTreeMap"), "the mechanism of the leak must stay named");
+    assert!(ordering.contains("stable"), "the stable-sort half must stay named");
+    assert!(ordering.contains("declared rather than broken"));
+    let three = d["★★★_all_THREE_salience_surfaces_now_covered"].as_str().unwrap();
+    for surface in ["MON-7", "UI-1", "UI-7", "UI-13"] {
+        assert!(three.contains(surface), "surface {surface} must stay named");
+    }
+
     // The sentinel collision must stay described as theoretical, not inflated.
     assert!(step0["★★_2_the_one_sharpening_that_IS_worth_it_the_UNION_AS_A_SUM_TYPE"]
         .as_str()
@@ -559,6 +684,8 @@ fn the_recorded_divergence_keeps_its_counterweight() {
         "UNDECLARED IS REPORTED, NOT PENALISED",
         "THE BASIS IS PER-WIDGET, NOT PER-DIMENSION-OF-THE-SUM",
         "THE SUM-TO-ONE RULE IS A CONSTRAINT ON THE ARGUMENT, NOT A DERIVATION",
+        "A SURFACE MUST RENDER `rank`, NOT THE ARRAY INDEX",
+        "THE HOUSEHOLD CAN STILL ORDER ITS PEERS",
     ] {
         assert!(limits.contains(term), "missing limit: {term}");
     }
@@ -574,5 +701,5 @@ fn the_recorded_divergence_keeps_its_counterweight() {
             assert!(seen.insert(c["name"].as_str().unwrap().to_string()), "duplicate case name");
         }
     }
-    assert_eq!(seen.len(), 24, "every declared case must be present");
+    assert_eq!(seen.len(), 31, "every declared case must be present");
 }

@@ -294,6 +294,16 @@ impl WidgetEmission {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WidgetSet {
     widgets: BTreeMap<String, LoadedWidget>,
+    /// ★★ **The order the household DECLARED them in** (UI-13).
+    ///
+    /// The map is keyed by id for lookup, and iterating a `BTreeMap` is
+    /// alphabetical — which would make **the widget's own name** the residual
+    /// ordering lever wherever nothing else separates two widgets. A widget
+    /// naming itself `aaa_spending` to sit above `zzz_spending` is the same
+    /// Goodhart move as staging its own brightness, so the residual order is
+    /// kept as the **host's** declaration order instead: the household's lever,
+    /// never the widget's.
+    order: Vec<String>,
     /// A cheap structural key for the definition this set was checked against.
     checked_against: DefinitionKey,
 }
@@ -329,6 +339,7 @@ impl WidgetSet {
     ) -> Result<WidgetSet, Vec<LoadError>> {
         let mut errors = Vec::new();
         let mut widgets: BTreeMap<String, LoadedWidget> = BTreeMap::new();
+        let mut order: Vec<String> = Vec::new();
         let permitted: BTreeSet<&str> = definition.operators.iter().map(String::as_str).collect();
 
         for decl in decls {
@@ -371,11 +382,12 @@ impl WidgetSet {
                 errors.push(LoadError::DuplicateId { widget: decl.id.clone() });
                 continue;
             }
+            order.push(decl.id.clone());
             widgets.insert(decl.id.clone(), LoadedWidget { decl });
         }
 
         if errors.is_empty() {
-            Ok(WidgetSet { widgets, checked_against: DefinitionKey::of(definition) })
+            Ok(WidgetSet { widgets, order, checked_against: DefinitionKey::of(definition) })
         } else {
             Err(errors)
         }
@@ -385,8 +397,9 @@ impl WidgetSet {
         self.widgets.get(id)
     }
 
+    /// In **declaration order** — see [`WidgetSet::order`]'s reasoning.
     pub fn iter(&self) -> impl Iterator<Item = &LoadedWidget> {
-        self.widgets.values()
+        self.order.iter().filter_map(|id| self.widgets.get(id))
     }
 
     pub fn len(&self) -> usize {

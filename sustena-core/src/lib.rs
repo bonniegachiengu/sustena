@@ -295,7 +295,8 @@ pub use widget::{
     EmitError, LoadError, LoadedWidget, WidgetDecl, WidgetEmission, WidgetSet,
 };
 pub use curated::{
-    attention_cost, compose_view, knapsack_select, salience, BindingKey, BindingTable,
+    attention_cost, compose_view, knapsack_select, rank_selection, salience, BindingKey,
+    BindingTable, PolicyError, SaliencePolicy, UrgencyBasis,
     Eligibility, Request, View, WidgetCandidate,
 };
 pub use principal::{

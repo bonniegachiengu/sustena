@@ -1928,3 +1928,38 @@ up would fabricate the household's concern); the basis is **per-widget**, so a
 mixed reader reads `Undeclared` (conservative, stated); and sum-to-one
 constrains the argument without deriving the ratio — nothing makes `0.75`
 correct.
+
+**Extended 2026-08-17 by UI-13 (+7 cases), and it found a third lever.**
+★★★ *Salience is never rendered as salience* has **three** surfaces. Two were
+already shut — **brightness** (MON-7: field-relative, no `VisualSpec`
+constructor) and **score** (UI-1/UI-7: `d(s,V)`, derived cost, household
+weights). The third, **position**, had been claimed by no row and was **open**:
+`WidgetSet` is a `BTreeMap` keyed by widget id and Rust's `sort_by` is
+**stable**, so a score tie fell through to alphabetical order over a
+**widget-authored** name — `aaa_spending` outranked `zzz_spending` at identical
+score.
+
+★★ Closed by removing the lever, not policing it. `rank_selection` orders on
+**score** desc, **urgency** desc (so a search term cannot break a tie between
+two genuinely urgent cards) and **cost** asc (derived; and at equal value,
+spend less attention). ★★★ Past those the tie is **declared rather than
+broken**: peers share a `rank`, so **position carries no information the score
+did not already give**. Ranks are competition-style (`0, 0, 2`), so a reader
+can see the third card is behind two widgets, not behind one group.
+
+★★ The residual order among peers is the **household's declaration order** —
+`WidgetSet` now keeps the order it was loaded in — so **renaming a widget
+changes neither its rank nor its position**, while the household can still
+reorder its peers. The lever moved from the widget to the household.
+
+★★★ **All three surfaces covered:** a widget can raise its prominence in
+exactly one way — **by the household genuinely being further from its viable
+region on a dimension the widget declared it reads.**
+
+★ **Divergence:** the concern is the reference's own and is at parity as a
+concern; its `knapsack_select` sorts by score with Python's `sort`, also
+**stable**, so its ties fall through to insertion order — not score-derived
+either, and neither side reported a tie before this. **Residuals:** a surface
+must render `rank`, **not** the array index (the core reports the tie; it
+cannot force a renderer to honour it), and the household can still order its
+peers, deliberately.

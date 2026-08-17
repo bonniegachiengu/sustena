@@ -67,6 +67,38 @@
 //! widgets. **The greedy move is self-defeating**, and that is asserted rather
 //! than argued.
 //!
+//! ## ★★★ The third salience surface: ORDERING (UI-13)
+//!
+//! *Salience is never rendered as salience* has three surfaces a widget could
+//! try to stage its own prominence on, and the first two were already closed:
+//!
+//! 1. **Brightness** — MON-7. Field-relative, and `VisualSpec` has no public
+//!    constructor, so a widget cannot encode itself bright.
+//! 2. **Score** — UI-1 and UI-7. Urgency is the household's `d(s,V)`, cost is
+//!    **derived** from the declared inputs, and the weights are the
+//!    household's [`SaliencePolicy`], which refuses to let urgency be argued
+//!    into second place.
+//! 3. ★★★ **Position** — this row, and it was **genuinely open**. `WidgetSet`
+//!    is keyed by id and Rust's `sort_by` is *stable*, so wherever two widgets
+//!    tied on score the alphabetically-earlier **id** took the higher slot —
+//!    and the id is widget-authored. `aaa_spending` outranked `zzz_spending`
+//!    at identical score. Small, real, and exactly the Goodhart move.
+//!
+//! It is closed the way the other two were — by removing the lever rather than
+//! policing it. [`rank_selection`] orders on three keys a widget cannot set:
+//! **score** desc, then **urgency** desc, then **cost** asc (derived, and the
+//! right preference — cheaper first at equal value). Past those, two widgets
+//! are indistinguishable on every un-gameable axis, and rather than fabricate a
+//! winner the tie is **declared**: [`WidgetCandidate::rank`] is equal for tied
+//! peers, so **position carries no information the score did not already
+//! give**. The same discipline as `Skew::Unknown` and
+//! [`UrgencyBasis::Undeclared`] — do not invent a distinction you do not have.
+//!
+//! ★★ And the residual array order within a tied group is the **household's
+//! declaration order**, not the widget's name: `WidgetSet` keeps the order it
+//! was loaded in for exactly this reason. **Renaming a widget changes neither
+//! its rank nor its position**, which is the property asserted.
+//!
 //! ## The knapsack is real
 //!
 //! A genuine 0/1 DP over integer cost and scaled score, not a sort dressed up —
@@ -381,6 +413,15 @@ pub struct WidgetCandidate {
     /// ★★ Whether that number was **measured** — see [`UrgencyBasis`]. A `0`
     /// with an `Undeclared` basis is silence, not safety.
     pub basis: UrgencyBasis,
+    /// ★★★ Salience rank within the returned list, `0` first — and **equal for
+    /// widgets that tie on every un-gameable key** (UI-13).
+    ///
+    /// A surface should render *this*, not the array index: where two widgets
+    /// share a rank they are genuinely peers, and showing one above the other
+    /// as though it mattered is precisely the fabricated prominence this row is
+    /// about. Set by [`rank_selection`]; `0` on a candidate that has not been
+    /// through it.
+    pub rank: usize,
     pub relevance: f64,
     pub score: f64,
     pub why: Eligibility,
@@ -536,12 +577,54 @@ pub fn knapsack_select(
             excluded.push(cand.clone());
         }
     }
-    let by_score = |a: &WidgetCandidate, b: &WidgetCandidate| {
-        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
-    };
-    selected.sort_by(by_score);
-    excluded.sort_by(by_score);
+    rank_selection(&mut selected);
+    rank_selection(&mut excluded);
     (selected, excluded)
+}
+
+/// ★★★ Order a list on keys **a widget cannot set**, and declare the ties.
+///
+/// Three keys, in order, all un-gameable:
+///
+/// 1. **score** descending — the household's, via `d(s,V)` and its declared
+///    [`SaliencePolicy`].
+/// 2. **urgency** descending — the same signal without the relevance term, so a
+///    query cannot break a tie between two genuinely urgent cards.
+/// 3. **cost** ascending — **derived** from the declared inputs (UI-1), and the
+///    right preference: at equal value, spend less attention.
+///
+/// ★★ Past those three the widgets are indistinguishable on everything the
+/// household can measure, so **the tie is declared rather than broken**: they
+/// share a [`rank`](WidgetCandidate::rank). The array order among them is the
+/// order the set was **declared in** — the household's, never the widget's own
+/// name — so renaming a widget changes neither its rank nor its position.
+///
+/// `partial_cmp(...).unwrap_or(Equal)` is the total-order fallback and is
+/// **unreachable**: urgency is a clamp of a finite quotient, relevance a ratio
+/// of counts, and `SaliencePolicy` refuses a non-finite weight, so no score can
+/// be `NaN`. Named rather than left as a silent absorber.
+pub fn rank_selection(items: &mut [WidgetCandidate]) {
+    use std::cmp::Ordering;
+    // A STABLE sort, so anything the three keys leave tied keeps the order it
+    // arrived in — which is the declaration order, not an alphabetical one.
+    items.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| b.urgency.partial_cmp(&a.urgency).unwrap_or(Ordering::Equal))
+            .then_with(|| a.cost.cmp(&b.cost))
+    });
+
+    let tied = |a: &WidgetCandidate, b: &WidgetCandidate| {
+        a.score == b.score && a.urgency == b.urgency && a.cost == b.cost
+    };
+    let mut rank = 0usize;
+    for i in 0..items.len() {
+        if i > 0 && !tied(&items[i - 1], &items[i]) {
+            rank = i;
+        }
+        items[i].rank = rank;
+    }
 }
 
 /// `compose(r)` — resolve a curated view.
@@ -587,7 +670,7 @@ pub fn compose_view(
         }
     }
 
-    let mut candidates: Vec<WidgetCandidate> = eligible
+    let candidates: Vec<WidgetCandidate> = eligible
         .into_iter()
         .map(|(w, why)| {
             let urgency = urgency_of(w, region, state);
@@ -600,12 +683,18 @@ pub fn compose_view(
                 basis: basis_for(w, region),
                 relevance,
                 score: policy.score(urgency, relevance),
+                // Assigned by `rank_selection` once the field is known; a
+                // candidate cannot carry a rank it chose for itself.
+                rank: 0,
                 why,
             }
         })
         .collect();
-    // Deterministic input order, so the DP's tie-breaking is reproducible.
-    candidates.sort_by(|a, b| a.id.cmp(&b.id));
+    // ★★★ Deliberately NOT sorted by id. `WidgetSet` iterates in declaration
+    // order, and that is the order kept here — sorting by id would hand the
+    // residual tiebreak to the widget's own name, which is the lever UI-13
+    // closes. The DP's tie-breaking stays reproducible because the declaration
+    // order is.
 
     let considered = candidates.len();
     let (selected, excluded) = knapsack_select(&candidates, request.budget);
@@ -622,7 +711,7 @@ mod tests {
     use crate::operator::Registry;
     use crate::region::Interval;
     use crate::schema::{DimType, Schema};
-    use crate::widget::WidgetDecl;
+    use crate::widget::{WidgetDecl, WidgetSet};
     use serde_json::json;
 
     fn definition() -> Definition {
@@ -962,6 +1051,7 @@ mod tests {
             cost,
             urgency: score,
             basis: UrgencyBasis::Bounded,
+            rank: 0,
             relevance: 0.0,
             score,
             why: Eligibility::AlwaysEligible,
@@ -1023,6 +1113,158 @@ mod tests {
     fn an_empty_field_selects_nothing_and_says_so() {
         let (selected, excluded) = knapsack_select(&[], 4);
         assert!(selected.is_empty() && excluded.is_empty());
+    }
+
+    // ── UI-13: the third salience surface — ORDERING ─────────────────────────
+
+    /// Two widgets that tie on score, urgency and cost. Under the old
+    /// behaviour the alphabetically-earlier id took the higher slot.
+    fn tied_pair(first: &str, second: &str) -> WidgetSet {
+        load(vec![
+            WidgetDecl::new(first, "card").unit().reading("balance"),
+            WidgetDecl::new(second, "card").unit().reading("stock"),
+        ])
+    }
+
+    fn tied_state() -> Value {
+        // balance and stock breached by the same amount, so the two widgets
+        // read identical urgency.
+        json!({"balance": 160.0, "stock": 160.0, "mood": 50.0})
+    }
+
+    #[test]
+    fn ordering_follows_the_score_a_widget_cannot_set() {
+        let set = load(vec![
+            WidgetDecl::new("zzz_urgent", "card").unit().reading("balance"),
+            WidgetDecl::new("aaa_calm", "card").unit().reading("mood"),
+        ]);
+        let view = compose_view(
+            &set,
+            &region(),
+            &json!({"balance": 160.0, "stock": 50.0, "mood": 50.0}),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        // Alphabetically `aaa_calm` comes first; by score it does not.
+        assert_eq!(view.selected[0].id, "zzz_urgent");
+        assert!(view.selected[0].rank < view.selected[1].rank);
+    }
+
+    #[test]
+    fn renaming_a_widget_changes_neither_its_rank_nor_its_position() {
+        // ★★★ THE PROPERTY. Two widgets tied on every un-gameable key. Rename
+        // the second to sort first alphabetically — and nothing moves.
+        let before = compose_view(
+            &tied_pair("m_one", "m_two"),
+            &region(),
+            &tied_state(),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        let after = compose_view(
+            &tied_pair("m_one", "aaa_two"),
+            &region(),
+            &tied_state(),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        assert_eq!(before.selected[0].id, "m_one");
+        assert_eq!(after.selected[0].id, "m_one", "a rename must not stage a position");
+        assert_eq!(
+            before.selected.iter().map(|c| c.rank).collect::<Vec<_>>(),
+            after.selected.iter().map(|c| c.rank).collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn a_tie_is_declared_rather_than_broken() {
+        // ★★ Equal rank for genuine peers: position carries no information the
+        // score did not already give.
+        let view = compose_view(
+            &tied_pair("m_one", "m_two"),
+            &region(),
+            &tied_state(),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        assert_eq!(view.selected.len(), 2);
+        assert_eq!(view.selected[0].score, view.selected[1].score);
+        assert_eq!(view.selected[0].rank, view.selected[1].rank, "peers, and it says so");
+        assert_eq!(view.selected[0].rank, 0);
+    }
+
+    #[test]
+    fn the_residual_order_is_the_households_declaration_order() {
+        // ★ The household CAN reorder tied peers — it declared them. The
+        // widget cannot. Same two widgets, swapped in the declaration.
+        let a = compose_view(
+            &tied_pair("m_one", "m_two"),
+            &region(),
+            &tied_state(),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        let b = compose_view(
+            &tied_pair("m_two", "m_one"),
+            &region(),
+            &tied_state(),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        assert_eq!(a.selected[0].id, "m_one");
+        assert_eq!(b.selected[0].id, "m_two");
+        assert_eq!(a.selected[0].rank, b.selected[0].rank, "and the rank is unmoved either way");
+    }
+
+    #[test]
+    fn cost_breaks_a_score_tie_and_cost_is_derived() {
+        // At equal score and urgency the cheaper widget ranks first — and cost
+        // comes from the declared inputs, so a widget cannot buy the slot.
+        let mut cheap = candidate("cheap", 1, 0.5);
+        cheap.urgency = 0.5;
+        let mut dear = candidate("dear", 4, 0.5);
+        dear.urgency = 0.5;
+        let mut items = vec![dear, cheap];
+        rank_selection(&mut items);
+        assert_eq!(items[0].id, "cheap");
+        assert!(items[0].rank < items[1].rank, "not a tie: cost separated them");
+    }
+
+    #[test]
+    fn urgency_breaks_a_score_tie_before_a_query_can() {
+        // Two cards reaching the same score by different routes: one urgent
+        // and irrelevant, one relevant and calm. Urgency wins the tiebreak, so
+        // a search term cannot outrank the household's own distance-to-V.
+        let mut urgent = candidate("urgent", 2, 0.5);
+        urgent.urgency = 0.6;
+        urgent.relevance = 0.2;
+        let mut relevant = candidate("relevant", 2, 0.5);
+        relevant.urgency = 0.2;
+        relevant.relevance = 0.9;
+        let mut items = vec![relevant, urgent];
+        rank_selection(&mut items);
+        assert_eq!(items[0].id, "urgent");
+    }
+
+    #[test]
+    fn ranks_are_positions_not_a_dense_sequence() {
+        // Two peers then a third: ranks 0, 0, 2 — so a reader can see that the
+        // third is genuinely behind two, not behind one group.
+        let mut a = candidate("a", 1, 0.9);
+        a.urgency = 0.9;
+        let mut b = candidate("b", 1, 0.9);
+        b.urgency = 0.9;
+        let mut c = candidate("c", 1, 0.1);
+        c.urgency = 0.1;
+        let mut items = vec![a, b, c];
+        rank_selection(&mut items);
+        assert_eq!(items.iter().map(|i| i.rank).collect::<Vec<_>>(), vec![0, 0, 2]);
     }
 
     // ── relevance ────────────────────────────────────────────────────────────
