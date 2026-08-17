@@ -52,6 +52,33 @@
 
 ---
 
+## Delivery phasing (2026-08-17)
+
+*An index over rows that already carry full detail below — the agreed order of attack, not a re-description. Row IDs are the contract; read the rows for what each one is.*
+
+**Phase 1 — Foundation.** The substrate the rest stands on.
+- **Operator:** **OP-3** (🔨 — `wp` is built, the static author-time obligation `g ⟹ wp(e,Q)` is not; **OP-5**, checked composition itself, is already ✅).
+- **Events & Time substrate:** **EVT-6** (watermarks + per-window lateness), **EVT-11** (periods, `RRULE` recurrence), **EVT-12** (replay + checkpointing), **EVT-10** (dimension-kind typing — snapshot vs accumulating; ties to M-DSL). Adjacent and open in the same layer: **EVT-1** (🔨 — `t_ingest`, `source`, provenance on the Rust record), **EVT-5**, **EVT-14**, **EVT-15** (⬜ — blocks M-TEN and M-EDIT).
+- **The firewall `F` — one predicate, two homes:** **CON-1** (🔨 — `C` ✅, `D` ✅, **`F` ⬜**) and **CON-2**'s standing *"`F` pending"*; the boundary it ranges over is **SUS-7** (⬜ — `B = ⟨scope, μ⟩`, today only a flat `owner_ids`), with **SUS-8** and **OP-10**'s boundary-change higher-gate ⬜ downstream of it. **IMM-1** closes with the same `D, F ⬜`.
+
+**Phase 2 — Cognition assembly.** The mathematics is done; this is wiring.
+- **Monitor:** **MON-8** (belief state / POMDP), **MON-7** (preattentive encoder), **MON-13** (harmonics — consumes `signal.rs`), **MON-1** (observability), **MON-3** (three pillars — traces), **MON-4** (stream processing). **MON-2 is not work** — the Kalman filter is the *declined import*, recorded as declined rather than pending.
+- **Controller:** **CTL-6** (IoT bridge), **CTL-8** (persistent-panel invariant), **CTL-11** (damping), plus **CTL-1**; **CTL-9**'s host driver stays outside core by design.
+
+**Phase 3 — Surface + Immune.**
+- **Editing:** **EDIT-13**, **EDIT-14**, **EDIT-15**, **EDIT-16**. ⚠ **EDIT-11 is blocked on the semantic reducer — sequence around it**, do not lead with it.
+- **Curated UI in Rust:** **UI-1 … UI-15**, with **UI-2** (*the type-checker is not on the load path*) called out as the one that changes a real property rather than adding a surface.
+- **Immune:** **IMM-7** (approval token in the immune framing), **IMM-10**, **IMM-11**, **IMM-12**; **IMM-6** is 🔨 (edge privileges enforced) and **IMM-1** completes with Phase 1's `F`.
+
+**Phase 4 — DSL.** The one large shallow chunk: **DSL-1**'s type-check half (⬜), **DSL-5**, **DSL-8**, **DSL-9**, **DSL-10**, **DSL-12**, **DSL-13**, then **DSL-14** (the friendlier authoring surface, correctly last). *Note: the predicate-grammar gaps the snapshot names — arithmetic and dynamic bracket indexing — have no row of their own; they sit under **DSL-1** and were disclosed as spec findings, not invented for this phasing.*
+
+**⏸️ DOUBLE-BACK — deferred, and deliberately as one deep bundle.** **OPV-4** (`Π`, the operator-DAG) plus the rows that only mean anything once it exists: **OPV-6** (learning / `vary`·`select`·`retain`), **OPV-7** (attention), **OPV-11** (`M_self` / `M_world`). Splitting them would mean building three consumers of a thing that is not there.
+- ★ **Return trigger, recorded so it is not left to memory:** Phases 1–4 cleared → **the deep bundle is the immediate next work**; **OR** any shallow row turns out to genuinely depend on `Π` → **do `Π` then, not later**. The second clause is the one that matters — a discovered dependency is a signal, not an inconvenience to route around.
+
+**⏸️ PARKED — standing decision, documented rather than forgotten.** The whole **Economy layer** (`M-PAWA`, and `MYC-5`'s treasury/settlement schedule with it). Not sequenced into any phase above; it re-enters only by an explicit decision to un-park it.
+
+---
+
 ## The WBD — by layer, in dependency order
 
 *Dependency order (from the capstone §9.1): Events & Time → DSL → Sustain-design → Operator → Constraint → Ingest → Monitor → (Curated UI ∥ Tenet → Operative → Multiparty); Editing after the operator path; Controller threads through from the first gate check onward.*

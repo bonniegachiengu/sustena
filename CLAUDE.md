@@ -21,6 +21,27 @@ Current roadmap: `docs/Sustena_XII_Roadmap_Jun2026.md` ← read this for sprint 
 
 ---
 
+## ★ There is a second, concurrent build: the Rust core
+
+**Everything in this file — every Sprint and every Slice below — is the PYTHON build**
+(`apps/api/`), which is live and in daily use. Alongside it, a **full rewrite of the core
+into Rust (`sustena-core`) is in progress**, built slice-by-slice from the technical
+articles and measured against the Python engine as the reference implementation.
+
+It is tracked in its own documents, not here:
+
+- **`docs/SUSTENA_UPGRADE_SPEC.md`** — the WBD. Every row of every article, with its
+  status, and the delivery phasing.
+- **`docs/R2_BACKLOG.md`** — what is built, what is next, current test counts.
+- **`conformance/README.md`** — the shared vectors, and the **recorded divergences**
+  between the two engines (which way each one leads, and why).
+
+Read those before touching `sustena-core/`. Do not infer the Rust core's state from this
+file's slice history, and do not update them from here — each slice updates its own rows
+as part of landing.
+
+---
+
 ## Repo layout
 
 ```
