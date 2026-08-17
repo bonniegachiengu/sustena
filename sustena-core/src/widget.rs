@@ -393,6 +393,19 @@ impl WidgetSet {
         }
     }
 
+    /// An empty set, checked against nothing. For a household that has
+    /// declared no widgets of a given kind — see [`crate::panel::PanelSet`].
+    pub fn empty() -> WidgetSet {
+        WidgetSet {
+            widgets: BTreeMap::new(),
+            order: Vec::new(),
+            checked_against: DefinitionKey {
+                dimensions: BTreeSet::new(),
+                operators: BTreeSet::new(),
+            },
+        }
+    }
+
     pub fn get(&self, id: &str) -> Option<&LoadedWidget> {
         self.widgets.get(id)
     }

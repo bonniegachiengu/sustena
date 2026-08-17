@@ -15,11 +15,13 @@ use serde_json::{json, Value};
 use sustena_core::{
     curated::{
         attention_cost, compose_view, knapsack_select, BindingKey, BindingTable, Eligibility,
-        rank_selection, PolicyError, Request, SaliencePolicy, UrgencyBasis, WidgetCandidate,
+        compose_with_panels, rank_selection, PolicyError, Request, SaliencePolicy,
+        UrgencyBasis, WidgetCandidate,
     },
     editing::Definition,
     event::{CausalStamp, Event, Provenance},
     operator::Registry,
+    panel::{PanelDecl, PanelSet},
     region::{Interval, Region},
     schema::{DimType, Schema},
     widget::{WidgetDecl, WidgetSet},
@@ -544,6 +546,136 @@ fn ranks_are_positions_not_a_dense_sequence() {
     assert_eq!(items.iter().map(|i| i.rank).collect::<Vec<_>>(), vec![0, 0, 2]);
 }
 
+// ── CTL-8: the persistent tier, outside the attention budget ─────────────────
+
+fn console_panel() -> PanelDecl {
+    PanelDecl::always(
+        WidgetDecl::new("console", "console").unit().reading("mood"),
+        "the console answers 'is anything running' in every state, not only a bad one",
+    )
+}
+
+fn panels(decls: Vec<PanelDecl>) -> PanelSet {
+    PanelSet::load(decls, &definition(), &Registry::default()).unwrap()
+}
+
+#[test]
+fn a_persistent_panel_is_shown_against_a_full_urgent_budget() {
+    // ★★★ THE PROPERTY.
+    let dynamic = load(vec![WidgetDecl::new("money", "card").unit().reading("balance")]);
+    let view = compose_with_panels(
+        &dynamic,
+        &panels(vec![console_panel()]),
+        &region(),
+        &json!({"balance": 900.0, "stock": 50.0, "mood": 50.0}),
+        &[],
+        &Request::default().with_budget(1),
+        &SaliencePolicy::default(),
+    );
+    assert_eq!(view.selected.len(), 1, "the budget is full");
+    assert_eq!(view.persistent.len(), 1, "and the panel is shown anyway");
+    assert_eq!(view.persistent[0].id, "console");
+}
+
+#[test]
+fn the_persistent_tier_does_not_consume_budget() {
+    let dynamic = load(vec![
+        WidgetDecl::new("a", "card").unit().reading("balance"),
+        WidgetDecl::new("b", "card").unit().reading("stock"),
+    ]);
+    let state = json!({"balance": 900.0, "stock": 900.0, "mood": 50.0});
+    let with_panel = compose_with_panels(&dynamic, &panels(vec![console_panel()]), &region(),
+                                         &state, &[], &Request::default(),
+                                         &SaliencePolicy::default());
+    let without = compose_with_panels(&dynamic, &PanelSet::none(), &region(), &state, &[],
+                                      &Request::default(), &SaliencePolicy::default());
+    assert_eq!(with_panel.spent, without.spent, "the panel cost nothing");
+    assert_eq!(
+        with_panel.selected.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+        without.selected.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+        "and displaced nobody"
+    );
+}
+
+#[test]
+fn a_persistent_panel_is_shown_when_nothing_is_wrong() {
+    let view = compose_with_panels(
+        &load(vec![]),
+        &panels(vec![console_panel()]),
+        &region(),
+        &json!({"balance": 50.0, "stock": 50.0, "mood": 50.0}),
+        &[],
+        &Request::default(),
+        &SaliencePolicy::default(),
+    );
+    assert!(view.selected.is_empty(), "nothing dynamic earns a slot");
+    assert_eq!(view.persistent.len(), 1, "and the panel is still there");
+}
+
+#[test]
+fn a_persistent_panel_carries_no_score_and_no_rank() {
+    let view = compose_with_panels(&load(vec![]), &panels(vec![console_panel()]), &region(),
+                                   &json!({"balance": 50.0}), &[], &Request::default(),
+                                   &SaliencePolicy::default());
+    let rendered = format!("{:?}", view.persistent[0]);
+    assert!(!rendered.contains("score") && !rendered.contains("rank"));
+    assert!(view.persistent[0].justification.contains("every state"));
+}
+
+#[test]
+fn a_when_active_panel_competes_like_any_widget() {
+    let quiet =
+        PanelDecl::when_active(WidgetDecl::new("quiet", "card").unit().reading("mood"));
+    let dynamic = load(vec![WidgetDecl::new("money", "card").unit().reading("balance")]);
+    let view = compose_with_panels(
+        &dynamic,
+        &panels(vec![quiet]),
+        &region(),
+        &json!({"balance": 900.0, "stock": 50.0, "mood": 50.0}),
+        &[],
+        &Request::default().with_budget(1),
+        &SaliencePolicy::default(),
+    );
+    assert!(view.persistent.is_empty(), "WHEN_ACTIVE is not the persistent tier");
+    assert_eq!(view.candidates_considered, 2, "but it did compete");
+    assert_eq!(view.selected[0].id, "money");
+}
+
+#[test]
+fn a_widget_cannot_declare_itself_persistent() {
+    // ★★★ Unspellable: WidgetDecl has no policy field. The same declaration
+    // lands in whichever tier the HOUSEHOLD put it in.
+    let w = WidgetDecl::new("same", "card").unit().reading("mood");
+    assert!(panels(vec![PanelDecl::always(w.clone(), "declared always")]).is_persistent("same"));
+    assert!(!panels(vec![PanelDecl::when_active(w)]).is_persistent("same"));
+}
+
+#[test]
+fn a_persistent_panel_must_argue_its_information_value() {
+    // ★★ No computed I(p) stands behind the claim, so the argument must.
+    assert!(matches!(
+        PanelSet::load(
+            vec![PanelDecl::always(WidgetDecl::new("c", "card").unit().reading("mood"), "  ")],
+            &definition(),
+            &Registry::default(),
+        ),
+        Err(sustena_core::panel::PanelError::UnjustifiedPersistence { .. })
+    ));
+}
+
+#[test]
+fn composing_twice_with_panels_gives_the_same_view() {
+    // No stored state: the persistent tier is re-derived, not remembered.
+    let p = panels(vec![console_panel()]);
+    let dynamic = load(vec![WidgetDecl::new("money", "card").unit().reading("balance")]);
+    let state = json!({"balance": 900.0, "stock": 50.0, "mood": 50.0});
+    let one = compose_with_panels(&dynamic, &p, &region(), &state, &[], &Request::default(),
+                                  &SaliencePolicy::default());
+    let two = compose_with_panels(&dynamic, &p, &region(), &state, &[], &Request::default(),
+                                  &SaliencePolicy::default());
+    assert_eq!(one, two);
+}
+
 // ── read-only ────────────────────────────────────────────────────────────────
 
 #[test]
@@ -642,6 +774,23 @@ fn the_recorded_divergence_keeps_its_counterweight() {
         assert!(three.contains(surface), "surface {surface} must stay named");
     }
 
+    // ★★★ CTL-8: the two tiers, and I(p) declared rather than computed.
+    let panels = d["★★★_CTL_8_two_tiers_and_the_persistent_one_is_OUTSIDE_the_budget"]
+        .as_str()
+        .unwrap();
+    assert!(panels.contains("no stored state"), "the no-storage resolution must stay named");
+    assert!(
+        panels.contains("FOURTH salience surface"),
+        "exemption as the fourth salience surface must stay named"
+    );
+    let entropy = d["★★_I_p_is_DECLARED_not_computed"].as_str().unwrap();
+    assert!(entropy.contains("intractable"));
+    assert!(entropy.contains("MON-1") && entropy.contains("MON-2"), "the declined-import precedents");
+    assert!(
+        d["the_honest_limits"].as_str().unwrap().contains("FLICKER-STABILITY IS NOT THIS ROW"),
+        "the out-of-scope note must stay"
+    );
+
     // The sentinel collision must stay described as theoretical, not inflated.
     assert!(step0["★★_2_the_one_sharpening_that_IS_worth_it_the_UNION_AS_A_SUM_TYPE"]
         .as_str()
@@ -701,5 +850,5 @@ fn the_recorded_divergence_keeps_its_counterweight() {
             assert!(seen.insert(c["name"].as_str().unwrap().to_string()), "duplicate case name");
         }
     }
-    assert_eq!(seen.len(), 31, "every declared case must be present");
+    assert_eq!(seen.len(), 39, "every declared case must be present");
 }

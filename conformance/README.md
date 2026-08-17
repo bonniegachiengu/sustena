@@ -1963,3 +1963,51 @@ either, and neither side reported a tie before this. **Residuals:** a surface
 must render `rank`, **not** the array index (the core reports the tie; it
 cannot force a renderer to honour it), and the household can still order its
 peers, deliberately.
+
+**Extended 2026-08-17 by CTL-8 (+8 cases) — the persistent tier.**
+★★ **STEP-0 resolved the phasing question: this is a core property, not host
+state, because it needs NO stored state.** A persistent panel is not a
+remembered identity surviving a recomposition — it is an **unconditional
+inclusion by declared policy**, re-derived every call, so it fits a `compose`
+that deliberately keeps nothing and required zero storage to add.
+
+★★★ **Two tiers, persistent outside the budget:**
+`view = persistent(ALWAYS) ∪ knapsack(dynamic, K≈4)`. **A panel that could be
+displaced by a busy day is not persistent, it is merely high-scoring** — so
+`View::spent` counts the dynamic tier alone. Proven against a budget of 1 fully
+occupied by a maximally-urgent widget; composing with and without it leaves
+`spent` and the selection byte-identical (**cost nothing, displaced nobody**);
+and it shows when *nothing* is wrong, which is the point of `I(p)` being high
+for **all** states. It carries **no score and no rank** — ranking it would put
+it back into the competition it is exempt from. ★ `WHEN_ACTIVE` needs no
+machinery: such a panel **is** a widget.
+
+★★ **`I(p)` is declared, not computed.** `H(state | ·)` is **intractable** in
+exactly the way MON-2's Kalman and MON-1's observability matrix are — both
+declined here — so there is **no `information_value()`**, and
+`PanelDecl::always` **requires a justification**, refusing without one. An
+exemption from the attention budget is the claim that most needs writing down
+to be argued with.
+
+★★★ **Exemption is the fourth salience surface**, closed like UI-13's three:
+`WidgetDecl` has **no policy field**, so persistence is unspellable from the
+widget side — a `PanelDecl` is a wrapper only the household constructs.
+
+**Divergence.** ★ The expectation was wrong and is recorded rather than
+adjusted: `PANEL_POLICY` and `WHEN_ACTIVE` are **grep-0 on BOTH sides**. The
+reference's `PANELS` is a hardcoded seven-entry **frontend nav list** for the
+Mycelium cockpit — the panel *list* exists as navigation, the *policy* only in
+the article.
+
+**Greppable false positives named.** ★★ `persistent` — **14 hits in Rust, none
+of them this**: every one is CUSUM's sense (`detect.rs` catches *small
+persistent changes*; `Shift::Upward` documents *running persistently high*),
+plus `pincer.rs`'s debounced *persistent condition*, a third sense again.
+★ `panel` — 4 hits, the **rollback panel** (Controller §II) plus the docstring
+line recording §VIII as unbuilt.
+
+**Residuals.** ★★ **Flicker-stability is not this row** — holding a *dynamic*
+widget in its slot across recompositions needs memory of the last view, which
+`compose_view` does not keep; separate and harder. ★ The canonical panel list
+is the **household's**, not hardcoded here. And a `WHEN_ACTIVE` panel is
+indistinguishable from a widget once composed, deliberately.

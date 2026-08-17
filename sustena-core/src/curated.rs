@@ -134,6 +134,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::Value;
 
 use crate::event::Event;
+use crate::panel::{PanelInView, PanelSet};
 use crate::region::Region;
 use crate::widget::{LoadedWidget, WidgetSet};
 
@@ -430,6 +431,14 @@ pub struct WidgetCandidate {
 /// What `compose` resolved. Never stored; recomputed on every call.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
+    /// ★★★ The always-shown tier (CTL-8), **outside the attention budget**.
+    ///
+    /// A persistent panel is shown whatever else is happening, so it does not
+    /// consume one of Cowan's four chunks — a panel that could be displaced by
+    /// a busy day is not persistent, it is merely high-scoring. It carries no
+    /// score and no rank, because ranking it would put it back into the
+    /// competition it is exempt from.
+    pub persistent: Vec<PanelInView>,
     pub selected: Vec<WidgetCandidate>,
     /// ★ Everything that did **not** make the cut, **with its score** — so the
     /// *"N other things stayed quiet"* line has something true to say. An
@@ -438,8 +447,18 @@ pub struct View {
     pub excluded: Vec<WidgetCandidate>,
     pub candidates_considered: usize,
     pub budget: usize,
-    /// Attention actually spent. `budget - spent` is what was left on the table.
+    /// Attention actually spent **by the dynamic tier**. `budget - spent` is
+    /// what was left on the table; the persistent tier is not counted, because
+    /// it never competed.
     pub spent: usize,
+}
+
+impl View {
+    /// Everything a surface should draw, in the order it should be considered:
+    /// the unconditional tier, then the ranked one.
+    pub fn shown(&self) -> (&[PanelInView], &[WidgetCandidate]) {
+        (&self.persistent, &self.selected)
+    }
 }
 
 /// Hick-Hyman, **computed**: reading `n` items is not `n` work, it is the
@@ -645,6 +664,83 @@ pub fn compose_view(
     request: &Request,
     policy: &SaliencePolicy,
 ) -> View {
+    compose_with_panels(widgets, &PanelSet::none(), region, state, recent, request, policy)
+}
+
+/// ★★★ `compose(r)` with the household's declared panels — the **two-tier**
+/// view of CTL-8.
+///
+/// ```text
+///   view = persistent(policy = ALWAYS)          — unconditional
+///        ∪ knapsack(dynamic widgets, K ≈ 4)     — competing
+/// ```
+///
+/// ★★ The persistent tier is **not subject to selection**: it is not scored,
+/// not ranked, and does not consume budget. ★ A `WHEN_ACTIVE` panel is simply a
+/// widget and joins the competing tier, which is why that policy needs no
+/// machinery of its own.
+///
+/// ★★★ **No state is stored for any of it.** A persistent panel is not a
+/// remembered identity surviving a recomposition — it is an unconditional
+/// inclusion by declared policy, re-derived on every call, which is why this
+/// tier fits a `compose` that deliberately keeps nothing.
+#[allow(clippy::too_many_arguments)]
+pub fn compose_with_panels(
+    widgets: &WidgetSet,
+    panels: &PanelSet,
+    region: &Region,
+    state: &Value,
+    recent: &[Event],
+    request: &Request,
+    policy: &SaliencePolicy,
+) -> View {
+    // ── the unconditional tier ───────────────────────────────────────────────
+    let persistent: Vec<PanelInView> = panels
+        .persistent()
+        .iter()
+        .map(|w| PanelInView::of(w, panels.justification_for(w.id()).unwrap_or_default()))
+        .collect();
+
+    let mut view = compose_dynamic(widgets, region, state, recent, request, policy);
+
+    // ★ A `WHEN_ACTIVE` panel competes exactly like a widget, so it is composed
+    // through the same path and merged into the same candidate pool.
+    if !panels.dynamic().is_empty() {
+        let extra = compose_dynamic(panels.dynamic(), region, state, recent, request, policy);
+        let mut pool: Vec<WidgetCandidate> = view
+            .selected
+            .into_iter()
+            .chain(view.excluded)
+            .chain(extra.selected)
+            .chain(extra.excluded)
+            .collect();
+        pool.sort_by(|a, b| a.id.cmp(&b.id));
+        pool.dedup_by(|a, b| a.id == b.id);
+        let considered = pool.len();
+        let (selected, excluded) = knapsack_select(&pool, request.budget);
+        let spent = selected.iter().map(|c| c.cost).sum();
+        view = View {
+            persistent: Vec::new(),
+            selected,
+            excluded,
+            candidates_considered: considered,
+            budget: request.budget,
+            spent,
+        };
+    }
+
+    view.persistent = persistent;
+    view
+}
+
+fn compose_dynamic(
+    widgets: &WidgetSet,
+    region: &Region,
+    state: &Value,
+    recent: &[Event],
+    request: &Request,
+    policy: &SaliencePolicy,
+) -> View {
     let beta = BindingTable::build(widgets);
 
     // ★ Event-first: the classes that ACTUALLY appeared, not every class β
@@ -700,7 +796,14 @@ pub fn compose_view(
     let (selected, excluded) = knapsack_select(&candidates, request.budget);
     let spent = selected.iter().map(|c| c.cost).sum();
 
-    View { selected, excluded, candidates_considered: considered, budget: request.budget, spent }
+    View {
+        persistent: Vec::new(),
+        selected,
+        excluded,
+        candidates_considered: considered,
+        budget: request.budget,
+        spent,
+    }
 }
 
 #[cfg(test)]
@@ -711,6 +814,7 @@ mod tests {
     use crate::operator::Registry;
     use crate::region::Interval;
     use crate::schema::{DimType, Schema};
+    use crate::panel::PanelSet;
     use crate::widget::{WidgetDecl, WidgetSet};
     use serde_json::json;
 
@@ -1308,6 +1412,160 @@ mod tests {
         assert!(view.selected.is_empty(), "and not shown");
         assert_eq!(view.excluded[0].score, 0.0, "and it can say why");
         assert_eq!(view.spent, 0, "no attention spent on nothing");
+    }
+
+    // ── CTL-8: the persistent tier, outside the attention budget ─────────────
+
+    fn console_panel() -> crate::panel::PanelDecl {
+        crate::panel::PanelDecl::always(
+            WidgetDecl::new("console", "console").unit().reading("mood"),
+            "the console answers 'is anything running' in every state, not only a bad one",
+        )
+    }
+
+    fn panels(decls: Vec<crate::panel::PanelDecl>) -> PanelSet {
+        PanelSet::load(decls, &definition(), &Registry::default()).unwrap()
+    }
+
+    #[test]
+    fn a_persistent_panel_is_shown_against_a_full_urgent_budget() {
+        // ★★★ THE PROPERTY. Budget 1, and a maximally-urgent widget takes it.
+        // The panel is there anyway, because it never competed.
+        let dynamic = load(vec![WidgetDecl::new("money", "card").unit().reading("balance")]);
+        let view = compose_with_panels(
+            &dynamic,
+            &panels(vec![console_panel()]),
+            &region(),
+            &json!({"balance": 900.0, "stock": 50.0, "mood": 50.0}),
+            &[],
+            &Request::default().with_budget(1),
+            &SaliencePolicy::default(),
+        );
+        assert_eq!(view.selected.len(), 1, "the budget is full");
+        assert_eq!(view.selected[0].id, "money");
+        assert_eq!(view.persistent.len(), 1, "and the panel is shown anyway");
+        assert_eq!(view.persistent[0].id, "console");
+    }
+
+    #[test]
+    fn the_persistent_tier_does_not_consume_budget() {
+        // `spent` counts the dynamic tier alone — a panel that could eat a
+        // chunk could displace a widget, which is exactly what it must not do.
+        let dynamic = load(vec![
+            WidgetDecl::new("a", "card").unit().reading("balance"),
+            WidgetDecl::new("b", "card").unit().reading("stock"),
+        ]);
+        let with_panel = compose_with_panels(
+            &dynamic,
+            &panels(vec![console_panel()]),
+            &region(),
+            &json!({"balance": 900.0, "stock": 900.0, "mood": 50.0}),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        let without = compose_with_panels(
+            &dynamic,
+            &PanelSet::none(),
+            &region(),
+            &json!({"balance": 900.0, "stock": 900.0, "mood": 50.0}),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        assert_eq!(with_panel.spent, without.spent, "the panel cost nothing");
+        assert_eq!(
+            with_panel.selected.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+            without.selected.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+            "and displaced nobody"
+        );
+    }
+
+    #[test]
+    fn a_persistent_panel_is_shown_when_nothing_is_wrong() {
+        // The point of I(p) being high for ALL states: "nothing is wrong" is
+        // itself the answer the panel gives.
+        let view = compose_with_panels(
+            &load(vec![]),
+            &panels(vec![console_panel()]),
+            &region(),
+            &json!({"balance": 50.0, "stock": 50.0, "mood": 50.0}),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        assert!(view.selected.is_empty(), "nothing dynamic earns a slot");
+        assert_eq!(view.persistent.len(), 1, "and the panel is still there");
+    }
+
+    #[test]
+    fn a_persistent_panel_carries_no_score_and_no_rank() {
+        // ★★ Structural: `PanelInView` has neither field. Ranking it would put
+        // it back into the competition it is exempt from.
+        let view = compose_with_panels(
+            &load(vec![]),
+            &panels(vec![console_panel()]),
+            &region(),
+            &json!({"balance": 50.0}),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        let rendered = format!("{:?}", view.persistent[0]);
+        assert!(!rendered.contains("score"));
+        assert!(!rendered.contains("rank"));
+        assert!(view.persistent[0].justification.contains("every state"));
+    }
+
+    #[test]
+    fn a_when_active_panel_competes_like_any_widget() {
+        // ★ The other half of the policy, and it needs no machinery: it is a
+        // widget, so it is eligible through β and selected through the
+        // knapsack. Here it loses to a more urgent one under a budget of 1.
+        let quiet = crate::panel::PanelDecl::when_active(
+            WidgetDecl::new("quiet", "card").unit().reading("mood"),
+        );
+        let dynamic = load(vec![WidgetDecl::new("money", "card").unit().reading("balance")]);
+        let view = compose_with_panels(
+            &dynamic,
+            &panels(vec![quiet]),
+            &region(),
+            &json!({"balance": 900.0, "stock": 50.0, "mood": 50.0}),
+            &[],
+            &Request::default().with_budget(1),
+            &SaliencePolicy::default(),
+        );
+        assert!(view.persistent.is_empty(), "WHEN_ACTIVE is not the persistent tier");
+        assert_eq!(view.candidates_considered, 2, "but it did compete");
+        assert_eq!(view.selected[0].id, "money");
+        assert!(view.excluded.iter().any(|c| c.id == "quiet"));
+    }
+
+    #[test]
+    fn a_widget_cannot_declare_itself_persistent() {
+        // ★★★ Unspellable: `WidgetDecl` has no policy field, so persistence is
+        // a wrapper only the household constructs. The observable consequence
+        // is that an identical widget declaration lands in whichever tier the
+        // HOUSEHOLD put it in, and in neither by its own doing.
+        let w = WidgetDecl::new("same", "card").unit().reading("mood");
+        let as_panel = panels(vec![crate::panel::PanelDecl::always(w.clone(), "declared always")]);
+        let as_widget = panels(vec![crate::panel::PanelDecl::when_active(w)]);
+        assert!(as_panel.is_persistent("same"));
+        assert!(!as_widget.is_persistent("same"));
+    }
+
+    #[test]
+    fn composing_twice_with_panels_gives_the_same_view() {
+        // ★★ No stored state: the persistent tier is re-derived, not
+        // remembered, which is why it fits a compose that keeps nothing.
+        let p = panels(vec![console_panel()]);
+        let dynamic = load(vec![WidgetDecl::new("money", "card").unit().reading("balance")]);
+        let state = json!({"balance": 900.0, "stock": 50.0, "mood": 50.0});
+        let one = compose_with_panels(&dynamic, &p, &region(), &state, &[], &Request::default(),
+                                      &SaliencePolicy::default());
+        let two = compose_with_panels(&dynamic, &p, &region(), &state, &[], &Request::default(),
+                                      &SaliencePolicy::default());
+        assert_eq!(one, two);
     }
 
     // ── read-only ────────────────────────────────────────────────────────────

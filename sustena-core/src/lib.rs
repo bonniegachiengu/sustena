@@ -51,6 +51,7 @@
 //! | The preattentive encoder φ | [`preattentive`] | R2 |
 //! | Widget schema, checked on the load path | [`widget`] | R2 |
 //! | β and compose(r) — the curated view | [`curated`] | R2 |
+//! | The persistent-panel invariant | [`panel`] | R2 |
 //! | Edit authority | [`editing`] | R2 |
 //! | Transition constraints | [`transition`] | R2 |
 //! | Checked composition | [`compose`] | R2 |
@@ -137,6 +138,7 @@ pub mod mutation;
 pub mod obligation;
 pub mod operative;
 pub mod operator;
+pub mod panel;
 pub mod path;
 pub mod period;
 pub mod observability;
@@ -295,10 +297,12 @@ pub use widget::{
     EmitError, LoadError, LoadedWidget, WidgetDecl, WidgetEmission, WidgetSet,
 };
 pub use curated::{
-    attention_cost, compose_view, knapsack_select, rank_selection, salience, BindingKey,
+    attention_cost, compose_view, compose_with_panels, knapsack_select, rank_selection,
+    salience, BindingKey,
     BindingTable, PolicyError, SaliencePolicy, UrgencyBasis,
     Eligibility, Request, View, WidgetCandidate,
 };
+pub use panel::{PanelDecl, PanelError, PanelInView, PanelPolicy, PanelSet};
 pub use principal::{
     effective_privilege, effective_privilege_with, permitted, permitted_with, Denial,
     MembershipEdge, Memberships, Skin, SkinRegistry, Tier,
