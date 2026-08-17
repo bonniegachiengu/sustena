@@ -48,6 +48,7 @@
 //! | Capabilities (confused deputy) | [`capability`] | R2 |
 //! | Fixed vs learned rules, least privilege | [`learned`] | R2 |
 //! | The definition lens π : D → G | [`lens`] | R2 |
+//! | The preattentive encoder φ | [`preattentive`] | R2 |
 //! | Edit authority | [`editing`] | R2 |
 //! | Transition constraints | [`transition`] | R2 |
 //! | Checked composition | [`compose`] | R2 |
@@ -142,6 +143,7 @@ pub mod population;
 pub mod predicate;
 pub mod presentation;
 pub mod region;
+pub mod preattentive;
 pub mod principal;
 pub mod router;
 pub mod schema;
@@ -281,6 +283,10 @@ pub use learned::{
 // three-letter verbs that generic would collide with something eventually, and
 // `lens::get` reads better than `get` at a call site anyway.
 pub use lens::{DefinitionGraph, DimLabel, EdgeKind, GraphEdge, Node, PutError, Supplied};
+pub use preattentive::{
+    encode_field, Arrow, Channel, DataDimension, Fraction, Hue, Motion, VisualAttribute,
+    VisualSpec,
+};
 pub use principal::{
     effective_privilege, effective_privilege_with, permitted, permitted_with, Denial,
     MembershipEdge, Memberships, Skin, SkinRegistry, Tier,

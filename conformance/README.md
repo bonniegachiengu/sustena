@@ -132,6 +132,7 @@ conformance/
     stranding.json      states vs histories, 3 remedies   (spec, R2)
     learned.json        fixed vs learned, bounded tier    (spec, R2)
     lens.json           π : D → G, and the way back       (spec, R2)
+    preattentive.json   φ : Data → VisualAttributes^n     (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1654,3 +1655,81 @@ and a gate refusal is a fact about the definition being edited. The graph is
 **top-level-dimension granular**, matching how `referenced_dimensions` reports,
 so the two halves agree by construction. And `put` does not reorder — `Edit`
 has no move or rename kind.
+
+### `preattentive.json` — `φ : Data → VisualAttributes^n` (MON-7, Monitor §VII)
+**15 cases, R2 (spec).** The door into the surface block, taken first so the
+block's conventions are set before fifteen UI rows lean on them.
+
+★★ **The *subject to* clause is the load-bearing half, and it is a TYPE.**
+§VII's model maximises discriminability **subject to** the attributes coming
+only from Treisman's preattentive set — because an encoding that leaks onto a
+non-preattentive channel (a number to read, a label to parse) does not degrade
+gracefully; it stops being a glance and becomes a serial scan. `Channel` has
+exactly seven variants and **no `Other(String)`**, so a non-preattentive
+encoding cannot be written down. Same discipline as EVT-6's missing
+`close_at(τ)`.
+
+★★★ **Urgency is the household's, not the widget's**, and three things make
+that structural: `VisualSpec` has **no public constructor and no setters** (a
+widget cannot build itself a bright spec because it cannot build a spec at
+all); the channel map is **fixed, not a parameter** (a configurable map is a
+gaming surface); and **brightness is field-relative**, with `encode_field` the
+only entry point. The consequence is the property worth having — **a widget can
+only get brighter by being WORSE**, asserted in both directions: raise its own
+`w` and it brightens; leave it unchanged and let a **peer** move further from
+`V`, and it **dims**. Attention is zero-sum across the field and cannot be
+manufactured. ★★ That discharges **UI-13** in advance, and it is the
+encoding-side twin of Flight 401: where the Curated UI stops a loud-but-safe
+widget **winning a slot**, this stops it **looking urgent** once it has one.
+
+★★ **Discriminability is RUN, not claimed.** The necessary condition — distinct
+state-classes encode distinctly — is asserted over every class this encoder can
+see, with an identical peer held constant so the peer cannot be what makes them
+differ. `Hue` has three variants, so *two near-identical hues for fine and
+critical* is unrepresentable. ★ The psychophysics is **named as out of reach**:
+discriminability here is bounded below, not maximised.
+
+★ **Encoder, not renderer** — `Hue::Amber` never `#E8A020` — kept honest by
+asserting no `#`/`px`/`rgb`/`hsl` reaches a spec. ★ And Tufte is honoured by
+leaving **saturation and enclosure unassigned**: there is no sixth or seventh
+data dimension, and giving them a value would be decoration wearing an
+encoding's clothes. ★ It consumes the **real engine** — a real `Region`, a real
+`MonitorEngine` pass, its real `Ingested` — so *this encodes `d(s,V)`* is
+checked against the thing that computes it.
+
+**Divergence.** R2, rust-ahead: `preattentive`, `hue`, `brightness` and
+`encode_widget` are grep-0 in the reference. What it has instead is
+`colour_rule` — a **widget-chosen** string hint (`"amber_if_below_20pct"`)
+declared per UI-schema field, serialised to the client, and **evaluated by
+nothing on either side** (grep-0 in `apps/web/src`). R2 #25's *exists, unwired*
+verified precisely, and the same *a field, not a check* pattern as
+`min_privilege` and `Skin`.
+
+★★ **The counterweight belongs to the reference and it is the important one.**
+Slice 0 derived the single urgency signal from real data, and ★★ **Slice 13's
+Curated UI reused that formula verbatim** rather than inventing a second — *no
+second notion of important*, honoured on purpose. So the reference already has
+**one** urgency and already feeds it to **selection**; this row adds the other
+consumer, the **encoding**. Two consumers, one signal, which is why it cannot
+be gamed at either end. ★ And its widget layer is real and useful
+(`visualize.*`, `WidgetTypeRegistry`) — the gap was never *there are no
+widgets*, it was *nothing maps state to a preattentive channel*.
+
+**Greppable false positives named.** ★ `visual` — 27 hits, **none** about
+visual encoding; every one is `visualize.*`, the widget-operator namespace.
+★★ `salience` — 4 hits, all **real** and all about **selection**
+(`curated_ui.py`), which is the counterweight's own evidence rather than a
+false positive. `colour_rule` — 5 hits, all declaration or pass-through.
+
+**Honest limits, seven.** ★★ **Encoder, not renderer.** ★★ **The psychophysics
+is not checkable here.** ★★★ **The map is fixed, not configurable, and that is
+the point** — a configurable map is a gaming surface. ★★ **Brightness and size
+are field-relative, so a one-item field carries neither** — nothing to be
+brighter than, and `1.0` would be a fabricated maximum making a healthy lone
+sustain look maximally urgent; an all-zero field emits neither rather than
+`0/0`. ★ **Five of seven channels are used**, by design. ★ **Nothing calls this
+from the engine yet, and should not** — encoding has a surface's cadence, and a
+per-ingest encode would be a field of one. And **trend is a one-step reading**
+(`w` against its own EWMA level, dead-band scaling with the series), since
+fitting a slope is MON-3's territory and would be the fabricated-model trap
+CTL-11 declined.

@@ -1,0 +1,120 @@
+{
+  "conformance_version": 1,
+  "slice": "preattentive",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Monitor - Formal Execution.md, §VII (Preattentive Processing); Treisman & Gelade 1980 (Feature Integration Theory); Tufte 1983 (data-ink)",
+  "replayed_by": ["rust"],
+  "note": "★★ `φ : Data → VisualAttributes^n`, maximising discriminability **subject to** the attributes being drawn only from the preattentive set. The *subject to* is the load-bearing half: an encoding that leaks onto a non-preattentive channel — a number to read, a label to parse — does not degrade gracefully, it stops being a glance and becomes a serial scan, which is exactly what §VII exists to avoid.",
+
+  "★★_the_STEP_0_reconcile": {
+    "1_no_encoder_exists_in_this_core": "Checked before designing: `preattentive`, `VisualAttribute`, `encoder`, `hue`, `brightness`, `Treisman` and `discriminab` are **all grep-0** in `sustena-core/src`. Nothing to reconcile with and nothing to extend — this establishes the surface block's conventions rather than joining them.",
+    "★_2_everything_it_CONSUMES_already_exists_and_is_the_real_thing": "The consolidated `MonitorEngine` (the Phase-2 closer) hands back an `Ingested` per pass carrying **`Reading { w, smoothed, alert }`** — and ★★ **`w` IS `d(s,V)`**, computed by `region.rs` and carried through unchanged; the struct's own docstring says so. Severity comes from the CUSUM alert, activity from `detected()`, and trend from `w` against `smoothed`. So every data dimension is a number the engine already computed: **nothing here is fabricated input**, and the encoder adds no state.",
+    "★_3_what_this_row_deliberately_does_NOT_touch": "MON-13's cycle suppression, MON-8's belief, MON-4's windows and MON-1's observability are all reachable from the engine and none is encoded. Five data dimensions, five channels; adding a sixth because a channel was free would be Tufte's decoration with extra steps."
+  },
+
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "There is no preattentive encoder on either side before this slice — `preattentive`, `hue`, `brightness` and `encode_widget` are all **grep-0** in the reference. What the reference has instead is `colour_rule`: a **string hint declared per UI-schema field** (`\"amber_if_below_20pct\"`), stored on `UISchemaField`, serialised by `ui_render.*`, sent to the client — and ★★ **evaluated by nothing, on either side**. Every backend hit is a declaration or a pass-through into a dict, and it is **grep-0 in `apps/web/src`**, so the string travels the whole way to the browser and no code ever reads it. That is R2 #25's *exists, unwired* verified precisely, and it is the same *a field, not a check* pattern as `min_privilege` and `Skin`.",
+    "★★_the_counterweight_THE_ONE_URGENCY_ALREADY_EXISTS_THERE_AND_IS_ALREADY_REUSED": "★★★ The most important thing this encoder needs was already right in the reference, and this row consumes rather than corrects it. Slice 0 derived a single urgency signal from real data (`pct = spent/allocated`, the pocket's distance from its own declared limit), and ★ **Slice 13's Curated UI reused that formula verbatim** rather than inventing a second one — `curated_ui.py`'s `salience(urgency, relevance)` is explicitly built on it, with the Additions' rule *no second notion of important* honoured on purpose. ★★ So the reference already has **one** urgency and already feeds it to **selection** (the knapsack). What this row adds is the **other consumer**: the same one number driving the **encoding**. Two consumers, one signal — which is precisely why it cannot be gamed at either end. ★ And the reference's widget layer is real and useful (`visualize.pocket_ring`, `constraint_health`, `event_feed`, the `WidgetTypeRegistry`); the gap is not *there are no widgets*, it is *nothing maps state to a preattentive channel*.",
+    "★_the_contrast_worth_stating_because_it_is_the_exact_thing_this_row_forbids": "★★ `colour_rule` is chosen **by whoever wrote the widget spec**, per field, as free text. Even if it were wired, that is a **widget-chosen** salience: the widget decides when it turns amber. This row makes that shape unrepresentable — the map is fixed, `VisualSpec` has no constructor, and brightness is field-relative — so the difference is not *unwired versus wired*, it is *a widget declaring its own importance versus the household's own distance-to-V deciding it*.",
+    "term_by_term": {
+      "the ONE urgency signal (no second notion of important)": "AT PARITY, and the reference established it first (Slice 0) and honoured it again (Slice 13).",
+      "urgency → SELECTION (attention budget)": "AT PARITY — `curated_ui.py`'s knapsack there, `curated_ui.rs`'s equivalent here.",
+      "★★ urgency → ENCODING (a visual channel)": "**THIS SLICE.** Neither side had it.",
+      "a closed preattentive set as a type": "**THIS SLICE.** `colour_rule` is an open string.",
+      "a fixed, non-configurable channel map": "**THIS SLICE**, and deliberately non-configurable — see the limits.",
+      "widgets / a widget registry": "PYTHON-AHEAD, and real. `visualize.*` and `WidgetTypeRegistry` ship and work; they are the renderer this encoder would feed.",
+      "the rendering itself (pixels, hex, keyframes)": "NEITHER SIDE IN THIS CORE, and out of scope by design — see the limits."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "★ visual (27 hits, ZERO about visual encoding)": "★ Every one is `visualize.*` — the operator namespace for the Monitor's widget operators (`visualize.pocket_ring`, `visualize.event_feed`, `visualize.constraint_health`) plus the routes that call them. Real, working, and about *which widget to compute*, not *which channel carries which dimension*. A reviewer grepping `visual` finds a healthy subsystem and none of it is this.",
+      "★★ salience (4 hits, all REAL and all about SELECTION)": "★★ The opposite of a false positive, and the counterweight's own evidence: `curated_ui.py`'s `salience(urgency, relevance)` and its two call sites. Genuinely load-bearing, genuinely built on the one urgency — and answering *which widgets get shown*, where this row answers *how a shown one looks*.",
+      "colour_rule (5 hits, all declaration or pass-through)": "Declared on `UISchemaField`, serialised in `to_dict`, copied by two `ui_render.*` operators. No evaluator anywhere, and **grep-0 in the web frontend**. Named so *there is colour handling already* is not concluded from the count."
+    },
+    "the_honest_limits": "★★ THIS IS THE ENCODER, NOT THE RENDERER — a `VisualSpec` carries `Hue::Amber`, never `#E8A020`; a `Fraction`, never a pixel radius; `Motion::Pulse`, never a keyframe. This core has no display and no units, and asserting that no `#`, `px`, `rgb` or `hsl` appears in a spec is how that boundary is kept honest rather than merely intended. · ★★ THE PSYCHOPHYSICS IS NOT CHECKABLE HERE — whether a particular amber is far enough from a particular red for a particular person on a particular screen is a rendering and measurement question. What IS checked is the necessary condition: distinct state-classes encode distinctly, run over every class this encoder can see. Discriminability is *bounded below*, not maximised, and the difference is stated rather than glossed. · ★★★ THE MAP IS FIXED, NOT CONFIGURABLE, AND THAT IS THE POINT — there is no `EncodingSpec` parameter, because a configurable map is a gaming surface: whoever chose it could route urgency onto a channel nobody looks at, or route its own metric onto brightness. A host wanting a different map is asking for a different guarantee. · ★★ BRIGHTNESS AND SIZE ARE FIELD-RELATIVE, SO A ONE-ITEM FIELD CARRIES NEITHER — `d(s,V)` is unbounded above, so an absolute scale would be invented; with nothing to be brighter than there is no honest value, and `1.0` would be a fabricated maximum. Hue, motion and orientation are absolute and are always emitted. · ★ FIVE OF SEVEN CHANNELS ARE USED — saturation and enclosure are deliberately unassigned, because there is no sixth or seventh data dimension and giving them a value would be Tufte's decoration wearing an encoding's clothes. They stay in `Channel` because the set is the set. · ★ NOTHING CALLS THIS FROM THE ENGINE YET — `MonitorEngine` does not encode on ingest, and should not: encoding is a surface concern with a surface's cadence, and a per-ingest encode would compute a field of one, which this deliberately refuses to give brightness. The caller assembles the field. · AND TREND IS A ONE-STEP READING — `w` against its own EWMA level, not a fitted slope; a real trend estimator is MON-3's territory and fitting one here would be the fabricated-model trap CTL-11 already declined."
+  },
+
+  "closure_cases": [
+    {
+      "name": "★★_every_channel_used_is_preattentive",
+      "why": "★★ The *subject to* clause, as a type. `Channel` has exactly seven variants and **no `Other(String)`**, so an encoding that reached for a non-preattentive channel — a number to read, a label to parse — cannot be written down. The assertion cannot fail by construction, which is the point: it fails only if someone adds an eighth variant, and then it fails loudly. Same discipline as EVT-6's missing `close_at(τ)` and EVT-10's `SnapshotDim` with no `add`.",
+      "expect": "every emitted channel is one of the seven"
+    },
+    {
+      "name": "★_saturation_and_enclosure_are_left_unassigned",
+      "why": "★ Tufte: every attribute must carry a data dimension, so an attribute with none is decoration. There is no sixth or seventh dimension here, so two preattentive channels stay **empty on purpose** rather than being given something to show. They remain in the type because the *set* is the set — leaving them out would misrepresent what preattentive processing covers.",
+      "expect": "no Saturation attribute, no Enclosure attribute"
+    },
+    {
+      "name": "each_channel_carries_its_declared_dimension",
+      "why": "The canonical map, asserted end to end: status→hue, urgency→brightness, magnitude→size, activity→motion, trend→orientation. A spec says *what this means*, not only *what it looks like* — a renderer that dropped the dimension would have lost the reason the channel was chosen, and could re-map it freely.",
+      "expect": "the five channel→dimension pairs"
+    },
+    {
+      "name": "★_nothing_here_is_a_pixel_or_a_colour_value",
+      "why": "★ The encoder/renderer boundary, kept honest by assertion rather than intention: no `#`, no `px`, no `rgb`, no `hsl` anywhere in a rendered spec. This core has no display and no units, and a hex value creeping in would be the first step to it having an opinion about both.",
+      "expect": "no rendering token appears in any spec"
+    }
+  ],
+
+  "discriminability_cases": [
+    {
+      "name": "the_three_status_classes_get_three_distinct_hues",
+      "why": "Two near-identical hues for *fine* and *critical* are not a weaker encoding, they are a broken one. `Hue` has three variants, so near-identical is unrepresentable at the type level; the assertion covers the map being injective over the three severities rather than collapsing two of them.",
+      "expect": "Info→Green, Warning→Amber, Critical→Red, all distinct"
+    },
+    {
+      "name": "★★_distinct_state_classes_encode_distinctly",
+      "why": "★★ Discriminability's **necessary condition, RUN** rather than claimed — over every state-class this encoder can see (3 severities × 3 trends), with an identical peer held constant across all of them so the peer cannot be what makes them differ. Every pair of specs differs in at least one attribute. This is the strongest checkable form of §VII's *maximise discriminability*; the psychophysical half is named as out of reach rather than smuggled in.",
+      "expect": "all specs pairwise distinct on attributes"
+    },
+    {
+      "name": "trend_reads_the_latest_observation_against_its_own_level",
+      "why": "Rising / level / falling from `w` against `smoothed` — numbers the engine already computed, so the encoder adds no state and cannot disagree with the detector about what the series is doing. `Level` is a real reading, not a missing one.",
+      "expect": "Rising, Level, Falling from three readings"
+    },
+    {
+      "name": "★_the_dead_band_scales_with_the_series",
+      "why": "★ *Level* has to mean level on a series near a million, not only on one near 1.0. A fixed epsilon would report a rounding difference as a trend on any large-magnitude household — which is a real shape here, since a `W` series is a weighted distance and its scale is whatever the region's weights make it.",
+      "expect": "Level on a 1e6-scale series differing in the 7th significant figure"
+    },
+    {
+      "name": "★_motion_reports_DETECTION_not_escalation",
+      "why": "★ A deliberate choice, and the two answers are genuinely different. `detected()` is *something is happening here*; `escalates()` adds MON-13's cycle suppression, which answers *is it worth a person's attention*. A known season should stop the **escalation** — that is what MON-13 is for — and should **not** make the reading look inert on the surface, because a rhythm you can see is how you learn it is a rhythm.",
+      "expect": "Pulse where the detector fired, Still where it did not"
+    }
+  ],
+
+  "ungameable_urgency_cases": [
+    {
+      "name": "★★_brightness_comes_from_the_real_distance_to_V",
+      "why": "★★ `Reading.w` **is** `d(s,V)` — `region.rs`'s number, carried through the Monitor unchanged. Brightness is that value normalised against the field, so the channel a person's eye is drawn to is driven by the household's own viable region and by nothing a widget declared about itself. Checked against a real `MonitorEngine` pass, not a hand-built reading.",
+      "expect": "the further sustain is brightest; the nearer scales proportionally"
+    },
+    {
+      "name": "★★★_a_widget_can_only_get_BRIGHTER_by_being_WORSE",
+      "why": "★★★ THE PROPERTY, asserted in **both** directions. Raise a sustain's own `w` — genuinely further from `V` — and it brightens. Leave it completely unchanged and let a **peer** move further from `V`, and it **dims**. Attention is zero-sum across the field and cannot be manufactured: there is no action a widget can take to become more salient except actually being in worse shape. That is UI-13's *salience is never rendered as salience* enforced at the encoder rather than hoped for at the surface, and it is the encoding-side twin of Flight 401 — where the Curated UI stops a loud-but-safe widget **winning a slot**, this stops it **looking urgent** once it has one.",
+      "expect": "brightness rises with own w; falls when a peer's w rises"
+    },
+    {
+      "name": "★★_a_single_item_field_carries_no_brightness_and_no_size",
+      "why": "★★ Preattentive processing is parallel *across the field*, so brightness only means anything relatively — and `d(s,V)` is unbounded above, so an absolute scale would be invented. With nothing to be brighter than there is no honest value, and emitting `1.0` would be a fabricated maximum that makes a perfectly healthy lone sustain look maximally urgent. Hue, motion and orientation are absolute and are still emitted, so the spec is not empty — just honest about which channels need a field.",
+      "expect": "no Brightness, no Size, Hue still present"
+    },
+    {
+      "name": "an_all_zero_field_emits_no_brightness_rather_than_zero_over_zero",
+      "why": "A field where every sustain sits exactly in `V` has no ordering to express. Absent rather than defaulted, for the same reason `Skew::Unknown` is not zero skew and `Fraction` refuses a non-finite maximum: a fabricated `0.0` and a real `0.0` would be indistinguishable to whatever draws it.",
+      "expect": "no Brightness and no Size for either item"
+    },
+    {
+      "name": "★★_there_is_no_way_to_construct_a_spec_by_hand",
+      "why": "★★ `VisualSpec`'s fields are private and it has **no public constructor and no setters**, so the only specs that exist came from `encode_field`, which reads the Monitor's own numbers. A widget cannot assign itself a brightness because it cannot assign itself anything — the same unforgeability discipline as `Capability` and `ApprovalToken`. What is assertable at runtime is that the specs produced are keyed to the sustains the engine was given.",
+      "expect": "specs carry the real sustain ids, in field order"
+    },
+    {
+      "name": "★_the_encoder_consumes_a_REAL_MonitorEngine_pass",
+      "why": "★ Not a hand-built `Ingested`: a real `MonitorEngine` is declared with a real `Region`, fed real states, and its `Ingested` output is encoded. So the claim *this encodes `d(s,V)`* is checked against the thing that actually computes `d(s,V)`, and a change to the engine's reading shape would break this test rather than silently drift past it.",
+      "expect": "a real engine pass encodes, and the brighter sustain is the one further from V"
+    }
+  ]
+}
