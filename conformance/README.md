@@ -124,6 +124,7 @@ conformance/
     dimension.json      declared kind · LWW attaches     (spec, R2)
     belief.json         belief under silence (no Kalman) (spec, R2)
     harmonics.json      cycle vs shift in the frequency   (spec, R2)
+    windowing.json      tumbling / sliding / session      (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1096,3 +1097,43 @@ it is a bug** — nothing silently differs.
   slot** rather than a dependency taken now; **no window taper**, so leakage is
   visible rather than silently smoothed; and it is not wired into
   `MonitorEngine`.
+
+- **`windowing.json` — rust-ahead-of-python on the typology, with most of the
+  substrate shipped hours earlier the same day.** `sliding`, `tumbling` and
+  `SlidingWindowAggregator` are grep-0.
+  ★★ **Tumbling is not a third mechanism, and is not rebuilt.** `[kT,(k+1)T)`
+  **is** a half-open period partition, so calendar-aligned tumbling is a
+  one-line delegate to EVT-11's `Recurrence::expand` — which matters concretely
+  rather than aesthetically: a month is not a fixed number of milliseconds, so
+  a duplicated implementation would have had to get calendar length right a
+  second time or quietly get it wrong. And **fixed-duration tumbling is the
+  degenerate sliding case where `step == size`**, checked by two routes
+  producing **byte-identical** windows. The genuinely new work is sliding and
+  session.
+  ★ **The counterweight:** this row was never wholly open. **EVT-6** built the
+  half-open `Window`, the watermark that closes it and the mandatory lateness
+  policy — the row's own *watermarks + late-event policy* clause — and
+  **EVT-11** built the period partition tumbling is.
+  ★ **And the reference's real windows are credited, then distinguished:**
+  `calendar.upcoming` and `tasks.due_soon` are genuine windows, but they are
+  forward-looking lookaheads over a stored list rather than stream windows over
+  an event series, and they close on `ctx.timestamp`. So there is windowing
+  *code* and no windowing *typology* — a different gap from having neither.
+  ★★ **A correction to MON-4's own row, carried forward a second time:** it
+  names `SlidingWindowAggregator (count/rate/by_type/error_rate)` in a way that
+  reads as shipped. It is **grep-0 on both sides**, and is deliberately left
+  unbuilt — aggregation is a *consumer* of the typology, not part of it, and
+  building one in would tie a window shape to a particular thing being summed.
+  **Greppable false positives named:** `session` has 81 hits and every one is an
+  HTTP client session, a DB session or a `CouncilSession` — a connection or a
+  governance round, never a gap-bounded group of events. `window` surfaces the
+  same lookahead hits EVT-6 named, plus `main.py`'s comments about **Windows,
+  the operating system**.
+  **Honest limits, six, one load-bearing:** ★★ **no aggregator is built**, on
+  purpose; sub-daily fixed-`T` tumbling routes through `Sliding` because
+  EVT-11's grammar has no `HOURLY` (that row's named residual, not closed
+  here); `sessionise` **reads the order it is handed**, exactly as `fold` does,
+  and the caller owns ordering; there is no session merging across batches; ★
+  **an open session's close is a watermark question, not a timeout** — there is
+  deliberately no *expire after a while* path, because that would be the wall
+  clock wearing a different name; and it is not wired into `MonitorEngine`.

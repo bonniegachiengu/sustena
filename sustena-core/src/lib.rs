@@ -84,6 +84,7 @@
 //! | Declared dimension kind · LWW attaches | [`dimension`] | R2 |
 //! | Belief state under silence (no Kalman) | [`belief`] | R2 |
 //! | Harmonics · cycle vs shift (DFT) | [`harmonics`] | R2 |
+//! | Window typology · tumbling/sliding/session | [`windowing`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -138,6 +139,7 @@ pub mod transition;
 pub mod vclock;
 pub mod version;
 pub mod watermark;
+pub mod windowing;
 
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
 pub use approval::{
@@ -205,6 +207,10 @@ pub use dimension::{
 pub use period::{
     partitions, Anchor, CivilDateTime, DstPolicy, Freq, LocalResolution, Period, PeriodError,
     Recurrence, TzError, TzProvider, Weekday,
+};
+pub use windowing::{
+    sessionise, tumbling_from_recurrence, SessionSpec, SessionState, Sliding, Typology,
+    WindowingError,
 };
 pub use watermark::{
     estimate_heuristic, Advance, Closing, LateOutcome, LateRecord, Lateness, SourceGuarantee,

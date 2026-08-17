@@ -1,0 +1,116 @@
+{
+  "conformance_version": 1,
+  "slice": "windowing",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Monitor - Formal Execution.md, §IV (Stream Processing)",
+  "replayed_by": ["rust"],
+  "note": "Zaharia et al. (2012). ★★ Tumbling is NOT a third mechanism — it is either an EVT-11 period expansion or the degenerate sliding case where step == size, and a case proves the two routes give byte-identical windows. The genuinely new work is sliding (overlapping) and session (data-driven).",
+  "reconciliation_before_building": {
+    "★★_tumbling_reuses_EVT_11_rather_than_duplicating_it": "`[kT, (k+1)T)` **is** a half-open period partition, which EVT-11 already builds. So this module contains **no tumbling boundary arithmetic**. Calendar-aligned tumbling is `tumbling_from_recurrence`, a one-line delegate to `Recurrence::expand` — which matters concretely rather than aesthetically: a month is not a fixed number of milliseconds, so a duplicated implementation would have had to either get calendar length right a second time or quietly get it wrong.",
+    "★★_and_fixed_duration_tumbling_is_the_DEGENERATE_SLIDING_case": "EVT-11's shipped grammar is `FREQ=DAILY|WEEKLY|MONTHLY`, so a 5-minute bucket is not expressible there (`HOURLY`/`MINUTELY` are on that row's named residual). Rather than add a third mechanism for it, **tumbling at a fixed `T` is `Sliding { size: T, step: T }`** — adjacent, non-overlapping, partitioning, by construction. `Sliding::is_tumbling()` just *reports* which case a spec is. A conformance case checks a fixed-`T` sliding windowing and an EVT-11 daily expansion produce **byte-identical** windows over the same span, so the claim is measured rather than argued.",
+    "★_the_lateness_policy_rides_through_from_EVT_6": "A `Window` cannot exist without a declared `Lateness`, so neither can a windowing that produces one — the mandatory policy EVT-6 introduced is inherited rather than re-imposed, and a case checks it on both sliding and session output."
+  },
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`sliding`, `tumbling` and `session` are grep-0 as window types in apps/api/sustena/, and so is `SlidingWindowAggregator`. There is no windowing typology there at all.",
+    "★★_a_correction_to_MON_4's_OWN_ROW_carried_forward": "The row names `SlidingWindowAggregator (count/rate/by_type/error_rate)` in a way that reads as shipped code. It is **grep-0** — the row was describing the article's specification, not an implementation. Flagged when EVT-6 closed the watermark half of this row, and repeated here so a future reader does not go looking for it. This slice builds the typology genuinely; the aggregator named in that row still does not exist **on either side**, and is deliberately not built (see the limits).",
+    "★_the_counterweight_the_SUBSTRATE_is_at_parity_and_most_of_it_shipped_HOURS_ago": "Honest framing: this row was never wholly open. **EVT-6** (2026-08-17) built the half-open `Window`, the watermark that closes it and the mandatory lateness policy — the row's own *watermarks + late-event policy* clause. **EVT-11** (same day) built the period partition that tumbling *is*. So what this slice adds is specifically **sliding and session**, on top of a substrate that already existed.",
+    "★_and_the_reference_has_REAL_windows_that_are_none_of_the_three": "`operators/calendar.py`'s `upcoming` and `operators/tasks.py`'s `due_soon` are genuine windows — `[now, now + days]` — but they are **forward-looking lookaheads over a stored list**, not stream windows over an event series, and they close on `ctx.timestamp` (EVT-6's finding). So the reference has windowing *code* and no windowing *typology*, which is a different gap from having neither.",
+    "term_by_term": {
+      "half-open [a,b) + watermark close + lateness": "AT PARITY as of EVT-6, hours before this slice.",
+      "★ tumbling": "AT PARITY as of EVT-11 for the calendar case — and deliberately not rebuilt here.",
+      "★★ sliding (overlapping, step < size)": "RUST-AHEAD. Genuinely new, and the case where an event belongs to several windows at once has no counterpart anywhere in the reference.",
+      "★★ session (gap-defined, data-driven)": "RUST-AHEAD, and the most different of the three — its boundary is not on any clock, which is why the *still open* state has to exist.",
+      "SlidingWindowAggregator": "NEITHER SIDE, and the row's wording is what is wrong rather than the code. Aggregation is a **consumer** of the typology, not part of it."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "window (real hits, none a stream window)": "`urgent_window_hours`, `harvest_window_days`, `window_end` — lookaheads over stored lists — plus `main.py`'s comments about **Windows, the operating system**. Named in EVT-6's entry for the closing behaviour; named again here because the *typology* question is a different one and the same hits will surface.",
+      "session (real hits, all HTTP)": "★ `AsyncClient` sessions, DB sessions, `CouncilSession`. Every one is a connection or a governance round; none is a gap-bounded group of events.",
+      "sliding / tumbling / SlidingWindowAggregator (0 hits each)": "Clean zeros."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "Two real forward-looking lookaheads that close on the processing clock, and a tracker row describing an aggregator it never had. What it does not have is any notion that a window has a *type* — that boundaries can be adjacent, overlapping, or decided by the data.",
+    "the_honest_limits": "Six. (1) ★★ NO AGGREGATOR IS BUILT — §IV's count/rate/by_type/error_rate are a **consumer** of the typology, not part of it, and building one into these types would tie a window shape to a particular thing being summed. The row's `SlidingWindowAggregator` therefore stays unbuilt on purpose, and its wording is corrected rather than satisfied. (2) ★ SUB-DAILY FIXED-`T` TUMBLING GOES THROUGH `Sliding`, NOT EVT-11 — because EVT-11's shipped grammar has no `HOURLY`/`MINUTELY`; that is EVT-11's named residual and this slice does not close it. (3) ★ SESSIONS READ THE ORDER THEY ARE HANDED — `sessionise` does not sort, exactly as `fold` replays the order it is given; an unordered batch produces gaps that are not real gaps, and the caller owns the ordering (`event::order` exists for it). (4) NO SESSION MERGING ACROSS BATCHES — a session open at the end of one batch is not resumed by the next call; stitching them is real further work. (5) ★ AN OPEN SESSION'S CLOSE IS A WATERMARK QUESTION, NOT A TIMEOUT — `close_on` needs a watermark past `last + τ`; there is deliberately no *expire after a while* path, because that would be the wall clock again wearing a different name. (6) NOT WIRED INTO `MonitorEngine` — the same residual MON-8 and MON-13 carry.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. The first step is not a window type at all — it is EVT-6's: give a window something other than `ctx.timestamp` to close on.",
+    "not_a_divergence_in": "R1 behaviour. Purely additive: a new module over EVT-6's `Window` and EVT-11's `Recurrence`, with no change to either and no existing vector touched."
+  },
+  "fixture": {
+    "why": "A household hour: a 60-minute rolling rate stepping every 15 minutes (so four windows cover any instant), a 30-minute session gap, and a daily tumbling run to check against EVT-11's own expansion.",
+    "MIN": 60000,
+    "HOUR": 3600000,
+    "DAY": 86400000,
+    "sliding": {"size_min": 60, "step_min": 15, "expected_overlap": 4},
+    "session": {"gap_min": 30,
+                "events": [["a", 0], ["b", 10], ["c", 25], ["d", 120], ["e", 125]],
+                "note": "minutes. a/b/c are within τ of each other; d is 95 minutes after c, so the first session closes"},
+    "tumbling": {"dtstart": [2026, 1, 1], "count": 5,
+                 "note": "★ daily, in Etc/UTC, so it can be compared byte-for-byte against Sliding{DAY, DAY}"}
+  },
+  "tumbling_cases": [
+    {
+      "name": "★★_CALENDAR_tumbling_is_a_DELEGATE_to_EVT_11_and_keeps_its_correctness",
+      "why": "★★ The reconciliation the brief asks for. A month is not a fixed number of milliseconds — January is 31 days and February 2026 is 28 — so a duplicated tumbling implementation would have had to get calendar length right a second time, or quietly get it wrong. Delegating to `Recurrence::expand` means it is right for the same reason it is right there, including the DST-correct 23- and 25-hour days EVT-11 already proves.",
+      "expect": {"january_days": 31, "february_days": 28, "adjacent_partitioning": true}
+    },
+    {
+      "name": "★★_a_FIXED_DURATION_tumbling_IS_the_degenerate_SLIDING_case",
+      "why": "★★ Proof that there is no third mechanism, measured rather than asserted: `Sliding { size: DAY, step: DAY }` and an EVT-11 **daily** expansion over the same span produce **byte-identical windows**. So a fixed-`T` tumbling needs no boundary arithmetic of its own, and `is_tumbling()` merely reports which case a spec is. (EVT-11's grammar has no `HOURLY`, which is why a sub-daily bucket takes this route — that is EVT-11's named residual, not a gap here.)",
+      "expect": {"windows": 5, "identical_to_evt11": true, "typology": "Tumbling", "overlap_factor": 1}
+    },
+    {
+      "name": "a_tumbling_window_puts_each_event_in_EXACTLY_one",
+      "why": "The partitioning property from the event's side rather than the boundary's: checked at an instant, at the first millisecond, at the last millisecond before a boundary, and exactly **on** a boundary — the place a closed interval would double-count.",
+      "expect": {"count_at_every_probe": 1}
+    }
+  ],
+  "sliding_cases": [
+    {
+      "name": "★★_a_SLIDING_window_OVERLAPS_and_an_event_belongs_to_EVERY_one_containing_it",
+      "why": "★★ The overlap is the point, not a side effect. With size 60m and step 15m, four windows cover any instant and the event is counted in **each** — that is what makes a rolling rate roll. `windows_containing` returns a `Vec` deliberately; deduping the event to one window would turn a rolling rate into a tumbling one wearing the wrong name.",
+      "expect": {"containing": 4, "each_window_size_min": 60, "overlap_factor": 4, "typology": "Sliding"}
+    },
+    {
+      "name": "★★_a_step_LARGER_than_the_size_is_REFUSED_because_it_would_DROP_events",
+      "why": "★★ With `step > size` the windows leave gaps, so any event landing in one belongs to **no** window and is silently dropped — a windowing that loses data while looking like it works. Refused at construction rather than allowed and documented, in the same family as the flow module having no clamp strategy to declare.",
+      "expect": {"error": "StepExceedsSize"}
+    },
+    {
+      "name": "sliding_windows_are_ANCHORED_to_a_declared_origin",
+      "why": "Two callers with the same size and step but different origins get different boundaries, so the origin is an argument rather than an assumed zero — an assumed epoch would silently disagree with any window a person actually thinks in (a day starting at midnight *local*, say).",
+      "expect": {"origins_differ": true}
+    }
+  ],
+  "session_cases": [
+    {
+      "name": "★★_a_gap_LARGER_than_τ_closes_a_session_and_a_smaller_one_does_not",
+      "why": "★★ The data-driven boundary: `a`/`b`/`c` arrive within 30 minutes of each other and stay one session; `d` arrives 95 minutes after `c`, so the first session ends — **τ after its own last event**, not at `d`. The end belongs to the session that ended, not to the event that revealed it had.",
+      "expect": {"sessions": 2, "first_ids": ["a", "b", "c"], "second_ids": ["d", "e"], "first_end_min": 55}
+    },
+    {
+      "name": "★★_the_LAST_session_is_OPEN_because_no_gap_has_been_observed_after_it",
+      "why": "★★ Its end is not known — no gap has been seen, so nothing has established one. **Not an empty session and not a closed one**: the same *we cannot answer yet* EVT-6's `Closing::NotYet` reports, and the reason `SessionState` has two variants rather than one plus a nullable field.",
+      "expect": {"is_open": true, "window": null}
+    },
+    {
+      "name": "an_EMPTY_batch_yields_NO_sessions_rather_than_an_empty_one",
+      "why": "No events is no sessions. An empty session would read as *something happened here and it contained nothing*, which is a different and false claim.",
+      "expect": {"sessions": 0}
+    }
+  ],
+  "watermark_cases": [
+    {
+      "name": "★★_an_OPEN_session_closes_only_when_a_WATERMARK_passes_its_gap",
+      "why": "★★ THE GUARANTEE, at the one place it could have been lost — a session's end is not known in advance, so it is the type most tempted to close on a timeout. `close_on` takes a **`&Watermark` and nothing else**. A processing clock two hours past the gap, carrying an honest 90-minute out-of-orderness bound, does **not** close it; a watermark that actually reaches `last + τ` does. **A clock is not evidence.**",
+      "expect": {"late_clock_closes": false, "early_watermark_closes": false, "reaching_watermark_closes": true, "closed_end_min": 40}
+    },
+    {
+      "name": "★_a_SLIDING_window_closes_only_on_a_watermark_because_it_IS_an_EVT_6_window",
+      "why": "★ Inherited rather than re-implemented: sliding and tumbling windows **are** `Window`s, so `is_closed_by` is the only closer they have and there is no second path to keep honest. A watermark taken at the window's own end but carrying a real bound does not close it — exactly as EVT-6 requires.",
+      "expect": {"hopeful_closes": false, "reaching_closes": true}
+    },
+    {
+      "name": "★_the_declared_LATENESS_rides_through_every_window_the_typology_produces",
+      "why": "★ EVT-6 made a lateness policy mandatory for a window, so a windowing cannot produce one without it either — checked on both sliding output and a closed session, since a session builds its `Window` at a different moment and could have dropped the policy on the way.",
+      "expect": {"sliding": "accumulate_and_retract", "session": "late_fire"}
+    }
+  ]
+}
