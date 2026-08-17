@@ -1,0 +1,116 @@
+{
+  "conformance_version": 1,
+  "slice": "learned",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Immune - Formal Execution.md, §V (Fixed and Learned Rules); consuming IMM-7's capability (Dennis & Van Horn 1966; Hardy 1988) and Harrison, Ruzzo & Ullman 1976 for economy of mechanism",
+  "replayed_by": ["rust"],
+  "note": "★★ The ParseRule system is PYTHON-ONLY — `ParseRule`, `parse_rule`, `transducer`, `OTP` and `R_fixed` are all **grep-0** in this core, checked before anything was designed. So IMM-10's Rust work is NOT to port a subsystem across just to have somewhere to hang a bound. It is the generic mechanism §V is about, of which a ParseRule is one instance: the fixed/learned split, the ordering, and — the keystone — an untrusted tier that holds an **attenuated capability** instead of ambient authority.",
+
+  "★★_the_STEP_0_reconcile_ParseRules_in_Rust_and_what_§V_already_has": {
+    "1_ParseRules_do_NOT_exist_in_this_core": "★★ Checked by grep before designing: `ParseRule` 0, `parse_rule` 0, `transducer` 0, `OTP` 0, `R_fixed` 0. The primitive-lift that turned the transducer's hand-wired matchers into declared `ParseRule` data was a **Python build**, and the regex library, the seed set and the adoption verifier live there. Porting them here to have somewhere to attach a least-privilege bound would be building a subsystem to justify a feature.",
+    "2_so_the_scope_is_the_GENERIC_mechanism": "A rule set split into a tier no principal can edit and a tier derived from untrusted input, with the untrusted tier bounded. A ParseRule is one instance of that; so is a learned classifier, so is any future ingest-derived rule. The host keeps its own matchers.",
+    "★_3_what_§V_already_has_and_is_NOT_rebuilt": "**Ordered-before ✅ and non-weakenable ✅**, and in the reference they are genuinely well built — see the counterweight. **Adoption gating ✅** (verify-against-inducing-example plus regression-against-stored-messages) exists app-layer and is untouched. This slice adds neither.",
+    "★★_4_a_related_but_DIFFERENT_thing_that_DOES_exist_in_Rust": "★ `event::Trust` (`Authoritative`/`Reported`/`Derived`) ships here — but that is **source** provenance, *is this connector the authority for what it reports*, and it already drives one real decision (`ClockFinding::suspect`). §V's trust is **rule** provenance, *how did we come to believe this rule*. Different question, so `RuleTrust` is a new type rather than an overload — and the note is recorded so a reviewer finding `Trust` in Rust does not conclude this gap was already closed."
+  },
+
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "Two gaps, both §V's own findings, both verified by grep rather than assumed. **(1) `trust` is a label, not a decision input** — 47 hits in the reference and **not one** of them is a comparison, a branch, a sort key or an ordering; the only operator-shaped hit is a `<...>` in a docstring listing the tuple's fields. It is stored (`parse_rule.py:139`), set (`parse_rule_learn.py:144`) and displayed, and nothing reads it to decide anything. **(2) No least-privilege bound on the learned tier** — `least_privilege` is grep-0 and `allow_list` is grep-0. A learned rule maps text to an operator invocation with nothing constraining WHICH operators it may target, so the learned set widens the effective attack surface every time it grows.",
+    "★★_the_counterweight_the_FIXED_LEARNED_SPLIT_IS_AT_PARITY_AND_THE_FIXED_TIER_IS_THE_BEST_THING_THERE": "★★★ The split itself is not the gap, and the reference's fixed tier is the single strongest piece of security design in it. `contains_sensitive_secret()` is checked **FIRST in `parse_message()`** (`transducer.py:894` — before any parser runs, so no learned rule can ever see an OTP first) **AND again in `IngestEngine.capture()`** (`ingest_engine.py:365` — before the raw text is ever written to `ingest_messages`, so a rejected capture leaves no row and no `raw_payload` at all). ★ Two independent layers, both ordered-first, one of them upstream of persistence rather than of parsing — that is defence in depth done properly, and a rejected message's digits are provably absent from the store rather than merely unlogged. ★ **And it is non-authorable**: the pattern list is a module constant with no edit path, no learning path, and a mirrored Java copy on the device so the secret never leaves the phone in the first place. Nothing here improves on any of that. ★ **Adoption gating is real too** — verify-against-inducing-example plus regression-against-stored-messages, app-layer, untouched.",
+    "term_by_term": {
+      "the R_fixed / R_learned split": "AT PARITY in substance. Typed here (`FixedRule` / `LearnedRule`), conventional there — but the behaviour is the same and the reference got the hard part right first.",
+      "R_fixed ordered BEFORE R_learned": "AT PARITY, and structural on both sides — the reference checks the secret filter before any parser; here `screen` runs the fixed tier first and the order is not a parameter.",
+      "R_fixed non-weakenable": "AT PARITY. A module constant with no edit path there; not part of a `Definition` here, so no `Edit`'s range includes it.",
+      "adoption gating (verify + regression)": "PYTHON-AHEAD, and deliberately left there — it needs the matcher library this core does not have.",
+      "★ trust as a DECISION input": "**THIS SLICE.** Grep-0 as a decision on the reference side: 47 mentions, zero comparisons.",
+      "★★ least privilege on the learned tier": "**THIS SLICE, and the keystone.** `least_privilege` and `allow_list` are both grep-0.",
+      "the capability the bound is expressed in": "RUST-AHEAD since IMM-7 (2026-08-17), and consumed here rather than rebuilt."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "★★ trust (47 hits, and ZERO of them are decisions)": "★★ The count is the trap. Forty-seven hits reads like a live subsystem; every one is a field declaration, an assignment, a docstring, a serialisation, or a test asserting the stored value. Filtering for `if` / `==` / `sort` / `key=` / a comparison operator leaves exactly one hit, and it is the `<...>` angle brackets in a docstring listing the ParseRule tuple's fields. §V's *'a declared field awaiting an evaluator'* is verified, not quoted.",
+      "★ R_fixed (grep-0, but the THING is real and excellent)": "★★ The most misleading zero in the whole set, in the opposite direction from usual. The *name* appears nowhere, and a reviewer grepping for it would conclude the fixed tier does not exist. It does — as `contains_sensitive_secret()`, checked in two places, both ordered first. Named here so the zero is never read as an absence.",
+      "least_privilege / allow_list (grep-0 each)": "Genuine zeros, recorded as checked. Note that `allowed`/`operators` DO appear as the sustain spec's own operator allow-list — that is the SUSTAIN's declared list, which every operator call already passes, and it is not a bound on the learned tier specifically. The learned tier inherits whatever the sustain allows, which is exactly the gap.",
+      "★ Trust in RUST (14 hits, real, and a DIFFERENT question)": "★ `event::Trust` is source provenance and already drives `ClockFinding::suspect`. A reviewer finding it could reasonably conclude gap (1) was closed. It is not: rule trust and source trust answer different questions, which is why `RuleTrust` is a separate type."
+    },
+    "the_honest_limits": "★★ NO MATCHER LIBRARY, AND THAT IS THE POINT — `FixedRule` and `LearnedRule` match on a lowercased substring, deliberately the dullest thing that works. A richer matcher would be the first step toward porting the reference's regex set, which is app-layer and stays there. A host brings its own matching and keeps the split, the ordering and the bound. · ★★ ADOPTION GATING IS NOT BUILT HERE — `with_learned` adopts what it is given. Verify-against-inducing-example and regression-against-stored-examples need the matcher and the stored corpus, both app-layer. This module bounds what an adopted rule may DO, and says nothing about whether it should have been adopted. · ★ ADOPTION AND AUTHORITY ARE DELIBERATELY SEPARATE — `with_learned` does NOT refuse a rule outside the ingress bound. Collapsing them would hide an adopted rule that can never fire; better that it sits visibly in the set and is refused at `capability_for`, where the reason names the bound. · ★ THE TRUST→TIER MAPPING IS DECLARED, NOT DERIVED — `TrustPolicy` implements no `Default` because what a trust level ought to reach is a policy statement about a deployment, and a library that invented one would make that decision invisibly. The same reason `Lateness` has no default. · ★★ NOTHING HANDS THE CAPABILITY TO A RUNNING RULE ENGINE — `capability_for` returns the bounded capability and the gate honours it, proven end to end here; but this core has no ingest loop to thread it through, because it has no ingest loop at all. That threading is the same named residual IMM-7 carries (*nothing issues capabilities to Symbionts yet*), and it is host work. · THE INGRESS BOUND IS PER-RULE-SET, NOT PER-SOURCE — a host wanting a different bound for M-Pesa than for a learned classifier declares two rule sets. Economy of mechanism: one list, not a matrix."
+  },
+
+  "fixed_tier_cases": [
+    {
+      "name": "the_fixed_tier_runs_first_and_the_order_is_not_a_parameter",
+      "why": "An input that BOTH the secret filter and a learned rule would match comes back `Rejected`, never `Matched`. Ordered-before is structural rather than conventional: `screen` is the only entry point, the loop order is fixed, and there is no `screen_learned_first` and no flag — so a caller cannot get the tiers the wrong way round. A learned rule matching an OTP before the secret filter saw it is the whole failure §V exists to prevent.",
+      "expect": "Screening::Rejected { by: otp }"
+    },
+    {
+      "name": "★★_the_fixed_tier_is_a_fixed_point_of_EVERY_edit_kind",
+      "why": "★★ `∀e, ∀r ∈ R_fixed: e(r) = r`, and it is structural: `Edit::apply` is `(&Definition) -> Definition`, acting on `𝒮`, `Inv` and `T`, with **no parameter through which a rule set could enter and no return through which one could leave** — the same shape as EVT-15's finding about the patch fold. A `FixedRule` is not part of a `Definition`, so every edit is the identity on it. Exercised over all EIGHT edit kinds and compared byte-for-byte rather than resting on the signature argument alone.",
+      "expect": "fixed tier byte-identical after all 8 edits"
+    },
+    {
+      "name": "★_a_fixed_rule_has_no_capability_and_asking_is_an_ERROR",
+      "why": "★ A pre-gate does not act — it refuses. The secret filter drops a message; it does not run an Enzyme. So there is nothing to bound, and asking returns `FixedRulesDoNotAct` rather than an empty capability. An empty capability would read as *bounded to nothing*, where the truth is *not applicable* — a small distinction that decides whether a reader thinks the fixed tier is a very restricted actor or not an actor at all.",
+      "expect": "Err(BoundError::FixedRulesDoNotAct)"
+    },
+    {
+      "name": "unmatched_is_a_different_answer_from_rejected",
+      "why": "*We do not recognise this* and *this must never be processed* are different findings and get different variants — the same discipline that keeps `Refused` apart from `NotPermitted` in EVT-15 and `NoEdge` apart from `InsufficientTier` in IMM-7.",
+      "expect": "Screening::Unmatched"
+    }
+  ],
+
+  "trust_as_input_cases": [
+    {
+      "name": "★_trust_decides_precedence_when_two_learned_rules_match",
+      "why": "★ The comparison §V said was missing. Two rules match the same text; declaration order puts the weaker-trusted one first and precedence puts the stronger one in front. This is trust driving an ordering — the exact thing that is grep-0 across all 47 mentions on the reference side.",
+      "expect": "the Shipped rule wins over the ProposedConfirmed one"
+    },
+    {
+      "name": "★_trust_decides_the_privilege_ceiling",
+      "why": "★ The second decision, and the one that matters for security: a `ProposedConfirmed` rule — machine-synthesised, human-clicked-yes — gets a strictly weaker capability than a `Shipped` one. Confirming a proposal is cheaper than authoring a rule, and the authority follows.",
+      "expect": "weak.tier() > strong.tier(), both from the same base capability"
+    },
+    {
+      "name": "ties_keep_the_declared_order_stably",
+      "why": "Two rules at the same trust level keep the order the host wrote them in. A rule set's own order is a real statement and is not worth scrambling for the sake of a total order that was never asked for.",
+      "expect": "declaration order preserved"
+    },
+    {
+      "name": "★_one_declared_policy_drives_BOTH_decisions",
+      "why": "★ Precedence and privilege both derive from `TrustPolicy::ceiling_for`, so they cannot drift apart. Two separate orderings — one for who wins a match, one for what they may do — would be two things to keep in step, and the day they disagreed the surface would be lying about one of them.",
+      "expect": "by_precedence order matches ceiling order"
+    }
+  ],
+
+  "least_privilege_cases": [
+    {
+      "name": "★★_an_ingest_tier_rule_is_REFUSED_AT_THE_GATE_for_an_out_of_bound_operator",
+      "why": "★★★ THE KEYSTONE, proven end to end through the real gate rather than at the boundary of this module. A learned rule holds a capability attenuated to the ingress bound; invoking an operator outside it reaches `execute_as` and comes back refused with `capability_carries`, no mutations, no events, state byte-identical. The mechanism is entirely IMM-7's — what is new is *who holds the capability* and *how the bound is derived*. This is the confused-deputy configuration IMM-7 built the capability for, with the learned tier as the deputy.",
+      "expect": "refused, rule = capability_carries, state untouched"
+    },
+    {
+      "name": "the_in_bound_operator_still_runs",
+      "why": "A bound that also blocks the legitimate call is an outage, not a bound. Asserted in the same test as the refusal so the two cannot drift apart — the same pairing IMM-7's confused-deputy proof uses.",
+      "expect": "committed = true"
+    },
+    {
+      "name": "a_rule_outside_the_ingress_bound_gets_no_capability_at_all",
+      "why": "The earlier refusal, one layer up: `capability_for` refuses before a capability exists, naming the rule and the operator. Two layers, and the outer one exists so a host that never reaches the gate still cannot hand out unbounded authority.",
+      "expect": "Err(BoundError::OutsideIngressBound)"
+    },
+    {
+      "name": "★★★_NO_TRUST_LEVEL_LIFTS_THE_INGRESS_BOUND",
+      "why": "★★★ The property the whole row rests on, asserted across all three trust levels: every one yields a capability carrying the bound's operators and NOT carrying anything outside it. Trust orders rules *within* the bound and can only narrow further; there is no value that promotes a learned rule out of the learned tier. A least-privilege ceiling with an exception is not a ceiling.",
+      "expect": "for every RuleTrust: carries in-bound, does not carry out-of-bound"
+    },
+    {
+      "name": "an_empty_bound_reaches_nothing_at_all",
+      "why": "`IngressBound::nothing()` is a real choice a host may keep, and it is the safe starting point — a deployment that has not decided what ingest may reach has decided that ingest reaches nothing, rather than everything.",
+      "expect": "Err(BoundError::OutsideIngressBound) for any operator"
+    },
+    {
+      "name": "★_the_bound_never_exceeds_the_principal_it_acts_for",
+      "why": "★ A capability is a **transfer**, so a rule acting for an observer cannot outrank that observer even when the policy's ceiling for its trust level is stronger. The attenuation takes the weaker of the two, which also means this can never be a privilege-escalation route: the policy sets a ceiling, never a floor.",
+      "expect": "tier = the base holder's, not the policy's stronger ceiling"
+    }
+  ]
+}

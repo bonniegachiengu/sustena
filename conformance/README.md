@@ -130,6 +130,7 @@ conformance/
     semantic.json       replay under D vs D'              (spec, R2)
     capability.json     the confused deputy, fixed        (spec, R2)
     stranding.json      states vs histories, 3 remedies   (spec, R2)
+    learned.json        fixed vs learned, bounded tier    (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1477,3 +1478,93 @@ a history was grandfathered, is host state and the sequenced next step.
 pointers are host state). And a history is replayed from its **declared
 genesis** — if that is wrong, every verdict after it is about a different
 history.
+
+### `learned.json` — fixed vs learned rules, and the bound (IMM-10, Immune §V)
+**14 cases, R2 (spec).** Consumes IMM-7's capability. ★★ For the fourth slice
+running, STEP-0 changed what got built.
+
+★★ **The ParseRule system is PYTHON-ONLY** — `ParseRule`, `parse_rule`,
+`transducer`, `OTP` and `R_fixed` are all **grep-0** in this core, checked
+before anything was designed. So the Rust work is not a port; it is the
+**generic mechanism §V is about**, of which a ParseRule is one instance: the
+fixed/learned split, the ordering, and the least-privilege bound. The regex
+library, the seed set and the adoption verifier stay app-layer.
+
+★★ **`R_fixed` is a fixed point of the edit operator, structurally.**
+`Edit::apply` is `(&Definition) -> Definition`, acting on `𝒮`/`Inv`/`T`, with
+**no parameter through which a rule set could enter and no return through which
+one could leave** — the same shape as EVT-15's finding about the patch fold. A
+`FixedRule` is not part of a `Definition`, so `∀e, ∀r ∈ R_fixed: e(r) = r`,
+**exercised over all eight edit kinds** rather than rested on the argument.
+★ And a fixed rule holds **no operator and no capability**: a pre-gate refuses,
+it does not act, so asking is an `Err` rather than an empty capability — which
+would read as *bounded to nothing* where the truth is *not applicable*.
+**Ordered-before is structural**: `screen` is the only entry point and the order
+is not a parameter.
+
+★★ **Trust is now a real decision input, and §V's finding was verified rather
+than quoted.** Across **47** `trust` hits in the reference, **not one** is a
+comparison, branch, sort key or ordering — filtering for `if`/`==`/`sort`/`key=`
+leaves a single hit, the `<...>` in a docstring listing the tuple's fields.
+`TrustPolicy` drives **two** decisions: **precedence** (a `Shipped` rule wins a
+match over a `ProposedConfirmed` one even when declared second) and
+**privilege** (machine-synthesised-then-clicked gets a strictly weaker
+capability than authored-and-reviewed). ★ Both derive from **one** declared
+mapping, so they cannot drift into two orderings that disagree — and
+`TrustPolicy` implements **no `Default`**, because what a trust level ought to
+reach is a deployment's policy (the `Lateness` reason).
+
+★★★ **The keystone: least privilege on the learned tier, consuming IMM-7.** A
+learned rule derived from untrusted ingest maps text to an operator invocation,
+so with nothing constraining *which* operators it may target the learned set
+widens the attack surface every time it grows. `IngressBound` declares what
+ingest may reach at all, and the rule holds a capability **attenuated to that
+bound** rather than the ambient authority of whoever it acts for — the
+confused-deputy configuration, with the learned tier as the deputy. Proven **at
+the real gate**, not at this module's boundary: an out-of-bound operator is
+refused with `capability_carries`, no mutations, no events, state
+byte-identical — while the in-bound call still commits, asserted in the same
+test so the bound cannot quietly become an outage. ★★★ **No trust level lifts
+the bound**, asserted across all three; ★ and the bound **never exceeds the
+principal it acts for**, since a capability is a transfer — the policy sets a
+ceiling, never a floor.
+
+**Divergence.** R2, rust-ahead on two things: trust-as-a-decision and the
+least-privilege bound (`least_privilege` and `allow_list` are both grep-0).
+★★ **The counterweight is the strongest in this module and belongs entirely to
+the reference.** The fixed/learned *split* is at parity, and the fixed tier
+there is its best security work: `contains_sensitive_secret()` runs **first in
+`parse_message()`** (`transducer.py:894`, before any parser, so no learned rule
+can see an OTP first) **and again in `IngestEngine.capture()`**
+(`ingest_engine.py:365`, before the raw text is ever written, so a rejected
+message leaves **no row and no `raw_payload`** — not merely no log line). Two
+independent layers, both ordered-first, one upstream of persistence;
+**non-authorable** (a module constant with no edit and no learning path); and
+mirrored in Java on the device so the secret never leaves the phone. ★ Adoption
+gating (verify-against-inducing-example plus regression) is real there too, and
+untouched.
+
+**Greppable false positives named — three, and two mislead in opposite
+directions.** ★★ `trust`: **47 hits, zero decisions** — a count that reads like
+a live subsystem and is entirely storage, display and tests. ★★ `R_fixed`:
+**grep-0 that is not an absence** — the most misleading zero so far, because
+the *name* appears nowhere while the *thing* is excellent, so grepping it
+yields the exact opposite of the truth. ★ `Trust` **in Rust**: 14 real hits,
+already driving `ClockFinding::suspect` — but that is **source** provenance
+(*is this connector the authority for what it reports*) against §V's **rule**
+provenance (*how did we come to believe this rule*), which is why `RuleTrust`
+is a separate type and not an overload.
+
+**Honest limits, six.** ★★ **No matcher library, and that is the point** —
+substring matching only; a richer matcher would be the first step toward
+porting the reference's regex set, which is app-layer. ★★ **Adoption gating is
+not built here** — verify + regression need the matcher and the stored corpus,
+both app-layer, and both already exist there; this module bounds what an
+adopted rule may DO. ★ **Adoption and authority are deliberately separate** —
+`with_learned` does not refuse an out-of-bound rule, because collapsing them
+would hide an adopted rule that can never fire; better it sits visibly in the
+set and is refused where the reason names the bound. ★ **The trust→tier mapping
+is declared, not derived.** ★★ **Nothing hands the capability to a running rule
+engine** — this core has no ingest loop at all, so the threading is host work
+and the same residual IMM-7 carries. And the ingress bound is **per-rule-set,
+not per-source**: two bounds means two rule sets, one list rather than a matrix.
