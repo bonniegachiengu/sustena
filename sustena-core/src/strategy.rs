@@ -321,6 +321,15 @@ impl StrategyGraph {
         self.order.iter().filter_map(|id| self.nodes.get(id))
     }
 
+    /// The edges, in declaration order — which is the order
+    /// [`run`] tries them in, so it is load bearing rather than incidental.
+    ///
+    /// ★ Added for OPV-6: `vary` rebuilds a strategy through the public
+    /// constructors only, so it has to be able to read the edges back.
+    pub fn edges(&self) -> &[StrategyEdge] {
+        &self.edges
+    }
+
     pub fn entry(&self) -> &str {
         &self.entry
     }
@@ -399,6 +408,26 @@ pub fn run(
     initial: &Value,
     trigger: Value,
 ) -> Walk {
+    run_with_effect(strategy, registry, allowed, enforcement, initial, trigger, &EffectClass::Unchecked)
+}
+
+/// [`run`], with the effect class named.
+///
+/// ★ Added for OPV-6: `select` scores a variant by running it under
+/// [`EffectClass::Sandbox`] — Operative §X's fork-and-replay **under the same
+/// rules** — and a sandbox run must be spelled `Sandbox` rather than borrowing
+/// `run`'s `Unchecked`. `run` delegates here, so every caller written before
+/// this behaves byte-for-byte as it did.
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_effect(
+    strategy: &StrategyGraph,
+    registry: &Registry,
+    allowed: &[String],
+    enforcement: &Enforcement,
+    initial: &Value,
+    trigger: Value,
+    effect: &EffectClass,
+) -> Walk {
     let mut accumulated = Map::new();
     accumulated.insert("trigger_event".to_string(), trigger);
 
@@ -434,7 +463,7 @@ pub fn run(
             node.mv.name(),
             &kwargs,
             &Authorization::Unchecked,
-            &EffectClass::Unchecked,
+            effect,
             &mut nonces,
         );
 

@@ -1,0 +1,178 @@
+{
+  "conformance_version": 1,
+  "slice": "OPV-6 — learning = search over meme space",
+  "phase": "R2 (spec) — authored from the article, not generated from the reference",
+  "authored_from": "3B1B — Operative - Formal Execution.md, §IV (M(t+1) = retain(select_{u,Viab}(vary(M(t))))) and §4G.1 (operatives as attractors)",
+  "replayed_by": "sustena-core/tests/conformance_learning.rs",
+  "note": "The LAST row of the deep bundle, and of the four-phase plan. Reference-less for STRATEGY learning — but see the divergence block: the reference does run a real vary/verify/retain loop one layer down, over ParseRules, and that is a substantial counterweight rather than a nil one.",
+
+  "★★_the_STEP_0_reconcile": {
+    "★★★_1_the_one_place_structure_moves_is_the_STRATEGY_LIBRARY_not_M_world": "OPV-11 shipped `WorldModel::structure_is_declared()` returning `true` for every value, and named that as the row's honesty rather than a stub: which edges exist in `T̂` is declared, and only the residual — a `Scenario`'s probabilities — is bound from data. OPV-6 does not contradict that and must not. The two are consistent because they are about DIFFERENT OBJECTS: a world model's causal structure stays declared (rewriting it from observations would be a far larger claim than §VII makes), while the STRATEGY LIBRARY — the memes, each of which is a `Π` from OPV-4 — is exactly what §IV's vary/select/retain moves. So learning changes the operative, not the world it believes in, and `structure_is_declared` stays `true` after this row exactly as before it.",
+    "★★★_2_Proposition_3_had_to_survive_variation_and_it_does_by_inheritance": "OPV-4 made `StrategyNode` hold a `LegalMove`, mintable only through `Shared::legal_move`, so a node outside `T` is unconstructible rather than rejected. `vary` rebuilds a strategy through the SAME public constructors — there is no back door that skips `with_node`'s minting — so `Π ⊆ T` is INHERITED through variation rather than re-checked after it. A `VaryOp::Extend` naming an illegal move comes back as a `MoveNotInT` in `Varied::refused`, which is how the bound is observable rather than merely true.",
+    "★★_3_select_could_not_collapse_u_into_a_scalar": "OPV-3 deliberately gave `Utility` NO method returning a scalar; `scalarise` is a free function that exists to demonstrate what collapsing deletes. Selection therefore returns the NON-DOMINATED SET (`pareto_frontier`), never a winner. OPV-29 calls presenting only the top-ranked option 'a presentation bug with the consequences of an architecture bug'; here it would be an architecture bug outright, because the survivor is what the library KEEPS.",
+    "★★_4_vary_is_declared_not_random_because_ADR_0001_forbids_RNG": "Holland's framing is stochastic. ADR-0001 keeps RNG (with clocks, I/O and threads) out of this core, so the variation operators are SUPPLIED BY THE CALLER rather than sampled. The same three moves — reconfigure, extend, optimise — made deterministic. A host wanting stochastic search draws the ops itself and hands them in, which has the side benefit that a learning round is replayable.",
+    "5_what_is_genuinely_new_here": "The loop itself (`vary`/`select`/`retain`/`learn`), the scoped library with minted provenance, the feedback trigger, and the stabilisation instrument. What is REUSED rather than rebuilt: `Π` (OPV-4) as the meme, `u_i` (OPV-3) as the score, `Region` as `Viab`, `EffectClass::Sandbox` + `execute_admitted` as the venue, `SelfModel` (OPV-11) as what-changed-about-me."
+  },
+
+  "divergence": {
+    "kind": "rust-only-spec",
+    "statement": "No strategy-learning exists in the reference: `vary`, `meme`, `evolutionary`, `holland`, `wolpert`, `attractor`, `fitness` and `no free lunch` are all grep-0 across `apps/api/sustena/`. But the nil-counterweight reading would be wrong, and the finding below is the reason.",
+
+    "★★★_the_counterweight_is_real_the_reference_RUNS_this_loop_one_layer_down": "`parse_rule_learn.py` + `parse_rule_proposer.py` + `SustainEngine.add_parse_rule`/`modify_parse_rule`/`retire_parse_rule` are a genuine vary/verify/retain loop over PARSE RULES. `synthesize_rule_from_correction()` is `vary` — and deterministic template synthesis, explicitly not an LLM, the same discipline this row adopted for its own reason. `verify_proposed_rule()` is `select` — a real two-condition V(r): inducing-example fidelity AND regression against every existing rule's declared examples, with BOTH required. `parse_rule_edits` with `status ∈ active|superseded|retired` is `retain`, and it is APPEND-ONLY VERSIONED — a correction is a new version, never a silent overwrite. ★★ And it is genuinely FEEDBACK-TRIGGERED: the round fires from a human's confirmed capture correction, never from a schedule. The results-not-a-clock discipline is the reference's own practice, and this row declared it rather than discovering it.",
+
+    "★★★_the_finding_what_the_reference_has_no_analogue_of": "Two things, and they are the two the article is sharpest about. (1) SELECTION IS NOT SCORED BY VIABILITY OR UTILITY: `verify_proposed_rule` is a corpus regression check — does the candidate match its own example, does it steal another rule's — which is a correctness test, not a fitness. Nothing there RUNS a candidate under the gate and asks what state it produced, so `select_{u,Viab}` has no counterpart; the venue this row uses (`EffectClass::Sandbox` through `execute_admitted`) exists in the reference for proposals and is simply not pointed at learning. (2) THERE IS NO NFL SCOPE: `parse_rule_edits` is not scoped per-Sustain, so a rule learned from one household's SMS enters a shared rule set, and `ParseRule.provenance` is a plain STRING field (`\"sustena_core\"`, `\"user\"`) that a caller can set to anything — including to whatever makes an imported rule read as native. This row makes provenance structural instead.",
+
+    "★★_and_the_reference_is_honest_about_its_own_gap": "`propose_and_verify(generator=None)` ships with NO generator wired, and its own docstring in CLAUDE.md says so: the verifier is real and usable, but nothing yet PRODUCES a candidate from raw text without a human. That is the mechanism-exists-search-does-not position, disclosed rather than papered over — the same posture this row takes toward convergence.",
+
+    "★★_the_hypothesis_this_row_refuses_to_assert": "§4G.1 reads operatives as ATTRACTORS of the iteration under selection by `u_i`. There is no theorem here that the loop converges, that its fixed points are unique, or that reaching one is good — the evolutionary literature supplies the MECHANISM and Sustena supplies the SCORING, and neither supplies a guarantee. So `Stabilisation::proves_convergence()` returns `false` FOR EVERY VALUE, present so the claim can be asserted ABSENT rather than merely left unwritten — the same device as `structure_is_declared()` always returning `true`. What IS built is the instrument: `LearningTrace` records the rounds, `stabilisation()` reports trailing rounds that changed nothing, `retained_fitness()` answers whether the survivors actually scored better, and `triggers()` reads the results-not-a-clock rule back off the record.",
+
+    "term_by_term": {
+      "vary(M(t))": "`vary(&Meme, &Shared, &[VaryOp]) -> Varied` — reconfigure / extend / optimise, one change per variant so a fitness is attributable. Rebuilt through `StrategyGraph::with_node`, which mints from `Shared`.",
+      "select_{u,Viab}": "`select(...) -> Selection` — each variant run under `EffectClass::Sandbox` via `run_with_effect`, then scored: `u_i(s')` as a VECTOR plus `Region::membership`. Frontier = `pareto_frontier` over the viable ones.",
+      "retain": "`retain(...) -> Retention` — the frontier enters the library as `MemeProvenance::Varied`, carrying the `Fitness` that kept it and the `Feedback` that triggered the round. Append-only within a round.",
+      "M(t)": "`MemeLibrary`, scoped to one `(sustain, operative)` pair by `LibraryScope`.",
+      "the trigger": "`Feedback::{Correction, PredictionDiverged, Objection}` — §IV's three, and no fourth."
+    },
+
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "variant (135 hits, and the sharpest by count in this row)": "Every one is the substring inside INVARIANT — `InvariantSpec`, `invariants`, 'binding'/'advisory' invariant authority. Not one is a search variant.",
+      "library (32 hits)": "The Arena / Mycelium LIBRARY PANEL — a package marketplace UI (`GET /devui/library`, arena_packages grouped by kind). Nothing to do with a strategy library.",
+      "provenance (45 hits)": "Two unrelated real senses: `ParseRule.provenance`/`trust` (IMM-10's connector vocabulary, a string field) and `GET /orchie/balance-provenance` (tracing which events moved a number). Neither is a meme's origin.",
+      "select_ (7 hits)": "SQLAlchemy `select().select_from(...)` in `users.py`. Not the evolutionary operator.",
+      "retain (1 hit)": "A docstring in `ingest.py` about raw messages being retained permanently — storage, not selection."
+    },
+
+    "the_honest_limits": "★★ `Stabilisation::proves_convergence` IS ALWAYS FALSE — the attractor reading is instrumented, never asserted, and no code path anywhere claims a fixed point is reached or good. ★★ `vary` IS DECLARED, NOT SAMPLED — ADR-0001 forbids RNG here, so the caller supplies the operators; this is Holland's three moves made deterministic, not a search strategy. ★ THE THREE VARY OPERATORS ARE THE ARTICLE'S THREE AND NO MORE — no crossover between two memes, which is a real evolutionary operator this row does not implement. ★ `retain` IS APPEND-ONLY — nothing is ever removed from a library, so a meme that stopped winning is still there to be read; FORGETTING IS A SEPARATE DECISION FROM LEARNING and this row does not make it. ★★ EXTENDING AT THE EXIT MOVES THE EXIT, which is a chosen semantic rather than a derived one — the alternative left the new node unreachable, growing `moves()` without changing any behaviour, which is the inert-addition failure this build refuses elsewhere. ★ SELECTION SCORES THE END STATE ONLY — a variant is judged by where its walk landed, not by the path it took, so two variants reaching the same state score identically. ★★ NOTHING WIRES A LIBRARY ONTO `ω` YET — `Operative` still has no `memes` field, for the same reason it has no `Π`, no `attention` and no `M_self`: a declared-but-inert field reads as built. ★ AND NO COST IS CHARGED FOR A ROUND — `select` runs every variant through the sandbox, which OPV-7's `B_att` and the pawa meter would both have opinions about; the economy is parked with `κ` and the juul balance."
+  },
+
+  "vary_cases": [
+    {
+      "name": "variation_cannot_manufacture_a_move_outside_t",
+      "why": "★★★ Proposition 3 through variation. An `Extend` naming a move `Shared` does not have produces NO variant and a `MoveNotInT` — the bound is inherited from OPV-4's minting rather than re-checked here.",
+      "op": {"extend": {"node": "b", "mv": "budget.teleport", "after": "a"}},
+      "expect": {"variants": 0, "refused_with": "MoveNotInT"}
+    },
+    {
+      "name": "an_extension_with_a_legal_move_is_still_bounded_by_t",
+      "why": "The positive half: a legal extension builds, and the variant's move set is a SUBSET of `Shared::moves()` — asserted against `T` itself, not against a copy.",
+      "op": {"extend": {"node": "b", "mv": "budget.allocate", "after": "a"}},
+      "expect": {"variants": 1, "moves_subset_of_T": true}
+    },
+    {
+      "name": "optimise_retunes_a_parameter_and_leaves_the_moves_alone",
+      "why": "The three operators are genuinely different: optimise changes a kwarg and the move set is byte-identical, so a fitness change is attributable to the tuning and not to a capability change.",
+      "op": {"optimise": {"node": "a", "param": "amount", "value": 250.0}},
+      "expect": {"moves_unchanged": true, "kwarg_now": 250.0}
+    },
+    {
+      "name": "a_variants_id_is_unique_per_op_not_per_label",
+      "why": "★ A REGRESSION, and it was caught by a test rather than by inspection. A variant's id was the parent plus the op's LABEL, so two `Optimise` ops on the same node and parameter minted the SAME id — two genuinely different variants silently conflated, one scored and the other reported as 'already in the library'. An identity and a description are different jobs; the id is now `parent/index:label` and the label carries the VALUE, because 'retuned amount' and 'retuned amount to 250' are different facts and only the second says what was learned.",
+      "expect": {"variants": 2, "ids_distinct": true}
+    },
+    {
+      "name": "a_refused_variation_is_reported_not_dropped",
+      "why": "★ Two ops, one legal and one not: the legal variant still builds AND the refusal is on the record. A vary pass that silently swallowed its refusals would make 'variation cannot widen T' unobservable.",
+      "expect": {"variants": 1, "refused": 1}
+    }
+  ],
+
+  "select_cases": [
+    {
+      "name": "a_variant_is_scored_by_running_it_in_the_sandbox",
+      "why": "★★ The venue is `run_with_effect(..., EffectClass::Sandbox)` — the full §4E gate, Operative §X's fork-and-replay under the SAME rules. There is no scoring heuristic: a fitness is what actually happened when the variant ran.",
+      "expect": {"fitness": "Viable", "frontier": 1}
+    },
+    {
+      "name": "scoring_leaves_the_state_it_was_handed_untouched",
+      "why": "★ Isolation BY CONSTRUCTION rather than by mechanism: this core is pure, so the walk gets a clone and its result is read and dropped. Nothing was protected from a write, because there was no write to protect from — said plainly rather than claimed as a sandbox feature.",
+      "expect": {"state_byte_identical": true}
+    },
+    {
+      "name": "a_variant_the_gate_refuses_scores_rather_than_erroring",
+      "why": "★ A variant that would take the balance below the household's own `liquid_non_negative` invariant comes back `Fitness::Refused` and never reaches the frontier. A bad score, not an error the caller has to handle.",
+      "expect": {"fitness": "Refused", "frontier": 0}
+    },
+    {
+      "name": "a_missing_dimension_is_unscorable_not_zero",
+      "why": "★★★ The third honest answer, and the family's discipline again (`Skew::Unknown`, `Soundness::Unavailable`, `UrgencyBasis::Undeclared`, `EffectiveN::BoundedAbove`). The walk SUCCEEDS; a dimension `u_i` reads is simply absent, so there is NO score — matching `Utility::at`'s own refusal to substitute a zero nobody supplied.",
+      "expect": {"fitness": "Unscorable", "frontier": 0}
+    },
+    {
+      "name": "selection_returns_a_set_and_there_is_no_method_that_returns_a_winner",
+      "why": "★★ `u_i` is a vector and stays one. `Selection.frontier` is a `Vec` and nothing on the type collapses it — the OPV-3/OPV-29 discipline applied where it matters most, since the survivor is what the library keeps.",
+      "expect": {"frontier_is_a_set": true}
+    }
+  ],
+
+  "retain_cases": [
+    {
+      "name": "a_retained_variant_carries_where_it_came_from_and_why",
+      "why": "★ The record is not discarded: a kept meme is `MemeProvenance::Varied { from, op }`, carries the `Fitness` that kept it, and carries the `Feedback` that triggered the round. WHY IT SURVIVED IS PART OF WHAT IT IS.",
+      "expect": {"provenance": "Varied", "retained_by": "present", "because": "the feedback's own description"}
+    },
+    {
+      "name": "an_imported_meme_cannot_read_as_native",
+      "why": "★★★ THE NFL KEYSTONE. `Meme` has no public constructor and `MemeProvenance` is minted only by the library, so `import` is the only door for a foreign strategy and it ALWAYS stamps `Imported { origin }`. A stranger's meme is not writable as `Authored` — the `Capability`/`Score`/`VisualSpec` mechanism applied to a claim about where a strategy came from.",
+      "expect": {"provenance": "Imported", "origin": "the donor's scope", "countable_via": "MemeLibrary::imported()"}
+    },
+    {
+      "name": "a_library_is_scoped_and_importing_from_itself_is_refused",
+      "why": "★★ `LibraryScope` has NO `Default` — a library with no scope would be the global shared pool No Free Lunch says cannot exist. And importing from your own scope is `SameScope`: nothing crossed a boundary, so calling it an import would be a lie about provenance.",
+      "expect": {"error": "SameScope"}
+    },
+    {
+      "name": "retain_records_what_it_dropped_as_well_as_what_it_kept",
+      "why": "★ `Retention` carries BOTH halves. A variant the gate refused is named in `dropped` with the gate's own reason, not silently absent — a round that reported only its survivors would make a library look like it had never considered anything bad.",
+      "expect": {"kept": 1, "dropped": 1, "drop_reason_contains": "gate refused"}
+    },
+    {
+      "name": "an_imported_meme_does_not_inherit_the_donors_score",
+      "why": "★★★ NFL as arithmetic: a fitness earned against ANOTHER household's problem distribution is not a fitness here. `import` drops `retained_by` and `because` rather than copying them, so a borrowed meme arrives unproven and has to earn its place in this library's own rounds.",
+      "expect": {"retained_by": "None"}
+    }
+  ],
+
+  "trigger_cases": [
+    {
+      "name": "there_is_no_feedback_variant_for_a_timer",
+      "why": "★★ Results, not a clock, made STRUCTURAL: `Feedback` has exactly §IV's three variants and `learn` takes one by value with no overload that omits it. A host with a scheduler still has to name the result it is reacting to. ADR-0001 makes it doubly true — the core has no clock to trigger a round with.",
+      "expect": {"variants": ["Correction", "PredictionDiverged", "Objection"]}
+    },
+    {
+      "name": "an_agreeing_projection_produces_no_feedback_and_so_no_round",
+      "why": "★★ 'A learning step with no triggering result is a no-op' put where it cannot be forgotten: `Feedback::from_projection` returns `None` when the projection and the observation agree. And a divergence carries the HORIZON, because OPV-11's `Projection` cannot be quoted without one and a divergence quoted without its horizon is not a fact.",
+      "expect": {"agreeing": null, "diverging_carries_horizon": true}
+    }
+  ],
+
+  "hypothesis_cases": [
+    {
+      "name": "stabilisation_never_proves_convergence",
+      "why": "★★★ THE HONESTY OF THIS ROW. `proves_convergence()` is `false` for EVERY value — `UnchangedFor`, `Churning`, `Unobserved` alike. §4G.1's attractor reading is a hypothesis; the loop is instrumented so it can be MEASURED, and nothing claims it converges, that a fixed point is unique, or that one is good.",
+      "expect": {"proves_convergence": false, "for_every_variant": true}
+    },
+    {
+      "name": "an_empty_trace_is_unobserved_not_stable",
+      "why": "★ 'Nothing has been observed' and 'nothing changed' are different facts, and a trace with no rounds must not read as a settled library. The third-answer discipline one more time.",
+      "expect": {"stabilisation": "Unobserved"}
+    },
+    {
+      "name": "a_round_that_kept_nothing_reads_as_unchanged",
+      "why": "A round whose only variation was illegal scores nothing and keeps nothing — and the trace reports `UnchangedFor { rounds: 1 }`, which is an observation about the round that ran, not a claim about the next one.",
+      "expect": {"changed_the_library": false, "stabilisation": {"UnchangedFor": 1}}
+    }
+  ],
+
+  "reconcile_cases": [
+    {
+      "name": "what_changed_about_me_shows_up_in_the_self_model",
+      "why": "★★ The OPV-11 reconcile. `Meme::self_model` delegates straight to `SelfModel::of` and adds nothing, so 'composed, not forked' is inherited rather than re-implemented — and after a round that retained an extension, the kept meme's `M_self` carries the new move where the parent's did not.",
+      "expect": {"before_contains_move": false, "after_contains_move": true}
+    },
+    {
+      "name": "learning_cannot_produce_a_self_model_that_escapes_T",
+      "why": "★★★ THE CLOSING PROPERTY OF THE BUNDLE. `SelfModel::moves_within(&Shared)` still holds on the learned meme — Proposition 1 (OPV-1's minting) → Proposition 3 (OPV-4's nodes) → variation (OPV-6) → the self-model (OPV-11), one unbroken chain, each link a type rather than a check.",
+      "expect": {"moves_within": true}
+    }
+  ]
+}

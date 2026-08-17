@@ -138,6 +138,7 @@ conformance/
     strategy.json       Pi, the strategy DAG              (parity+, R1+R2)
     attention.json      narrow + broad, the <b,d,p> meter  (spec, R2)
     models.json         M_self, M_world, effective-N       (spec, R2)
+    learning.json       vary / select / retain over memes  (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2221,3 +2222,59 @@ fidelity claim is **declared, never measured**, and **the gate never reads it**
 `agrees_with` is **a report, not a guard**; ★★ **nothing wires either model
 onto `ω` yet** — *a declared-but-inert field reads as built*; ★ **`⊕̂` is not
 modelled**.
+
+---
+
+### `learning.json` — search over meme space (OPV-6, Operative §IV)
+**22 cases, R2 (spec).** ★ The **last** row of the deep bundle. Reference-less
+for *strategy* learning — but the counterweight below is real, not nil.
+
+★★★ **STEP-0 scoped the row off the previous one.** OPV-11's
+`structure_is_declared()` is always `true` **because no learning path existed**.
+This row builds one — and the two do not conflict, because they are about
+**different objects**: a world model's causal structure stays **declared** (only
+a `Scenario`'s probabilities are bound from data), while the **strategy
+library** — the memes, each a `Π` from OPV-4 — is what §IV's loop moves.
+*Learning changes the operative, not the world it believes in.*
+
+★★★ **Proposition 3 survives variation by inheritance.** `vary` rebuilds
+through the **same public constructors**, so a node outside `T` stays
+unconstructible; an illegal `Extend` is a **reported** `MoveNotInT`, not a
+dropped op.
+
+★★ **`select` returns a FRONTIER, never a winner** — `pareto_frontier` over the
+viable variants, because `u_i` is a vector and OPV-3 gave `Utility` no scalar
+method. The venue is the **real gated sandbox** (`EffectClass::Sandbox` through
+`execute_admitted`): a gate refusal is **a bad score, not an error**, and a
+missing dimension is **`Unscorable`, not zero**. Isolation is **by
+construction** — the core is pure, so there was no write to protect from.
+
+★★ **Results, not a clock, structurally**: `Feedback` has §IV's three variants
+and **no `Scheduled`**, `learn` requires one, and `from_projection` returns
+`None` when the projection agrees — *a step with no triggering result is a
+no-op, said by the constructor*.
+
+★★★ **The attractor reading is instrumented, never asserted.**
+`Stabilisation::proves_convergence()` is **`false` for every value** — the same
+device as `structure_is_declared` always being `true`. The trace answers *did it
+settle* and *did the survivors score better* without claiming either.
+
+★★★ **No Free Lunch, structural.** A library is **scoped**, `Meme` has **no
+public constructor**, and `import` is the only door for a foreign strategy and
+**always** stamps its origin — a stranger's meme cannot be written down as
+native, and it arrives **without the donor's score**.
+
+★★ **Counterweight:** the reference runs this loop one layer down over
+**ParseRules** — append-only versioned, and genuinely **feedback-triggered**.
+*The discipline is its own practice; this row declared it rather than
+discovering it.* ★★★ **The finding** is what it lacks: selection there is a
+**corpus regression check, not a fitness**, and there is **no NFL scope**
+(`provenance` is a settable string). ★★ Sharpest false positive of the set by
+count: **`variant`, 135 hits, every one the substring inside `invariant`**.
+
+**Limits, all eight recorded in the file and asserted by the binary:** no
+crossover; `vary` is **declared, not sampled** (ADR-0001 forbids RNG);
+`proves_convergence` is always false; `retain` is **append-only**
+(*forgetting is a separate decision from learning*); extending at the exit
+**moves the exit**; selection scores the **end state only**; **nothing wires a
+library onto `ω` yet**; and **no cost is charged for a round**.

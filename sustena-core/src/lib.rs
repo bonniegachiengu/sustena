@@ -134,6 +134,7 @@ pub mod holarchy;
 pub mod inverse;
 pub mod kernel;
 pub mod learned;
+pub mod learning;
 pub mod lens;
 pub mod migrate;
 pub mod mixture;
@@ -290,6 +291,14 @@ pub use operator::{
 pub use capability::{Amplification, Attenuation, Capability, Rights};
 pub use learned::{
     BoundError, FixedRule, IngressBound, LearnedRule, RuleSet, RuleTrust, Screening, TrustPolicy,
+};
+// ★ `vary`/`select`/`retain`/`learn` are deliberately NOT re-exported at the
+// crate root: four of the most generic verbs in the language, and `retain` is
+// already `Vec::retain` to every Rust reader. `learning::vary(...)` says which
+// vary it is.
+pub use learning::{
+    Feedback, Fitness, LearningRound, LearningTrace, LibraryError, LibraryScope, Meme,
+    MemeLibrary, MemeProvenance, Retention, Selection, Stabilisation, Variant, Varied, VaryOp,
 };
 // ★ `get`/`put`/`put_apply` are deliberately NOT re-exported at the crate root:
 // three-letter verbs that generic would collide with something eventually, and
