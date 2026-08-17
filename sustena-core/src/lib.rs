@@ -88,6 +88,7 @@
 //! | Observability · reachability (no matrix) | [`observability`] | R2 |
 //! | Damping · settles vs rings | [`damping`] | R2 |
 //! | ★ the four wired into [`monitor`] (Phase 2 close) | [`monitor`] | R2 |
+//! | Semantic replay under D′ | [`semantic`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -137,6 +138,7 @@ pub mod region;
 pub mod principal;
 pub mod router;
 pub mod schema;
+pub mod semantic;
 pub mod signal;
 pub mod state;
 pub mod tenet;
@@ -198,6 +200,9 @@ pub use editing::{
 pub use belief::{
     Belief, BeliefError, BeliefReading, BeliefTracker, Collapse, Dynamics, SilenceAlert,
     SilenceSpec,
+};
+pub use semantic::{
+    is_deterministic, replay_under, CallOutcome, EnzymeCall, ReplayMode, SemanticOutcome,
 };
 pub use damping::{
     crossings, overshoot, read_trajectory, DampingError, DampingVerdict, Overshoot,

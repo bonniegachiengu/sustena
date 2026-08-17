@@ -127,6 +127,7 @@ conformance/
     windowing.json      tumbling / sliding / session      (spec, R2)
     observability.json  reachability, not rank(O)         (spec, R2)
     damping.json        settles vs rings                  (spec, R2)
+    semantic.json       replay under D vs D'              (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1242,3 +1243,51 @@ it is a bug** — nothing silently differs.
   declared interval (a region's relations have no sides, exactly as they
   contribute no distance in `region.rs`); and the **pawa-metered tie-in is a
   named slot**, since the economy layer is parked.
+
+### `semantic.json` — replay under `D` vs `D′` (EVT-15, Events and Time §IX)
+**11 cases, R2 (spec).** The **semantic** reducer: re-run the logged Enzyme
+**calls** through the real gate under a chosen `Definition`, so a call admitted
+under `D` can be found **refused** under `D′`. Built *beside* the patch fold,
+not into it.
+★★ **The premise was checked in the code before this vector existed**, and held
+in three parts, one of them needing a correction: the patch fold **is**
+`D`-independent (`checkpoint::replay` takes a log and a checkpoint — there is
+**no parameter through which a definition could enter**, a property rather than
+a shortfall); ★ the ingredient is **PYTHON-AHEAD** — `operators_log` carries
+`operator_name` + `input_json` per call while the **Rust `Event` carries
+neither, and there is no `operators_log` in this core**, so `EnzymeCall` had to
+be *defined* here; and ★★ **`D′` needed no new type**, because
+`editing::Definition` is already `⟨schema, invariants, operators⟩` — the gate's
+own three inputs.
+★★ **Same `D` reproduces; `D′` reinterprets.** The consistency case is asserted
+rather than assumed — without it, every `D′` verdict would be a claim about a
+different history. Under a `D′` floor of 1500 the history is **partly**
+inadmissible with the verdict on the specific call: the income clears the floor
+**exactly** (1000→1500, the boundary chosen on purpose) and the allocation to
+1200 is refused. `NotPermitted` is kept **separate** from `Refused` — the
+allow-list and the gate send an editor to different repairs.
+★★★ **No external effect can re-fire, guaranteed twice.** Structurally this
+core has **no sink, no egress and no send** — **EVT-14 is not built in Rust**,
+stated rather than assumed away. But a signature-only guarantee would evaporate
+the day an effect layer lands, so `ReplayMode::Replay` also **discards and
+counts**: `suppressed_events > 0` is asserted, so the guarantee is **exercised
+rather than vacuous**, and `Live` must be *named* — the discipline
+`Authorization::Unchecked` already follows.
+**Divergence.** No Python counterpart: this is R2. The **counterweight is
+unusually strong and belongs to the reference** — ★ `semantic` greps **4** hits
+there and **the first is the reference naming this exact gap about itself**;
+and the nearest real relative, `check_definition_edit_safety()`, already asks
+*would the new definition refuse this?* — but of **live states**, where this
+asks it of **histories**. An instance can sit at a perfectly valid state it
+reached through a step the new definition would have refused. That difference
+is the row.
+**Greppable false positives named:** `replay` hits are EVT-12's patch replay
+(`rebuild_state`), which is the `D`-independent thing this sits beside — a
+reviewer re-grepping will find it and must not read it as this.
+**Honest limits, three:** ★ `is_deterministic` runs the calls twice and
+compares, which **detects non-determinism and does not prove purity**; the
+call log is **not wired to `execute`** (nothing yet records an `EnzymeCall`
+when an operator runs); and `boundary`/`firewall` are not part of a
+`Definition`, so a `D′` replay checks schema, invariants and the allow-list —
+**not `μ` or `F`**. EVT-12's checkpoints deliberately do not transfer: a
+checkpoint under `D` is not one under `D′`.
