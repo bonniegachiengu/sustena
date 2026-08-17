@@ -1,0 +1,125 @@
+{
+  "conformance_version": 1,
+  "slice": "cynefin",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Operative - Formal Execution.md, §IX (Suited Domains — Cynefin, Per Operative: the response-mode table, match(i,s), the abstention's reason, the Ashby coverage condition, disorder as a detection target, and the enumerable-mismatch property)",
+  "replayed_by": ["rust"],
+  "note": "Snowden & Boone's response modes; Ashby's requisite variety. ★ This layer routes ON a domain reading and does NOT produce one — §IX assigns dom(s) to the Monitor, and the article gives no classification algorithm. Building a confident one would be the confident-classification-from-nowhere this codebase refuses.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`cynefin`, `snowden`, `disorder`, `requisite`, `ashby`, `safe-to-fail`, `categorise` and `suited` are ALL grep-0 in apps/api/sustena/. The reference has no regime axis, so it has no notion of an operative being unsuited to a *situation* as opposed to a *subject*.",
+    "★_the_counterweight_the_abstain_SEAM_is_at_parity_and_it_is_the_load_bearing_half": "§IX: *'when match = 0 the cheap shipped behaviour is abstention — `CouncillorConfig.is_relevant()` already produces an ABSTAIN path, and domain mismatch is a SECOND reason to take it.'* That is exact. `collect_votes` writes `abstain_reason: \"no_domain_overlap\"` at two call sites, and `abstain` returns 73 hits across the reference. So the mechanism a Cynefin mismatch plugs into is **already built and already correct** — an operative that should not weigh in does not weigh in, and the vote record says why. What is absent is the axis: the reference's `is_relevant` tests SUBJECT-MATTER tag overlap, so its abstention means *'this is not my topic'* and never *'my method presupposes what this regime denies'*. The seam is at parity; the second reason to take it is the gap.",
+    "term_by_term": {
+      "dom_i over the Cynefin axis": "RUST-AHEAD, and the collision this row recorded in advance is exactly why it is expressible at all. `operatives.<n>.domain` in homestead.json is `[\"finances\",\"budget\",\"savings\"]` — a subject-matter tag list. Naming the axis `Cynefin` when `ω` shipped kept both sayable; reusing the key would have made one inexpressible, which is what OPV-16 warned about before either existed.",
+      "the response modes (Snowden & Boone)": "RUST-AHEAD. grep-0 for `snowden`, `categorise`, `safe-to-fail`. These are what make a mismatch mean something — a domain is not a label but a claim about which method works, and each method carries a presupposition a different regime can deny.",
+      "★ match(i,s) and WHY the abstention exists": "RUST-AHEAD as a REASON, at parity as a MECHANISM — see the counterweight. §IX's point is that an optimisation operative in a chaotic regime is *'not merely less useful; it is confidently wrong, because its method presupposes analysability.'* A layer reporting only `match = 0` throws away the thing that makes the abstention defensible, so `Mismatch` carries a reason DERIVED from the declared domains and their response modes rather than a canned string.",
+      "the coverage condition (Ashby)": "RUST-AHEAD. `requisite` and `ashby` are grep-0. With no regime axis there is nothing to have requisite variety over, so the reference cannot notice a regime nobody is suited to — which is the condition §IX says must be surfaced rather than routed around.",
+      "disorder as a detection target": "RUST-AHEAD. grep-0. And here it is un-declarable by construction rather than by rule: `Cynefin` has exactly four variants, so `dom_i = {disorder}` is not forbidden — there is no value to write.",
+      "★ dom(s) itself": "NOT BUILT ON EITHER SIDE, and deliberately not here. §IX says dom(s) is a Monitor output and gives no classification algorithm. See the slots.",
+      "the enumerable-mismatch property": "HALF RUST-AHEAD. The declarations are now enumerable and auditable (`claimants` lists who claims which domain). Auditing a claim against the SHAPE of Π_i needs Π, which is OPV-4 and does not exist — so that half is a named slot rather than approximated from an operative's id or objectives, which would be guessing at a shape nobody declared."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "probe (1 hit, 0 real)": "`Liveness probe -- used by Cloud Run and monitoring` in main.py. A health check, not §IX's probe→sense→respond.",
+      "response mode (1 hit, 0 real)": "`# ── Request / response models ──` — a section divider in dev.py. Substring.",
+      "domain — ★ still an ACTIVE collision, and this row is the one that recorded it": "`operatives.<n>.domain` remains the subject-matter tag list it always was. Named again here because THIS is the row that flagged it, and the flag held: the axis is `Cynefin`, the tag list keeps `domain`, and both stay expressible."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The abstention seam, working and correct — an operative that should not weigh in does not, and the record says why. What it lacks is the axis that would give it a second reason, and the coverage question that axis makes askable. This is a gap in *what can be asked*, not in *what happens when the answer is no*.",
+    "the_honest_limits": "Three, and the first is the one that matters. (1) ★★ `dom(s)` IS SUPPLIED, NOT COMPUTED — §IX says plainly it is a Monitor output with §VIII's criticality as ONE of its inputs, and gives no algorithm for classifying a Sustain into the four domains. Inventing a confident one would be exactly the confident-classification-from-nowhere refused everywhere else in this codebase (0/0 is not r=0; a missing cost is not free; a missing reading is not zero). The classifier is CAP-13 / §4D.6 — a correctly SEPARATE LAYER, not an agent-layer gap. (2) THE Π-SHAPE MISMATCH CHECK IS OPV-4'S — declarations are enumerable now; auditing them against the graph's shape needs a Π that does not exist, and inferring a shape from an operative's id or objectives would be guessing. (3) CRITICALITY INFORMS EXACTLY ONE TRANSITION — §XIII licenses complex → chaotic and nothing else, so nothing else is inferred and the reading is never rewritten.",
+    "★_one_source_of_truth_reconciled": "`mixture::coverage_gaps` (OPV-28) folded in a copy of the coverage computation when the gate needed one and §XIII's condition had no home. OPV-16 is that home, so the duplicate was REMOVED and `mixture::coverage_gaps` now delegates to `cynefin::domain_coverage`. The wrapper survives only so a caller holding `Contender`s need not unwrap them by hand. Named `domain_coverage` rather than `coverage` because `goodhart::coverage` already means something genuinely different (O and U over utility supports, §XIV) — two real notions of coverage in one crate, and the newcomer takes the longer name.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive, and it removed a duplicate rather than adding one."
+  },
+  "fixture": {
+    "why": "Two operatives covering three of the four domains, so a chaotic regime is genuinely uncovered and the gap is real rather than contrived — and an optimiser declared for `complicated` so the canonical mismatch (§IX's own example) can be exercised against a chaotic regime.",
+    "operatives": {
+      "mentor": ["complicated"],
+      "curator": ["clear", "complex"]
+    },
+    "uncovered": ["chaotic"]
+  },
+  "response_mode_cases": [
+    {
+      "name": "every_domain_has_a_distinct_response_mode_and_a_presupposition",
+      "why": "★ The response modes are what make a mismatch mean something: a domain is not a label but a claim about which method works. Each mode carries a presupposition — recognisability, analysability, affordable probing, or that acting beats analysing — and a regime that denies it is what turns 'less suited' into 'confidently wrong'.",
+      "expect": {"distinct_modes": 4, "complicated": "sense → analyse → respond", "chaotic": "act → sense → respond", "complicated_presupposes": "analysability"}
+    }
+  ],
+  "match_cases": [
+    {
+      "name": "★★_a_mismatch_names_the_presupposition_that_fails",
+      "why": "★★ THE PROOF OF VALUE for §IX's abstention. The reason is DERIVED from the operative's own declared domains and their response modes, not a canned string: it names what its method takes for granted, what the regime requires instead, and why the difference matters. §IX's own words — *'not merely less useful; it is confidently wrong, because its method presupposes analysability'* — are reachable from declared data, which is what makes the abstention defensible rather than merely policy.",
+      "operative": "mentor", "regime": "chaotic",
+      "expect": {"suited": false, "why_contains": ["analysability", "act → sense → respond", "confidently wrong"]}
+    },
+    {
+      "name": "a_suited_operative_is_simply_suited",
+      "why": "The other side, so the mismatch machinery is not mistaken for the whole of `match`. An operative declaring two domains is suited in both and unsuited outside them — `match(i,s) = 1[dom(s) ∈ dom_i]`, and nothing more elaborate.",
+      "expect": {"curator_in_complex": true, "curator_in_clear": true, "curator_in_complicated": false}
+    }
+  ],
+  "coverage_cases": [
+    {
+      "name": "★_coverage_measures_requisite_variety_and_ENUMERATES_the_claimants",
+      "why": "★ Ashby: the population acquires requisite variety only if ⋃dom_i covers all four. And §IX's closing point — *'writing the declaration down makes the mismatch an ENUMERABLE PROPERTY rather than a paragraph in a document'* — is the `claimants` list: who claims which domain, checkable. Auditing a claim against the shape of Π_i is OPV-4's and is named as a slot rather than guessed at.",
+      "expect": {"has_requisite_variety": false, "uncovered": ["chaotic"], "clear_claimants": ["curator"], "chaotic_claimants": [], "describe_contains": "surface the gap"}
+    },
+    {
+      "name": "adding_the_missing_operative_completes_requisite_variety",
+      "why": "The condition is satisfiable, not merely checkable — and the description flips to say so, so a covered population reads as covered rather than as an absence of complaints.",
+      "expect": {"has_requisite_variety": true, "describe_contains": "requisite variety"}
+    },
+    {
+      "name": "an_operative_declaring_nothing_is_never_suited",
+      "why": "Declaring no domain is not modesty, it is unreachability: no regime can select it. Named rather than left to be discovered when it never appears in a routing result.",
+      "expect": {"never_suited": ["dead"]}
+    }
+  ],
+  "disorder_cases": [
+    {
+      "name": "★★_disorder_is_UNDECLARABLE_by_construction",
+      "why": "★★ §IX: *'Cynefin's fifth state, disorder, is a DETECTION TARGET, not a value to declare.'* Here that is structural rather than a rule someone follows: `Cynefin` has exactly four variants, so `dom_i = {disorder}` is not forbidden — there is no value to write. The type makes the article's instruction unnecessary.",
+      "expect": {"variants": 4, "no_disorder_variant": true}
+    },
+    {
+      "name": "★_an_uncovered_regime_surfaces_a_gap_and_routes_NOBODY",
+      "why": "★ §IX: *'the correct behaviour is to surface the gap rather than route to the least-bad scorer and present its output in the usual format.'* So nobody is routed — and the mismatches are KEPT, because *why* nobody was suited is the content of the gap, not noise to discard alongside it. The disorder names what the regime would have required of whoever took it.",
+      "regime": "chaotic",
+      "expect": {"surfaces_a_gap": true, "suited": [], "mismatched": 2, "requires": "act → sense → respond", "describe_contains": "least-bad scorer"}
+    },
+    {
+      "name": "★_an_INDETERMINATE_reading_is_disorder_too",
+      "why": "★ The second way disorder arrives, and the one that makes `dom(s)` being supplied honest: the Monitor may not be able to say. `DomainReading::Indeterminate` is a first-class answer rather than a missing value, so a caller with no reading does not have to fabricate a regime to proceed — which was a genuine agent-side gap before this row.",
+      "expect": {"surfaces_a_gap": true, "suited": [], "describe_contains": "not a value anyone may declare"}
+    },
+    {
+      "name": "a_covered_regime_routes_the_suited_and_abstains_the_rest",
+      "why": "The ordinary case, so the disorder paths are not mistaken for the whole behaviour. One suited, one abstaining with its reason attached.",
+      "regime": "clear",
+      "expect": {"surfaces_a_gap": false, "suited": ["curator"], "mismatched": ["mentor"]}
+    }
+  ],
+  "criticality_wiring_cases": [
+    {
+      "name": "★_criticality_flags_complex_to_chaotic_and_NOTHING_else",
+      "why": "★ §XIII: dom(s) is a Monitor output and *'§VIII's criticality detector is one of its inputs, since near-criticality is precisely the complex → chaotic transition risk.'* So OPV-14's reading is wired in for exactly that inference and no other: a critical or supercritical σ̂ on a COMPLEX reading flags that one transition. On any other reading it flags nothing, because σ̂ says nothing about clear → complicated. Consuming one input for the one thing it licenses is the honest alternative to building a classifier the article never specified.",
+      "expect": {"complex_supercritical": ["complex", "chaotic"], "complex_subcritical": null, "other_domains": null, "indeterminate": null}
+    },
+    {
+      "name": "★★_a_flag_does_not_reclassify_the_reading",
+      "why": "★★ The line between wiring an input and inventing a classifier. There is NO path in this module that produces a `DomainReading` — the flag is a separate value, the reading is returned untouched, and `describe()` says 'a flag, not a reclassification' in as many words. This is what keeps 'dom(s) is supplied' true rather than nominally true.",
+      "expect": {"reading_unchanged": "complex", "describe_contains": "not a reclassification"}
+    }
+  ],
+  "composition_cases": [
+    {
+      "name": "★★_cynefin_decides_WHETHER_to_route_and_mixture_decides_WHOM",
+      "why": "★★ The layering that makes §XV's route duty complete rather than merely present. `cynefin::route_on_domain` takes a `DomainReading` and answers *should anyone be asked at all* — catching both kinds of disorder before a gate is ever consulted. `mixture::route` takes a known regime and answers *whom to ask*. Composed, an indeterminate reading is representable end to end: it surfaces as disorder and the expensive gate is never entered. Before this row a caller with no reading had to fabricate a regime to call `route` at all, which was a real agent-side gap and is the reason Route was Partial.",
+      "expect": {"indeterminate_stops_before_the_gate": true, "known_regime_reaches_the_gate": true}
+    },
+    {
+      "name": "★_mixture_delegates_coverage_rather_than_keeping_a_copy",
+      "why": "★ One source of truth. The gate folded a coverage computation in when §XIII's condition had no home; this row is that home, so the duplicate was removed and `mixture::coverage_gaps` now delegates. The two agree by construction rather than by anyone remembering to update both.",
+      "expect": {"agree": true}
+    }
+  ]
+}

@@ -73,6 +73,7 @@
 //! | Present the frontier, not the winner | [`presentation`] | R2 |
 //! | Sparse mixture-of-experts gate | [`mixture`] | R2 |
 //! | Criticality — branching ratio σ̂ | [`criticality`] | R2 |
+//! | Suited domains · coverage · disorder | [`cynefin`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -82,6 +83,7 @@ pub mod crdt;
 pub mod controller;
 pub mod council;
 pub mod criticality;
+pub mod cynefin;
 pub mod detect;
 pub mod disaggregation;
 pub mod division;
@@ -138,6 +140,10 @@ pub use council::{aggregate_delegated_votes, resolve, DelegatedVote, ProposalSta
 pub use criticality::{
     branching_ratio, critical_slowing_down, BranchingReading, CascadeSummary, CriticalityError,
     CriticalitySpec, EarlyWarning, Regime,
+};
+pub use cynefin::{
+    assess, domain_coverage, route_on_domain, transition_risk, CynefinError, Disorder, DomainCoverage,
+    DomainReading, DomainRouting, Mismatch, ResponseMode, Suitability, TransitionRisk,
 };
 pub use detect::{
     classify, Alert, Cusum, CusumSpec, DetectorError, Ewma, Reading, Severity, Shift, Watch,

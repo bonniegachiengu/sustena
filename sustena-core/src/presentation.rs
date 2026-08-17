@@ -39,23 +39,24 @@
 //!
 //! [`Duty::ALL`] records them, and [`discharged_by_this_build`] says plainly
 //! which are real here. It reports what is **not** built rather than implying
-//! coverage. As of the mixture slice all three are at least partial:
-//! `Route`'s sparse gate ships ([`crate::mixture`]), but `match(i,s)` needs
-//! `dom(s)`, which is **supplied** rather than computed.
+//! coverage. **As of OPV-16 all three are `Built`** — §XV's duties are closed
+//! on the agent side.
 //!
-//! ★ **A correction, made after checking rather than assumed:** the criticality
-//! slice (OPV-14) was expected to move both `Route` and `HoldTheWhole` to
-//! `Built`. It does not. §XIII says the criticality detector is *"one of the
-//! inputs"* to the domain reading — it is not the four-way classification — so
-//! `σ̂` gives `HoldTheWhole` the criticality signal it explicitly wants while
-//! leaving `dom(s)` absent for both duties. That absence is **OPV-16's**, not
-//! OPV-14's. An earlier note here also read *"the domain reading exists
-//! (Cynefin, shipped with ω)"*, which conflated `dom_i` — an operative's
-//! **suited** domains, which `ω` does carry — with `dom(s)`, the Sustain's
-//! **current** regime, which nothing computes. Both are corrected below.
+//! ★ The route to that took two corrections, both made by checking rather than
+//! assumed, and both left visible. OPV-14 was expected to close the last two
+//! duties and **did not**: §XIII says the criticality detector is *"one of the
+//! inputs"* to a domain reading, not the classification. And an earlier note
+//! read *"the domain reading exists (Cynefin, shipped with ω)"*, which
+//! conflated `dom_i` — an operative's **suited** domains, which `ω` does carry
+//! — with `dom(s)`, the Sustain's **current** regime. What actually closed them
+//! was OPV-16: an **indeterminate** `dom(s)` became representable, so a caller
+//! with no reading surfaces disorder instead of fabricating a regime.
 //!
-//! Neither absence is stubbed; a declared-but-inert field reads as built and
-//! is worse than an absence.
+//! `dom(s)` is still **supplied** — §IX assigns the classifier to the Monitor
+//! (CAP-13 / §4D.6) and gives no algorithm for it. That is a separate **layer**,
+//! not an agent-layer gap: producing the reading is the Monitor's, holding and
+//! acting on it is this layer's, and that half is complete. Nothing is stubbed;
+//! a declared-but-inert field reads as built and is worse than an absence.
 //!
 //! §XV also restates the trap OPV-16 recorded and the previous slice honoured:
 //! *"the existing test and `match` are different axes: subject matter versus
@@ -129,19 +130,23 @@ pub fn discharged_by_this_build() -> [(Duty, Discharge, &'static str); 3] {
     [
         (
             Duty::Route,
-            Discharge::Partial,
-            "the sparse MoE gate ships (crate::mixture — declared weights, top-k, structural \
-             sparsity, coverage gap surfaced); match(i,s) needs dom(s), which is SUPPLIED rather \
-             than computed — and σ̂ (OPV-14) does not complete it, since a criticality reading is \
-             ONE INPUT to a domain reading and not the four-way classification, so this waits on \
-             OPV-16",
+            Discharge::Built,
+            "the sparse MoE gate (crate::mixture) plus suited-domain routing, the Ashby coverage \
+             condition and disorder (crate::cynefin). What moved this from Partial: an \
+             INDETERMINATE dom(s) is now representable, so a caller with no reading surfaces \
+             disorder instead of fabricating a regime to call route() at all — that was the real \
+             agent-side gap. dom(s) itself is SUPPLIED: §IX assigns the classifier to the Monitor \
+             (CAP-13 / §4D.6) and gives no algorithm, so that is a separate LAYER, not an \
+             agent-layer gap",
         ),
         (
             Duty::HoldTheWhole,
-            Discharge::Partial,
-            "§VIII's criticality signal ships (crate::criticality — σ̂ over the causal DAG); the \
-             domain reading dom(s) does NOT exist — ω declares each operative's SUITED domains \
-             (dom_i), which is a different thing, and mapping signals to a current regime is OPV-16",
+            Discharge::Built,
+            "§VIII's criticality signal (crate::criticality — σ̂ over the causal DAG) and the \
+             domain reading, held as crate::cynefin::DomainReading with disorder detected and the \
+             one inference §XIII licenses wired in (complex → chaotic, a flag that never \
+             reclassifies). Producing the reading is the Monitor's (CAP-13); holding and acting \
+             on it is this layer's, and that half is complete",
         ),
         (
             Duty::PresentTheFrontier,
@@ -493,20 +498,19 @@ mod tests {
         assert_eq!(d.len(), Duty::ALL.len());
         // Route moved NotBuilt → Partial when the mixture gate shipped; it is
         // not Built because match(i,s) needs a dom(s) nobody computes yet.
-        // ★ Both wait on OPV-16, not OPV-14: σ̂ is one INPUT to a domain
-        // reading, not the four-way classification.
+        // ★ All three Built as of OPV-16 — §XV's duties closed on the agent
+        // side, with dom(s)'s classifier named as a separate LAYER.
+        for duty in Duty::ALL {
+            let (_, discharge, why) = d.iter().find(|(x, _, _)| *x == duty).unwrap();
+            assert_eq!(*discharge, Discharge::Built, "{}", duty.name());
+            assert!(!why.is_empty());
+        }
         let route = d.iter().find(|(x, _, _)| *x == Duty::Route).unwrap();
-        assert_eq!(route.1, Discharge::Partial);
         assert!(route.2.contains("SUPPLIED"));
-        assert!(route.2.contains("OPV-16"));
+        assert!(route.2.contains("CAP-13"));
+        assert!(route.2.contains("separate LAYER"));
         let whole = d.iter().find(|(x, _, _)| *x == Duty::HoldTheWhole).unwrap();
-        assert_eq!(whole.1, Discharge::Partial);
-        assert!(whole.2.contains("criticality signal ships"));
-        assert!(whole.2.contains("OPV-16"));
-        let front = d
-            .iter()
-            .find(|(x, _, _)| *x == Duty::PresentTheFrontier)
-            .unwrap();
-        assert_eq!(front.1, Discharge::Built);
+        assert!(whole.2.contains("criticality signal"));
+        assert!(whole.2.contains("that half is complete"));
     }
 }

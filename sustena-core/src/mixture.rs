@@ -406,15 +406,15 @@ pub fn subject_relevance(operative_tags: &BTreeSet<String>, request_tags: &BTree
 
 /// `⋃_i dom_i` measured against all four domains — the Ashby coverage
 /// condition (§XIII).
+///
+/// ★ **Delegates to [`crate::cynefin::domain_coverage`], which is the canonical
+/// computation.** This gate folded a copy in when it needed one and §XIII's
+/// coverage condition had no home; OPV-16 built that home, so the duplicate was
+/// removed rather than left to drift. This wrapper survives only because a
+/// caller holding [`Contender`]s should not have to unwrap them by hand.
 pub fn coverage_gaps(contenders: &[Contender<'_>]) -> BTreeSet<Cynefin> {
-    let covered: BTreeSet<Cynefin> = contenders
-        .iter()
-        .flat_map(|c| c.operative.suited().iter().copied())
-        .collect();
-    Cynefin::ALL
-        .into_iter()
-        .filter(|d| !covered.contains(d))
-        .collect()
+    let operatives: Vec<&Operative> = contenders.iter().map(|c| c.operative).collect();
+    crate::cynefin::domain_coverage(&operatives).uncovered().clone()
 }
 
 // ---------------------------------------------------------------------------

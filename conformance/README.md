@@ -113,6 +113,7 @@ conformance/
                         U-guard · present the frontier  (spec, R2)
     mixture.json        sparse MoE gate · top-k         (spec, R2)
     criticality.json    branching ratio σ̂ · slowing down (spec, R2)
+    cynefin.json        suited domains · coverage · disorder (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -663,3 +664,34 @@ it is a bug** — nothing silently differs.
   ADR-0001 forbids in core — with the constraint a future slice must satisfy
   already recorded: **the verdict type may not carry an absolute "power law"
   variant, only a comparison.**
+
+- **`cynefin.json` — rust-ahead-of-python, with the abstain SEAM at parity, and
+  the slice that closed §XV's three duties.** `cynefin`, `snowden`, `disorder`,
+  `requisite`, `ashby`, `safe-to-fail`, `categorise` and `suited` are grep-0.
+  **★ The counterweight is the load-bearing half:** §IX says the cheap shipped
+  behaviour on `match = 0` is abstention because *"`is_relevant()` already
+  produces an ABSTAIN path"* — and it does, writing
+  `abstain_reason: "no_domain_overlap"`. The mechanism a Cynefin mismatch plugs
+  into is **already built and already correct**. What is absent is the axis: the
+  reference tests subject-matter tag overlap, so its abstention means *"this is
+  not my topic"* and never *"my method presupposes what this regime denies"*.
+  The seam is at parity; the second reason to take it is the gap. **★★ This
+  layer routes ON a domain reading and does not produce one** — §IX assigns
+  `dom(s)` to the Monitor and gives no classification algorithm, so the
+  classifier is **CAP-13, a separate layer rather than an agent-layer gap**, and
+  that distinction is what makes the duties' `Built` honest. **Disorder is
+  undeclarable by construction**: `Cynefin` has exactly four variants, so
+  `dom_i = {disorder}` has no value to write; it arrives instead as an uncovered
+  regime or an indeterminate reading, and both route nobody while **keeping the
+  mismatches**, since why nobody was suited is the gap's content. **★ One source
+  of truth reconciled:** `mixture`'s copy of the coverage computation was
+  removed and now delegates here — named `domain_coverage`, because
+  `goodhart::coverage` already means `O`/`U` over utility supports, two real
+  notions in one crate. False positives: `probe` (1, a Cloud Run liveness
+  probe), `response mode` (1, a `# Request / response models` divider). And
+  `domain` remains an **active** collision — this is the row that flagged it
+  before either side existed, and the flag held. Three limits: `dom(s)` supplied,
+  the `Π`-shape mismatch check is OPV-4's (declarations are enumerable now;
+  inferring a graph's shape from an id would be guessing), and criticality
+  informs **exactly one** transition — complex → chaotic, a flag that never
+  reclassifies.

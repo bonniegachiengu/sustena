@@ -480,21 +480,27 @@ fn the_three_duties_are_recorded_with_what_is_not_built() {
 
     let find = |want: Duty| *d.iter().find(|(x, _, _)| *x == want).unwrap();
 
-    // Route moved NotBuilt → Partial when the mixture gate shipped.
+    // ★★ All three Built as of OPV-16 — §XV's duties closed on the agent side.
+    for duty in Duty::ALL {
+        let (_, discharge, _) = find(duty);
+        assert_eq!(discharge, Discharge::Built, "{}", duty.name());
+    }
+    assert!(e["all_three_built"].as_bool().unwrap());
+
     let (_, route, route_why) = find(Duty::Route);
-    assert_eq!(route, Discharge::Partial);
-    assert_eq!(e["route"].as_str().unwrap(), "Partial");
+    assert_eq!(route, Discharge::Built);
+    assert_eq!(e["route"].as_str().unwrap(), "Built");
+    // dom(s) is still SUPPLIED — and its classifier is a separate LAYER
+    // (CAP-13), not an agent-layer gap. That distinction is what makes Built
+    // honest rather than asserted.
     assert!(route_why.contains(e["route_names"].as_str().unwrap()));
     assert!(route_why.contains("SUPPLIED"));
+    assert!(route_why.contains("separate LAYER"));
 
     let (_, whole, whole_why) = find(Duty::HoldTheWhole);
-    assert_eq!(whole, Discharge::Partial);
-    assert_eq!(e["hold_the_whole"].as_str().unwrap(), "Partial");
+    assert_eq!(whole, Discharge::Built);
     assert!(whole_why.contains(e["hold_names"].as_str().unwrap()));
-    // ★ σ̂ shipped and did NOT complete dom(s) — one input, not the whole
-    // classification. Both duties wait on OPV-16.
-    assert!(whole_why.contains("criticality signal ships"));
-    assert!(whole_why.contains("different thing"));
+    assert!(whole_why.contains("that half is complete"));
 
     let (_, front, _) = find(Duty::PresentTheFrontier);
     assert_eq!(front, Discharge::Built);
