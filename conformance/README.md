@@ -123,6 +123,7 @@ conformance/
     checkpoint.json     replay · (s_k,k) · O(n-k)        (spec, R2)
     dimension.json      declared kind · LWW attaches     (spec, R2)
     belief.json         belief under silence (no Kalman) (spec, R2)
+    harmonics.json      cycle vs shift in the frequency   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1047,4 +1048,51 @@ it is a bug** — nothing silently differs.
   drift rate is declared rather than learned, §I's observability-matrix rank is
   **not approximated** (only the no-matrix half is answered — a rough answer to
   a rank question is worse than none), and the tracker is not yet wired into
+  `MonitorEngine`.
+
+- **`harmonics.json` — rust-ahead-of-python, with the substrate at parity and
+  the need real on the other side today.** `dft`, `fourier`, `fft`, `harmonic`,
+  `spectral`, `seasonal` and `periodic` are seven clean zeros.
+  ★★ **A correction to MON-13's own row, made before building.** The row said
+  this *consumes `signal.rs`*. It cannot: `signal.rs` is the excitable-medium
+  primitive — `Phase`, `Pulse`, `Field`, refractoriness, a wave across a
+  **graph of nodes** — and produces no time series to transform. The confusion
+  is traceable to the Additions paragraph, which runs the harmonics sentence
+  and then *"The Signal primitive Monitor relays is defined formally in §4B"* —
+  a **cross-reference about where Signal is defined**, not a dependency. What
+  the article says to transform is *"the fold [...] over a windowed series"*,
+  which is the `W = d(s,V)` window `detect.rs` already runs over. So the window
+  is **supplied**, as `criticality.rs`'s is: no parallel windowing, which was
+  the real substance of the instruction.
+  ★ **The counterweight has two halves.** The **substrate** is at parity —
+  EWMA/CUSUM ship and `MonitorEngine` already keeps the very history this
+  transforms — and the **need is real there today**: `budget.allocate` carries
+  a `period: "monthly"` param and `record_income` a `frequency: "monthly"`, so
+  the household's rhythms are already *named* in the reference while nothing
+  can *see* them.
+  ★★ **And the case is proven rather than argued:** a conformance case runs the
+  **real `Cusum`** from `detect.rs` over the on-schedule monthly bill and
+  asserts it **fires**, while the frequency-domain reading calls the identical
+  series an expected cycle. So *"the time-domain detectors cannot do this
+  alone"* is a measured fact about this codebase's own detector.
+  ★★ **Testing forced a correction inspection would not have.** Attributing one
+  bin per known cycle reported an on-schedule bill as a **shift** — because a
+  bill is a periodic **impulse**, not a sinusoid, and an impulse train puts
+  energy at every multiple of its fundamental, which is what the row is *named*
+  for. Fixed by attributing the harmonic series `k, 2k, 3k, …`, with the cost
+  named where it lives: a genuine shift landing exactly on a harmonic of a
+  known cycle is absorbed with it. Inherent, not a defect.
+  **Greppable false positives named:** `frequency` has 19 hits and every one is
+  `budget.record_income`'s `frequency` **param** — the free-text string
+  `'once'`/`'monthly'`. Genuinely adjacent in meaning, completely unrelated in
+  kind: a label on a transaction, not a component of a series. `cycle` has 15
+  and they are import cycles, council cycles and a graph-cycle guard.
+  **Honest limits, six, one load-bearing:** ★★ **a shift on a harmonic of a
+  known cycle is absorbed** — the price of being able to explain a
+  non-sinusoidal cycle at all; the window is supplied, so its length and sample
+  interval are the caller's choices; the mean is removed but a **linear trend
+  deliberately is not**, since removing it silently would suppress the slow
+  drift a Monitor most wants to see; `O(N²)` with **an FFT as a named scaling
+  slot** rather than a dependency taken now; **no window taper**, so leakage is
+  visible rather than silently smoothed; and it is not wired into
   `MonitorEngine`.

@@ -1,0 +1,130 @@
+{
+  "conformance_version": 1,
+  "slice": "harmonics",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Monitor - Formal Execution.md, Additions — 'Frequency-domain change (harmonics)'",
+  "replayed_by": ["rust"],
+  "note": "★★ The payoff is SUPPRESSION and it must be honest: energy at a known period is an expected cycle, and the residual after removing the known cycles is the genuine-shift signal. A monthly bill arriving on schedule must not fire a 'spend is up' alarm — and the time-domain CUSUM, on the same series, does.",
+  "reconciliation_before_building": {
+    "★★_the_MON_13_row_said_this_consumes_signal_rs_and_it_CANNOT": "Checked before building, and the premise does not hold. `signal.rs` is the **excitable-medium** primitive — `Phase`, `Pulse`, `Field`, refractoriness, a wave travelling across a **graph of nodes**. It produces no time series to transform. The confusion is traceable to the Additions paragraph itself, which runs two sentences together: the harmonics sentence, and then *'The Signal primitive Monitor relays is defined formally in §4B (§III)'* — a **cross-reference about where Signal is defined**, not a statement that harmonics consumes it. The row read the second sentence as a dependency of the first.",
+    "★_what_it_actually_reads": "The article says *'the fold [...] over a windowed series'* — which is the **same `W = d(s,V)` series `detect.rs`'s EWMA and CUSUM already run over**, and which `MonitorEngine` already keeps a history of. So this takes a **supplied** `&[f64]` window, exactly as `criticality.rs` takes a supplied window rather than owning one. **No parallel windowing is defined**, which was the real substance of the instruction.",
+    "★★_and_TESTING_forced_a_correction_inspection_would_not_have": "The first implementation attributed a known cycle to **one bin** and the on-schedule monthly bill came back a *genuine shift*. The reason is the row's own name: a bill is a periodic **impulse**, not a sinusoid, and an impulse train puts energy at **every multiple of its fundamental**. Attributing only the fundamental leaves the harmonics in the residual. Fixed by attributing the harmonic series `k, 2k, 3k, …` — and the cost is named where it lives rather than discovered later: **a genuine shift landing exactly on a harmonic of a known cycle is absorbed with it.** That is inherent, not a defect — you cannot both explain a non-sinusoidal cycle and keep its harmonic bins free."
+  },
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`dft`, `fourier`, `fft`, `harmonic`, `spectral`, `seasonal` and `periodic` are all grep-0 in apps/api/sustena/ — seven clean zeros. Nothing anywhere reads a series in the frequency domain, so nothing can tell a season from a shift.",
+    "★_the_counterweight_the_SUBSTRATE_is_at_parity_and_the_NEED_is_real_there_TODAY": "Two halves. **The substrate:** the time-domain detectors ship — `detect.rs`'s EWMA and CUSUM over `W = d(s,V)`, held per-sustain by `MonitorEngine`, which already keeps the very history this transforms. So MON-13 is not waiting on an input; it is the **frequency-domain complement** of a chain that already runs. **And the need is real, not hypothetical:** the household genuinely has monthly rhythms — `budget.allocate` carries a `period: \"monthly\"` param, `budget.record_income` a `frequency: \"monthly\"`, and the advisory rule proposes `period: \"monthly\"` allocations. A monthly bill landing in a spend series is exactly the thing a time-domain detector fires on, and today nothing would stop it.",
+    "★★_and_the_case_is_PROVEN_rather_than_argued": "The conformance case runs the **real `Cusum`** from `detect.rs` over the same series the frequency-domain reading calls an expected cycle, and asserts it **fires**. So *'the time-domain detectors cannot do this alone'* is a measured fact about this codebase's own detector rather than a claim about detectors in general.",
+    "term_by_term": {
+      "★ a windowed series to read": "AT PARITY as a substrate — `MonitorEngine` keeps per-sustain histories, and `detect.rs` consumes exactly this series.",
+      "the Monitor→Controller escalation boundary": "AT PARITY — and reused rather than duplicated: a genuine shift is classified with `detect::classify`, the same `excess → Severity` table.",
+      "★★ a frequency-domain reading": "RUST-AHEAD. Seven grep-0 terms; there is no transform under any other name.",
+      "★★ cycle-vs-shift suppression": "RUST-AHEAD, and this is the row. Today a monthly bill would false-alarm — the CUSUM case proves it on this side, and nothing on the other side is shaped differently.",
+      "★ declared periods to use as known cycles": "PARTLY AT PARITY, and in a way worth naming — `period: 'monthly'` is a **free-text label** on a pocket, not an interval anything expands. EVT-11 makes it a real recurrence here, which is why `KnownCycle::from_periods` exists.",
+      "an FFT": "NEITHER SIDE, AND DELIBERATELY. A direct O(N²) DFT is honest at household-scale windows and needs no dependency; the FFT is a **scaling slot**, named rather than pulled in."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "frequency (19 hits, none a spectrum)": "★ Every one is `budget.record_income`'s `frequency` **param** — the free-text string `'once'` / `'monthly'` describing how often an income arrives. Genuinely adjacent in meaning and completely unrelated in kind: a label on a transaction, not a component of a series.",
+      "cycle (15 hits, none periodic)": "`import cycle`, `council cycle`, `max_steps (safety guard against cycles)` — a graph cycle, a governance round and a module-load cycle. None is a rhythm.",
+      "dft / fourier / fft / harmonic / spectral / seasonal / periodic (0 hits each)": "Seven clean zeros. No transform under another name."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The series, the detectors that run over it, the escalation path they cross, and free-text labels that name the very rhythms this would use. What it does not have is any way to look at the series' periodicity — so the monthly bill it already knows about by name is invisible to the detector that fires on it.",
+    "the_honest_limits": "Six. (1) ★★ A SHIFT ON A HARMONIC OF A KNOWN CYCLE IS ABSORBED — attributing `k, 2k, 3k, …` is what makes a non-sinusoidal cycle explainable at all, and the price is that a genuine shift landing exactly on one of those bins is suppressed with it. Inherent, not a defect, and stated where the attribution happens. (2) ★ NO WINDOWING OF ITS OWN — the window is supplied, so window length and sample interval are the caller's choices and they change what is resolvable; that is deliberate (`criticality.rs` does the same) but it means a badly-chosen window degrades the reading silently. (3) ★ THE MEAN IS REMOVED, A LINEAR TREND IS NOT — removing a trend is a modelling choice, and doing it silently would suppress exactly the slow drift a Monitor most wants to see. (4) O(N²) — honest at household scale, and **an FFT is a named scaling slot** rather than a dependency taken now. (5) SPECTRAL LEAKAGE IS NOT WINDOWED AWAY — a period that does not divide the window smears across neighbouring bins; no Hann/Hamming taper is applied, because a taper is another declared choice and its absence is more legible than a silent one. (6) NOT WIRED INTO `MonitorEngine` — like MON-8's tracker, this is designed to sit alongside the chain and the wiring is named rather than claimed.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. The first step is not the transform — it is EVT-11: turning `period: 'monthly'` from a label into a real recurrence gives the known cycle something to be derived from.",
+    "not_a_divergence_in": "R1 behaviour. Purely additive: a new module, no call site in `execute` or `MonitorEngine`, no change to `detect.rs` beyond reusing its `classify`, and no existing vector touched."
+  },
+  "fixture": {
+    "why": "The household case the Additions names: weekly samples of a spend series with a bill arriving on a monthly rhythm. 32 samples with a spike every 4 gives 8 full cycles — enough to be a rhythm rather than a coincidence.",
+    "window": 32,
+    "baseline": 100.0,
+    "spike": 300.0,
+    "on_cycle_period": 4,
+    "off_cycle_period": 5,
+    "residual_threshold": 0.35,
+    "min_cycles_to_establish": 2,
+    "cusum": {"mu_0": 100.0, "delta": 50.0, "h": 100.0}
+  },
+  "transform_cases": [
+    {
+      "name": "a_pure_sinusoid_puts_its_power_in_its_own_bin",
+      "why": "The transform checked against a case with a known answer before anything is built on it — four cycles across the window land in bin 4, at period 8 samples, with the amplitude recovered to 1.0. A DFT that is wrong here is wrong everywhere downstream.",
+      "expect": {"peak_k": 4, "period_samples": 8.0, "amplitude": 1.0}
+    },
+    {
+      "name": "★_the_MEAN_is_removed_so_a_LEVEL_is_not_read_as_a_RHYTHM",
+      "why": "★ A constant series has no rhythm, and must read as having none. Without removing the mean, a household's average spend would dominate every reading and the residual would be a statement about how much they spend rather than about whether the pattern changed.",
+      "expect": {"all_power_near_zero": true}
+    },
+    {
+      "name": "a_window_too_short_or_not_finite_is_refused",
+      "why": "Two samples have no frequency content to read, and a NaN anywhere makes the whole transform meaningless. Both are named errors rather than a zero-filled spectrum, because a spectrum of zeros reads as *nothing is happening*.",
+      "expect": {"short": "WindowTooShort", "nan": "NonFiniteSample"}
+    }
+  ],
+  "suppression_cases": [
+    {
+      "name": "★★_a_monthly_bill_arriving_ON_SCHEDULE_is_an_EXPECTED_CYCLE",
+      "why": "★★ THE ROW'S PAYOFF. The bill lands every 4 samples for 8 cycles; its energy — fundamental **and harmonics** — is attributed to the declared monthly cycle, the residual is small, and **nothing escalates**. The season arrived, as seasons do.",
+      "expect": {"verdict": "ExpectedCycle", "escalates": false, "attributed_to": "monthly_bill", "explained_gt_residual": true}
+    },
+    {
+      "name": "★★_the_TIME_DOMAIN_detector_WOULD_HAVE_FIRED_on_exactly_that_series",
+      "why": "★★ The claim *'this is what the time-domain detectors cannot do alone'* made a **measured fact about this codebase's own detector** rather than an assertion about detectors in general. The real `Cusum` from `detect.rs`, with a declared `μ₀`/`δ`/`h`, walks the same series and crosses `h` — because a spike is a spike to an accumulator. The frequency-domain reading, on the identical data, says expected cycle. **Complement, not veto.**",
+      "expect": {"cusum_fires": true, "harmonics_says_expected_cycle": true}
+    },
+    {
+      "name": "★★_the_SAME_MAGNITUDE_arriving_OFF_CYCLE_is_a_GENUINE_SHIFT",
+      "why": "★★ The other half of the proof, and the one that stops suppression from being a blanket mute. Same spike, same size, at a period the declared cycle does not explain — so it stays in the residual and surfaces, at a severity from the same table any other alert uses. A suppressor that could not do this would be an off switch.",
+      "expect": {"verdict": "GenuineShift", "residual_fraction_gt": 0.35, "escalates": true}
+    },
+    {
+      "name": "★_a_NEW_rhythm_ON_TOP_of_a_known_one_still_surfaces",
+      "why": "★ The realistic case rather than the clean one: the monthly bill is **still arriving** and something else has started. The known cycle is explained and the new one is not, so it surfaces — which is what makes this useful in a household that never stops having a monthly bill.",
+      "expect": {"verdict": "GenuineShift"}
+    }
+  ],
+  "honesty_cases": [
+    {
+      "name": "★★_a_period_the_WINDOW_CANNOT_RESOLVE_is_INDETERMINATE_not_expected",
+      "why": "★★ THE HONESTY POINT, and the trap the brief names. The cycle is **declared** — fully authorised — but a 12-sample window cannot carry a 10-sample period: fewer than two full cycles fit, so it is indistinguishable from a trend. Subtracting energy at a bin the window cannot resolve would **remove a real shift under the name of a season**. ★ Declaration authorises a cycle; it does not make a short window able to measure it. Those are two different requirements and both are needed.",
+      "expect": {"verdict": "Indeterminate", "reason_contains": ["cannot resolve", "indistinguishable from a trend"]}
+    },
+    {
+      "name": "★★_an_UNESTABLISHED_cycle_cannot_suppress_and_SAYS_WHY",
+      "why": "★★ The other half: seen once is not a season. Using it to suppress would hide a shift behind a rhythm **nobody has confirmed** — the exact dishonesty this codebase refuses everywhere else. The refusal names the count it saw and the count it needed, because a caller told only *no* cannot tell an unlucky window from a wrong declaration.",
+      "expect": {"verdict": "Indeterminate", "reason_contains": ["seen 1 time", "nobody has confirmed"]}
+    },
+    {
+      "name": "★_the_SAME_cycle_ESTABLISHED_enough_times_DOES_suppress",
+      "why": "★ The pair to the case above, and the reason it is not simply strictness: the difference between the two is **the evidence, and nothing else**. Same series, same period, same threshold — one refuses and one suppresses, because one has been seen 8 times and the other once.",
+      "expect": {"verdict": "ExpectedCycle"}
+    },
+    {
+      "name": "★_INDETERMINATE_is_neither_of_the_other_two_answers",
+      "why": "★ It does not escalate (nothing has been shown) and it is not an expected cycle (nothing has been explained). The same third-answer family as `Skew::Unknown` and `Soundness::Unavailable` — *we cannot yet tell* is a real answer, and collapsing it into either neighbour is how a system becomes confidently wrong.",
+      "expect": {"escalates": false, "is_expected_cycle": false}
+    }
+  ],
+  "policy_cases": [
+    {
+      "name": "a_nonsense_policy_is_refused_at_declaration",
+      "why": "A residual threshold outside 0..=1 is not a fraction; a period of 1 sample is not a period; and `min_cycles_to_establish < 2` would let a single occurrence establish a season, which is the whole thing the establishment rule exists to prevent.",
+      "expect": {"threshold": "BadResidualThreshold", "min_cycles": "BadMinCycles", "period": "BadPeriod"}
+    },
+    {
+      "name": "★_a_cycle_derived_from_a_REAL_EVT_11_recurrence_matches_its_period",
+      "why": "★ The tie-in the brief asks for, run against a real `Recurrence`: a declared monthly budget period **is** a declared cycle. `FREQ=MONTHLY;BYMONTHDAY=1` expanded from 1 January, sampled daily, gives a 31-sample cycle — the actual length of that month, not an averaged 30.4, because EVT-11 expands real periods rather than a nominal one.",
+      "expect": {"period_samples": 31.0, "provenance": "Declared"}
+    },
+    {
+      "name": "a_cycle_from_EVT_11_periods_needs_at_least_TWO_of_them",
+      "why": "One period gives a span, not a recurrence — there is no second boundary to measure a repeat against. Refused by name rather than assuming the span is the cycle.",
+      "expect": {"error": "NotARecurrence"}
+    },
+    {
+      "name": "two_cycles_landing_in_ONE_BIN_cannot_double_count_its_power",
+      "why": "Two declared cycles whose periods round to the same bin must not let the explained power exceed the total — an accounting error there would let a spec suppress arbitrarily much by declaring the same rhythm twice.",
+      "expect": {"explained_le_total": true}
+    }
+  ]
+}

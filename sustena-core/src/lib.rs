@@ -83,6 +83,7 @@
 //! | Replay · checkpoints (s_k, k) | [`checkpoint`] | R2 |
 //! | Declared dimension kind · LWW attaches | [`dimension`] | R2 |
 //! | Belief state under silence (no Kalman) | [`belief`] | R2 |
+//! | Harmonics · cycle vs shift (DFT) | [`harmonics`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -108,6 +109,7 @@ pub mod event;
 pub mod flow;
 pub mod fold;
 pub mod goodhart;
+pub mod harmonics;
 pub mod holarchy;
 pub mod inverse;
 pub mod kernel;
@@ -191,6 +193,10 @@ pub use belief::{
     SilenceSpec,
 };
 pub use checkpoint::{events_applied, replay, replay_to, Checkpoint, ReplayError};
+pub use harmonics::{
+    read as read_harmonics, spectrum, Component, HarmonicReading, HarmonicsError,
+    CycleProvenance, CycleVerdict, HarmonicsSpec, KnownCycle,
+};
 pub use clocks::{clock_findings, skew_of, ClockFinding, Skew, Suspect};
 pub use dimension::{
     AccumulatingDim, ContestedDim, DimensionError, DimensionSchema, DimensionValue,
