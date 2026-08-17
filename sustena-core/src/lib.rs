@@ -68,6 +68,7 @@
 //! | Disaggregation · hysteresis | [`disaggregation`] | R2 |
 //! | Division of labour · `rb > c` | [`division`] | R2 |
 //! | CRDT family · join-semilattice | [`crdt`] | R2 |
+//! | Operative ω · utility as a vector | [`operative`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -90,6 +91,7 @@ pub mod kernel;
 pub mod migrate;
 pub mod monitor;
 pub mod mutation;
+pub mod operative;
 pub mod operator;
 pub mod path;
 pub mod ooda;
@@ -154,6 +156,11 @@ pub use kernel::{
 };
 pub use migrate::{Applied, Compatibility, Emc, EmcVersionIds, MigrateError, Mu, StateMove};
 pub use mutation::Mutation;
+pub use operative::{
+    dominance, geometric_mean, nash_product, pareto_frontier, scalarise, Alternative, Cynefin,
+    Dominance, LegalMove, NashOutcome, Objective, Omega, Operative, OperativeError, Proposal,
+    Ranking, Sense, Shared, StatePoint, Utility,
+};
 pub use operator::{
     execute, execute_admitted, execute_as, Authorization, Enforcement, Execution, OperatorResult,
     Registry,

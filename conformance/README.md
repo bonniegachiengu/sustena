@@ -108,6 +108,7 @@ conformance/
     disaggregation.json θ↑/θ↓ hysteresis · dispersal    (spec, R2)
     division.json       role assignment · rb > c        (spec, R2)
     crdt.json           G-counter · OR-set · RGA        (spec, R2)
+    operative.json      ω · utility as a vector         (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -531,3 +532,35 @@ it is a bug** — nothing silently differs.
   never collected**, because a vanished tag could not suppress a retry and a
   vanished element would orphan a concurrent insert; and `converges` refuses
   above seven updates rather than sampling.
+
+- **`operative.json` — rust-ahead-of-python, with Nash's degenerate case at
+  parity.** `pareto`, `dominance`, `frontier`, `scalaris`/`scalariz`, `convex`,
+  `objective`, `cynefin` and `sharing constraint` are all grep-0. The
+  reference's `OperativeVote.utility` is declared `float = 0.5` and produced as
+  a bare literal at the call sites (`utility=0.5`, `utility=0.1`), so it is a
+  scalar **confidence attached to a vote**, not a function over `S` at all —
+  §II's argument that collapsing incommensurable objectives deletes options
+  cannot even be stated against a value that was never a vector. **Nash is at
+  parity**, and §II says so itself: `nash_utility_score` is *"a correct
+  implementation of a principled thing over an impoverished input"*, genuinely
+  tested. Two nuances are recorded rather than glossed, one in the reference's
+  favour and one against: the **disagreement point is named in three docstrings
+  and subtracted in none** (a party gaining exactly nothing zeroes Nash's
+  product and does not dent a geometric mean of raw scores — the single
+  property the product is most known for), and it is **not on a production
+  decision path** (the only non-test references are its own definition and one
+  docstring; `aggregate_delegated_votes` is what actually runs), so *at parity*
+  should not be read as *in the loop*. One grep count is named as the false
+  positive it is: **`supp` returns 87 hits and 0 real ones** — `supply`,
+  `support`, `supplier`, `supplied`, none of them `supp(u_i)`; `reachable`
+  returns 8, all about a network host or a database. And **one hit class is NOT
+  a false positive but an active collision**: `operatives.<n>.domain` in
+  homestead.json is a live subject-matter tag list, exactly the trap OPV-16
+  recorded in advance, which is why the Cynefin axis here is named `Cynefin`
+  and does not take that key. Three limits disclosed: `u_i` **reads** declared
+  dimensions rather than transforming them (a transform is OPV-6's business),
+  the non-selectability demonstration is a **dense sweep** rather than an
+  analytic proof (the analytic result is Das & Dennis's and is cited), and
+  `R(s)` is over a **declared** transition relation. Also recorded: Nash takes
+  **one scalar per party**, so applying it to vector utilities requires the
+  very collapse §II warns against — frontier first, bargain second.

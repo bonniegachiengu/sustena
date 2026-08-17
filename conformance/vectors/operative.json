@@ -1,0 +1,154 @@
+{
+  "conformance_version": 1,
+  "slice": "operative",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Operative - Formal Execution.md, §I (The Operative — ω, the sharing constraint, Propositions 1 and 2) and §II (Utility Is a Vector — Pareto dominance, the frontier, the convex-hull defect, Δu, Nash bargaining)",
+  "replayed_by": ["rust"],
+  "note": "SPEC vectors opening the agent layer. §I's two propositions are built as SHAPES rather than checks — an operative has no S and no T, so the sharing constraint is unrepresentable to violate — and §II's vector is kept a vector end to end, with nothing in the module able to collapse it.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`pareto`, `dominance`, `dominated`, `frontier`, `scalaris`/`scalariz`, `convex`, `objective`, `cynefin` and `sharing constraint` are ALL grep-0 in apps/api/sustena/. The reference has no notion of a non-dominated option, no vector-valued utility, and no frontier to present.",
+    "term_by_term": {
+      "★ u_i : S → ℝ^m — utility as a VECTOR": "RUST-AHEAD, and this is the keystone. `OperativeVote.utility` is declared `utility: float = 0.5` and documented as *'how much this proposal improves the operative's utility function'* — a scalar CONFIDENCE attached to a vote, not a function over S at all. It is produced as a bare literal at the call sites (`utility=0.5`, `utility=0.1` in attache.py and curator.py), so there is no S it is a function OF. §II's whole argument — that collapsing incommensurable objectives deletes options — cannot even be stated against a value that was never a vector.",
+      "Pareto dominance and 𝒫(X)": "RUST-AHEAD. grep-0 for every term. There is no comparison in the reference that can return *incomparable*; a scalar total-orders by construction, which is precisely the silent resolution §II objects to.",
+      "the convex-hull defect (Das & Dennis 1997)": "RUST-AHEAD. `convex` and `scalaris`/`scalariz` are grep-0. The reference never scalarises — because it never had a vector to scalarise.",
+      "Δu_i(o,s) — transition-shaped": "RUST-AHEAD. The reference's utility is attached to a vote about a proposal, never computed as `u(after) − u(before)`, so there is no pair for the comparison to be over.",
+      "★ Nash bargaining — the degenerate case": "AT PARITY, and the article says so itself: `nash_utility_score` is *'a correct implementation of a principled thing over an impoverished input'*. It genuinely computes `exp(mean(ln u))` over YES-vote utilities and is genuinely tested (four tests in test_operative_runtime.py). Two precise nuances recorded below rather than glossed.",
+      "the sharing constraint ∀i,j: S_i=S_j ∧ T_i=T_j": "RUST-AHEAD as a STRUCTURE, at parity as a FACT. The reference's operatives really do all act on one engine over one state and one OPERATOR_REGISTRY — the constraint holds there, as a consequence of there being one process. What is new is making it hold because it cannot be written otherwise.",
+      "Prop 1 (no private move)": "AT PARITY in effect, rust-ahead in form. A Python operative proposes an operator name and `execute_operator` refuses anything not in the registry and not spec-allowed — so no private move gets through. That is a runtime refusal at the far end; here a proposal naming a move outside T is unconstructible, so the refusal has nothing to refuse.",
+      "Prop 2 (adding an operative only re-ranks)": "RUST-AHEAD as a checkable claim. True of the reference by the same argument, but nothing there computes `R(s)`, so it cannot be exhibited. `reachable` returns 8 hits and every one is about a network host or a database being reachable — see the false positives.",
+      "dom_i — the Cynefin axis": "RUST-AHEAD, **and OPV-16's recorded trap is real and was live**. homestead.json line 380 reads `\"domain\": [\"finances\", \"budget\", \"savings\"]` — a subject-matter tag list, not {clear, complicated, complex, chaotic}. Reusing that key would have made one of the two inexpressible, so the axis here is named `Cynefin`. `cynefin` is grep-0; the trap was flagged in advance and is honoured at the point it would have been sprung.",
+      "supp(u_i)": "RUST-AHEAD. `Utility::support()` is real because an objective declares which dimension it reads, which makes §XIV's `O = ⋃ supp(u_i)` computable when OPV-27 comes to need it. `Omega::unwatched_dimensions()` reports `U = dim(S) \\ O` and does nothing about it — §XIV is explicit that the fix is not another operative."
+    },
+    "the_two_precise_nuances_about_nash_recorded_rather_than_glossed": {
+      "the disagreement point is NAMED in three places and subtracted in none": "★ council.py's docstring says the score is *'the geometric mean of utility improvements above the disagreement point (status quo = 0.5)'*, and curator.py and protege.py each document *'Disagreement point: status quo — used in Nash bargaining.'* The arithmetic is `exp(mean(ln u))` over the RAW utilities: `d` is never subtracted. Nash is `∏(u_i − d_i)`, and the difference is not cosmetic — it is the single property the product is most known for. A party gaining exactly nothing (u = d) zeroes Nash's product and does not dent a geometric mean of raw scores, which is why `nash_product` here returns `NoBargain` rather than a low number. Recorded as a specific, checkable observation about the arithmetic, not as a claim about intent.",
+      "it is defined and tested but not on a production decision path": "The only non-test references to `nash_utility_score` are its own definition and the docstring on `OperativeVote.utility` that points at it. The aggregation that actually runs is `aggregate_delegated_votes` (confidence-weighted), called once at council.py:478. So the parity claim is precise: the reference contains a correct implementation of the degenerate case, genuinely tested — it is simply not what decides anything today. That is worth stating because 'at parity' should not be read as 'in the loop'."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "supp (87 hits, 0 real)": "★ Worth naming because the count is alarming and the truth is zero: `supply` (29), `support` (18+7), `supplier` (10), `supplied` (9). Not one is `supp(u_i)`.",
+      "reachable (8 hits, 0 real)": "Network and database reachability (*'reachable on a live host'*, *'returns True if the database is reachable'*, an account *'unreachable by anyone'*) plus three in predicates.py about a quantifier's outer scope staying reachable. None is `R(s)`.",
+      "domain — ★ NOT a false positive, an ACTIVE collision": "The one hit class that matters. `operatives.<n>.domain` in homestead.json is a live subject-matter tag list. Named here so the distinction survives: this is why the Cynefin axis does not get that key."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "A working council: five operatives with strategy graphs, per-councillor sandbox forks, delegated sub-votes and confidence-weighted aggregation, plus a correct degenerate Nash score sitting beside it. The sharing constraint holds there in fact. What is absent is the *shape* — a utility that is a function over S, and a vector rather than a number — and everything that shape unlocks: a frontier to present, an incomparable verdict, a support set to compute coverage from. The reference's scalar is not a wrong answer to §II's question; it is a value that was never asked it.",
+    "the_tension_found_while_grounding": "★ Nash bargaining takes ONE SCALAR PER PARTY. Applying it to vector utilities therefore requires collapsing each agent's vector — which is exactly the deletion §II's first half warns about. The two results are not in conflict, but the order of operations is not arbitrary: compute the frontier first, losslessly and in vector form, and bargain among frontier points only if a single pick is genuinely required. That is also why *present the frontier, not the winner* is its own duty (OPV-29) rather than a presentation preference.",
+    "the_honest_limits": "Three. (1) `u_i` READS declared dimensions, it does not transform them — an objective says *I care about this dimension, in this direction*; a concave or thresholded transform is OPV-6's business, and inventing one here would be inventing preferences nobody declared. (2) THE NON-SELECTABILITY DEMONSTRATION IS A DENSE SWEEP, not an analytic proof — the analytic result is Das & Dennis's and is cited; the sweep reports how many weight vectors it tried rather than implying exhaustiveness. (3) `R(s)` IS OVER A DECLARED TRANSITION RELATION — the world declares its moves and where they lead; nothing here infers a transition.",
+    "declared_slots_deliberately_not_stubbed": "`Π` (OPV-4, the operator-DAG — app-built), `M_self`/`M_world` (OPV-11), `attention` (OPV-7) and learning (OPV-6) have NO placeholder field on `Operative`. A declared-but-inert field reads as built and is worse than an absence.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive — the R1 council's `aggregate_delegated_votes` is untouched, and this is the layer above it rather than a replacement."
+  },
+  "fixture": {
+    "why": "One world with three dimensions and two moves, and two operatives that differ ONLY in u_i — a thrifty one that reads savings alone, and a balanced one that reads savings and free time. That difference is the entire difference §I permits, and it is enough to make the two rank the same options differently.",
+    "dimensions": ["savings", "free_time", "noise"],
+    "moves": ["save", "rest"],
+    "transitions": [["s0", "save", "s1"], ["s1", "rest", "s2"]],
+    "operatives": {
+      "mentor": {"objectives": [["savings", "savings", "maximise"]], "suited": ["clear", "complicated"]},
+      "curator": {"objectives": [["savings", "savings", "maximise"], ["rest", "free_time", "maximise"]], "suited": ["complex"]}
+    }
+  },
+  "sharing_constraint_cases": [
+    {
+      "name": "★_an_operative_can_propose_only_elements_of_T",
+      "why": "★ Proposition 1, as a shape rather than a check. `LegalMove` has private fields and no public constructor, and the only source is `Shared::legal_move` — so a `Proposal` naming a move outside T is not rejected, it is unconstructible. *What the system is capable of is not a function of N.*",
+      "expect": {"legal": "save", "illegal": "print_money", "error": "MoveNotInT"}
+    },
+    {
+      "name": "an_objective_over_a_dimension_outside_S_is_refused",
+      "why": "The other half of the sharing constraint. A preference over something that is not part of S would score against a number that never exists, so an operative reading an undeclared dimension is refused at the moment it joins Ω rather than producing confident comparisons against nothing.",
+      "expect": {"error": "DimensionNotInS"}
+    },
+    {
+      "name": "a_transition_on_an_undeclared_move_is_refused",
+      "why": "A transition on something outside T would be a capability nobody declared — and R(s) computed over it would report reachable states that no legal move reaches.",
+      "expect": {"error": "MoveNotInT"}
+    }
+  ],
+  "proposition_cases": [
+    {
+      "name": "★_adding_an_operative_leaves_R(s)_unchanged_and_only_re_ranks",
+      "why": "★★ THE PROOF OF PROPOSITION 2, and it is a shape too: `Shared::reachable` takes no operative and no population, so adding a member cannot change a function it is never passed to. The test asserts the PAIR — reachable set byte-identical before and after, ranking genuinely different — because the proposition is about exactly that contrast. With the thrifty operative alone, the rest-heavy option is dominated and drops; adding the balanced one puts it back on a frontier without adding a single move. *An operative is a preference and a search procedure, not a capability.*",
+      "alternatives": [
+        {"id": "a", "savings": 10.0, "free_time": 0.0},
+        {"id": "b", "savings": 0.0, "free_time": 10.0}
+      ],
+      "expect": {
+        "reachable": ["s0", "s1", "s2"],
+        "reachable_unchanged": true,
+        "ranking_changed": true,
+        "dominated_for_all_before": ["b"],
+        "dominated_for_all_after": []
+      }
+    },
+    {
+      "name": "the_observed_and_unwatched_sets_are_real",
+      "why": "§XIV's `O = ⋃ supp(u_i)` and `U = dim(S) \\ O`, computable because an objective declares which dimension it reads. Reported and NOT acted on: §XIV is explicit that the fix for an unwatched dimension is not another operative, which is why this is a read rather than a remedy. It is here because it falls out of real supports for free and OPV-27 will need it.",
+      "expect": {"observed_one": ["savings"], "unwatched_one": ["free_time", "noise"], "unwatched_both": ["noise"]}
+    },
+    {
+      "name": "suited_domains_are_the_cynefin_axis_not_a_subject_matter_tag",
+      "why": "★ OPV-16 recorded this collision in advance and it was live: homestead.json's `operatives.<n>.domain` is `[\"finances\", \"budget\", \"savings\"]`. Reusing that key for {clear, complicated, complex, chaotic} would make one of the two inexpressible, so the axis is named `Cynefin` and a subject-matter tag list can still be added later under its own name.",
+      "expect": {"mentor_clear": true, "mentor_complex": false, "curator_complex": true, "axis_size": 4}
+    }
+  ],
+  "vector_cases": [
+    {
+      "name": "★_a_non_convex_option_is_kept_by_the_frontier_and_selected_by_no_weight_vector",
+      "why": "★★ THE PROOF OF VALUE, and §II's claim executed rather than repeated. Three options: (10,0), (0,10) and (4,4). The middle one is genuinely non-dominated — each of the others beats it on one objective and loses on the other, which `Dominance::Incomparable` says and a scalar cannot. It sits in a non-convex notch, so `max(10λ₀, 10λ₁) ≥ 5 > 4` for every λ on the simplex: **no weight vector will ever select it.** Swept against a dense grid of 1001 weight vectors and never once the argmax, while `pareto_frontier` keeps all three. *Collapsing to a scalar does not hide a trade-off; it deletes options.*",
+      "points": {"a": [10.0, 0.0], "b": [0.0, 10.0], "c": [4.0, 4.0]},
+      "weights_swept": 1001,
+      "expect": {"frontier": ["a", "b", "c"], "c_ever_selected": false, "a_vs_c": "Incomparable"}
+    },
+    {
+      "name": "a_convex_option_is_selected_by_some_weight_vector",
+      "why": "★ The companion, so the finding reads as *scalarisation misses exactly the non-convex ones* rather than *scalarisation never works*. Move the middle option out to (8,8) — on the convex hull now — and equal weights select it outright. The defect is specific and Das & Dennis named it precisely; overstating it would be as wrong as ignoring it.",
+      "points": {"a": [10.0, 0.0], "b": [0.0, 10.0], "c": [8.0, 8.0]},
+      "expect": {"c_wins_at_equal_weights": true}
+    },
+    {
+      "name": "dominance_is_four_valued_and_incomparable_is_a_real_answer",
+      "why": "★ `Incomparable` is the case §II is about, and the case a scalar cannot express — a total order has no room for *better on some, worse on others*, so collapsing resolves it by fiat and reports a winner. Also pinned: `∀k ≥` with no strict improvement is `Equal`, not dominance, which is the easiest half of the definition to drop.",
+      "expect": {"dominates": [[2,2],[1,1]], "dominated_by": [[1,1],[2,2]], "equal": [[1,2],[1,2]], "incomparable": [[2,0],[0,2]]}
+    },
+    {
+      "name": "comparing_vectors_of_different_length_is_refused",
+      "why": "An ℝ² against an ℝ³ is not a close call, it is a category error — and padding the shorter one would invent an objective nobody declared.",
+      "expect": {"error": "DimensionMismatch"}
+    },
+    {
+      "name": "delta_is_over_a_pair_and_is_still_a_vector",
+      "why": "§II's third point: the comparison is `Δu_i(o,s) = u_i(o(s)) − u_i(s)`, transition-shaped exactly as §4E's `D(s,s')` is. And it returns a vector — savings up thirty, free time down two, reported as the two facts they are rather than as one number that has already decided how to trade them.",
+      "before": {"savings": 100.0, "free_time": 5.0},
+      "after": {"savings": 130.0, "free_time": 3.0},
+      "expect": {"delta": [30.0, -2.0]}
+    },
+    {
+      "name": "a_minimised_objective_reads_the_other_way",
+      "why": "Without a declared sense, dominance is meaningless — *more spent* and *more saved* cannot both be improvements on one axis. A quieter state dominates a louder one only because the objective declared it was minimising noise.",
+      "expect": {"quiet_dominates_loud": true}
+    },
+    {
+      "name": "a_dimension_the_point_does_not_carry_is_refused_not_read_as_zero",
+      "why": "★ Zero is a value. Substituting it for a missing reading would produce a confident dominance verdict against a number nobody supplied — the same rule the roll-up follows when it excludes an unreadable child by name rather than counting it as nothing.",
+      "expect": {"error": "DimensionMissing"}
+    }
+  ],
+  "nash_cases": [
+    {
+      "name": "nash_subtracts_the_disagreement_point",
+      "why": "`∏_i (u_i − d_i)` with `d` genuinely subtracted, which is what the reference's docstring describes and its arithmetic does not do.",
+      "utilities": [0.9, 0.7], "disagreement": [0.5, 0.5],
+      "expect": {"score": 0.08}
+    },
+    {
+      "name": "★_a_party_that_gains_nothing_zeroes_nash_but_not_a_geometric_mean",
+      "why": "★ The one place the two arithmetics part company, made observable. With u = (1.0, 0.5) against d = (0.5, 0.5) the second party gains exactly nothing, so Nash's product is zero — no bargain is struck, and `NoBargain` says that rather than reporting a low score. The geometric mean of the raw utilities reads the same option as better than 0.7. This is the single property Nash's product is most known for, and it is the difference the reference's three docstring mentions of the disagreement point describe but do not implement.",
+      "expect": {"nash": "NoBargain", "refused_by": [1], "geometric_mean_above": 0.7}
+    },
+    {
+      "name": "the_degenerate_one_dimensional_case_is_what_the_reference_computes",
+      "why": "§II: *'the same object in the degenerate case where every u_i is one-dimensional and normalised.'* `geometric_mean` is provided precisely so the reference's own arithmetic can be COMPARED rather than assumed equivalent — and here, over three YES utilities, it is exactly the cube root of their product.",
+      "utilities": [0.8, 0.6, 0.9],
+      "expect": {"equals_cube_root_of_product": true}
+    }
+  ]
+}
