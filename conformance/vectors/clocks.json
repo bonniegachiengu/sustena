@@ -1,0 +1,161 @@
+{
+  "conformance_version": 1,
+  "slice": "clocks",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Events and Time - Formal Execution.md, §III (Two Clocks, and the Skew Between Them) + §I (the Event Record — t_ingest and source)",
+  "replayed_by": ["rust"],
+  "note": "Akidau et al. (2015), the event-time / processing-time distinction. ★ Skew is the NORMAL case, not an error — there is no threshold, no rejection and no error type in this slice. ★★ And negative skew is a SIGNAL, surfaced and never clamped: §III says clamping *'relocates the violation somewhere nobody is looking'*, the same species of error the enforcement gate exists to prevent.",
+  "reconciliation_before_building": {
+    "★_causes_was_already_present_and_was_NOT_re_added": "EVT-1's `causes` shipped earlier with the vector-clock work and is on `Event` today, carrying the causal DAG that `vclock.rs` derives its clocks from. The tracker row still listed it as pending; the row was stale, not the code. Corrected in place rather than re-implemented.",
+    "★_provenance_was_ALSO_already_present": "`Provenance::{Observed, Legacy}` — the observed-vs-inferred distinction §III asks for — was already on the record, along with a test that a backfilled row cannot pass for observed. So this slice did NOT build that distinction; it built the second clock the distinction now has to range over, and made `skew_of` respect it. EVT-5's row claimed provenance was missing; that half was stale too.",
+    "what_was_genuinely_missing": "`t_ingest` (the second clock), the skew reading over it, the surfacing of negative skew, and `source` provenance — which connector/device/Enzyme at what trust level."
+  },
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "★ There is exactly ONE clock on the reference event record, and it is the receiver's. `db/schema.py`'s `events` table is `Column(\"timestamp\", DateTime, default=datetime.utcnow)` — a single wall-clock stamp taken when the row is written. `t_event` and `t_ingest` are grep-0, and so is `skew`. The article's own audit says it in as many words: *'The record has one wall-clock timestamp (default=datetime.utcnow). Skew is not computable.'*",
+    "★★_the_counterweight_the_INGEST_HALF_exists_at_the_app_layer_and_so_does_source": "Exact, and it is most of the record. `ingest_messages` carries `received_at TEXT NOT NULL` — a real, durable, per-message record of when the system learned of it, which is precisely `t_ingest` under another name — and `source_id` (67 hits) is a real per-connector provenance string, `'mpesa'` / `'kcb'`, decided by the SMS sender and never by wording. So the reference already has an ingest clock and a source; what it does not have is the OTHER clock to subtract from it. The gap is not provenance and not arrival time. It is the event time, and therefore the difference.",
+    "★★_and_the_event_time_is_CAPTURED_THEN_DISCARDED_which_is_sharper_than_absent": "The transducer's own regexes name the group: `(?P<date>\\S+)\\s+at\\s+(?P<time>...)` appears in **13** real M-Pesa and KCB patterns — `mpesa_received`, `mpesa_paybill`, `mpesa_buygoods`, `mpesa_sent`, `mpesa_withdraw`, `kcb_card`, `kcb_mpesa_*` and the rest. The SMS states when the transaction happened, the parser MATCHES it, and then every handler's `parsed_fields` block omits it — `{direction, amount, counterparty, phone, balance_after}` and never `date`. So the event time is not missing from the input; it is extracted and dropped one line later. That makes this a smaller and far more actionable gap than absence, and it is exactly what the tracker's ING-13 says: *'lift the SMS's own date/time into event time (today only received_at, so skew isn't computable)'*.",
+    "★_a_near_miss_the_reference_DOES_have_declared_trust_and_provenance_just_not_on_the_event": "`core/parse_rule.py`'s `ParseRule` carries `trust`, `provenance` and `examples` — its own docstring reads *'the connector's declared trust level and the rule's origin/regression corpus'*, which is §I's *'source — which connector [...] at what trust level'* almost verbatim. Real values ship: `trust='shipped', provenance='sustena_core'` on every seed rule, `trust='user_corrected', provenance='user'` on a learned one. The concept is built and in use; it is attached to the RULE that read the message rather than to the EVENT the message became. Unapplied, not missing.",
+    "term_by_term": {
+      "t_ingest (an arrival clock at all)": "AT PARITY at the app layer — `ingest_messages.received_at`. RUST-AHEAD on the core record, where the reference has only the receiver's `timestamp` and calls it the event's time.",
+      "★ t_event (a distinct world clock)": "RUST-AHEAD, and this is the whole row. Nothing on either side of the reference lifts the source's own statement of when it happened, though the parser matches it in 13 patterns.",
+      "★★ skew = t_ingest − t_event": "RUST-AHEAD by construction — with one clock there is nothing to subtract. `skew` is grep-0.",
+      "★★ negative skew surfaced, never clamped": "RUST-AHEAD, and NOT because the reference clamps. It cannot clamp, because it cannot compute the quantity — so there is no bad behaviour here to report, only an absent one. Worth stating precisely so the reference is not accused of an error it does not make.",
+      "source provenance on the event": "RUST-AHEAD on the record; AT PARITY in spirit at the boundary (`source_id`) and on the parse rule (`trust`/`provenance`).",
+      "backfill marked `provenance='legacy'`": "AT PARITY as an idea and RUST-AHEAD as a field. The reference genuinely ran a one-time backfill — `migrate_to_event_sourcing()` writes each sustain a genesis event at its own `created_at` and renumbers prior rows — and it is careful work, verified byte-for-byte before cutover. What it lacks is the marker: a backfilled row is not distinguishable afterwards from an observed one, which is exactly what §III's `provenance` exists to prevent."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "t_ingest (0 real hits, ~10 apparent)": "`grep t_ingest` appears to hit, and every hit is a substring of an unrelated identifier: `_get_ingest_attention`, `get_ingest_engine`, `ingest_singleton`. There is no field, column or variable of that name.",
+      "t_event (0 real hits, ~12 apparent)": "Same shape, and worse, because the hits look topical: `get_events`, `recent_events`, `raw_events`, `days_since_last_event`. All are the plural noun, none is a time.",
+      "provenance (real hits, wrong object)": "Named above — `ParseRule.provenance` and `/orchie/balance-provenance` are both real and both good; neither is a field on the event record.",
+      "skew (0 hits, and the zero is clean)": "No hits at all, under any spelling, and no threshold or lateness constant hiding under another name."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "An arrival time it records faithfully, a source it decides by sender rather than by wording, a real backfill it verified before cutover, and a declared trust/provenance vocabulary — applied to parse rules. What it does not have is the second number. One clock cannot be late.",
+    "the_honest_limits": "Four. (1) ★ NO WATERMARK AND NO LATENESS POLICY — deciding *when you may stop waiting* is §IV (EVT-6) and is deliberately not answered here; this slice is what a watermark would be estimated from, and it takes care not to preclude one by refusing to invent a bound. (2) ★ NOTHING REJECTS A LATE EVENT, on purpose — §III's forwarding macro broke for a week and the correct behaviour was to accept, so there is no threshold, no error type and no `Δ` in the module at all. (3) `Trust` is DECLARED, never computed — nothing infers it from behaviour, and the only thing that reads it is which clock a disagreement points at. (4) ★ THE SUSPECT IS AN INFERENCE FROM A DECLARATION, not a measurement — it says which clock is the likelier culprit given who reported the event, and `Undetermined` is a real third answer rather than a default.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. The cheapest first step is the one already half-done: `parsed_fields` keeping the `date`/`time` groups the regexes already capture.",
+    "not_a_divergence_in": "R1 behaviour. `t_ingest` and `source` are `Option` with `#[serde(default)]`, so a record written before them deserialises, orders, dedupes and folds byte-identically — asserted against a literal pre-slice wire record rather than assumed."
+  },
+  "fixture": {
+    "why": "A household's real shape: an SMS that arrives promptly, one stranded a week by a broken forwarding macro, one from a device whose clock runs fast, and a row backfilled from a legacy table that only ever had one timestamp. Times are milliseconds since an arbitrary epoch — a fixed offset, never a wall clock, since the core has no clock.",
+    "MINUTE": 60000,
+    "WEEK": 604800000,
+    "events": [
+      {"id": "sms1", "t_event": 1000, "t_ingest": 1400, "provenance": "observed",
+       "source": {"id": "mpesa", "kind": "connector", "trust": "authoritative"},
+       "note": "the ordinary case — 400ms of skew"},
+      {"id": "stranded", "t_event": 2000, "t_ingest": 604802000, "provenance": "observed",
+       "source": {"id": "mpesa", "kind": "connector", "trust": "authoritative"},
+       "note": "a week of skew — the broken forwarding macro. ACCEPTED."},
+      {"id": "fast_clock", "t_event": 2400000, "t_ingest": 0, "provenance": "observed",
+       "source": {"id": "phone-7", "kind": "device", "trust": "reported"},
+       "note": "★ NEGATIVE skew — the device claims 40 minutes after we heard about it"},
+      {"id": "legacy1", "t_event": 5000, "t_ingest": 5000, "provenance": "legacy",
+       "source": null,
+       "note": "backfilled from a one-timestamp legacy row"},
+      {"id": "pre_slice", "t_event": 6000, "t_ingest": null, "provenance": "observed",
+       "source": null,
+       "note": "a record written before the second clock existed"}
+    ]
+  },
+  "skew_cases": [
+    {
+      "name": "skew_is_the_gap_between_the_two_clocks",
+      "why": "The definition, run once so the arithmetic is pinned before anything is built on it.",
+      "event": "sms1",
+      "expect": {"skew": "Observed", "millis": 400, "is_normal": true}
+    },
+    {
+      "name": "★_a_week_of_skew_is_ACCEPTED_and_read_exactly_like_a_millisecond_of_it",
+      "why": "★ §III's own field case: *'The forwarding macro that broke for a week produced events with a week of skew, and the correct system behaviour was to ACCEPT them, not reject them.'* Skew is unbounded and heavy-tailed — there is no Δ within which everything arrives. So the assertion is not merely that the week is tolerated; it is that **nothing anywhere reads a threshold**. There is no error type in the module to return, which is a stronger guarantee than a generous limit.",
+      "event": "stranded",
+      "expect": {"skew": "Observed", "millis": 604800000, "is_normal": true, "no_error": true}
+    },
+    {
+      "name": "★_a_week_late_event_still_orders_by_WHEN_IT_HAPPENED",
+      "why": "★ The reason to carry two clocks rather than pick the better one. The stranded event turned up last and belongs first; ordering is on `t_event`, so it lands back in its own past instead of at the end where it arrived. This is also the check that the new field did not quietly become an ordering term.",
+      "expect": {"first_by_order": "sms1", "stranded_precedes_recent": true}
+    }
+  ],
+  "negative_skew_cases": [
+    {
+      "name": "★★_a_negative_skew_SURVIVES_AS_A_NEGATIVE_NUMBER",
+      "why": "★★ THE LOAD-BEARING CASE. `t_event > t_ingest` is impossible in the world, so it is a real fact about a clock — and §III requires it *'recorded and surfaced as a data-quality fact, never silently clamped.'* The reading is signed, the computation is one subtraction, and nothing floors it. Clamping would satisfy every downstream consumer and relocate the violation somewhere nobody is looking, which is the same failure the enforcement gate exists to prevent.",
+      "event": "fast_clock",
+      "expect": {"skew": "Observed", "millis": -2400000, "is_negative": true, "is_normal": false}
+    },
+    {
+      "name": "★_the_sign_survives_a_serialisation_boundary",
+      "why": "★ If a clamp were ever going to creep in, a boundary is where it would — a field widened to unsigned, a JSON round trip through a type that cannot hold it. So the negative reading is checked across one rather than only in memory.",
+      "event": "fast_clock",
+      "expect": {"round_trips": true, "millis": -2400000}
+    },
+    {
+      "name": "★★_it_is_SURFACED_as_a_finding_not_merely_representable",
+      "why": "★★ Representing a negative skew and never mentioning it again would satisfy the letter of *'never clamped'* and miss the point of *'surfaced as a data-quality fact.'* So surfacing is a function that returns findings — the disagreeing event is reported with its signed skew and, stated separately, how far the device runs ahead, which is the number a person actually reads.",
+      "expect": {"findings": 1, "event_id": "fast_clock", "skew": -2400000, "ahead_by": 2400000}
+    },
+    {
+      "name": "★★_surfacing_CANNOT_repair_because_it_has_no_mutable_access",
+      "why": "★★ The structural half, and the reason this is not merely a convention. `clock_findings` takes `&[Event]` — an immutable slice — so writing a corrected time back is **not expressible from the surfacing path**. The type makes the clamp unspellable rather than the reviewer catching it, which is the same discipline that made a clamp on a conserved dimension unrepresentable in the firewall.",
+      "expect": {"log_unchanged_after_surfacing": true}
+    },
+    {
+      "name": "★_an_authoritative_source_points_the_suspicion_at_the_RECEIVER",
+      "why": "★ §III says a negative skew *'means a device clock disagrees with the receiver's'* — and which of the two is wrong is a provenance question, not a timing one. When the source **is** the authority for the time it stamped, the side that disagrees with it is the one recording arrival. This is the one thing that reads the declared trust level, so `Trust` is a field with a consumer rather than a field with a plan.",
+      "expect": {"suspect": "TheReceiver"}
+    },
+    {
+      "name": "a_merely_reporting_source_points_the_suspicion_at_ITSELF",
+      "why": "The opposite reading from the same machinery: a phone relaying an SMS is not the authority for the timestamp it puts on it, so its own clock is the simpler explanation. The fixture's `fast_clock` is a device at `trust: reported`, which is the realistic case.",
+      "event": "fast_clock",
+      "expect": {"suspect": "TheSource"}
+    },
+    {
+      "name": "★_with_no_source_declared_the_culprit_is_UNDETERMINED_not_guessed",
+      "why": "★ The third answer again. With nothing declared about who reported it, naming either clock would be a guess dressed as a finding — and the disagreement is still reported in full, with only the attribution withheld.",
+      "expect": {"suspect": "Undetermined", "still_reported": true}
+    }
+  ],
+  "three_readings_cases": [
+    {
+      "name": "★★_an_absent_ingest_time_reads_UNKNOWN_and_not_ZERO",
+      "why": "★★ The first of the two readings that are deliberately not numbers. A record written before the second clock existed says nothing about when it arrived — which is a different fact from arriving instantly, and collapsing them would put a fabricated 0ms into every average taken over a migrated log.",
+      "event": "pre_slice",
+      "expect": {"skew": "Unknown", "millis": null, "is_normal": false}
+    },
+    {
+      "name": "★★_a_BACKFILLED_row_reads_INFERRED_and_not_ZERO",
+      "why": "★★ The second, and the subtler one. A legacy row carried exactly one timestamp: it genuinely IS the arrival time, and §III's rule sets `t_event := timestamp` from it under a `legacy` marker. So the two clocks read equal and the arithmetic is 0 — but that 0 says *we only ever had one number*, not *it arrived instantly*. Reporting `Observed(0)` would make a backfill indistinguishable from a punctual arrival, which is precisely what the marker exists to prevent, so the reading is `Inferred` and `millis()` is `None`. The raw fields stay on the record for anyone who wants them; it is the READING that refuses to guess.",
+      "event": "legacy1",
+      "expect": {"skew": "Inferred", "millis": null, "not_equal_to_observed_zero": true}
+    },
+    {
+      "name": "★_a_backfilled_row_is_never_reported_as_a_clock_disagreement",
+      "why": "★ The other direction of the same honesty. `Inferred` is neither a normal skew nor a negative one, so it raises no finding — inventing a disagreement that was never observed would be as wrong as hiding one that was.",
+      "event": "legacy1",
+      "expect": {"findings_for_it": 0}
+    },
+    {
+      "name": "backfill_marks_the_INFERRED_clock_and_leaves_the_observed_one_alone",
+      "why": "Which of the two times the marker is about, stated rather than implied: the arrival time is a genuine observation and the event time is derived from it, so `provenance` marks the event half. An audit that marked the whole record would lose the fact that half of it was real.",
+      "expect": {"t_event": 5000, "t_ingest": 5000, "provenance": "legacy"}
+    }
+  ],
+  "additive_migration_cases": [
+    {
+      "name": "★★_a_record_written_before_the_second_clock_still_DESERIALISES",
+      "why": "★★ The migration check, run against a literal pre-slice wire record rather than a reconstruction of one — the JSON in the test has no `t_ingest` and no `source` key anywhere. Both fields are `Option` with `#[serde(default)]`, so the old shape reads back with its id, event time, provenance and causal parents intact.",
+      "expect": {"parses": true, "t_ingest": null, "source": null, "causes_preserved": true}
+    },
+    {
+      "name": "★★_the_new_fields_do_not_change_ORDER_DEDUPE_or_the_FOLD",
+      "why": "★★ The property that could not regress. The sort key is `(t_event, id)` and neither new field is in it; dedupe keys on the stable id; and the fold reads only `mutations`. So the same log with and without the second clock attached — including a week of skew on one event — produces the identical sequence and the identical folded state. Asserted by folding both and comparing, not by inspecting the code that would have to be wrong.",
+      "expect": {"same_order": true, "same_dedupe": true, "same_folded_state": true}
+    },
+    {
+      "name": "a_source_records_which_connector_at_what_trust_level",
+      "why": "§I's field read back through a serialisation round trip, since a provenance that does not survive being written down is not provenance.",
+      "expect": {"id": "mpesa", "kind": "connector", "trust": "authoritative"}
+    }
+  ]
+}

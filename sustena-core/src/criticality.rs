@@ -548,6 +548,8 @@ mod tests {
             name: "event.test.thing".into(),
             t_event: 0,
             provenance: Provenance::Observed,
+            t_ingest: None,
+            source: None,
             stamp: CausalStamp {
                 counter: 0,
                 node: "n".into(),

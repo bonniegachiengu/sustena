@@ -77,10 +77,12 @@
 //! | Boundary B · autopoietic closure | [`boundary`] | R2 |
 //! | Firewall F — what crosses B | [`flow`] | R2 |
 //! | wp obligation — author-time | [`obligation`] | R2 |
+//! | Two clocks · skew · negative skew surfaced | [`clocks`] | R2 |
 
 pub mod admission;
 pub mod approval;
 pub mod boundary;
+pub mod clocks;
 pub mod compose;
 pub mod consensus;
 pub mod crdt;
@@ -174,7 +176,11 @@ pub use editing::{
     EditAuthority, EditEffect, EditError, EditToken, Governance, Instance, Irreversible, Migration,
     Stranded,
 };
-pub use event::{dedupe, merge, order, CausalStamp, Event, Observation, Provenance};
+pub use clocks::{clock_findings, skew_of, ClockFinding, Skew, Suspect};
+pub use event::{
+    dedupe, merge, order, CausalStamp, Event, Observation, Provenance, Source, SourceKind,
+    Trust,
+};
 pub use error::{FoldError, FoldResult, StateError, StateResult};
 pub use flow::{
     check_flows, classify_movement, flows_of, Crossing, Flow, FlowDirection, FlowRefusal,

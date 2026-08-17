@@ -370,6 +370,8 @@ mod tests {
             name: "e".into(),
             t_event: t,
             provenance: Provenance::Observed,
+            t_ingest: None,
+            source: None,
             stamp: CausalStamp { counter, node: node.to_string() },
             causes: causes.iter().map(|c| c.to_string()).collect(),
             mutations: vec![],

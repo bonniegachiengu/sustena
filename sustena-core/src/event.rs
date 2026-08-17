@@ -49,6 +49,20 @@
 //!
 //! A legacy row given an inferred event time carries `Provenance::Legacy`, so
 //! an inferred time is never mistaken for an observed one.
+//!
+//! ## The second clock, and who reported it
+//!
+//! §I writes the record as
+//! `⟨id, type, payload, t_event, t_ingest, source, causes⟩`. `t_ingest` is
+//! **when the system durably learned of it**, and it is a genuinely different
+//! number from `t_event` — the gap between them is the skew, read in
+//! [`crate::clocks`].
+//!
+//! Both `t_ingest` and `source` are `Option` and `#[serde(default)]`, so a
+//! record written before they existed still deserialises, folds and orders
+//! unchanged. **`None` is not zero.** An absent ingest time means *nobody ever
+//! recorded when this arrived*, which is a different fact from *it arrived
+//! instantly*, and the skew reading keeps them apart.
 
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
@@ -71,6 +85,59 @@ pub enum Provenance {
 impl Default for Provenance {
     fn default() -> Self {
         Provenance::Observed
+    }
+}
+
+/// What kind of thing reported an event.
+///
+/// §I names them: *"which connector, which device, which Enzyme"*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceKind {
+    /// An integration — an SMS reader, a bank feed.
+    Connector,
+    /// A physical thing — a phone, a sensor.
+    Device,
+    /// The system's own execution produced it.
+    Enzyme,
+    /// A person entered it.
+    Human,
+}
+
+/// How far the source is to be taken at its word.
+///
+/// **Declared, never computed.** Nothing infers a trust level from behaviour;
+/// it is a statement made when the source is registered. §I asks for it as part
+/// of provenance (*"at what trust level"*).
+///
+/// The one thing that reads it today is [`crate::clocks::ClockFinding::suspect`]
+/// — when the two clocks disagree, which of them is the more likely culprit
+/// depends on whether the source is the authority for what it reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Trust {
+    /// The source *is* the authority for what it reports — a bank stating a
+    /// transaction it itself performed.
+    Authoritative,
+    /// It reports what it observed but is not the authority — a phone relaying
+    /// an SMS, a sensor taking a reading.
+    Reported,
+    /// The value was derived rather than observed.
+    Derived,
+}
+
+/// Provenance of the record: who reported it, and at what trust level.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Source {
+    /// Which connector, device or Enzyme — `"mpesa"`, `"kcb"`, a device id.
+    pub id: String,
+    pub kind: SourceKind,
+    pub trust: Trust,
+}
+
+impl Source {
+    pub fn new(id: impl Into<String>, kind: SourceKind, trust: Trust) -> Self {
+        Self { id: id.into(), kind, trust }
     }
 }
 
@@ -112,8 +179,18 @@ pub struct Event {
     pub name: String,
     /// When it happened in the world, as milliseconds since the epoch.
     pub t_event: i64,
+    /// When the system durably learned of it, as milliseconds since the epoch.
+    ///
+    /// Additive and optional: a record written before the second clock existed
+    /// carries `None`, which reads as *unknown* and never as *zero skew*.
+    #[serde(default)]
+    pub t_ingest: Option<i64>,
+    /// Whether `t_event` was observed or inferred.
     #[serde(default)]
     pub provenance: Provenance,
+    /// Who reported it. Optional for the same additive reason as `t_ingest`.
+    #[serde(default)]
+    pub source: Option<Source>,
     /// The Lamport stamp of the node that produced it.
     pub stamp: CausalStamp,
     /// Causal parents. Together with the stamp this makes the log a directed
@@ -125,6 +202,37 @@ pub struct Event {
 }
 
 impl Event {
+    /// Backfill a legacy row that carried exactly ONE timestamp.
+    ///
+    /// The legacy record's single wall-clock stamp is when the *receiver* wrote
+    /// it down, so it genuinely **is** an ingest time and lands on `t_ingest` as
+    /// an observation. The event time is then *inferred* from it — §III's
+    /// `t_event := timestamp` — and marked [`Provenance::Legacy`] so the
+    /// inference can never pass for an observation.
+    ///
+    /// The two clocks therefore read equal, which is honest: it says *we only
+    /// ever had one number*, not *it arrived instantly*. The skew reading keeps
+    /// that distinction — see [`crate::clocks::skew_of`], which reports
+    /// `Inferred` here rather than `Observed(0)`.
+    pub fn backfilled(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        timestamp: i64,
+        stamp: CausalStamp,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            t_event: timestamp,
+            t_ingest: Some(timestamp),
+            provenance: Provenance::Legacy,
+            source: None,
+            stamp,
+            causes: vec![],
+            mutations: vec![],
+        }
+    }
+
     /// The replica-agnostic sort key: `(t_event, id)`.
     ///
     /// Lexicographic, so an exact tie on physical time breaks the same way
@@ -219,7 +327,9 @@ mod tests {
             id: id.into(),
             name: "event.test.thing".into(),
             t_event: t,
+            t_ingest: None,
             provenance: Provenance::Observed,
+            source: None,
             stamp: CausalStamp { counter, node: node.into() },
             causes: vec![],
             mutations: vec![],
@@ -324,6 +434,66 @@ mod tests {
         let mut e = ev("legacy1", 0, "n", 1);
         e.provenance = Provenance::Legacy;
         assert_ne!(e.provenance, Provenance::Observed);
+    }
+
+    // ── the second clock lands additively ──────────────────────────────────
+
+    /// The exact wire shape of an event written before `t_ingest` and `source`
+    /// existed — no such keys anywhere in it.
+    const PRE_SLICE_WIRE: &str = r#"{
+        "id": "old1",
+        "name": "event.finances.income_received",
+        "t_event": 1000,
+        "provenance": "observed",
+        "stamp": {"counter": 1, "node": "phone"},
+        "causes": ["genesis"],
+        "mutations": []
+    }"#;
+
+    #[test]
+    fn a_record_written_before_the_second_clock_still_deserialises() {
+        let e: Event = serde_json::from_str(PRE_SLICE_WIRE).unwrap();
+        assert_eq!(e.id, "old1");
+        assert_eq!(e.t_event, 1000);
+        assert_eq!(e.t_ingest, None, "absent, which reads as unknown");
+        assert_eq!(e.source, None);
+        assert_eq!(e.causes, vec!["genesis".to_string()], "the causal graph is untouched");
+    }
+
+    #[test]
+    fn the_new_fields_do_not_disturb_ordering_dedupe_or_identity() {
+        // The migration check: an old-format log and the same log with the
+        // second clock attached order and dedupe identically, because neither
+        // operation reads t_ingest.
+        let old: Event = serde_json::from_str(PRE_SLICE_WIRE).unwrap();
+        let mut migrated = old.clone();
+        migrated.t_ingest = Some(1000 + 7 * 24 * 60 * 60_000); // a week of skew
+        migrated.source = Some(Source::new("mpesa", SourceKind::Connector, Trust::Authoritative));
+
+        assert_eq!(old.order_key(), migrated.order_key(), "the sort key is unchanged");
+
+        let mut a = vec![old.clone(), ev("z", 2000, "phone", 2)];
+        let mut b = vec![migrated, ev("z", 2000, "phone", 2)];
+        order(&mut a);
+        order(&mut b);
+        assert_eq!(
+            a.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            b.iter().map(|e| e.id.as_str()).collect::<Vec<_>>()
+        );
+
+        // And dedupe still keys on the stable id, not on the record's shape.
+        assert_eq!(dedupe(vec![old.clone(), old]).len(), 1);
+    }
+
+    #[test]
+    fn a_source_says_which_connector_at_what_trust_level() {
+        let mut e = ev("a", 100, "phone", 1);
+        e.source = Some(Source::new("kcb", SourceKind::Connector, Trust::Reported));
+        let round: Event = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
+        let s = round.source.unwrap();
+        assert_eq!(s.id, "kcb");
+        assert_eq!(s.kind, SourceKind::Connector);
+        assert_eq!(s.trust, Trust::Reported);
     }
 
     // ── the CRDT property, stated as three laws ─────────────────────────────

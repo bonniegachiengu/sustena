@@ -550,6 +550,8 @@ fn event_vectors() {
             name: "event.test.thing".into(),
             t_event: v["t_event"].as_i64().unwrap(),
             provenance: Provenance::Observed,
+            t_ingest: None,
+            source: None,
             stamp: CausalStamp {
                 counter: v["counter"].as_u64().unwrap(),
                 node: v["node"].as_str().unwrap().to_string(),

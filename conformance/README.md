@@ -117,6 +117,7 @@ conformance/
     boundary.json       B = ⟨scope, μ⟩ · closure law     (spec, R2)
     flow.json           F(φ,s) — what crosses B          (spec, R2)
     obligation.json     g ⟹ wp(e,Q) at author time      (spec, R2)
+    clocks.json         two clocks · skew · provenance   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -781,3 +782,44 @@ it is a bug** — nothing silently differs.
   declaration that can be wrong** — checking it against the body is a separate,
   larger row, which is why `EffectSummary` is optional and absent by default
   rather than inferred.
+
+- **`clocks.json` — rust-ahead-of-python, and the sharpest counterweight in the
+  set: most of the record is already there.** `t_event`, `t_ingest` and `skew`
+  are grep-0 on the reference's core event record, which carries exactly one
+  wall-clock column (`Column("timestamp", DateTime, default=datetime.utcnow)`)
+  — the receiver's. ★ **But the ingest half genuinely exists at the app layer**:
+  `ingest_messages.received_at` is a real, durable, per-message record of when
+  the system learned of it, and `source_id` (67 hits) is a real per-connector
+  provenance decided by the SMS *sender* and never by wording. The reference
+  has an arrival clock and a source. What it lacks is the other clock to
+  subtract from it, and **one clock cannot be late**.
+  ★★ **And the event time is captured, then discarded — which is a smaller and
+  far more actionable gap than absence.** The transducer's own regexes name the
+  group: `(?P<date>\S+)\s+at\s+(?P<time>…)` appears in **13** real M-Pesa and
+  KCB patterns. The SMS states when the transaction happened, the parser
+  *matches* it, and every handler's `parsed_fields` omits it one line later —
+  `{direction, amount, counterparty, phone, balance_after}` and never `date`.
+  So the cheapest first step toward parity is not a parser change at all: keep
+  the two groups already being matched. That is exactly ING-13.
+  ★ **A near-miss worth naming:** `ParseRule` carries `trust`, `provenance` and
+  `examples`, its docstring reading *"the connector's declared trust level"* —
+  §I's *"which connector [...] at what trust level"* almost verbatim, with real
+  values shipping (`trust='shipped'`, `trust='user_corrected'`). The concept is
+  built and in use, attached to the *rule* that read the message rather than to
+  the *event* the message became. Unapplied, not missing.
+  ★ **The reference is not accused of clamping** — it cannot clamp, because it
+  cannot compute the quantity. There is no bad behaviour here, only an absent
+  one, and the term-by-term says so.
+  **Greppable false positives named:** `t_ingest` and `t_event` both *appear*
+  to hit and neither has a single real one — every apparent match is a
+  substring of `_get_ingest_attention`, `get_ingest_engine`, `get_events`,
+  `recent_events`, `days_since_last_event`. All are the plural noun; none is a
+  time. `skew` is a clean zero under every spelling.
+  **Honest limits, four, two load-bearing:** ★ **no watermark and no lateness
+  policy** — *when may I stop waiting* is §IV/EVT-6 and is deliberately left
+  unanswered, which is why this slice invents no bound; and ★ **nothing rejects
+  a late event**, on purpose, since §III's forwarding macro broke for a week and
+  the correct behaviour was to accept — so there is no threshold, no `Δ` and no
+  error type in the module at all. `Trust` is declared and never computed, and
+  the suspect it feeds is an inference from a declaration rather than a
+  measurement, with `Undetermined` as a real third answer.
