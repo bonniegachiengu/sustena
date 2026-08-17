@@ -135,6 +135,7 @@ conformance/
     preattentive.json   φ : Data → VisualAttributes^n     (spec, R2)
     widget.json         w = <inputs,render,emits>, loaded  (spec, R2)
     curated.json        beta + compose(r) + the knapsack   (spec, R2)
+    strategy.json       Pi, the strategy DAG              (parity+, R1+R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2039,4 +2040,65 @@ grounds a widget reading five, the permissive direction, since a card showing
 four of five still says something. ★ And it **does not apply to the persistent
 tier**: `ALWAYS` means always, and *nothing is here yet* is an answer a console
 is supposed to give.
+
+### `strategy.json` — `Π`, the strategy DAG (OPV-4, Operative §III)
+**14 cases, R1+R2.** ★★ The deep bundle's **one row with a parity half**:
+`operative_graph.py` is Π in production, so the walk was **measured** rather
+than invented.
+
+★★ **STEP-0 corrected the brief, in OPV-1's favour.** `ω` has **no `Π` slot**
+to fill — `operative.rs` says why itself: *"follow-ons ... have no placeholder
+here, because a declared-but-inert field reads as built."* So this row **adds**
+the mechanism, and the restraint is vindicated rather than corrected.
+
+★★★ **But the mechanism Proposition 3 needs was already there.** OPV-1 made
+Prop 1 structural by minting `LegalMove` only through `Shared::legal_move`;
+Prop 3 is the same claim one level up, so **`StrategyNode` holds a
+`LegalMove`, not a name** — a node outside `T` is **unconstructible**, refused
+at build, where the reference stores a string and raises mid-walk. ★★★ And the
+bound is **proven strictly**: `reachable_under(Π) ⊂ Shared::reachable` — a
+strategy re-sequences legal moves and **can only narrow** — computed from
+`Shared`'s **own** transition table, because a bound derived from a copy would
+prove nothing.
+
+★★ **Every node goes through the real gate** (`execute_admitted`), so `Π` has
+no bypass; a refused node stops the walk with the gate's own reason and state
+byte-identical when nothing committed. ★ Two containments stay live: `T` at
+build, the sustain's allow-list at the gate.
+
+★ **Parity, verified rather than assumed:** the conditional walk, `$dot.path`
+resolved-never-evaluated **including leaving an unresolvable reference as the
+literal string** (checked in `_resolve_dynamic_kwargs`), `{{token}}`
+calibration refusing an unsupplied token, six operators with absent-field and
+type-mismatch both reading false, and the `max(2·|N|, 10)` guard.
+
+★★★ **The finding: the reference's graph calls operators OUTSIDE the gate** —
+`run` calls `op_meta.fn(...)` directly, not `execute_operator`. ★★ **The
+counterweight is why this is a finding rather than an alarm:** the graph's
+output is an `OperativeProposal`, and *operatives advise, the human decides* —
+`accept_suggestion` goes through `execute_operator` for the commit, so the
+operators a graph calls are overwhelmingly evaluative. A **shape** worth
+naming, not a live hole.
+
+★ **The cycle guard reports rather than truncating** — the reference falls out
+of the loop and builds a proposal from the last result, so a cyclic graph and a
+completed one look alike to the caller. ★ **One small real difference recorded
+rather than rounded away:** the reference's dynamic resolver recurses into
+dicts but **not lists**; this resolves both.
+
+**Greppable false positives named.** ★ `Strategy` — `admission::Strategy` is
+the constraint verdict policy (refuse / clamp / defer); confusing *what a rule
+does when broken* with *how an operative reasons* would genuinely mislead, so
+the newcomer took `StrategyGraph` (28th collision). `graph` — four different
+real graphs (`observability`, `population`, `lens`, `signal`), none of them Π.
+
+**Honest limits, five.** ★★ The walk **does not build a proposal** —
+presentation belongs to the operative layer, where `Proposal` already lives.
+★★ **Authorization and effects are `Unchecked`**, so the principal and approval
+conjuncts are not threaded onto a strategy's nodes yet — the honest residual,
+since **a strategy is exactly the deputy IMM-7's capability was built for**.
+★ `typecheck` validates shape, **not acyclicity** — the step limit is the
+substitute and is named as one. ★ **First matching edge wins**, so edge order
+carries meaning rather than specificity. ★ **State threads**, so a mid-walk
+refusal leaves earlier commits in place.
 

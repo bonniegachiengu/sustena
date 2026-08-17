@@ -51,6 +51,7 @@
 //! | The preattentive encoder φ | [`preattentive`] | R2 |
 //! | Widget schema, checked on the load path | [`widget`] | R2 |
 //! | β and compose(r) — the curated view | [`curated`] | R2 |
+//! | Π, the strategy DAG | [`strategy`] | R1+R2 |
 //! | The persistent-panel invariant | [`panel`] | R2 |
 //! | Edit authority | [`editing`] | R2 |
 //! | Transition constraints | [`transition`] | R2 |
@@ -156,6 +157,7 @@ pub mod semantic;
 pub mod stranding;
 pub mod signal;
 pub mod state;
+pub mod strategy;
 pub mod tenet;
 pub mod transition;
 pub mod vclock;
@@ -303,6 +305,10 @@ pub use curated::{
     Eligibility, Request, View, WidgetCandidate, Withdrawn,
 };
 pub use panel::{PanelDecl, PanelError, PanelInView, PanelPolicy, PanelSet};
+pub use strategy::{
+    reachable_under, run as run_strategy, CompareOp, Condition, StepRecord, StrategyEdge,
+    StrategyError, StrategyGraph, StrategyNode, Walk, WalkOutcome,
+};
 pub use principal::{
     effective_privilege, effective_privilege_with, permitted, permitted_with, Denial,
     MembershipEdge, Memberships, Skin, SkinRegistry, Tier,

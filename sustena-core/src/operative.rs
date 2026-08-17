@@ -237,6 +237,15 @@ impl Shared {
         self.dimensions.contains(name)
     }
 
+    /// Where one move leads from one state, if `T` declares it.
+    ///
+    /// ★ A read, added for OPV-4 so a strategy's reachable set can be computed
+    /// **from `Shared`'s own table** rather than a copy of it — the bound has
+    /// to come from the thing it is a bound on.
+    pub fn next_state(&self, from: &str, mv: &str) -> Option<String> {
+        self.transitions.get(&(from.to_string(), mv.to_string())).cloned()
+    }
+
     /// `R(s)` — the states reachable by admitted move sequences.
     ///
     /// ★ **Proposition 2, at the type level.** No operative and no population

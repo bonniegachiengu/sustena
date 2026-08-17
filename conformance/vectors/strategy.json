@@ -1,0 +1,122 @@
+{
+  "conformance_version": 1,
+  "slice": "strategy",
+  "phase": "R1+R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Operative - Formal Execution.md, §III (Π = ⟨N, E, entry, exit⟩ and the run(Π, ctx, trigger) pseudocode); measured against the Slice-5 Python implementation in sustena/core/operative_graph.py",
+  "replayed_by": ["rust"],
+  "note": "★★ The deep bundle's one row **with a parity half**: `operative_graph.py` is Π in production. The walk, `$dot.path`, the conditional-edge shape and the step guard are ported at parity; three things are sharper, and one of them is a real finding about the reference's call path.",
+
+  "★★_the_STEP_0_reconcile": {
+    "★★_1_ω_has_NO_Π_slot_and_that_was_DELIBERATE": "★★ The brief expected OPV-1's `ω` to carry a declared `Π` slot for this row to fill. **It does not** — and `operative.rs` says why in its own docstring: *'`Π` (OPV-4), `attention` (OPV-7), `M_self`/`M_world` (OPV-11) and learning (OPV-6) are follow-ons and **have no placeholder here, because a declared-but-inert field reads as built**.'* So this row **adds** the mechanism rather than filling a slot, and OPV-1's restraint is vindicated rather than corrected: had the slot existed, `ω` would have shipped for five days looking like it had a strategy.",
+    "★★★_2_but_the_MECHANISM_Prop_3_needs_was_already_there": "★★★ The reconcile's real payoff. OPV-1 made Proposition 1 structural by minting `LegalMove` **only** through `Shared::legal_move`, so a proposal outside `T` is unconstructible. Proposition 3 is the same claim one level up — *a strategy adds structure, not capability* — so `StrategyNode` **holds a `LegalMove`, not a name**, and the property falls out of a mechanism that already existed rather than a second check written beside it.",
+    "★_3_and_the_bound_comes_from_the_thing_it_is_a_bound_ON": "`Shared::reachable` takes neither an operative nor a strategy, which is how OPV-1 made Proposition 2 type-level. One small read was added — `Shared::next_state` — so `reachable_under` computes a strategy's reach **from `Shared`'s own transition table** rather than from a copy of it. A bound derived from a duplicate would prove nothing.",
+    "4_Π_is_not_the_router": "`mixture.rs` chooses **which** operative acts; `Π` is **how** the chosen one reasons. Kept apart deliberately — a router that also reasoned would make OPV-28's sparsity guarantee meaningless, and a strategy that also routed would be choosing its own author."
+  },
+
+  "divergence": {
+    "kind": "parity-plus-sharpening",
+    "statement": "`operative_graph.py` is real, in production, and its semantics are ported here as-is: the conditional walk (entry → run the node's operator → accumulate its `data` under the node id → follow the **first** matching outgoing edge → stop at `exit`), `$dot.path` runtime injection, `{{token}}` build-time calibration, the six comparison operators, absent-field-reads-false, type-mismatch-reads-false, no-matching-edge terminates, and the `max(2·|N|, 10)` step guard. Three things are sharper and are listed below; one is a finding rather than an improvement.",
+    "★★★_the_finding_the_reference's_graph_calls_operators_OUTSIDE_the_gate": "★★★ `run` calls **`op_meta.fn(context, **kwargs)`** — the operator *function*, directly. It does **not** go through `SustainEngine.execute_operator`, which is where the reference's enforcement gate, fold-append and parent-binding check live. So a strategy there executes operator bodies on a path the gate never sees. ★★ **The counterweight is real and substantial, and it is why this is a finding rather than an alarm:** the graph's output is an `OperativeProposal` — `_build_proposal` is its return — and Slice 10's whole discipline is that **operatives advise, the human decides**, with `accept_suggestion` going through `execute_operator` for the actual commit. So the operators a graph calls are overwhelmingly evaluative (`mentor.evaluate_budget` and its kin), and the ungated path is a **shape** worth naming rather than a live hole. ★ Here every node goes through `execute_admitted`, so `Π` inherits guard, `V`, `D`, closure, `F` and the authorization/token conjuncts with **no strategy bypass** — and a refused node stops the walk with the gate's own reason while what committed stays committed.",
+    "★★_sharper_2_Prop_3_is_a_TYPE_not_a_runtime_check": "★★ The reference stores `operator_name: str` and looks it up in `OPERATOR_REGISTRY` **mid-walk**, raising `ValueError` at the node. Here the node holds a `LegalMove` mintable only by `Shared`, so a move outside `T` is **unconstructible** — refused at build (`MoveNotInT`) and unable to reach a walk at all. *A strategy that cannot legally be run is a defect in the strategy, not an event during it.*",
+    "★_sharper_3_the_cycle_guard_REPORTS_rather_than_truncating": "★ Both sides bound the walk at `max(2·|N|, 10)`. The reference then falls out of the loop and builds a proposal from whatever the last result happened to be — so **a cyclic graph and a completed graph look alike to the caller**. `WalkOutcome::StepsExhausted` makes them different, because *it ran out* and *it finished* are different facts. Same third-answer discipline as `Skew::Unknown` and `UrgencyBasis::Undeclared`.",
+    "★_a_small_real_difference_worth_naming_rather_than_glossing": "★ The reference's `_resolve_dynamic_kwargs` recurses into nested **dicts** but **not lists**, so a `$ref` inside a list literal is left unresolved there. This resolves both. Recorded as a difference rather than claimed as parity — it is small, and a vector that rounds small differences to *identical* is how a large one eventually slips through.",
+    "term_by_term": {
+      "the conditional topological walk (entry → exit, first matching edge)": "AT PARITY — the reference's algorithm, ported.",
+      "`$dot.path` runtime injection, resolved not evaluated": "AT PARITY, including **leaving an unresolvable reference as the literal string** rather than substituting `null` (verified in `_resolve_dynamic_kwargs`, not assumed).",
+      "`{{token}}` build-time calibration, refusing an unsupplied token": "AT PARITY (`CalibrationError` there, `StrategyError::Uncalibrated` here).",
+      "the conditional-edge shape and its six operators": "AT PARITY, including absent-field → false and type-mismatch → false.",
+      "the `max(2·|N|, 10)` step guard": "AT PARITY as a bound; ★ **sharper as an outcome** — reported, not silent.",
+      "★ `$ref` inside a list": "RUST-AHEAD, and small: the reference recurses into dicts only.",
+      "★★★ Proposition 3 as a type (a non-`T` node is unconstructible)": "**RUST-AHEAD.** The reference checks the registry mid-walk and raises.",
+      "★★★ every node through the real gate": "**RUST-AHEAD**, and the reference's graph path is genuinely ungated — see the finding.",
+      "the proposal the walk builds (`OperativeProposal`)": "PYTHON-ONLY, deliberately: proposal *shape* is the operative layer's, and OPV-1 built `Proposal` already. The walk here returns what it did and what state it left, not a rendered recommendation."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "★ Strategy (a collision, and a genuinely misleading one)": "★ `admission::Strategy` is the constraint verdict policy — **refuse / clamp / defer**. Confusing *what a rule does when it is broken* with *how an operative reasons* would be a real misreading, so the newcomer took `StrategyGraph`, matching `DefinitionGraph`'s precedent. Twenty-eighth collision.",
+      "graph (many real hits, several different graphs)": "`observability.rs`'s operator graph, `population.rs`'s node graph, `lens.rs`'s `DefinitionGraph`, `signal.rs`'s excitable medium. All real, none of them Π. Named because *graph* is the first word a reviewer greps and it lands on four wrong things before this one."
+    },
+    "the_honest_limits": "★★ **THE WALK DOES NOT BUILD A PROPOSAL** — it returns the steps, the outcome, the accumulated results and the state it left. The reference's `_build_proposal` reads `operator_name`/`input_params`/`rationale` off the exit node's data with generic fallbacks, which is a **presentation** decision belonging to the operative layer (where OPV-1's `Proposal` already lives), not to the walker. Naming it here rather than porting it. · ★★ **AUTHORIZATION IS `Unchecked` AND EFFECTS ARE `Unchecked` FOR NOW** — the walker passes both, so a caller wanting the principal or approval conjuncts on a strategy's nodes must thread them, and there is no API here to do it yet. That is a **real residual**, and it is the honest one to name given IMM-7 exists: a strategy is exactly the deputy a capability was built for. · ★ **NO TOPOLOGICAL VALIDATION BEYOND SHAPE** — `typecheck` checks endpoints and dangling edges; it does **not** verify the graph is acyclic, because §III's own runner does not either and a bounded cyclic walk is a legitimate (if guarded) shape. The step limit is the acyclicity substitute, and it is named as one. · ★ **FIRST MATCHING EDGE WINS, AND EDGE ORDER IS THE AUTHOR'S** — parity with the reference, and it means edge order carries meaning; a set of overlapping conditions is resolved by declaration order rather than by specificity. Stated because it is the kind of thing a reader assumes is specificity-ordered. · ★ **STATE THREADS, SO A LATER NODE SEES AN EARLIER NODE'S COMMIT** — which is the point, and also means a refusal mid-walk leaves earlier commits in place. The same stop-at-the-first-real-failure shape EVT-15's promotion has, and it is a property to know rather than a bug."
+  },
+
+  "proposition_3_cases": [
+    {
+      "name": "★★★_a_node_outside_T_is_refused_at_BUILD_and_is_unconstructible",
+      "why": "★★★ Proposition 3's mechanism. `StrategyNode` holds a `LegalMove`, which only `Shared::legal_move` can mint — so a node naming an operator outside `T` is not rejected *later*, it cannot be written down. `with_node` returns `MoveNotInT` at build, where the reference stores the string and raises mid-walk. *A strategy that cannot legally be run is a defect in the strategy, not an event during it.*",
+      "expect": "Err(MoveNotInT) at build"
+    },
+    {
+      "name": "every_move_a_strategy_names_is_in_T",
+      "why": "`Π.moves() ⊆ T`, asserted as a set containment — which needs no check to be true, because the type already guaranteed it. The method exists so the containment can be *asserted* rather than argued, the same reason `channels_used()` exists in MON-7.",
+      "expect": "subset holds"
+    },
+    {
+      "name": "★★★_a_strategy_reaches_no_state_T_did_not_already_allow",
+      "why": "★★★ The proposition itself, as a set comparison rather than a claim. A world where `m1` then `m2` reaches `s2`; a strategy naming only `m1` reaches `s1` and stops. Its reachable set is a **strict subset** of `T`'s — so a strategy **re-sequences and conditions** moves that were already legal and **can only narrow**. And the bound is computed from `Shared`'s own transition table (via the one read this row added), not from a copy, because a bound derived from a duplicate would prove nothing.",
+      "expect": "reachable_under ⊆ Shared::reachable, and strictly"
+    }
+  ],
+
+  "walk_cases": [
+    {
+      "name": "the_walk_runs_entry_to_exit_and_threads_state",
+      "why": "The base case, and it asserts the thing that makes a walk a walk rather than a batch: **state threads**, so the second node allocates out of the balance the first node created. 1000 in, 400 allocated, 600 left — checked on the state the walk returns, not on the accumulated results.",
+      "expect": "ReachedExit, two committed steps, balance 600"
+    },
+    {
+      "name": "★_a_dollar_path_kwarg_is_resolved_from_an_earlier_result",
+      "why": "★ `$earn.amount` — resolved at run time from the accumulated results by **dot-path walk, never evaluation**, the same discipline as `predicate` and `parse_rule`. Proven by consequence rather than by inspecting the kwargs: 250 in, `$earn.amount` out, balance back to zero. If the reference had been substituting a literal or a `null`, the arithmetic would not land.",
+      "expect": "balance 0.0 after in-then-out"
+    },
+    {
+      "name": "a_conditional_edge_routes_on_the_producing_nodes_result",
+      "why": "An edge guarded by `amount > 100` against an income of 10 does not match, so the walk stops at `NoMatchingEdge` and the second node **never runs** — checked on the step count, because *did not match* and *matched and was refused* are different and only one of them executed anything.",
+      "expect": "NoMatchingEdge at 'earn', one step"
+    },
+    {
+      "name": "an_absent_condition_field_reads_false_rather_than_erroring",
+      "why": "Parity with the reference, and the right reading on its own terms: a condition about something that did not happen has not been met. An error would make a missing field a crash rather than a route not taken.",
+      "expect": "false"
+    },
+    {
+      "name": "a_type_mismatch_reads_false_too",
+      "why": "The reference catches `TypeError` and returns false; comparing a string to a number here yields no ordering and reads false the same way. Ported rather than 'improved' into an error, because the reference's choice is the right one for an edge guard.",
+      "expect": "false"
+    },
+    {
+      "name": "★_a_cycle_is_bounded_and_the_exhaustion_is_REPORTED",
+      "why": "★ A self-edge with no terminating condition. Both sides bound it at `max(2·|N|, 10)`; the reference then falls out of the loop and builds a proposal from the last result, so **a cyclic graph and a completed one look alike to the caller**. `StepsExhausted { limit }` makes them different, and `finished()` is false — *it ran out* and *it finished* are different facts.",
+      "expect": "StepsExhausted { limit: 10 }, ten steps, finished() = false"
+    }
+  ],
+
+  "gate_cases": [
+    {
+      "name": "★★★_a_node_the_gate_refuses_stops_the_walk_honestly",
+      "why": "★★★ `Π` gets no bypass: every node goes through `execute_admitted`, so an allocation exceeding the balance is stopped by the operator's own guard exactly as a hand-written call would be. The walk returns `Refused` carrying **the gate's own reason**, and state is byte-identical to the start because nothing committed. This is the row's reconciliation with the gate, checked rather than described.",
+      "expect": "Refused { node, reason }, state unchanged"
+    },
+    {
+      "name": "★_an_operator_the_sustain_does_not_allow_is_refused_at_the_gate",
+      "why": "★ Two different containments, and both are live. `T` is the world's legal-move set and is checked at **build**; the sustain's allow-list is checked at the **gate**, per call. A move can be in `T` and still not permitted here — and it is refused, not run. Naming the pair matters because a reader could otherwise assume Proposition 3's build-time check made the runtime one redundant.",
+      "expect": "Refused"
+    }
+  ],
+
+  "build_cases": [
+    {
+      "name": "typecheck_catches_a_dangling_edge_and_a_missing_endpoint",
+      "why": "Shape errors are load-time findings, not walk-time surprises — the same position UI-2 takes on widgets and `parse_rule` takes on rules. An edge to a node that does not exist, and an `exit` that names nothing, are both caught before anything runs.",
+      "expect": "Err(DanglingEdge), Err(MissingEndpoint { which: exit })"
+    },
+    {
+      "name": "calibration_resolves_a_placeholder_and_refuses_an_unsupplied_one",
+      "why": "`{{limit}}` becomes the calibrated value; an unsupplied token is **refused** naming the node, the parameter and the token — parity with the reference's `CalibrationError`, and the same refuse-rather-than-default discipline as `PanelDecl::always` and `SaliencePolicy::declared`.",
+      "expect": "resolved value; Err(Uncalibrated { token: limit })"
+    },
+    {
+      "name": "★_the_two_resolution_passes_do_not_see_each_others_syntax",
+      "why": "★ `{{token}}` is build-time and `$path` is run-time, and a calibration pass must leave a `$` reference **untouched**. Two passes at two times over the same kwargs is exactly where a resolver quietly eats the other's syntax, so it is asserted rather than assumed.",
+      "expect": "$earn.amount survives calibration verbatim"
+    }
+  ]
+}
