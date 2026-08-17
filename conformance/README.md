@@ -136,6 +136,7 @@ conformance/
     widget.json         w = <inputs,render,emits>, loaded  (spec, R2)
     curated.json        beta + compose(r) + the knapsack   (spec, R2)
     strategy.json       Pi, the strategy DAG              (parity+, R1+R2)
+    attention.json      narrow + broad, the <b,d,p> meter  (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2101,4 +2102,65 @@ since **a strategy is exactly the deputy IMM-7's capability was built for**.
 substitute and is named as one. ★ **First matching edge wins**, so edge order
 carries meaning rather than specificity. ★ **State threads**, so a mid-walk
 refusal leaves earlier commits in place.
+
+### `attention.json` — the two attentions (OPV-7, Operative §V)
+**15 cases, R2 (spec).** ★★ **Reference-less**: the shape exists there only by
+convention (`should_evaluate` cheap vs `evaluate` costly), undeclared. So the
+counterweight is **internal consistency**, not a parity grep.
+
+★★★ **The STEP-0 constraint that replaced it: narrow must not become a fifth
+notion of *important*.** The salience family closed rival-importance on four
+surfaces, and a **scoring** attention is where a fifth could open. `Score` has
+**no public constructor and no public fields** — the only way to obtain one is
+`narrow_scan`, computing it from `Region::distance`, the household's own
+`d(s,V)`. An operative cannot mint a score, cannot raise its own, and has no
+field anywhere to declare a rival metric. ★ An unreadable state yields **no
+score**, not a fabricated zero. ★ Same discipline one size down:
+`Aperture::stance()` reads narrow-vs-broad **off `⟨b,d,ρ⟩`**, so a label cannot
+be declared — which matters, because *both non-empty* is enforced by comparing
+stances.
+
+★★★ **Both attentions, structurally** — two required fields, no `Option`, no
+single-attention constructor; and a pair landing in the **same region** is
+**refused**, since one aperture under two names is the partition arriving
+through the back door.
+
+★★ **Two output types, not two scores.** Narrow returns a `Score`; broad a
+`Reframing` with **no magnitude**, because a number would invite weighing it
+against a narrow score — the collapse that makes an agent a maximiser inside a
+frame it cannot notice is wrong. ★ Broad also ignores what the task was already
+looking at, or the two attentions collapse into one louder one.
+
+★★★ **A path with fringes, and the subtree is unspellable.** One child
+descended per level, `b` siblings sampled as fringes. There is **no
+`walk_subtree`**; `subtree_visits()` exists only to measure the gap — 48 visits
+against **over thirty thousand** at `b=8, d=6`.
+
+★★ **The closed trade, as arithmetic:** `⟨1,4,3⟩` and `⟨12,1,1⟩` both cost 12.
+Doubling depth breaks a budget until resolution pays for it — **no free axis**.
+
+★★ **Depth walks the real `⊕` tree** (`MonitorEngine`'s parent relation, the
+one `escalate` climbs — escalation up, attention down, no parallel tree). ★ And
+the footprint reconciles with UI-1: pawa bounds the **scan**, `K ≈ 4` the
+**hold** — *anything can scan widely and hold four; nothing can hold widely.*
+
+**Divergence: R2, rust-only-spec.** ★★ **The counterweight is the reference's
+and it is real:** the cheap-scan discipline is its own, documented in
+`operatives/base.py` and honoured. What was missing is the **declaration** —
+this row made the shape a type and the width a bounded quantity; **it did not
+discover the shape.**
+
+**Greppable false positives named — one is the sharpest by count.**
+★★★ `attention` — **51 hits, zero about this**: every one is *needs-attention*,
+the Monitor's queue, which is the **object** of attention rather than the
+faculty. ★★ `narrow`/`broad` — 42 between them, all English adjectives.
+`resolution` — 15, none the `ρ` axis. ★ And `should_evaluate` (27) is named as
+**the real one**, so it is not overlooked while the noisy zeros are dismissed.
+
+**Honest limits, five.** ★★ `B_att` is **a number, not a balance** — `κ` is
+declared and uncalibrated (the `pawa_meter` position), and the money is parked:
+the cost **discipline** is this slice. ★★ The stance boundary is a **declared
+heuristic**. ★ The path descends into the **first** child. ★ Broad reports the
+**first** frame change. ★★ And **nothing calls attention from an operative
+yet** — `ω` has no `attention` field, for the reason it had no `Π` slot.
 

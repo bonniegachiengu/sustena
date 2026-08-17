@@ -1,0 +1,128 @@
+{
+  "conformance_version": 1,
+  "slice": "attention",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Operative - Formal Execution.md, §V (attention = ⟨narrow, broad⟩, the ⟨b,d,ρ⟩ meter, path-with-fringes); Ashby's law of requisite variety; Cowan 2001 for the hold this composes with",
+  "replayed_by": ["rust"],
+  "note": "★★ Reference-less: the two-attention shape exists in the reference **only by convention** and is undeclared. So the counterweight is not a parity grep but **internal consistency** — three constraints already built here that this row had to stay true to.",
+
+  "★★★_the_STEP_0_constraint_that_replaces_the_missing_counterweight": {
+    "the_risk": "★★★ The salience family closed rival-importance on **four** surfaces — brightness (MON-7), score (UI-1/UI-7), position (UI-13), exemption (CTL-8). A **scoring** attention is exactly where a fifth could open: an operative that could raise its own narrow score would have a rival notion of *important* sitting beside `d(s,V)`, which is the one thing this codebase has spent four slices making impossible.",
+    "★★★_the_enforcement": "`Score` has **no public constructor and no public fields**. The only way to obtain one is `narrow_scan`, which computes `value` from `Region::distance` — the household's own `d(s,V)` — and nowhere else. An operative cannot mint a score, cannot raise its own, and has **no field anywhere** in which to declare a rival metric. Same mechanism as `VisualSpec` (MON-7) and `Capability` (IMM-7), applied to the fifth surface. ★ The absence is checked too: a sustain whose state cannot be read yields **no score**, not a fabricated zero.",
+    "★_and_the_stance_is_read_not_declared": "★ A second, smaller version of the same discipline: `Aperture::stance()` classifies narrow-vs-broad **off `⟨b,d,ρ⟩` itself**, so an operative cannot call a broad aperture *narrow* by saying so — there is no field to say it in. Which matters, because *both non-empty* is enforced by comparing stances.",
+    "the_three_internal_constraints_this_row_leaned_on": "★ In place of a parity half: **(1)** `d(s,V)` and the four-surface salience family — attention must consume the one urgency, not rival it. **(2)** The `⊕` composition tree — depth's substrate already exists as `MonitorEngine`'s parent relation, the same structure `holarchy::escalate` climbs, so no parallel tree was introduced. **(3)** UI-1's `K ≈ 4` — attention's footprint is what may enter the hold, so the two had to compose rather than compete."
+  },
+
+  "divergence": {
+    "kind": "rust-only-spec",
+    "statement": "R2, reference-less. The two-attention shape exists in the reference **as a convention rather than a declaration**: `should_evaluate()` is documented *'ALWAYS cheap: threshold check only, zero LLM calls'* against an expensive `evaluate()` — a genuine cheap-scan / costly-look split, honoured by discipline and 27 grep hits. But there is no aperture, no `⟨b,d,ρ⟩`, no cost function, no reframing type, and nothing structural preventing an operative from having only one of the two.",
+    "★★_the_counterweight_the_SHAPE_is_the_reference's_and_it_is_honoured_there": "★★ The split this row formalises is not invented here — it is the reference's own working discipline, stated in `operatives/base.py`'s docstring and kept: **cheap scan first, expensive look only if the scan says so**. That is exactly §V's economy, and it is why the reference's operative layer is affordable at all. ★ What is missing there is the **declaration**: the discipline is a comment and a naming convention, so nothing stops a future operative from doing expensive work in `should_evaluate`, and nothing says how *wide* or how *deep* a scan may go. This row makes the shape a type and the width a bounded quantity; it did not discover the shape.",
+    "term_by_term": {
+      "cheap-scan before expensive-look": "AT PARITY as a **discipline** — `should_evaluate()` vs `evaluate()`, honoured by convention and documented as such.",
+      "★★ both attentions non-empty, structurally": "**THIS SLICE.** Nothing there prevents a one-attention operative.",
+      "★★ narrow and broad as different OUTPUT TYPES": "**THIS SLICE.** `should_evaluate` returns `bool`; there is no reframing notion at all (`reframe` is grep-0).",
+      "★★ the ⟨b, d, ρ⟩ meter and κ·b·d·ρ": "**THIS SLICE.** `breadth` is grep-0; no cost function for a scan exists.",
+      "★★★ depth over the ⊕ composition tree": "**THIS SLICE**, and it reuses the tree `holarchy::escalate` already climbs rather than introducing one.",
+      "★★★ path-with-fringes rather than subtree": "**THIS SLICE**, and structural — the geometric traversal is not expressible.",
+      "narrow's score coming from `d(s,V)`": "**THIS SLICE** as an enforcement; `d(s,V)` itself is MON-10's and is consumed, not re-derived.",
+      "the B_att budget in real currency": "NEITHER SIDE — economy-adjacent, and parked with juul-spending. See the limits."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "★★★ attention (51 hits in the reference, ZERO about this)": "★★★ The sharpest false positive in the whole set by count. **Every one is `needs-attention`** — the Monitor's queue of things awaiting a human (`_get_ingest_attention`, needs-attention helpers, the panel copy). A reviewer grepping `attention` finds fifty-one hits and a healthy-looking subsystem, and **none of it is §V's attention**. It is the *object* of attention, not the faculty.",
+      "★★ narrow / broad (42 hits between them, ZERO real)": "★★ All the English adjectives, and all in the same honest voice this codebase writes in: *'a narrow, deliberate escape'*, *'deliberately narrow and focused'*, *'a bad/over-broad candidate'*. Named because the pair looks exactly like the row's own vocabulary.",
+      "resolution (15 hits, none the ρ axis)": "Path resolution, placeholder resolution, `MergeResolution`. Different word entirely.",
+      "★ should_evaluate (27 hits, and it is the REAL one)": "★ The opposite of a false positive and the counterweight's own evidence: the cheap-scan discipline, documented and honoured. Named so it is not overlooked while the noisier greps are being dismissed."
+    },
+    "the_honest_limits": "★★ **`B_att` IS A NUMBER, NOT A BALANCE** — the cost function `κ·b·d·ρ` and the bound are real and enforced, but `κ` is **declared and uncalibrated** (exactly like `pawa_meter`'s own coefficients, and stated in the same words) and the budget is a `usize` a caller supplies. Wiring it to a real juul balance is economy-adjacent and parked with juul-spending; **the cost DISCIPLINE is this slice, the money is not**. · ★★ **THE STANCE BOUNDARY IS A DECLARED HEURISTIC** — `b > d·ρ` separates *many things glanced at* from *few things closely*. It is a modelling choice, not a derivation, and it is named as one rather than presented as falling out of §V; what §V does give is that the two are **regions**, and that is what the code encodes. · ★ **THE PATH DESCENDS INTO THE FIRST CHILD** — one child per level is what makes the walk linear, and *which* child is currently the tree's own order rather than a chosen one. A caller wanting the most-urgent child would need the scores the scan produces, which is a real follow-on and is named rather than silently defaulted into. · ★ **BROAD REPORTS THE FIRST FRAME CHANGE, NOT ALL OF THEM** — one reframing trigger is enough to say *the frame you were scoring in has changed*; enumerating every breach would be a second scoring pass wearing a different name. · ★★ **NOTHING CALLS ATTENTION FROM AN OPERATIVE YET** — `ω` still has no `attention` field, for the same reason it had no `Π` slot: *a declared-but-inert field reads as built*. Wiring `⟨narrow, broad⟩` onto `Operative` belongs with the row that gives it a caller, and the same is true of feeding the scan's footprint into `compose_view`'s candidate pool."
+  },
+
+  "both_attentions_cases": [
+    {
+      "name": "★★★_an_attention_carries_both_and_there_is_no_way_to_declare_one",
+      "why": "★★★ *A council of one-attention agents is a council of half-minds.* `Attention` has **two required fields, no `Option`, and no single-attention constructor**, so the half-mind is unrepresentable rather than discouraged. The pair's stances are asserted as a **set** containing both regions, so *both non-empty* is checkable rather than argued.",
+      "expect": "stances() = {Narrow, Broad}"
+    },
+    {
+      "name": "★★★_a_pair_that_is_one_region_twice_is_refused",
+      "why": "★★★ The partition arriving through the back door. Two apertures that both land in `Narrow` would satisfy *two fields* while giving the operative one attention under two names — §V is explicit that both belong to **one mind**, not that a council splits into specialists. Refused with the region named.",
+      "expect": "Err(NotTwoRegions { both: Narrow })"
+    },
+    {
+      "name": "a_zero_axis_is_not_an_aperture",
+      "why": "An axis at zero is *look at nothing*, which is not a way of attending. Checked on all three, because a zero depth and a zero breadth fail for the same reason and both would silently make the cost zero — an aperture that costs nothing and sees nothing is the worst kind of free.",
+      "expect": "Err(ZeroAxis) for each axis"
+    },
+    {
+      "name": "★_the_stance_is_read_off_the_axes_not_declared",
+      "why": "★ An operative cannot call a broad aperture *narrow* by declaring it so, because there is **no field to declare it in** — `stance()` reads `⟨b,d,ρ⟩`. This is the smaller sibling of the score enforcement, and it matters because *both non-empty* is enforced by comparing stances: if the label were declarable, the refusal above would be trivially evadable.",
+      "expect": "⟨1,3,4⟩ narrow, ⟨12,1,1⟩ broad"
+    }
+  ],
+
+  "closed_trade_cases": [
+    {
+      "name": "★★_deep_and_narrow_costs_the_same_as_broad_and_shallow",
+      "why": "★★ Iso-cost, as arithmetic: `⟨1,4,3⟩` and `⟨12,1,1⟩` both cost 12. The **product** is what the budget bounds, which is precisely what makes the trade closed — the two shapes are the same spend, so neither is the *cheap* one and choosing between them is a choice about what to see rather than what to afford.",
+      "expect": "both cost 12"
+    },
+    {
+      "name": "raising_an_axis_is_paid_for_by_lowering_another",
+      "why": "The trade run rather than described: doubling depth alone breaks a budget the aperture was inside, and the same depth becomes affordable again once resolution pays for it. **No free axis** — which is the whole reason the meter is a product and not a sum.",
+      "expect": "affordable → over budget → affordable again"
+    },
+    {
+      "name": "an_attention_over_budget_is_refused",
+      "why": "The bound applies to the **pair**, not to each aperture separately: an operative attends with both, so both are spent. Refused at declaration with the cost and the budget named, rather than at scan time when half the work is already done.",
+      "expect": "Err(OverBudget)"
+    }
+  ],
+
+  "path_not_subtree_cases": [
+    {
+      "name": "★★★_the_scan_is_a_path_with_fringes_and_visits_at_most_b_times_d",
+      "why": "★★★ The property that makes attention affordable at all. Each level samples up to `b` siblings as **fringes** and descends into exactly **one** — so the walk is linear in `d`. Asserted against `path_visits()`, and checked concretely: three mids sampled at level one, one of them descended into at level two.",
+      "expect": "visited ≤ b·d, reached_depth = 2"
+    },
+    {
+      "name": "★★★_the_geometric_traversal_is_NOT_EXPRESSIBLE",
+      "why": "★★★ Structural rather than advised: there is **no `walk_subtree`**, and `scan` descends into one child per level, so a caller cannot request the fan-out. `subtree_visits()` exists **only to measure the gap** and nothing consumes it — at `b=8, d=6` the subtree is over thirty thousand visits against a path of forty-eight. That is why nobody may ask for it, and why the product form in the cost function describes what the walker does rather than a budget it might exceed.",
+      "expect": "path_visits = 48, subtree_visits > 30000"
+    },
+    {
+      "name": "a_scan_stops_at_a_nano_sustain_rather_than_pretending_to_go_deeper",
+      "why": "A sustain with no children ends the descent, and `reached_depth` reports how far it actually got rather than the aperture's declared `d`. *Asked for five levels, found one* is a fact worth keeping — a scan that reported its request rather than its result would make the footprint a claim instead of a record.",
+      "expect": "visited empty, reached_depth = 0"
+    }
+  ],
+
+  "two_output_types_cases": [
+    {
+      "name": "★★★_narrow_returns_a_Score_and_it_comes_from_d_s_V",
+      "why": "★★★ The fifth-surface enforcement. `Score` has no constructor, so every score that exists came from `Region::distance` — the household's own `d(s,V)`. Worst-first ordering is that distance's, not an operative's, and a sustain inside `V` scores exactly `0`. This is attention **consuming** the one urgency rather than opening a rival.",
+      "expect": "the breached sustain first, the viable one at 0.0"
+    },
+    {
+      "name": "★★_an_operative_cannot_mint_a_score",
+      "why": "★★ Compile-time in substance: private fields, no constructor. What is assertable at runtime is the other half of the same honesty — a sustain whose state cannot be read yields **no score at all**, not a fabricated zero. Absent rather than defaulted, the `Fraction::of` and `Skew::Unknown` discipline.",
+      "expect": "no readable state → empty, not zeros"
+    },
+    {
+      "name": "★★_broad_returns_a_Reframing_not_a_number",
+      "why": "★★ The load-bearing distinction. Broad reports **that** the frame moved and **where**, and deliberately offers **no magnitude** — a number here would invite a caller to weigh it against a narrow score, and that collapse is exactly what makes an agent a maximiser inside a frame it cannot notice is wrong (Ashby, and §XIV's Goodhart drift arriving through the attention layer).",
+      "expect": "FrameChanged { at }, with no score field to compare"
+    },
+    {
+      "name": "★_broad_ignores_what_the_task_was_already_looking_at",
+      "why": "★ The point of broad is what narrow is **not** covering. A breach inside the task's own branch is narrow's job and reframing nothing; only something outside it triggers. Without this, broad would fire on everything narrow already saw and the two attentions would collapse into one louder one.",
+      "expect": "FrameHolds when every breach is inside the task branch"
+    }
+  ],
+
+  "footprint_cases": [
+    {
+      "name": "★_the_scan_footprint_can_be_wide_while_the_hold_stays_four",
+      "why": "★ The reconcile with UI-1, in one sentence: **anything can scan widely and hold four; nothing can hold widely.** Pawa bounds the *scan* — what may be looked at this period — and `K ≈ 4` bounds the *hold*. The footprint is the set attention visited, and it is what may enter the knapsack; the knapsack's own bound is unchanged by how widely the sweep went. Two budgets over two different things, composing rather than competing.",
+      "expect": "footprint wider than the hold; DEFAULT_BUDGET still 4"
+    }
+  ]
+}
