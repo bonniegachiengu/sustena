@@ -1,0 +1,126 @@
+{
+  "conformance_version": 1,
+  "slice": "mixture",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Operative - Formal Execution.md, §XV lines 437-445 (the gate g(x,s), sparsity, declared-not-learned, relevance vs match) + §XIII lines 269-271 (routing on domain match, abstention, the Ashby coverage condition) + the Notes' Correction line 527 (no MoE router; the cheap/expensive shape exists undeclared)",
+  "replayed_by": ["rust"],
+  "note": "Orchie's third duty. Jacobs/Jordan/Nowlan/Hinton (1991) gave the gating network; Shazeer et al. (2017) made it sparse. The gate is borrowed for SELECTION and deliberately not for COMBINATION — averaging expert outputs would be the §II collapse one layer on.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`softmax`, `top-k`, `mixture`, `expert`, `sparse`, `load balanc`, `requisite variety`, `ashby` and `cynefin` are ALL grep-0 in apps/api/sustena/. There is no soft, utility-weighted or top-k gate over operatives — the Notes' Correction says so in as many words: *'No mixture-of-experts router. is_relevant() is a hard set-intersection on domain tags; no soft, utility-weighted, or top-k gate.'*",
+    "★_three_counterweights_and_each_is_real": {
+      "1. mismatch → abstain is AT PARITY IN BEHAVIOUR": "§XIII: *'the cheap shipped behaviour is abstention — CouncillorConfig.is_relevant() already produces an ABSTAIN path, and domain mismatch is a second reason to take it.'* Confirmed live: `collect_votes` writes `abstain_reason: \"no_domain_overlap\"` at two call sites, and `abstain` returns 73 hits. So *an unsuited operative is not asked* is already the shipped behaviour. What is new is the STRUCTURE around it — soft relevance, a metered top-k, and the reason kept distinct from losing the cut.",
+      "2. the cheap/expensive split EXISTS AS A CONVENTION": "★ The Notes' Correction, line 527, names this exactly: *'No attention representation — but the SHAPE exists: should_evaluate() is a deliberately cheap, no-LLM, no-I/O threshold scan over many dimensions, and evaluate() is the expensive focused graph run. Broad vigilance versus narrow work, BY CONVENTION, UNDECLARED. A candidate to be promoted rather than built.'* Confirmed: `should_evaluate`'s docstring reads *'Cheap threshold check — MUST NOT call the LLM.'* The split that makes sparsity worth anything is genuinely there — as a docstring rule a caller has to keep. This slice promotes it to a type: an unselected operative's expensive path is not merely discouraged, it is unreachable.",
+      "3. a declared-weight, budget-bounded selector with disclosed exclusions EXISTS — FOR WIDGETS": "★★ The sharpest one. `curated_ui.py` computes `score(w) = α·urgency + λ·relevance` with DECLARED weights (`ALPHA_URGENCY = 0.75`, `LAMBDA_RELEVANCE = 0.25`), runs a real 0/1 knapsack under an attention budget — cost-aware, so a generalisation of top-k rather than a weaker form of it — and returns `(selected, excluded)` *'both with their score, so the caller can'* explain the cut. That is §XV's gate in shape, weights, sparsity discipline and disclosure. It routes attention to **WIDGETS**. For **OPERATIVES** the same codebase uses the hard 0/1 `is_relevant()`. So the gate exists in the reference, one object over, and the gap is that it was never turned on the agent layer."
+    },
+    "term_by_term": {
+      "α·relevance — soft subject-matter": "RUST-AHEAD. `is_relevant` is `bool(set(self.domain) & set(proposal_domains))`. `subject_relevance` generalises it and AGREES AT BOTH BOUNDARIES — untagged request → 1.0 (`if not proposal_domains: return True`), operative with no tags → 0.0 (`if not self.domain: return False`) — so it is > 0 exactly when the hard test is true, and soft in between where the hard test can only say yes.",
+      "η·Δû — the utility-weighted term": "RUST-AHEAD, and it could not have existed before OPV-3: there was no `u_i` over S to take a delta of. `OperativeVote.utility` is a scalar confidence attached to a vote AFTER deliberation, which is the wrong side of the decision to route with.",
+      "ζ·match — the Cynefin term": "RUST-AHEAD as a TERM, at parity as a BEHAVIOUR (see counterweight 1). `cynefin` is grep-0; the reference's `domain` is the subject-matter tag list, which is exactly OPV-16's recorded collision.",
+      "top-k sparsity": "RUST-AHEAD for operatives, AT PARITY for widgets (counterweight 3).",
+      "declared not learned": "AT PARITY in spirit and honoured here. §XV: *'a declared gate is auditable where a learned one is not.'* The reference's weights are declared constants; so are these. Neither has a training loop, and this build does not fabricate one.",
+      "the Ashby coverage condition": "RUST-AHEAD. `requisite variety` and `ashby` are grep-0. The reference cannot notice a regime no operative is suited to, because it has no regime axis.",
+      "load balancing (Shazeer)": "NOT BUILT, and deliberately. It is an auxiliary TRAINING loss that stops a gate collapsing onto a few experts; without training infrastructure there is no loss to add, and building something else and calling it load balancing would be fabrication. `never_reachable` is the honest adjacent read — the dead-expert problem that loss exists to prevent, detected structurally instead of trained away."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "gating (3 hits, 0 real)": "★ All three are the ADMISSION sense, not the mixture sense — *'gating it on is_development'*, *'gating a sustain's own unrelated operator'*, *'never actually gating parsing'*. The word is present in this codebase constantly and always means the §4E gate.",
+      "top_k (2 hits, 0 real)": "`top_key` — a loop variable over restored state in control_ops.py. Substring; named already in the goodhart/presentation vector and repeated here because a reviewer grepping THIS slice would hit it first.",
+      "relevance (16 hits) — ★ NOT a false positive, and the two senses must be told apart": "Real, and split across the two objects. `council.py`'s hits are the operative-routing sense (`is_relevant`, the hard 0/1 test this slice generalises). `curated_ui.py`'s are the widget-salience sense (`α·urgency + λ·relevance`, the declared-weight selector of counterweight 3). Same word, two layers, and the whole shape of the divergence is that one of them got the good machinery."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "The behaviour (unsuited operatives abstain), the discipline (a cheap scan versus an expensive run) and the machinery (declared weights, a budgeted knapsack, disclosed exclusions) — but distributed across three places, one of them applied to widgets rather than operatives, and one of them held as a docstring convention rather than a type. Nothing here is a new idea to this codebase; what is new is putting them together on the agent layer and making the sparsity structural.",
+    "★_borrowed_for_selection_deliberately_not_for_combination": "Jacobs et al.'s mixture COMBINES expert outputs, y = Σ_i g_i(x) f_i(x). Sustena must not: averaging expert outputs is the §II collapse one layer further on, and §XV's third duty is to present the frontier rather than a blend. So the gate is taken for selection and the combination step is deliberately NOT taken. `g_i` is reported — it is useful to see how sharply the gate discriminated — and never used to weight an answer. Related: softmax is MONOTONE, so it does not change which k are selected; top-k by softmax is top-k by raw score. It normalises the reported weights, and saying so beats implying it does selection work it does not.",
+    "★_the_routing_scalarisation_tension_and_how_the_wall_is_built": "Δû is a VECTOR (OPV-3) and the gate needs a scalar, so routing performs exactly the collapse OPV-29 just stopped a surface performing. The resolution is not to pretend otherwise: the router's scalar is a ROUTING-ONLY quantity — it chooses whom to ask, never what to do — and the collapse is permitted because attention is metered and someone must be asked first. The wall is structural: `Dispatch` carries NO `Alternative` and no frontier at all, so there is no value in it that could reach `present()`. And it is proven rather than asserted — the conformance case routes, then presents, and asserts the frontier is byte-identical to presenting without having routed. The collapse rule is a named `EstimateRule` so which collapse was applied is auditable.",
+    "the_honest_limits": "Four, and three of them are the same word. (1) `dom(s)` IS SUPPLIED, NOT COMPUTED — it is a Monitor output whose inputs include §VIII's criticality detector (OPV-14, ⬜), so `route` takes it as an argument and nothing here infers a regime. (2) `Δû` IS SUPPLIED — computing it would mean forking, which is the expensive thing routing exists to avoid; the hat in the formula is doing that work. (3) DISORDER IS NOT DETECTED — Cynefin's fifth state is a detection target per §XIII and belongs to OPV-16; this build surfaces a coverage GAP (a declared regime nobody is suited to) and does not attempt to notice that the regime reading itself is absent. (4) LOAD BALANCING IS NOT BUILT — see term_by_term.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive. It consumes `Operative`/`Cynefin` from OPV-1 without modifying them, and touches `presentation.rs` only to move Route from NotBuilt to Partial in the status read."
+  },
+  "fixture": {
+    "why": "Four operatives all suited to the same regime and all tagged for the same subject, differing ONLY in their supplied Δû — so the selection is unambiguous and the sparsity count is exactly k versus N with nothing else moving. A second fixture varies the regime, because domain mismatch has to be shown beating a high estimate.",
+    "weights": {"alpha": 1.0, "eta": 1.0, "zeta": 0.5},
+    "k": 2,
+    "rule": "net gain",
+    "contenders": [
+      {"id": "a", "tags": ["food"], "estimate": [9.0], "suited": ["clear"]},
+      {"id": "b", "tags": ["food"], "estimate": [5.0], "suited": ["clear"]},
+      {"id": "c", "tags": ["food"], "estimate": [1.0], "suited": ["clear"]},
+      {"id": "d", "tags": ["food"], "estimate": [0.5], "suited": ["clear"]}
+    ],
+    "request_tags": ["food"],
+    "dom_s": "clear"
+  },
+  "sparsity_cases": [
+    {
+      "name": "★★_the_expensive_path_runs_k_times_not_N",
+      "why": "★★ THE PROOF OF VALUE, and the whole reason this is a gate rather than a ranked list. §XV: *'evaluating an operative runs a graph, may fork state, and is metered.'* If you score all N and then truncate, the expensive work already happened. So the router PERFORMS the expensive call: `Dispatch::run` applies the caller's function to the selected tickets and to nothing else, and there is no method that hands a Ticket to an unselected operative or iterates the population with `f`. The case passes a counting closure and asserts it entered exactly 2 of 4 — not that a list of 4 was filtered to 2, but that the other two were never entered at all. `Ticket` has private fields and is minted only inside `route`.",
+      "expect": {"considered": 4, "calls": 2, "called": ["a", "b"], "sparsity": 0.5, "withheld": 2, "all_withheld_below_top_k": true}
+    },
+    {
+      "name": "softmax_is_monotone_so_it_does_not_change_the_selection",
+      "why": "★ Worth pinning because it is easy to imply the softmax is doing selection work. It is not: top-k by softmax is top-k by raw score. It normalises the reported weights so `g_i` sums to 1 and the sharpness of the gate is legible. Where softmax WOULD matter is a weighted mixture output y = Σ g_i f_i — which this build deliberately does not do, because averaging expert outputs is the §II collapse again.",
+      "expect": {"sums_to_one": true, "order_preserved": true}
+    },
+    {
+      "name": "k_larger_than_the_field_asks_everyone_suited",
+      "why": "A gate that cannot ask more operatives than exist. Sparsity 0 is the honest report when nothing was skipped — not an error, and not silently clamped without saying so.",
+      "expect": {"tickets": 2, "sparsity": 0.0}
+    }
+  ],
+  "axis_cases": [
+    {
+      "name": "★_relevance_generalises_the_hard_test_and_agrees_at_its_boundaries",
+      "why": "★ This is what makes it a generalisation rather than a replacement. `is_relevant` returns True for an untagged request and False for an operative with no declared domain; `subject_relevance` returns 1.0 and 0.0 for exactly those, so it is > 0 precisely when the hard test is true. In between it returns the fraction the hard test cannot express — half the request's tags covered is a real 0.5 rather than an indistinguishable yes.",
+      "expect": {"untagged_request": 1.0, "untagged_operative": 0.0, "half_covered": 0.5, "no_overlap": 0.0}
+    },
+    {
+      "name": "★_a_domain_mismatch_abstains_under_its_own_reason_and_is_never_scored",
+      "why": "★ §XIII: an operative built for complicated-domain optimisation in a chaotic regime *'is not merely less useful; it is confidently wrong, because its method presupposes analysability.'* So a Δû of 99 does not buy past a regime mismatch — the unsuited operative is withheld before scoring, with `score: None`, because scoring it would imply the regime question had an answer worth weighing. And the reason is kept DISTINCT from losing the top-k: *not suited* and *out-scored* are different facts, and merging them into 'not selected' would hide the coverage question behind a scoring result.",
+      "expect": {"tickets": ["fit"], "withheld_operative": "unfit", "reason": "DomainMismatch", "score": null}
+    }
+  ],
+  "coverage_cases": [
+    {
+      "name": "★_a_regime_no_operative_is_suited_to_surfaces_the_gap_and_asks_nobody",
+      "why": "★ §XIII's coverage condition, and the behaviour it prescribes rather than just the arithmetic: *'If some domain is in no operative's set, there is a regime in which no operative is suited, and the correct behaviour is to SURFACE THE GAP rather than route to the least-bad scorer and present its output in the usual format.'* So this returns zero tickets and names the regime — and the expensive path genuinely does not run, asserted with the same counting closure. Routing to the least-bad scorer is not a degraded answer; it is a confidently wrong one.",
+      "expect": {"tickets": 0, "gap": "chaotic", "expensive_calls": 0}
+    },
+    {
+      "name": "coverage_gaps_measures_the_union_against_all_four",
+      "why": "`⋃_i dom_i` against {clear, complicated, complex, chaotic} — Ashby's requisite variety, checked by counting. Cheap enough to fold in here rather than defer; what is deferred to OPV-16 is *disorder* as a detection target, which needs a `dom(s)` nobody computes yet.",
+      "expect": {"uncovered": ["chaotic"]}
+    },
+    {
+      "name": "an_operative_suited_to_nothing_is_named_as_never_reachable",
+      "why": "★ The honest fragment of load balancing. Shazeer's version is an auxiliary training loss and there is no training here, so building something and calling it load balancing would be fabrication. But the problem that loss exists to prevent — an expert that never gets used — is detectable structurally: an operative declaring no suited domain can be selected by no `dom(s)` at all.",
+      "expect": {"never_reachable": ["dead"]}
+    }
+  ],
+  "wall_cases": [
+    {
+      "name": "★★_the_routing_scalar_does_not_reach_the_presentation",
+      "why": "★★ THE OTHER PROOF, and the one that keeps this slice from undoing the last one. Routing collapses a vector Δû into a scalar — exactly what OPV-29 stopped a surface doing. The permission is narrow: routing chooses WHOM TO ASK, never WHAT TO DO. The wall is structural (`Dispatch` carries no `Alternative` and no frontier, so no value in it can reach `present()`) and it is PROVEN rather than described: present the same alternatives before and after routing, and the frontier is byte-identical. Routing had zero influence on what a person is shown — including the non-convex option that a routing-style weighted sum would have deleted.",
+      "expect": {"frontier_unchanged": true, "frontier": ["a", "b", "c"]}
+    },
+    {
+      "name": "the_estimate_collapse_is_a_named_declared_rule",
+      "why": "★ Which collapse was applied has to be auditable — the same reason §XV wants declared weights. `NetGain` is signed so a loss genuinely offsets a gain; `GainsOnly` is the optimistic read (*is there anything here for you?*), honest for routing and dishonest for deciding, which is why it may not leave this module; `Weighted` takes declared per-objective weights and refuses an arity mismatch rather than padding.",
+      "expect": {"net_gain": 2.0, "gains_only": 5.0, "weighted": -1.0, "arity_mismatch": "EstimateArity"}
+    }
+  ],
+  "declaration_cases": [
+    {
+      "name": "a_negative_weight_or_a_zero_k_is_refused",
+      "why": "A negative α would mean *prefer the operative that knows least about this* — a sign error rather than a tuning choice. All-zero weights are not a declared policy but an absent one. And k = 0 is not a sparse gate, it is an off one, which a routing policy should not be able to hide.",
+      "expect": {"negative": "BadWeight", "all_zero": "AllWeightsZero", "zero_k": "ZeroK"}
+    },
+    {
+      "name": "routing_is_deterministic_and_ties_break_by_declaration_order",
+      "why": "A core whose promise is reproducibility cannot route differently twice on the same inputs. Ties break by declaration order, which is arbitrary but stated — and stated beats stable-by-accident.",
+      "expect": {"identical": true, "tie_winner": "a"}
+    },
+    {
+      "name": "a_duplicate_contender_is_refused",
+      "why": "The same operative twice would be asked twice and metered twice, and would distort the softmax it appears in. Refused rather than deduplicated silently, because which of the two estimates was meant is not something to guess.",
+      "expect": {"error": "DuplicateContender"}
+    }
+  ]
+}

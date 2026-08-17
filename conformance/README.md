@@ -111,6 +111,7 @@ conformance/
     operative.json      ω · utility as a vector         (spec, R2)
     goodhart_presentation.json
                         U-guard · present the frontier  (spec, R2)
+    mixture.json        sparse MoE gate · top-k         (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -589,8 +590,43 @@ it is a bug** — nothing silently differs.
   it to the write path, and §XV asks for it on the read path. Also: `winner`
   (2, a dedup `winner_id`), `top_k` (2, a `top_key` loop variable),
   `orchestrat` (3, a display label and two comments). **OPV-28's sparse MoE
-  gate is not built here either**, and the file says so rather than implying
-  coverage — `discharged_by_this_build()` reports Route as `NotBuilt`. Four
-  limits disclosed, including that support matching is **root-name granular**
-  and errs in the **safe** direction: it can refuse a real guard, which is
-  visible, rather than silently accept a fake one.
+  gate was not built in that slice**, and the file said so rather than implying
+  coverage. It shipped later the same day, so `discharged_by_this_build()` now
+  reports Route as `Partial` — see `mixture.json`. Four limits disclosed,
+  including that support matching is **root-name granular** and errs in the
+  **safe** direction: it can refuse a real guard, which is visible, rather than
+  silently accept a fake one.
+
+- **`mixture.json` — rust-ahead-of-python, with three counterweights and each
+  one real.** `softmax`, `top-k`, `mixture`, `expert`, `sparse`,
+  `load balanc`, `requisite variety`, `ashby` and `cynefin` are grep-0, and the
+  article's own Notes agree: *"No mixture-of-experts router. `is_relevant()` is
+  a hard set-intersection on domain tags; no soft, utility-weighted, or top-k
+  gate."* But three things the gate is made of are already here. **(1)
+  Mismatch → abstain is at parity in behaviour** — `collect_votes` writes
+  `abstain_reason: "no_domain_overlap"`, so an unsuited operative already is
+  not asked. **(2) The cheap/expensive split exists as a convention** — the
+  Notes name it exactly (*"the SHAPE exists: `should_evaluate()` is a
+  deliberately cheap, no-LLM, no-I/O threshold scan [...] BY CONVENTION,
+  UNDECLARED. A candidate to be promoted rather than built"*), and
+  `should_evaluate`'s docstring reads *"MUST NOT call the LLM"*. This slice
+  promotes that convention to a type: an unselected operative's expensive path
+  is unreachable, not merely discouraged. **(3) ★ A declared-weight,
+  budget-bounded selector with disclosed exclusions exists — for WIDGETS.**
+  `curated_ui.py` computes `α·urgency + λ·relevance` with declared constants
+  (`0.75` / `0.25`), runs a real cost-aware knapsack under an attention budget,
+  and returns `(selected, excluded)` *"both with their score"*. That is §XV's
+  gate in shape, weights, sparsity discipline and disclosure — pointed at
+  widgets. For **operatives** the same codebase uses the hard 0/1
+  `is_relevant()`. The gate exists one object over, and the gap is that it was
+  never turned on the agent layer. False positives named: **`gating` (3 hits, 0
+  real) — all three are the ADMISSION sense**, which is what that word always
+  means in this codebase; `top_k` (2, a `top_key` loop variable). And
+  `relevance` (16 hits) is **not** a false positive but two senses that must be
+  told apart — the operative-routing one and the widget-salience one, which is
+  the whole shape of the divergence. Four limits disclosed: `dom(s)` and `Δû`
+  are both **supplied, not computed** (computing `Δû` means forking, which is
+  the expensive thing routing avoids), *disorder* detection is OPV-16, and
+  **Shazeer's load balancing is not built** — it is a training loss, there is
+  no training here, and building something else and calling it load balancing
+  would be fabrication.

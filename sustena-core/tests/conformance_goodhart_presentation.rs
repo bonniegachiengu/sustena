@@ -480,10 +480,12 @@ fn the_three_duties_are_recorded_with_what_is_not_built() {
 
     let find = |want: Duty| *d.iter().find(|(x, _, _)| *x == want).unwrap();
 
+    // Route moved NotBuilt → Partial when the mixture gate shipped.
     let (_, route, route_why) = find(Duty::Route);
-    assert_eq!(route, Discharge::NotBuilt);
-    assert_eq!(e["route"].as_str().unwrap(), "NotBuilt");
+    assert_eq!(route, Discharge::Partial);
+    assert_eq!(e["route"].as_str().unwrap(), "Partial");
     assert!(route_why.contains(e["route_names"].as_str().unwrap()));
+    assert!(route_why.contains("SUPPLIED"));
 
     let (_, whole, whole_why) = find(Duty::HoldTheWhole);
     assert_eq!(whole, Discharge::Partial);
@@ -529,9 +531,8 @@ fn the_recorded_divergence_keeps_its_counterweight() {
     assert!(near.contains("write path"));
     assert!(fp["top_k (2 hits, 0 real)"].as_str().unwrap().contains("top_key"));
 
-    // OPV-28 is named as not built here either, rather than implied.
+    // OPV-28 was not built in that slice, and the note says which slice did.
     let moe = t["the sparse MoE gate g(x,s)"].as_str().unwrap();
-    assert!(moe.contains("NOT BUILT HERE EITHER"));
     assert!(moe.contains("OPV-28"));
 
     // Four honest limits, all present.

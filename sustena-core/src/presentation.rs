@@ -39,9 +39,11 @@
 //!
 //! [`Duty::ALL`] records them, and [`discharged_by_this_build`] says plainly
 //! which are real here. It reports what is **not** built rather than implying
-//! coverage: `Route`'s gate `g(x,s)` is OPV-28 and is not here, and
-//! *hold the whole* is partial — the domain reading exists (the Cynefin axis
-//! shipped with `ω`), the criticality signal does not (OPV-14). Neither is
+//! coverage. As of the mixture slice all three are at least partial:
+//! `Route`'s sparse gate ships ([`crate::mixture`]), but `match(i,s)` needs
+//! `dom(s)`, which is **supplied** rather than computed until OPV-14 feeds the
+//! Monitor's domain reading — so it is `Partial`, not `Built`, and the reason
+//! is the same one *hold the whole* is partial for. Neither absence is
 //! stubbed; a declared-but-inert field reads as built and is worse than an
 //! absence.
 //!
@@ -117,8 +119,10 @@ pub fn discharged_by_this_build() -> [(Duty, Discharge, &'static str); 3] {
     [
         (
             Duty::Route,
-            Discharge::NotBuilt,
-            "the sparse MoE gate g(x,s) = top-k(softmax(α·relevance + η·Δû + ζ·match)) is OPV-28",
+            Discharge::Partial,
+            "the sparse MoE gate ships (crate::mixture — declared weights, top-k, structural \
+             sparsity, coverage gap surfaced); match(i,s) needs dom(s), which is SUPPLIED rather \
+             than computed until OPV-14 feeds the Monitor's domain reading",
         ),
         (
             Duty::HoldTheWhole,
@@ -473,9 +477,12 @@ mod tests {
     fn the_three_duties_are_recorded_with_what_is_not_built() {
         let d = discharged_by_this_build();
         assert_eq!(d.len(), Duty::ALL.len());
+        // Route moved NotBuilt → Partial when the mixture gate shipped; it is
+        // not Built because match(i,s) needs a dom(s) nobody computes yet.
         let route = d.iter().find(|(x, _, _)| *x == Duty::Route).unwrap();
-        assert_eq!(route.1, Discharge::NotBuilt);
-        assert!(route.2.contains("OPV-28"));
+        assert_eq!(route.1, Discharge::Partial);
+        assert!(route.2.contains("SUPPLIED"));
+        assert!(route.2.contains("OPV-14"));
         let whole = d.iter().find(|(x, _, _)| *x == Duty::HoldTheWhole).unwrap();
         assert_eq!(whole.1, Discharge::Partial);
         assert!(whole.2.contains("OPV-14"));

@@ -71,6 +71,7 @@
 //! | Operative ω · utility as a vector | [`operative`] | R2 |
 //! | Goodhart guard — invariant over U | [`goodhart`] | R2 |
 //! | Present the frontier, not the winner | [`presentation`] | R2 |
+//! | Sparse mixture-of-experts gate | [`mixture`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -92,6 +93,7 @@ pub mod holarchy;
 pub mod inverse;
 pub mod kernel;
 pub mod migrate;
+pub mod mixture;
 pub mod monitor;
 pub mod mutation;
 pub mod operative;
@@ -202,6 +204,10 @@ pub use presentation::{
 pub use holarchy::{
     escalate, validate_holarchy, Breach, Capacity, Escalation, EscalationOutcome, HolarchyError,
     HolarchyReport, Hop, LevelCheck, Levels,
+};
+pub use mixture::{
+    coverage_gaps, subject_relevance, Contender, Dispatch, EstimateRule, GateWeights, Mixture,
+    MixtureError, Ticket, Withheld, WithheldReason,
 };
 pub use monitor::{
     Driven, Ingested, MonitorEngine, MonitorError, SustainWatch,

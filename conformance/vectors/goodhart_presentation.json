@@ -15,7 +15,7 @@
       "★ 𝒫(X) presented rather than a winner": "RUST-AHEAD as a VECTOR frontier, **and the disclosure instinct is AT PARITY** — see the next entry, which is the honest half of this.",
       "★ 'what did not make the cut travels with the answer'": "AT PARITY, and genuinely so. `knapsack_select` (curated_ui.py:221) returns `(selected, excluded)` — *'both with their score, so the caller can'* explain the cut — and the Orchie surface renders the excluded set as *'N other things stayed quiet'* with their scores. The reference already has the instinct §XV is about: a surface that shows a subset must disclose what it withheld. What it does NOT have is a vector: its salience is `ALPHA_URGENCY·urgency + LAMBDA_RELEVANCE·relevance` (0.75 / 0.25), a WEIGHTED SUM — precisely the scalarisation §II names, with the weights declared. So its cut is honest and its ranking is a convex-hull ranking. The disclosure is at parity; the thing being disclosed has already been collapsed.",
       "Orchie's three duties": "RUST-AHEAD as a recorded set. `orchestrat` returns 3 hits and none is §XV's duties — a display label *'AI orchestrator'*, a comment about Mycelium being the orchestrator cockpit, and *'the engine just orchestrates'*.",
-      "the sparse MoE gate g(x,s)": "NOT BUILT HERE EITHER — it is OPV-28, and `discharged_by_this_build` says so rather than implying coverage. The reference's own gate is the crude honest form §XV describes: a hard 0/1 domain-overlap test on subject-matter tags (`CouncillorConfig.is_relevant`), which §XV explicitly calls *'a legitimate start — a declared gate is auditable where a learned one is not.'*"
+      "the sparse MoE gate g(x,s)": "Not built in THIS slice — it is OPV-28, and `discharged_by_this_build` said so rather than implying coverage. **It shipped later the same day** (`crate::mixture`, see conformance/vectors/mixture.json), which is why Route now reports Partial rather than NotBuilt here. The reference's own gate is the crude honest form §XV describes: a hard 0/1 domain-overlap test on subject-matter tags (`CouncillorConfig.is_relevant`), which §XV explicitly calls *'a legitimate start — a declared gate is auditable where a learned one is not.'*"
     },
     "the_greppable_false_positives_named_so_nobody_re_derives_them": {
       "winner (2 hits, 0 real)": "`winner_id` in `_supersede_pending_duplicate` — the surviving row when two ingest captures duplicate. A dedup winner, not a ranked option.",
@@ -122,8 +122,8 @@
     },
     {
       "name": "the_three_duties_are_recorded_with_what_is_NOT_built",
-      "why": "★ §XV names three duties and this build discharges one and a half. `discharged_by_this_build` reports that plainly — Route is NotBuilt and names OPV-28, HoldTheWhole is Partial (the Cynefin domain reading shipped with ω; §VIII's criticality signal is OPV-14), PresentTheFrontier is Built. A status read, deliberately reporting the absences, because a declared-but-inert field reads as built and is worse than nothing.",
-      "expect": {"route": "NotBuilt", "route_names": "OPV-28", "hold_the_whole": "Partial", "hold_names": "OPV-14", "present": "Built"}
+      "why": "★ §XV names three duties and `discharged_by_this_build` reports plainly which are real. **Updated 2026-08-16 when the mixture gate (OPV-28) shipped:** Route moved NotBuilt → Partial — the sparse gate is built, but `match(i,s)` needs `dom(s)`, which is SUPPLIED rather than computed until OPV-14 feeds the Monitor's domain reading, which is the same absence that keeps HoldTheWhole partial. PresentTheFrontier is Built. A status read that states its absences, because a declared-but-inert field reads as built and is worse than nothing — and a stale one that still claimed NotBuilt would be the same failure in the other direction.",
+      "expect": {"route": "Partial", "route_names": "OPV-14", "hold_the_whole": "Partial", "hold_names": "OPV-14", "present": "Built"}
     }
   ]
 }
