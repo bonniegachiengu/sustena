@@ -122,6 +122,7 @@ conformance/
     period.json         RRULE · zone anchoring · [a,b)  (spec, R2)
     checkpoint.json     replay · (s_k,k) · O(n-k)        (spec, R2)
     dimension.json      declared kind · LWW attaches     (spec, R2)
+    belief.json         belief under silence (no Kalman) (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1002,3 +1003,48 @@ it is a bug** — nothing silently differs.
   hidden, with compaction needing EVT-6 to say when; and a declared kind cannot
   be changed, because a dimension that changed kind under a running log would
   invalidate every apply already made to it.
+
+- **`belief.json` — rust-ahead-of-python, with a coarse staleness notion
+  already at parity and correctly scoped.** `belief`, `pomdp`, `uncertainty`
+  and `sensor_silent` are grep-0.
+  ★★ **The no-Kalman position is a POSITION, not a shortcut.** §VIII's
+  full-update line reads `point_mass(kalman_filter.update(observation))`, and
+  the Kalman half is **MON-2, the declined import** — a stance `monitor.rs`
+  already held about the detection pipeline, now with a second concrete site.
+  What survives is the `point_mass`, and Sustena already has the rule for it:
+  §VII's snapshot dimension, where a newer reading of an external authority
+  supersedes. `Belief` **holds an EVT-10 `SnapshotDim`** and collapses through
+  it, so the coherence is structural — *"an observation arrived"* has one
+  meaning here rather than two — and the behavioural proof is that a **stale
+  reading arriving late does not collapse the belief**.
+  ★ **The counterweight, credited rather than grudged:**
+  `ingest_engine.get_sources()` computes `is_stale` per source against a
+  **declared** `expected_interval_minutes`, and a source with no declared
+  cadence is **never flagged** — guessing one would fabricate a fact. The
+  needs-attention surface already carries it to a person, and the escalation
+  road exists on both sides.
+  ★★ **So the gap is precisely three things, and only the third is new:**
+  per-**dimension** rather than per-source (a source can be alive while a
+  quantity it reports is stale); **continuous** rather than binary (a variance
+  says *how much* has been lost, which is what a band needs); and ★★ **the
+  estimate degrades rather than a flag flipping** — the reference's last
+  written value looks exactly as authoritative at hour 48 as at minute 1, and
+  that is the specific dishonesty a belief state removes.
+  **Greppable false positives named:** `variance` has 4 hits and every one is
+  `variance_kg` in `operators/procurement.py` — a measured delivery
+  discrepancy, which is the *opposite* kind of thing from an uncertainty about
+  an unmeasured value. `last_seen` is the counterweight above, named so it
+  reads as the partial parity it is. ★ And `kalman` is grep-0 **on both
+  sides** — recorded so the absence is not read as a gap on either.
+  **Honest limits, six, two load-bearing:** ★★ **not a joint POMDP belief** —
+  the tractable per-dimension mean+variance is what §VIII's own render asks
+  for, and the joint belief is named as the model it approximates; ★★ **the
+  point-mass collapse assumes the observation is authoritative**, so variance
+  goes to zero at a reading — for a genuinely noisy sensor that is a modelling
+  assumption made and not checked, and modelling measurement noise is exactly
+  where a Kalman filter would come in, which means the trap and the limit are
+  the same decision seen twice. Also: no transition model is invented, the
+  drift rate is declared rather than learned, §I's observability-matrix rank is
+  **not approximated** (only the no-matrix half is answered — a rough answer to
+  a rank question is worse than none), and the tracker is not yet wired into
+  `MonitorEngine`.

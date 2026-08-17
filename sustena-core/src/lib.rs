@@ -82,9 +82,11 @@
 //! | Periods · RRULE · zone-id anchoring | [`period`] | R2 |
 //! | Replay · checkpoints (s_k, k) | [`checkpoint`] | R2 |
 //! | Declared dimension kind · LWW attaches | [`dimension`] | R2 |
+//! | Belief state under silence (no Kalman) | [`belief`] | R2 |
 
 pub mod admission;
 pub mod approval;
+pub mod belief;
 pub mod boundary;
 pub mod checkpoint;
 pub mod clocks;
@@ -183,6 +185,10 @@ pub use editing::{
     admit_edit, safe, typecheck, AuthorityError, CouncilMint, Definition, Edit, EditAdmission,
     EditAuthority, EditEffect, EditError, EditToken, Governance, Instance, Irreversible, Migration,
     Stranded,
+};
+pub use belief::{
+    Belief, BeliefError, BeliefReading, BeliefTracker, Collapse, Dynamics, SilenceAlert,
+    SilenceSpec,
 };
 pub use checkpoint::{events_applied, replay, replay_to, Checkpoint, ReplayError};
 pub use clocks::{clock_findings, skew_of, ClockFinding, Skew, Suspect};

@@ -1,0 +1,118 @@
+{
+  "conformance_version": 1,
+  "slice": "belief",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Monitor - Formal Execution.md, §VIII (Partial Observability — Belief State Maintenance) + §I (Observability)",
+  "replayed_by": ["rust"],
+  "note": "Sondik (1971). ★★ The observation update is EVT-10's snapshot collapse, NOT a Kalman filter — MON-2 is a declined import, and the `point_mass` half of §VIII's pseudocode is the half Sustena already has a rule for. ★ Silence widens honestly: uncertainty grows, and the mean is HELD unless a transition model was actually declared.",
+  "★★_the_no_Kalman_position_and_why_it_is_a_POSITION_not_a_shortcut": "§VIII's full-update line reads `point_mass(kalman_filter.update(observation))`. The Kalman half is deliberately not built, and this codebase already holds that position rather than adopting it here for convenience: `monitor.rs` records MON-2 as a **declined import**, quoting the article's own Additions — *'the observability and Kalman apparatus of §I–II assumes a continuous linear system ẋ = Ax + Bu. Sustena's state is discrete, typed, and event-sourced [...] a loose import, not a literal fit.'* ★★ What survives is the `point_mass`, and Sustena already knows what an observation of an external authority means: §VII's snapshot dimension, where **a newer reading supersedes**. So `Belief` holds an EVT-10 `SnapshotDim` and collapses **through** it — the coherence is structural rather than parallel, and *'an observation arrived'* has one meaning in this codebase instead of two.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`belief`, `pomdp`, `uncertainty` and `sensor_silent` are grep-0 in apps/api/sustena/. Nothing there maintains an estimate of a quantity it has stopped hearing about — a dimension simply keeps its last written value, with nothing recording that the value is getting older.",
+    "★_the_counterweight_a_COARSE_staleness_notion_ALREADY_EXISTS_and_it_is_the_right_idea": "Exact, and it is more than a token. `ingest_engine.get_sources()` computes `is_stale` per source against a **declared** `expected_interval_minutes` — and it is careful in the way that matters: a source with **no declared cadence is never flagged**, because guessing one would fabricate a fact. `devui.py` surfaces stale sources on the Monitor's needs-attention block, so *this source went quiet* is already a real, visible, honestly-scoped signal there. What it does not do is say anything about the **value**: staleness is binary and per-source, where a belief is continuous and per-dimension.",
+    "★_and_the_escalation_path_it_would_ride_ALSO_already_exists_on_BOTH_sides": "The Monitor→Controller boundary is `detect::Severity::escalates()` here and the needs-attention → Controller surface there. So neither side is missing the road; what is new is the cargo — an estimate that degrades, and a threshold crossing that reports *we have lost sight of this* rather than *this source is quiet*.",
+    "★★_the_shape_of_the_gap_stated_precisely": "Three things, and only the third is conceptually new. (1) **Per-dimension rather than per-source** — a source can be alive while the quantity it reports is stale, and vice versa. (2) **Continuous rather than binary** — `is_stale` is true or false; a variance says *how much* has been lost, which is what a band on a chart needs. (3) ★★ **The estimate degrades rather than the flag flipping** — the reference's last written value stays exactly as authoritative-looking at hour 48 as at minute 1, and that is the specific dishonesty a belief state removes.",
+    "term_by_term": {
+      "★ a per-source staleness flag": "AT PARITY, and correctly scoped there — never flagged without a declared cadence.",
+      "the escalation road": "AT PARITY on both sides.",
+      "★★ a belief with a MEAN and a growing VARIANCE": "RUST-AHEAD. `variance` has 4 hits there and every one is `variance_kg` in procurement — a delivery shortfall, not an uncertainty.",
+      "★★ widening under silence": "RUST-AHEAD, and this is the row: nothing anywhere records that an unobserved value is getting less reliable.",
+      "the observation collapsing to a point mass": "RUST-AHEAD as a belief operation — but AT PARITY as a *rule*, since the LWW-supersede it reuses is the guard the reference derived empirically (EVT-10's counterweight, and the same one applies here).",
+      "★ SENSOR_SILENT as an admission rather than an alarm": "RUST-AHEAD in the framing as much as the code. `is_stale` reads as a fault; §VIII's alert is explicitly *not* a claim that anything is wrong.",
+      "Kalman": "★ NEITHER SIDE HAS IT, AND NEITHER SHOULD. `kalman` is grep-0 there and declined here. Recorded so a future reader does not read the absence as a gap on either side."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "variance (4 hits, all procurement)": "★ `variance_kg` in `operators/procurement.py` — the difference between an expected and an actual delivery quantity. A real, useful number and the exact opposite kind of thing: a measured discrepancy, not an uncertainty about an unmeasured value.",
+      "last_seen (9 hits, and genuinely adjacent)": "`ingest_sources.last_seen_at`, which is the counterweight above. Named so it is read as the partial parity it is rather than as a coincidence.",
+      "belief / pomdp / uncertainty / sensor_silent (0 hits each)": "Clean zeros, all four."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "An honestly-scoped per-source staleness flag that never guesses a cadence, surfaced on the right panel, riding a real escalation path. What it does not have is any statement about the VALUE — so a reading from two days ago is displayed with exactly the confidence of one from a minute ago.",
+    "the_honest_limits": "Six. (1) ★★ NOT A JOINT POMDP BELIEF — a distribution over the whole state space is intractable for a rich state, and §VIII's own render only asks for `mean()` and `variance()`; this builds the tractable form (per observed dimension, mean + growing variance) and names the joint belief as the model it approximates. (2) ★★ THE POINT-MASS COLLAPSE ASSUMES THE OBSERVATION IS AUTHORITATIVE — variance goes to **zero** at a reading, because §VII's snapshot dimension treats the reading of an external authority *as* the value. **For a genuinely noisy sensor that is a modelling assumption this makes and does not check** — and modelling measurement noise is exactly where a Kalman filter would come in, which is the declined import. The two are the same decision seen twice, and the cost is stated rather than hidden. (3) ★ NO TRANSITION MODEL IS INVENTED — `Dynamics::Unknown` holds the mean and grows only the uncertainty; a drift moves it only where one was declared. (4) THE DRIFT RATE IS DECLARED, NOT LEARNED — nothing estimates it from history, which would be a real further row. (5) ★ §I's OBSERVABILITY MATRIX IS NOT BUILT — `ungoverned()` answers only the case that needs no matrix (a governed dimension no sensor has ever spoken about); rank analysis is MON-1 and is a slot. (6) NOT WIRED INTO `MonitorEngine` — the tracker is per-sustain state designed to sit alongside the CUSUM/EWMA chain, and the wiring is named rather than claimed.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. The step is smaller than it looks, because the declared cadence `is_stale` already reads is exactly the input a drift rate needs.",
+    "not_a_divergence_in": "R1 behaviour. Purely additive: a new module, no call site in `execute` or `MonitorEngine`, and the only change to existing code is a serde derive on `Severity` so an alert is persistable."
+  },
+  "fixture": {
+    "why": "§VIII's own example — a soil sensor that goes quiet — with its own `silence_threshold_hours: 6`, plus a second dimension that keeps reporting, so *only what actually went quiet* raises anything.",
+    "HOUR_MS": 3600000,
+    "drift_rate_per_hour": 2.0,
+    "silence_threshold_hours": 6,
+    "severity": "WARNING",
+    "soil": {"dimension": "soil.moisture", "readings": [[42.0, 0, "s1"], [38.0, 10800000, "s2"]]},
+    "stale_reading": {"value": 9999.0, "t_event": 50, "id": "sms-0",
+                      "note": "★ arrives AFTER a newer one and must not collapse the belief"},
+    "second": {"dimension": "tank.level", "value": 10.0, "t_event": 18000000, "id": "t1"}
+  },
+  "observation_cases": [
+    {
+      "name": "★_an_observation_collapses_the_belief_to_a_POINT_MASS",
+      "why": "★ §VIII's `point_mass`, with the Kalman half deliberately absent. At the instant of a reading the variance is **zero**, because §VII treats the reading of an external authority as the value — which is a real modelling assumption, stated in the limits rather than buried.",
+      "expect": {"estimated": 42.0, "uncertainty": 0.0, "last_contact": 0}
+    },
+    {
+      "name": "★★_a_STALE_observation_arriving_LATE_does_NOT_collapse_the_belief",
+      "why": "★★ THE COHERENCE PROOF, and the reason this is not a second notion of *an observation arrived*. `Belief` holds an EVT-10 `SnapshotDim` and the supersede runs **through it**, so a reading that loses on `(τ, id)` loses here exactly as it would on the state dimension. The belief is unchanged and says so — `Collapse::Stale`, naming what it kept and when. A belief that took whatever arrived last would disagree with the state it is a belief *about*.",
+      "expect": {"collapse": "Stale", "kept": 1200.0, "kept_at": 200}
+    },
+    {
+      "name": "★_an_EQUAL_event_time_breaks_on_the_id_as_it_does_on_the_state_dimension",
+      "why": "★ The same total order, reused rather than re-derived — checked in both directions so it is the order deciding and not the arrival sequence.",
+      "expect": {"z_beats_a": "Collapsed", "a_loses_to_z": "Stale"}
+    },
+    {
+      "name": "hearing_again_collapses_the_variance_back_to_zero",
+      "why": "The other half of the loop: uncertainty that has grown over three hours of silence goes back to a point the moment the sensor speaks. Without this the band would only ever widen, which would make it decoration rather than a reading.",
+      "expect": {"before": 36.0, "after_new_reading": 0.0, "estimated": 38.0}
+    }
+  ],
+  "silence_cases": [
+    {
+      "name": "★★_uncertainty_grows_MONOTONICALLY_with_silence",
+      "why": "★★ §VIII's `widen(belief, sigma = elapsed * DRIFT_RATE)`, taken literally — `σ = elapsed_hours × drift_rate`, `variance = σ²`. Checked across 24 consecutive hours rather than at one convenient point, because *the longer unheard, the less known* is a property of the whole curve and a formula that dipped anywhere would be worse than one that was simply wrong.",
+      "expect": {"monotonic_over_24h": true, "variance_at_3h": 36.0}
+    },
+    {
+      "name": "★★_with_NO_transition_model_the_mean_is_HELD_and_only_uncertainty_grows",
+      "why": "★★ The honest floor, and the discipline this row could most easily have broken. §VIII's `predict_forward(belief, transition_model)` is only honest if a transition model exists; inventing one to fill the pseudocode's shape would put a **made-up trajectory behind a real-looking mean**, which is worse than admitting ignorance. `Dynamics::Unknown` holds the value and grows the band: *we know less*, not *we know something else*. And the type implements no `Default`, so the choice is declared.",
+      "expect": {"estimated_after_48h": 42.0, "uncertainty_after_48h_gt": 0.0}
+    },
+    {
+      "name": "★_a_DECLARED_drift_moves_the_mean_and_nothing_else_does",
+      "why": "★ The other side of the same discipline: where someone has genuinely said how a quantity behaves while unobserved, `predict_forward` is real and the mean moves. The difference between the two cases is a declaration, not a heuristic.",
+      "expect": {"per_hour": -1.5, "estimated_after_4h": 36.0}
+    }
+  ],
+  "escalation_cases": [
+    {
+      "name": "★_silence_past_the_threshold_alerts_and_before_it_does_not",
+      "why": "★ §VIII's `elapsed > silence_threshold_hours`, at the article's own six hours. Checked on both sides of the line, because a threshold that fires early is a false alarm and one that never fires is decoration.",
+      "expect": {"at_5h": null, "at_7h_silent_for_ms": 25200000}
+    },
+    {
+      "name": "★★_the_alert_rides_the_EXISTING_Monitor_to_Controller_boundary",
+      "why": "★★ `detect::Severity::escalates()` is the one function that already draws that line, so the silence alert reuses it rather than inventing a second notion of crossing. ★ But it is deliberately **not** a `detect::Alert`: that type carries a `Shift`, and **nothing shifted** — claiming a direction the data does not have would be a worse error than a second struct. The boundary is reused; the shape is not.",
+      "expect": {"escalates": true, "describe_contains": "NOT because something is known to be wrong"}
+    },
+    {
+      "name": "★★_a_silence_alert_can_NEVER_be_INFO",
+      "why": "★★ §VIII defines the escalation as happening *'because uncertainty has grown to the point where human attention is warranted'* — so an alert that stays in the Monitor is not this alert. The severity is declared, and the one value that would contradict the section is **refused at declaration** rather than allowed and hoped about.",
+      "expect": {"info": "SilenceCannotBeInfo", "critical_ok": true}
+    },
+    {
+      "name": "hearing_again_CLEARS_the_alert",
+      "why": "The admission is retracted when it stops being true: the sensor spoke, so we can see it again. An alert that persisted after contact resumed would train a person to ignore it.",
+      "expect": {"before": 1, "after": 0}
+    },
+    {
+      "name": "only_what_ACTUALLY_went_quiet_raises_anything",
+      "why": "Two dimensions, one still reporting: exactly one alert. Per-dimension tracking is the point — a source can be alive while one quantity it reports has gone stale, and the reverse.",
+      "expect": {"rendered": 2, "silent": 1, "silent_dimension": "soil.moisture"}
+    }
+  ],
+  "observability_cases": [
+    {
+      "name": "★_a_GOVERNED_dimension_never_observed_is_reported_UNGOVERNED",
+      "why": "★ §I's decisive implication — *'every state variable worth governing must be reachable from a measurable output; unmeasured state is ungoverned state.'* This answers the concrete half that needs no matrix: a quantity someone declared worth governing that **no sensor has ever spoken about**. Full observability-matrix rank analysis is MON-1 and is named as a slot rather than approximated, because a rough answer to a rank question is worse than none.",
+      "expect": {"ungoverned": ["tank.level"], "after_observing": []}
+    }
+  ]
+}

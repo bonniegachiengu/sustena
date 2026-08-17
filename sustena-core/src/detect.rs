@@ -82,10 +82,12 @@
 //! the number the severity came from is visible rather than recomputed from
 //! state that has moved on.
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// How loud a shift is, and therefore who deals with it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
 pub enum Severity {
     /// Stays in the Monitor. Watching, not looking.
     Info,
