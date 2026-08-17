@@ -126,6 +126,7 @@ conformance/
     harmonics.json      cycle vs shift in the frequency   (spec, R2)
     windowing.json      tumbling / sliding / session      (spec, R2)
     observability.json  reachability, not rank(O)         (spec, R2)
+    damping.json        settles vs rings                  (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1191,3 +1192,53 @@ it is a bug** — nothing silently differs.
   contributes no reads; **a path is not an estimator** (reachability does not
   say how to invert the chain to recover a value); and it is not wired into
   `MonitorEngine`.
+
+- **`damping.json` — rust-ahead, and the counterweight turned out to be
+  INTRA-RUST once the greps were actually run.** `damping`, `oscillat`,
+  `overshoot`, `resonan` and `unit circle` are grep-0 — **and so is
+  `lyapunov`**.
+  ★ **A framing correction worth recording:** the obvious counterweight would
+  have been *the time-domain half is at parity*. It is not. Nothing on the
+  reference side compares `W(after)` to `W(before)`, and its four `stable` hits
+  are a **stable sort**, a **stable fingerprint** and two **testable**s — a
+  false positive that would have produced a wrong claim if taken at face value.
+  CTL-2 is a **Rust** row that shipped earlier, so the real counterweight is
+  intra-Rust: the per-step check already exists *here*, and this row adds only
+  the half the article says Lyapunov cannot provide.
+  ★ **What the reference does have is the remedy for the symptom:**
+  `control.rollback` and the rollback panel are real, and the enforcement gate
+  genuinely refuses a transition breaching a declared invariant — a real
+  guarantee of a *different* kind. A ringing controller produces the rollback
+  experience one correction at a time, each individually justified and none of
+  them breaching anything.
+  ★★ **The gap is arithmetic, not hypothetical.** Under `e_{k+1} = (1−g)·e_k`,
+  a gain in `(1,2)` makes `W` fall every step **while the state flips side
+  every step**, and `g = 2` puts the pole exactly on the circle so `W` never
+  changes — `≤` holds for ever, with equality, and nothing settles. A case runs
+  the **real `is_stable_intervention`** over both and asserts `stable` at every
+  step.
+  ★★ **Honest fit, on MON-1's precedent:** where a gain is **declared** the pole
+  is exact and is computed — declining a real model would be as dishonest as
+  fabricating an absent one — and **where there is none, nothing is fitted**.
+  There is deliberately **no `fit_gain(trajectory)`**: a declared law is a fact
+  about the controller, a fitted one is a story about it, and taking poles of a
+  fitted model is the fabricated-`A` trap.
+  ★★ **A finding from testing rather than design, and the reason both native
+  readings ship:** `W` is a **magnitude**, so a converging-but-ringing loop has
+  a *monotonically falling* `W` — the magnitude reading calls it `Damped` and is
+  not wrong to. The **side** series is what carries the ringing there. Shipping
+  only the magnitude reading would have made the underdamped case invisible **in
+  exactly the way Lyapunov already makes it invisible**.
+  **Greppable false positives named:** `stable` (4 hits, none a stability
+  check) and `gain` (**149 apparent hits, zero real** — every one is the
+  substring in *again*). Both look alarming and mean nothing; the first would
+  have produced a wrong counterweight.
+  **Honest limits, six, two load-bearing:** ★★ poles are **declined where no
+  gain exists, not approximated**, and nothing fits one to get around it; ★★
+  **the two native readings see different things**, so a caller wanting the
+  whole picture needs both; three points minimum, since two cannot show a
+  reversal; **no remedy is applied** — `advice()` says *reduce the gain* and
+  nothing changes one, because a gain is a declaration; overshoot is per
+  declared interval (a region's relations have no sides, exactly as they
+  contribute no distance in `region.rs`); and the **pawa-metered tie-in is a
+  named slot**, since the economy layer is parked.

@@ -86,6 +86,7 @@
 //! | Harmonics · cycle vs shift (DFT) | [`harmonics`] | R2 |
 //! | Window typology · tumbling/sliding/session | [`windowing`] | R2 |
 //! | Observability · reachability (no matrix) | [`observability`] | R2 |
+//! | Damping · settles vs rings | [`damping`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -100,6 +101,7 @@ pub mod controller;
 pub mod council;
 pub mod criticality;
 pub mod cynefin;
+pub mod damping;
 pub mod detect;
 pub mod dimension;
 pub mod disaggregation;
@@ -195,6 +197,10 @@ pub use editing::{
 pub use belief::{
     Belief, BeliefError, BeliefReading, BeliefTracker, Collapse, Dynamics, SilenceAlert,
     SilenceSpec,
+};
+pub use damping::{
+    crossings, overshoot, read_trajectory, DampingError, DampingVerdict, Overshoot,
+    PoleVerdict, ProportionalLaw, Side,
 };
 pub use checkpoint::{events_applied, replay, replay_to, Checkpoint, ReplayError};
 pub use observability::{

@@ -1,0 +1,122 @@
+{
+  "conformance_version": 1,
+  "slice": "damping",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Controller - Formal Execution.md, Additions — 'Stability has a frequency-domain face' (+ §II, CTL-2)",
+  "replayed_by": ["rust"],
+  "note": "★★ *'Lyapunov says the gap closes; damping says it closes without oscillation.'* CTL-2's per-step `W(after) ≤ W(before)` PASSES at every step of a ringing loop — a case runs the real `is_stable_intervention` over one to prove it — and only the damping analysis separates settles from rings.",
+  "★★_the_gap_this_closes_is_NOT_hypothetical": "Under a proportional law `e_{k+1} = (1−g)·e_k`: at **`1 < g < 2`** the pole is inside the unit circle but negative, so `W` strictly decreases every step **while the state flips side every step** — it converges *and* rings, and Lyapunov passes throughout. At **`g = 2`** the pole is exactly `−1`, so `W_{k+1} = W_k` and **Lyapunov's `≤` holds forever, with equality, while nothing ever settles**. Those are not contrived: they are the arithmetic of the simplest control law there is, and they are exactly the over-corrector §II permits.",
+  "★★_honest_fit_the_pole_where_a_gain_EXISTS_the_trajectory_where_not": {
+    "the_problem": "*'Poles inside the unit circle'* is a **linear** characterization — it needs a transfer function with a fixed gain to take poles of. The same shape as §I's observability matrix, which MON-1 declined for the same reason.",
+    "★_where_a_gain_is_DECLARED_the_pole_is_exact_so_compute_it": "`ProportionalLaw::classify` computes `1 − g` and the four verdicts fall straight out of `|1−g|` and its sign: `Damped` (0<g<1), `Deadbeat` (g=1), `Underdamped` (1<g<2 — converges AND rings), `Undamped` (|1−g| ≥ 1, with `sustained` marking the pole exactly on the circle). Where the model is real, the analysis is real; declining it there would have been as dishonest as fabricating it elsewhere.",
+    "★★_and_where_there_is_no_gain_NOTHING_IS_FITTED": "There is deliberately **no `fit_gain(trajectory) -> ProportionalLaw`**. A law someone declared is a fact about the controller; a law fitted to a trajectory is a story about it, and taking poles of a fitted model is precisely the fabricated-`A` trap MON-1 declined the matrix to avoid. The native form is used instead — ringing read from the trajectory directly.",
+    "★★_and_the_two_native_readings_are_NOT_redundant": "A real finding from testing rather than design: **`W` is a magnitude**, so a loop flipping side every step while converging has a *monotonically falling* `W` — the magnitude reading calls it `Damped` and is not wrong to. The **side** series is what carries the ringing there. Each reading sees what the other cannot, and shipping only the magnitude one would have made the underdamped case invisible in exactly the way Lyapunov already makes it invisible."
+  },
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`damping`, `oscillat`, `overshoot`, `resonan` and `unit circle` are grep-0 in apps/api/sustena/ — and so is `lyapunov`. Nothing there checks whether a correction settles or rings, and nothing checks whether it closed the gap either.",
+    "★★_the_counterweight_is_INTRA_RUST_and_a_framing_CORRECTION_belongs_here": "★ Checked rather than assumed, and the check moved the claim. The obvious counterweight would be *the time-domain half is at parity* — **it is not**. `lyapunov` is **grep-0** in apps/api/sustena/, and the four `stable` hits are a *stable sort*, a *stable fingerprint* and two *testable*s: **nothing on that side compares `W(after)` to `W(before)`.** CTL-2 is a **Rust** row that shipped in a prior slice, so the time-domain guarantee is rust-ahead too. ★ **The real counterweight is intra-Rust:** `is_stable_intervention` and `should_rollback` already exist *here*, over the real `d(s,V)`, so CTL-11 is not building stability from nothing — it adds only the half the article says Lyapunov cannot provide. *The gap closes* was already checked; *it closes without oscillation* was not.",
+    "★_what_the_reference_DOES_have_is_the_REMEDY_for_the_SYMPTOM": "Worth naming rather than glossing, and it is real: `control.rollback` and the rollback panel exist and work — they are what a household reaches for **after** a correction went the wrong way. And the enforcement gate genuinely refuses a transition that would breach a declared invariant, which is a real guarantee of a *different* kind (it is about the viable region's boundary, not about the distance shrinking). A ringing controller produces the rollback experience one correction at a time, each individually justified and none of them breaching anything. So that side has the **remedy for the symptom** and no way to see either the distance trend or the pattern.",
+    "term_by_term": {
+      "★ Lyapunov / W decreases per step": "RUST-AHEAD — **corrected while checking**. CTL-2 shipped in a prior Rust slice; `lyapunov` is grep-0 on the other side and nothing there compares `W` across a step. Recorded because the easy assumption was *at parity* and the grep says otherwise.",
+      "the rollback that follows a bad step": "AT PARITY — `control.rollback` is real, and it is the remedy for this row's symptom rather than a check for its cause.",
+      "★★ overshoot — crossing V to the far side": "RUST-AHEAD. Nothing anywhere asks which *side* of the region a state sits on; `Membership` is three-valued here and has no counterpart there.",
+      "★★ ringing in a W trajectory": "RUST-AHEAD. The trajectory exists (it is the same series EWMA runs over) and nothing reads it for reversals.",
+      "★ the discrete pole where a gain is declared": "RUST-AHEAD — and there is no proportional control law declared anywhere on either side, so this is machinery waiting for a declaration rather than machinery in use.",
+      "poles-in-the-unit-circle as a general test": "DECLINED where no gain exists, on MON-1's precedent. Recorded as declined rather than pending, so the absence is not read as a shortfall on either side."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "★ stable (4 hits, and NONE of them a stability check)": "★ The one that would have produced a wrong counterweight if taken at face value: a *stable sort* in `curated_ui.py`, a *stable fingerprint* in `ingest_engine.py`, and two *testable*s. Named because *stability* is precisely this row's subject, and finding four hits under it would otherwise read as *the time-domain half is covered there*. It is not.",
+      "gain (149 apparent hits, ZERO real)": "★ Every one is the substring in **again**. Named because a controller gain is the row's own central parameter, so the number looks alarming and means nothing.",
+      "damping / oscillat / overshoot / resonan (0 hits each)": "Clean zeros."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "A gate that refuses a transition breaching a declared invariant, and a rollback panel for when a step went wrong anyway. What it does not have is a **distance** to a viable region at all — so neither *did that step close the gap* nor *are the steps alternating* is a question it can ask. Each correction looks individually justified; together they can be a controller chasing its own tail.",
+    "the_honest_limits": "Six. (1) ★★ **POLES ARE DECLINED WHERE NO GAIN EXISTS, NOT APPROXIMATED** — and nothing fits a gain to a trajectory to get around it. A future slice should not 'complete' this with an inferred `A`. (2) ★★ **THE TWO NATIVE READINGS SEE DIFFERENT THINGS** — a magnitude series cannot show a sign flip, so a loop can read `Damped` by `read_trajectory` and still ring; the side series is what catches it, and a caller wanting the whole picture needs both. Stated because it is the exact place a single reading would quietly under-report. (3) ★ **THREE POINTS MINIMUM** — two cannot show a reversal, so a shorter trajectory is `Indeterminate` rather than `Damped`. (4) **NO REMEDY IS APPLIED** — `advice()` says *reduce the gain*; nothing here changes one, because choosing a controller's gain is a declaration, not an inference. (5) **OVERSHOOT IS PER DECLARED INTERVAL** — a region's relations (cross-dimension predicates) have no sides, so they contribute nothing here, exactly as they contribute no distance in `region.rs`. (6) ★ **THE PAWA-METERED TIE-IN IS A NAMED SLOT** — the Additions note an intervention's worth is its Lyapunov gain *net of pawa*, so the cost of ringing is economy-adjacent, and the economy layer is parked.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. The first step is not the analysis — it is keeping the `W` series per sustain, which `MonitorEngine` already does on this side.",
+    "not_a_divergence_in": "R1 behaviour. Purely additive: a new module over `region.rs`'s declared intervals and `controller.rs`'s existing check, with no change to either and no existing vector touched."
+  },
+  "fixture": {
+    "why": "One household band and the simplest control law there is, so the failure is arithmetic rather than contrived: a pocket that should hold between 100 and 200, and a proportional correction toward its centre.",
+    "band": {"dimension": "finances.liquid", "lo": 100.0, "hi": 200.0, "centre": 150.0},
+    "gains": {"damped": 0.5, "deadbeat": 1.0, "underdamped": 1.5, "sustained": 2.0, "divergent": 3.0},
+    "overshoot": {"before": 50.0, "after": 230.0,
+                  "note": "★ W falls 50 → 30, so Lyapunov PASSES — and the state is now on the far side"},
+    "damped_correction": {"before": 50.0, "after": 120.0},
+    "trajectories": {
+      "falling": [100.0, 60.0, 30.0, 10.0, 0.0],
+      "alternating": [100.0, 20.0, 70.0, 15.0, 50.0],
+      "too_short": [100.0, 40.0]
+    }
+  },
+  "lyapunov_blind_spot_cases": [
+    {
+      "name": "★★_a_RINGING_loop_passes_LYAPUNOV_at_EVERY_SINGLE_STEP",
+      "why": "★★ THE HEADLINE, and the article's sentence made checkable. A gain of 1.5 puts the pole at −0.5: inside the unit circle, so it converges — and the sign flips every step. The case runs the **real `is_stable_intervention`** over the whole trajectory and asserts `stable` each time. CTL-2 is not wrong; it is answering a different question, and only the damping analysis separates *settles* from *rings*.",
+      "expect": {"stable_at_every_step": true, "rings": true, "settles": true, "advice_contains": "flipping side every step"}
+    },
+    {
+      "name": "★★_a_SUSTAINED_oscillation_passes_LYAPUNOV_FOREVER_with_EQUALITY",
+      "why": "★★ The sharpest case, and it is arithmetic rather than contrived: at gain 2 the pole is exactly `−1`, so `W_{k+1} = W_k`. `W(after) ≤ W(before)` holds at every step, **for ever**, with equality — and the state flips side every step and never settles. A stability check that only compares consecutive `W` values cannot ever object to this loop.",
+      "expect": {"stable_at_every_step": true, "w_never_changes": true, "pole": -1.0, "sustained": true, "settles": false, "advice_contains": "holds forever with equality"}
+    },
+    {
+      "name": "★_an_OVERSHOOT_reduces_W_and_is_STILL_the_failure",
+      "why": "★ The concrete discrete form, in one step rather than a trajectory. 50 → 230 on a [100,200] band: `W` falls from 50 to 30, so CTL-2 is satisfied — and the state has crossed to the far side and now needs a correction back. The finding names the dimension, both sides and both values, so it is checkable rather than a flag.",
+      "expect": {"lyapunov_stable": true, "overshoots": 1, "from": "Below", "to": "Above", "describe_contains": "needs a correction back"}
+    },
+    {
+      "name": "a_DAMPED_correction_lands_INSIDE_and_is_no_overshoot",
+      "why": "The pair. Same start, same direction, smaller correction: it arrives rather than passing. Both steps pass Lyapunov, and only one of them is a controller you would want.",
+      "expect": {"lyapunov_stable": true, "overshoots": 0}
+    }
+  ],
+  "pole_cases": [
+    {
+      "name": "★_a_DAMPED_gain_settles_from_the_SAME_side",
+      "why": "★ `0 < g < 1` puts the pole in `(0,1)` — positive and inside the circle — so each correction is a fraction of the remaining error and the sign never changes. Nothing to advise about, and `advice()` returns `None` rather than a reassurance nobody needs.",
+      "expect": {"pole": 0.5, "verdict": "Damped", "settles": true, "rings": false, "advice": null}
+    },
+    {
+      "name": "a_UNIT_gain_is_DEADBEAT",
+      "why": "`g = 1` puts the pole exactly at zero: one step to the target, no ringing and no residue. Named as its own verdict because *arrives immediately* and *approaches gradually* are different behaviours a controller author would want to tell apart.",
+      "expect": {"pole": 0.0, "verdict": "Deadbeat", "one_step_to_zero": true}
+    },
+    {
+      "name": "★_a_gain_PAST_TWO_diverges",
+      "why": "★ `g = 3` puts the pole at `−2`, outside the unit circle: each correction is larger than the error it was fixing, so the loop grows. Distinguished from the sustained case by `sustained: false`, because *never settles* and *actively worsens* deserve different advice.",
+      "expect": {"pole": -2.0, "verdict": "Undamped", "sustained": false, "settles": false, "advice_contains": "corrections grow"}
+    },
+    {
+      "name": "★★_a_gain_must_be_DECLARED_and_CANNOT_BE_FITTED",
+      "why": "★★ The MON-1 discipline made structural here: there is **no `fit_gain(trajectory)`** in this module. A law someone declared is a fact about the controller; a law fitted to a trajectory is a story about it, and taking poles of a fitted model is exactly the fabricated-`A` trap the observability matrix was declined to avoid. This case records the constructor's own validation — the *absence* is the substance.",
+      "expect": {"nan_refused": "BadGain", "finite_accepted": true}
+    }
+  ],
+  "trajectory_cases": [
+    {
+      "name": "a_MONOTONICALLY_FALLING_trajectory_reads_DAMPED",
+      "why": "The base case where no gain is declared: `W` walks down without reversing, so the loop settles — and `settled` distinguishes *reached the region* from *still approaching it*, which are different states to be in.",
+      "expect": {"verdict": "Damped", "steps": 4, "settled": true}
+    },
+    {
+      "name": "★_an_ALTERNATING_trajectory_reads_RINGING",
+      "why": "★ Down, up, down, up — the over-corrector coming back each time. The sign of `ΔW` alternating is the ringing signature visible in the magnitude series **without needing a model of what produced it**, which is exactly what the native form is for.",
+      "expect": {"verdict": "Ringing", "steps": 4, "alternations": 3}
+    },
+    {
+      "name": "★★_fewer_than_THREE_points_is_INDETERMINATE_not_damped",
+      "why": "★★ Two points cannot show a reversal — they have one direction and no chance to change it — so calling them damped would be a claim the data cannot support. The same third answer `Skew::Unknown` and `CycleVerdict::Indeterminate` carry, for the same reason.",
+      "expect": {"verdict": "Indeterminate", "rings": false, "reason_contains": "at least 3"}
+    },
+    {
+      "name": "★_repeated_BOUNDARY_CROSSINGS_are_the_other_face_of_ringing",
+      "why": "★ The same failure read from the *sides* rather than the magnitudes. Below → Above → Below → Above is three crossings; a run that enters the region and stays is none. This exists because the magnitude reading cannot see it — see the next case.",
+      "expect": {"alternating_crossings": 3, "settling_crossings": 0}
+    },
+    {
+      "name": "★★_the_MAGNITUDE_series_CANNOT_see_a_sign_flip_and_the_SIDES_can",
+      "why": "★★ A finding from testing rather than design, and the reason both native readings ship. A declared gain of 1.5 rings — and the `W`-magnitude trajectory it produces reads **`Damped`**, because `|W|` genuinely falls every step. Neither reading is wrong; they see different things. Shipping only the magnitude one would have made the underdamped case invisible **in exactly the way Lyapunov already makes it invisible**, which is the failure this whole row exists to fix.",
+      "expect": {"magnitude_reads_ringing": false, "pole_says_rings": true, "side_crossings_gt": 0}
+    }
+  ]
+}
