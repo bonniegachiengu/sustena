@@ -1,0 +1,104 @@
+{
+  "conformance_version": 1,
+  "slice": "stranding",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Editing - Formal Execution.md (SLOPE), §I (the migration predicate), §II (the typed edit taxonomy), §III (compatible / migratable / rejected); consuming EVT-15's semantic reducer",
+  "replayed_by": ["rust"],
+  "note": "★★ EDIT-11's mechanism was finished before this slice opened — twice over. `editing::safe` is the migration predicate over live STATES (2026-08-12); `semantic::replay_under` is the reducer over HISTORIES (EVT-15, 2026-08-17). What was missing is the wiring between them and, more importantly, THE DECISION that follows: migrate / grandfather / refuse, offered with evidence rather than collapsed into a silent default.",
+
+  "★★_the_STEP_0_reconcile_the_IMM_7_LESSON_APPLIED_AGAIN": {
+    "1_the_state_half_is_BUILT_and_it_is_complete": "`editing::safe(candidate, instances, migration)` — `Safe(e,μ) ⟺ ∀i ∈ inst(D): μ(sᵢ) ∈ V_{D′}`, shipped 2026-08-12. It judges the **migrated** state (`μ(sᵢ)`, not `sᵢ` — judging the un-migrated state would refuse edits the migration was written to make safe), reports a witness set naming instance AND rule AND reason, treats an uncompilable candidate invariant as a violation against every instance rather than skipping it (fail-closed), and is wired into `admit_edit` as the fourth conjunct — skipped entirely for a kind that cannot strand, §IV's asymmetry. Nothing here improves on it.",
+    "2_the_history_MECHANISM_is_BUILT_TOO": "`semantic::replay_under` (EVT-15, this same day) re-runs the logged Enzyme calls through the real gate under a chosen `Definition` and reports per call whether it would still have been admissible, distinguishing a gate `Refused` from an operator the definition no longer permits. Consumed, not rebuilt.",
+    "3_and_the_REST_of_the_editing_engine_was_already_there": "Checked before designing anything: the typed edit taxonomy (`Edit`, with `applicable`/`apply`/`inverse`/`forgets`/`can_strand`), authority (`EditToken` with no public constructor, `CouncilMint` derived from a real `consensus::Decision`, `EditAuthority`, `Governance`), the version DAG and three-valued rollback (EDIT-7), `μ` and Expand–Migrate–Contract (`migrate::{Mu, Emc}`, EDIT-12), and `typecheck` over the whole definition. ★ **The engine half of M-EDIT really was complete**, exactly as its summary claimed — so this slice is narrow by construction.",
+    "★★_4_so_what_was_ACTUALLY_missing": "Two things, and neither is a mechanism. **(a)** Nothing called `replay_under` from the definition-edit path — the history question was answerable and unasked. **(b)** ★★ `admit_edit` has exactly **two** outcomes: admitted, or `EditError::WouldStrand`. `Migration` is an *input* the caller must already have chosen, never a *reported outcome*. So of §III's three classifications, the engine could express *compatible* and *rejected* and had no surface at all for the choice between them. That surface is this slice."
+  },
+
+  "★★_the_crux_states_are_not_histories": {
+    "statement": "An instance can sit at a perfectly valid state that it reached through a step the new definition would have refused.",
+    "the_worked_case": "`D′` adds `finances.liquid.balance >= 500`. An instance recorded 300, then 700, and sits at **1000**. `safe` passes it — 1000 clears the floor. `replay_under` refuses call `c1`, because the balance was **300** the moment that call committed. Same instance, same `D′`, two different answers, and both are correct about the question they were asked.",
+    "why_the_two_lists_are_never_summed": "They send an editor to different repairs. A stranded state wants a migration; a stranded history wants a policy decision about the past. A single count of *problems* would make the surface arithmetic and useless.",
+    "★_and_it_shows_up_a_SECOND_time_in_the_remedies": "★★ **Migration cannot fix a history.** μ transforms where an instance IS; it cannot reach back and make a past call admissible. So `Remedy::Migrate` always carries the *whole* history-stranded list as unresolved residue, even when it clears the states completely. The distinction is not just a property of the checks — it is a property of what the fixes can reach, which is the stronger statement."
+  },
+
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "The reference has the STATE half and only the STATE half, and only one outcome for it. `check_definition_edit_safety()` evaluates every live instance's current state against the candidate spec's invariants and returns `{\"status\": \"refused\", \"reason\", \"blocked_by\": [...]}`. There is no history check (nothing replays calls under a candidate definition anywhere) and no choice: `grandfather` is **grep-0**, `migrate_instance` is **grep-0**, `would_strand` is **grep-0**.",
+    "★★_the_counterweight_is_STRONG_and_the_reference_NAMES_THIS_GAP_ABOUT_ITSELF": "★★ Three things. **First**, `check_definition_edit_safety()` is genuinely good work and this row does not weaken it: it is fail-closed (a candidate invariant that will not compile is reported as a violation against every live instance rather than skipped), it runs BEFORE anything is persisted, and it invalidates the per-instance spec cache on a successful edit — which was caught because an edit that silently failed to govern already-instantiated sustains is exactly the quiet non-application the project's own discipline exists to rule out. **Second**, ★★ its refusal already carries **evidence** — `blocked_by` names the instance, the invariant and the reason — so the reference had the *witness-set* discipline before Rust did, and Rust's `Stranded` is the same idea typed. **Third**, ★★★ **the reference names this exact gap about itself**, in its own words: *\"Only 'refuse' is built, not 'require an explicit migration.' A real, disclosed gap: there is no tool to transform a stranded instance's state to fit a new schema — the safety check can only say no, not offer a guided fix.\"* Same shape as EVT-15's counterweight: a sequenced, disclosed debt rather than an oversight.",
+    "term_by_term": {
+      "the migration predicate over live STATES": "AT PARITY in substance — `check_definition_edit_safety()` there, `editing::safe` here. Rust judges `μ(sᵢ)` where the reference judges `sᵢ`, because the reference has no μ to apply (see the next row).",
+      "witness set / evidence on refusal": "AT PARITY — `blocked_by` there, `Stranded` here. The reference got here first.",
+      "μ and Expand–Migrate–Contract": "RUST-AHEAD since 2026-08-12 (EDIT-12, `migrate.rs`). The reference's own note calls this the missing tool.",
+      "★★ the HISTORY check under D′": "**THIS SLICE**, consuming EVT-15. Nothing on either side asked this before.",
+      "★★ the three-outcome decision surface": "**THIS SLICE.** The reference has one outcome (refuse); `admit_edit` had two (admit / WouldStrand); neither could express *grandfather* at all.",
+      "grandfathering": "NEITHER SIDE before this slice — grep-0 in the reference, and no representation in Rust.",
+      "the typed edit taxonomy / authority / version DAG / rollback": "RUST-AHEAD since 2026-08-12, and untouched here."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "★ check_definition_edit_safety (2 hits, and BOTH are real)": "★ The opposite of a false positive, and named for that reason: a reviewer might grep it, find only two hits, and conclude it is a stub. It is not — one is the definition and one is the call site in `update_definition`, which is exactly the right number for a predicate with one caller. It is the real, load-bearing state check.",
+      "blocked_by (2 hits, both real)": "The docstring and the return. Real evidence, not a placeholder — and the reason the counterweight above is genuine rather than polite.",
+      "grandfather / would_strand / migrate_instance (grep-0 each)": "Recorded as checked rather than assumed. `grandfather` in particular is the one worth stating: there is no partial implementation, no half-named flag, nothing to reconcile with."
+    },
+    "the_honest_limits": "★★ THE HISTORY CHECK CANNOT SEE μ OR F — EVT-15's limit carries unchanged. A `D′` replay checks schema, invariants and the allow-list, because those are the three things a `Definition` carries; the **boundary** `μ` (SUS-7) and the **firewall** `F` (CON-1) are not part of one, so nothing here says whether a past CROSSING would still have been admitted. Stated up front rather than left to be inferred from an empty list. · ★★ NOTHING VERIFIES THAT A SUPPLIED HISTORY IS THE INSTANCE'S OWN — the caller passes `InstanceHistory` alongside `Instance` and the two are matched by nothing. That is EVT-15's *the call log is not wired to `execute`* seen from the consumer side: until an `EnzymeCall` is recorded when an operator runs, the history is an input to be trusted rather than a record to be read. · ★★ THE REMEDIES ARE OFFERED, NOT APPLIED — `remedies()` returns what is available with its evidence and its residue; nothing here migrates an instance, records a grandfather scope, or blocks an edit. Threading a chosen remedy back through `admit_edit` (and giving the engine a place to REMEMBER that a history was grandfathered, which is durable state this core does not hold) is the sequenced next step. · ★ GRANDFATHERING HAS NO ENFORCEMENT ARM HERE — the remedy names what would be kept on the old terms; making *only new actions* meet `D′` needs a per-instance effective-definition pointer, which is host state. · A HISTORY IS REPLAYED FROM ITS DECLARED GENESIS, and if that genesis is wrong every verdict after it is about a different history."
+  },
+
+  "distinction_cases": [
+    {
+      "name": "★★_a_history_is_refused_that_the_current_state_passes",
+      "why": "★★ THE CRUX, and the single case that justifies the row. `D′` adds a `>= 500` floor. The instance recorded 300 then 700 and sits at 1000. `state_stranded` is EMPTY — 1000 clears the floor — while `history_stranded` names call `c1` with the gate's own reason, because the balance was 300 when that call committed. The state-only check the engine already had cannot see this, by construction rather than by oversight.",
+      "expect": "state_stranded = [], history_stranded = [c1 Refused], histories_only() = true"
+    },
+    {
+      "name": "a_history_that_never_dipped_is_clear",
+      "why": "The control, and it matters: same floor, same endpoint, different journey — 1000 in one call. Nothing stranded either way, and `remedies()` returns EMPTY rather than offering `Refuse` for a safe edit. Caution dressed as a choice is still noise.",
+      "expect": "is_clear() = true, remedies() = []"
+    },
+    {
+      "name": "both_lists_are_filled_and_neither_short_circuits",
+      "why": "A state stranding does not stop the history scan. An editor choosing between remedies needs the whole picture — stopping at the first problem is how a caller fixes one thing at a time without ever seeing that `Refuse` was the only real option.",
+      "expect": "both lists non-empty, affected_instances() deduplicated"
+    },
+    {
+      "name": "a_dropped_operator_is_NotPermitted_not_Refused",
+      "why": "EVT-15 split these because the allow-list and the gate send an editor to different repairs, and the split has to survive the wiring or the split was decorative. Dropping an operator from `D′` reports every call that used it as `NotPermitted`, never as a gate refusal.",
+      "expect": "every outcome is NotPermitted"
+    },
+    {
+      "name": "assessing_leaves_the_instance_state_untouched",
+      "why": "Read-only by construction — `safe` evaluates predicates and `replay_under` runs in `ReplayMode::Replay`, which discards and counts every emission. Asserted rather than argued from the signature, because this runs over LIVE instances and a definition edit is exactly when a caller is least able to tolerate a surprise write.",
+      "expect": "state byte-identical after assessment"
+    }
+  ],
+
+  "decision_cases": [
+    {
+      "name": "grandfather_is_offered_when_only_histories_are_stranded",
+      "why": "The instance is viable under `D′` and only its past is not — which is precisely the situation grandfathering was invented for. `Grandfather` and `Refuse` are both offered; `Migrate` is not, because no μ was declared.",
+      "expect": "remedies = [grandfather, refuse]"
+    },
+    {
+      "name": "★★_grandfather_is_WITHHELD_while_the_state_itself_is_stranded",
+      "why": "★★ The sharpest availability rule, and it is a soundness argument rather than a policy. Scoping `D′` to new actions cannot help an instance already sitting somewhere `D′` forbids: the very next call refuses regardless, so the remedy would not remedy anything. Offering it would be offering a fix that cannot work, which is worse than offering nothing. Here `Refuse` is the ONLY option — exactly the case a silent default would have papered over.",
+      "expect": "remedies = [refuse]"
+    },
+    {
+      "name": "★★_migration_never_clears_a_stranded_history",
+      "why": "★★ The states-versus-histories distinction, showing up in the REMEDIES. μ transforms where an instance IS and cannot reach back to make a past call admissible, so `Remedy::Migrate` carries the whole history-stranded list as residue even when it clears the states completely — `leaves_residue()` is true. A surface that let `Migrate` read as *fixed* here would quietly lie about what the migration did.",
+      "expect": "unresolved_states = [], unresolved_histories = [c1], leaves_residue() = true"
+    },
+    {
+      "name": "migration_is_not_offered_when_none_was_declared",
+      "why": "Suggesting `Migrate` with no μ in hand is advice, not a remedy — the caller would have to invent the transform this surface exists to report on. `Migration::Identity` means no migration was declared, and the offer is withheld.",
+      "expect": "remedies = [refuse]"
+    },
+    {
+      "name": "★★_there_is_no_single_recommended_remedy",
+      "why": "★★ Structural, not a convention: `remedies()` is the only accessor and it returns a `Vec`; there is no `best()`, no `recommended()`, no ordering that reads as a ranking, and `Remedy` implements no `Default`. Which outcome is right is a policy question about a particular household or business — a library that picked one would be making that decision invisibly, which is the whole failure mode this surface exists to prevent. Same discipline as OPV-29's Pareto frontier, where no method returns one option.",
+      "expect": "more than one remedy offered, none marked preferred"
+    },
+    {
+      "name": "refuse_is_always_available_and_never_leaves_residue",
+      "why": "Blocking the edit resolves the stranding by not creating it, so `leaves_residue()` is false — and it is offered whenever anything is stranded at all, including the cases where it is the only sound choice. An editing surface where *do not do this* can become unavailable is a surface that can force a bad edit.",
+      "expect": "refuse present in every non-clear impact, leaves_residue() = false"
+    }
+  ]
+}

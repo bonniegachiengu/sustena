@@ -129,6 +129,7 @@ conformance/
     damping.json        settles vs rings                  (spec, R2)
     semantic.json       replay under D vs D'              (spec, R2)
     capability.json     the confused deputy, fixed        (spec, R2)
+    stranding.json      states vs histories, 3 remedies   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -1385,3 +1386,94 @@ it is kept small enough to reason about instead (four fields, two operations),
 the same conclusion Rice's theorem forced on constraints. Skins bundle a
 **tier only**. And the approval token and the capability are **deliberately not
 unified**: one authorises a single act, the other a standing designation.
+
+### `stranding.json` — states vs histories, and the three remedies (EDIT-11, Editing §I–III)
+**11 cases, R2 (spec).** Consumes EVT-15. ★★ For the third slice running,
+STEP-0 narrowed the work before any of it was written: **the mechanism was
+finished twice over, and what was missing was the decision.**
+
+`editing::safe` has been the migration predicate over live **states** since
+2026-08-12 — judging `μ(sᵢ)` rather than `sᵢ`, reporting a witness set naming
+instance *and* rule *and* reason, treating an uncompilable candidate invariant
+as a violation against every instance rather than skipping it, and wired into
+`admit_edit` as its fourth conjunct. `semantic::replay_under` has been the
+reducer over **histories** since EVT-15 that morning. The rest of the engine —
+taxonomy, authority, version DAG, inverses, three-valued rollback, μ + EMC —
+was already ✅.
+
+★★ **What was actually missing is two things, neither a mechanism.** Nothing
+called `replay_under` from the edit path: the history question was *answerable
+and unasked*. And `admit_edit` had exactly **two** outcomes — admitted, or
+`WouldStrand` — with `Migration` an *input the caller had already chosen*
+rather than a *reported outcome*. Of §III's three classifications the engine
+could express *compatible* and *rejected* and had **no surface for the choice**.
+
+★★ **The crux, as a running test.** `D′` adds `finances.liquid.balance >= 500`.
+An instance recorded 300, then 700, and sits at **1000**. `safe` passes it —
+1000 clears the floor. `replay_under` refuses call `c1`, because the balance was
+**300** the moment that call committed. Same instance, same `D′`, two correct
+answers to two different questions. The two lists are **never summed**: a
+stranded state wants a migration, a stranded history wants a policy decision,
+and a single count of *problems* would make the surface arithmetic and useless.
+
+★★★ **The distinction recurs in the REMEDIES, which is the stronger statement:
+migration cannot fix a history.** μ transforms where an instance *is*; it cannot
+reach back and make a past call admissible. So `Remedy::Migrate` carries the
+whole history-stranded list as residue even when it clears the states
+completely, and `leaves_residue()` says so — a surface that let `Migrate` read
+as *fixed* there would quietly lie about what the migration did.
+
+★★ **Grandfathering is withheld while the state itself is stranded, and that is
+soundness rather than policy.** Scoping `D′` to new actions cannot help an
+instance already sitting somewhere `D′` forbids: the very next call refuses
+regardless. There, `Refuse` is the **only** option — precisely the case a silent
+default would have papered over.
+
+★ **No remedy is recommended, structurally.** `remedies()` is the only
+accessor, it returns a `Vec`, there is no `best()` and no ordering that reads as
+a ranking, and `Remedy` implements no `Default`. Which outcome is right is a
+policy question about a particular household; a library that picked one would be
+deciding it invisibly. Same discipline as OPV-29's Pareto frontier.
+
+**Divergence.** R2, rust-ahead. The reference has the state half and only the
+state half, with one outcome for it: `check_definition_edit_safety()` returns
+`{"status": "refused", "reason", "blocked_by": [...]}`. Nothing replays calls
+under a candidate definition; `grandfather`, `would_strand` and
+`migrate_instance` are **grep-0**.
+
+★★ **The counterweight is unusually strong and belongs to the reference.**
+`check_definition_edit_safety()` is real, careful work: **fail-closed** (an
+uncompilable candidate invariant is a violation against every instance, not a
+skip), run **before** persistence, and it invalidates the per-instance spec
+cache on success — a fix made because an edit that silently failed to govern
+already-instantiated sustains is exactly the quiet non-application that
+discipline exists to rule out. ★ Its `blocked_by` already carries a real
+**witness set** naming instance, invariant and reason, so **the reference had
+that discipline before Rust did**, and `Stranded` is the same idea typed.
+★★★ And it **names this exact gap about itself**: *"Only 'refuse' is built...
+the safety check can only say no, not offer a guided fix."* Same shape as
+EVT-15's counterweight — a sequenced, disclosed debt rather than an oversight.
+
+**Greppable false positives named — and one is the inverse of one:**
+★ `check_definition_edit_safety` returns **2 hits and both are real** (the
+definition and its single call site), so a reviewer reading the low count as a
+stub would be exactly wrong. `blocked_by` is 2 hits, both real. `grandfather` /
+`would_strand` / `migrate_instance` are **grep-0** — recorded as checked, and
+`grandfather` in particular is worth stating: there is no partial
+implementation and no half-named flag to reconcile with.
+
+**Honest limits, five.** ★★ The history check **cannot see `μ` or `F`** —
+EVT-15's limit carried unchanged, because boundary and firewall are not part of
+a `Definition`, so nothing here says whether a past *crossing* would still have
+been admitted. ★★ **Nothing verifies that a supplied history is the instance's
+own** — EVT-15's *the call log is not wired to `execute`*, seen from the
+consumer side: until an `EnzymeCall` is recorded when an operator runs, a
+history is an input to be trusted rather than a record to be read. ★★ **The
+remedies are offered, not applied** — nothing here migrates an instance,
+records a grandfather scope, or blocks an edit; threading a chosen remedy back
+through `admit_edit`, and giving the engine somewhere durable to remember that
+a history was grandfathered, is host state and the sequenced next step.
+★ **Grandfathering has no enforcement arm** (per-instance effective-definition
+pointers are host state). And a history is replayed from its **declared
+genesis** — if that is wrong, every verdict after it is about a different
+history.
