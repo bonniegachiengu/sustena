@@ -78,6 +78,7 @@
 //! | Firewall F — what crosses B | [`flow`] | R2 |
 //! | wp obligation — author-time | [`obligation`] | R2 |
 //! | Two clocks · skew · negative skew surfaced | [`clocks`] | R2 |
+//! | Watermarks · windows · declared lateness | [`watermark`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -126,6 +127,7 @@ pub mod tenet;
 pub mod transition;
 pub mod vclock;
 pub mod version;
+pub mod watermark;
 
 pub use admission::{admit_one, typecheck_constraint, ConstraintDecl, DeclError, Strategy, Verdict};
 pub use approval::{
@@ -177,6 +179,11 @@ pub use editing::{
     Stranded,
 };
 pub use clocks::{clock_findings, skew_of, ClockFinding, Skew, Suspect};
+pub use watermark::{
+    estimate_heuristic, Advance, Closing, LateOutcome, LateRecord, Lateness, SourceGuarantee,
+    Watermark, WatermarkError, WatermarkKind, WatermarkTracker, Window, WindowError,
+    WindowState,
+};
 pub use event::{
     dedupe, merge, order, CausalStamp, Event, Observation, Provenance, Source, SourceKind,
     Trust,

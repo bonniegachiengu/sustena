@@ -118,6 +118,7 @@ conformance/
     flow.json           F(φ,s) — what crosses B          (spec, R2)
     obligation.json     g ⟹ wp(e,Q) at author time      (spec, R2)
     clocks.json         two clocks · skew · provenance   (spec, R2)
+    watermark.json      W(τ) · windows · lateness policy (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -823,3 +824,42 @@ it is a bug** — nothing silently differs.
   error type in the module at all. `Trust` is declared and never computed, and
   the suspect it feeds is an inference from a declaration rather than a
   measurement, with `Undetermined` as a real third answer.
+
+- **`watermark.json` — rust-ahead-of-python, and the divergence is a SPECIFIC
+  FAILURE rather than an absence.** `watermark`, `lateness` and `retract` are
+  grep-0. ★★ **But the reference has three real windows and every one of them
+  closes on `W(τ) = τ`** — `operators/calendar.py`'s `upcoming`
+  (`window_end = now_utc + timedelta(days=days)`), `operators/tasks.py`'s
+  `due_soon` (`window_end = today + timedelta(days=DUE_SOON_DAYS)`), and
+  `operatives/protege.py`'s `urgent_window_hours`. Each takes its boundary from
+  the processing clock, which is precisely the §4J.3 failure this row exists to
+  fix, in shipped code. So the gap is not that windows are missing; it is that
+  they **close on hope**, with no vocabulary in which to say what happens when
+  the hope was wrong.
+  ★ **A real credit, so the finding is not overstated into a purity defect it
+  is not:** those windows read `ctx.timestamp` — a clock passed in on the
+  operator context — not `datetime.now()` called inside the operator. EVT-13's
+  purity requirement is respected. The defect is the **value assumed**, not an
+  ambient read, which makes it smaller and far more fixable than it looks.
+  ★ **And where it bites least, said rather than glossed:** `due_soon` and
+  `upcoming` look FORWARD from τ, so a late arrival about the past does not
+  silently corrupt an already-emitted answer the way a closed backward-looking
+  aggregation would. Where it would bite is a period aggregate — a monthly
+  budget total — which is EVT-11's object, and is why §VIII calls periods and
+  watermarks the same object seen twice.
+  **Greppable false positives named:** `window` hits `urgent_window_hours`,
+  `harvest_window_days`, `window_end` — and, the one that will waste a minute,
+  `main.py`'s comments about **Windows, the operating system**. `late` hits
+  `translate`, `template`, `calculate`, `related` and nothing else.
+  ★ **`SlidingWindowAggregator` is grep-0**, named specifically because this
+  repo's own MON-4 row lists it in a way that reads as shipped — that row was
+  describing the article's specification, not code, and has now been corrected.
+  **Honest limits, five:** ★ **a guarantee is a declaration and can be wrong** —
+  nothing verifies a source's claimed bound against its observed skew, which is
+  a real further row; the estimator is **one** estimator (a declared percentile,
+  chosen for being honest about being an estimate); there is no emission and no
+  scheduler, so the fold stays the caller's; ★ **no recurrence** — the half-open
+  interval is here because closing needs it, but `RRULE`/`DTSTART;TZID`/zone
+  anchoring are EVT-11 and deliberately not started; and a retraction is
+  **offered, not enforced** — a downstream that ignores it is still wrong, and
+  nothing here can make it subtract.

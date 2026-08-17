@@ -1,0 +1,145 @@
+{
+  "conformance_version": 1,
+  "slice": "watermark",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Events and Time - Formal Execution.md, §IV (Watermarks, and the Declared Lateness Policy)",
+  "replayed_by": ["rust"],
+  "note": "Akidau et al. (2015). ★★ The load-bearing property is that NO WINDOW CLOSES BY WALL-CLOCK HOPE — §4J.3 names the current failure as windows closing because a date rolled over, which is a watermark of the form W(τ)=τ, i.e. the assumption that skew is zero. EVT-5 proved that assumption false; this slice makes it unspellable-by-accident.",
+  "unblocked_by": "EVT-5. `estimate_heuristic` reads the skew distribution `clocks::skew_of` surfaces, rather than inventing a bound — and it honours EVT-5's three readings: an `Unknown` or `Inferred` skew contributes nothing, because neither is zero skew.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "`watermark`, `lateness` and `retract` are grep-0 in apps/api/sustena/. There is no notion of a bound on completeness anywhere, and therefore no notion of an event being late.",
+    "★★_the_counterweight_windows_DO_exist_there_and_they_close_on_W(τ)=τ_exactly": "This is not an absence — it is the specific failure §4J.3 names, in shipped code. Three real windows: `operators/calendar.py`'s `upcoming` (`window_end = now_utc + timedelta(days=days)`, filtering `now_utc <= ev_dt <= window_end`), `operators/tasks.py`'s `due_soon` (`window_end = today + timedelta(days=DUE_SOON_DAYS)`), and `operatives/protege.py`'s `urgent_window_hours`. Every one of them takes its boundary from the processing clock. **That IS W(τ) = τ.** So the gap is not that the reference has no windows; it is that its windows close on hope, and it has no vocabulary in which to say what happens when the hope was wrong.",
+    "★_a_real_credit_the_clock_is_INJECTED_not_ambient": "Worth stating so the finding is not overstated into a purity defect it is not. Those windows read `ctx.timestamp` — a clock passed in on the operator context — not `datetime.now()` called inside the operator. EVT-13's purity requirement is respected: `apply` takes its time from the host. The defect is the **value assumed** (that τ is a safe boundary), not an ambient read, which makes it a smaller and more fixable thing than it first looks.",
+    "★_the_forward_looking_windows_are_where_it_bites_least_and_that_is_worth_saying": "`due_soon` and `upcoming` look FORWARD from τ, so a late-arriving event about the past does not silently corrupt an already-emitted answer the way a closed backward-looking aggregation window would. The failure mode is real but mild there. Where it would bite is a period aggregate — a monthly budget total — and that is EVT-11's object, which is why §VIII calls periods and watermarks the same object seen twice.",
+    "term_by_term": {
+      "a window at all": "AT PARITY in the weak sense — three real windows exist, all closing on processing time.",
+      "★★ a watermark W(τ)": "RUST-AHEAD. Nothing bounds completeness; τ is used directly as the boundary.",
+      "monotonicity of W": "RUST-AHEAD by vacuity — there is no W to be monotone. Not a defect there, an absence.",
+      "perfect vs heuristic": "RUST-AHEAD. The distinction cannot arise without the object, and Sustena's dominant source (an SMS forwarder over a mobile network) is heuristic by construction, so the question is not academic.",
+      "★★ declared lateness policy": "RUST-AHEAD, and this is the honest completion of the row. A heuristic watermark will sometimes be wrong; with no policy there is nothing to do when it is.",
+      "the late log": "RUST-AHEAD. There is a real `ingest_messages` needs-attention queue for messages that did not parse, but nothing that records a fact which arrived after an answer was already given — a different question."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "window (real hits, none of them a time window that closes)": "`urgent_window_hours`, `harvest_window_days`, `window_end`, plus — the one that will waste a minute — `main.py`'s comments about **Windows**, the operating system. The three real windows are named above.",
+      "SlidingWindowAggregator (0 hits)": "★ Named because the tracker's own MON-4 row lists it (*'`SlidingWindowAggregator` (count/rate/by_type/error_rate)'*) in a way that reads as shipped. It is grep-0 — that row is describing the **article's** specification, not code. Anyone re-checking should not go looking for it.",
+      "late (0 real hits, many apparent)": "`translate`, `template`, `calculate`, `related`, `_LATENESS`-nothing. There is no lateness concept under another spelling."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "Real windows, an injected rather than ambient clock, and a needs-attention queue for messages it could not parse. What it does not have is any claim about completeness — so no window can be said to be closed, only to have had its boundary pass.",
+    "the_honest_limits": "Five. (1) ★ A GUARANTEE IS A DECLARATION AND CAN BE WRONG — `Watermark::perfect` is only as good as the promise it is handed; nothing verifies a source's claimed bound against its observed skew, and doing so would be a real further row. (2) ★ THE ESTIMATOR IS ONE ESTIMATOR — a declared percentile of observed skew, chosen because it is honest about being an estimate; §IV does not prescribe a method and a better one (per-source, decaying, seasonal) would slot in beside it. (3) NO EMISSION AND NO SCHEDULER — this module says when a window MAY answer and what to do with a late fact; it does not compute the answer, and the fold stays the caller's. (4) ★ NO RECURRENCE — half-open `[a,b)` is here because closing needs it; `RRULE`, `DTSTART;TZID` and zone anchoring are EVT-11 and deliberately not started. (5) A RETRACTION IS OFFERED, NOT ENFORCED — a downstream that ignores it is still wrong, and nothing here can make it subtract.",
+    "when_python_catches_up": "These cases become parity vectors unchanged. The first step is not a watermark at all — it is ING-13/EVT-5's `t_event`, since without the event time there is no skew to estimate a bound from.",
+    "not_a_divergence_in": "R1 behaviour. Purely additive: a new module with no call site in `execute`, no change to `Event`, and no existing vector touched."
+  },
+  "fixture": {
+    "why": "One household window and the two watermarks a real deployment would actually have: a source that promises a two-hour bound, and the zero-bound promise that reproduces the reference. Times are milliseconds from an arbitrary epoch — a fixed offset, never a wall clock, since the core has no clock.",
+    "MINUTE": 60000,
+    "HOUR": 3600000,
+    "window": {"start": 0, "end": 36000000, "note": "[0h, 10h) — half-open"},
+    "tau": 39600000,
+    "note_on_tau": "★ 11h — the processing clock is a full hour PAST the window's end. Under W(τ)=τ the window would already have answered.",
+    "guarantees": [
+      {"source_id": "mpesa", "max_out_of_orderness": 7200000,
+       "note": "a source that really does deliver up to 2h out of order → mark = 9h"},
+      {"source_id": "mpesa", "max_out_of_orderness": 0,
+       "note": "★ THE REFERENCE'S ASSUMPTION, said out loud → mark = τ = 11h"}
+    ],
+    "skew_log": [
+      {"id": "a", "t_event": 3600000, "t_ingest": 3660000, "skew": 60000},
+      {"id": "b", "t_event": 7200000, "t_ingest": 7500000, "skew": 300000},
+      {"id": "c", "t_event": 10800000, "t_ingest": 12600000, "skew": 1800000}
+    ]
+  },
+  "wall_clock_cases": [
+    {
+      "name": "★★_a_window_will_NOT_close_on_processing_time_alone",
+      "why": "★★ THE LOAD-BEARING CASE, and §IV's whole point. The processing clock stands a full hour past the window's end; with an honest two-hour guarantee the watermark is only at 9h, so the window is **open**. `close` takes a `&Watermark` and nothing else — there is no `close_at(tau)` overload, so a caller holding only a clock cannot ask the question, let alone get a yes. The failure §4J.3 records is not refused at runtime; it is **unspellable**.",
+      "expect": {"closing": "NotYet", "needs": 36000000, "watermark": 32400000, "is_closed": false}
+    },
+    {
+      "name": "★★_reproducing_the_reference_requires_DECLARING_A_ZERO_BOUND_OUT_LOUD",
+      "why": "★★ The divergence made executable rather than described. `W(τ) = τ` is exactly `SourceGuarantee { max_out_of_orderness: 0 }` — the assertion *this source never delivers out of order*. It remains possible, and should: a genuinely in-order source has a zero bound. What changed is that it is now **sayable only by saying it**. Same τ, same window, two guarantees: the zero-bound one closes, the honest one does not. The difference is entirely a declaration someone had to write down, which turns a default into a signature.",
+      "expect": {"zero_bound_closes": true, "two_hour_bound_does_not": true, "mark_equals_tau_under_zero_bound": true}
+    },
+    {
+      "name": "★_a_heuristic_close_carries_its_caveat_forward_and_a_guaranteed_one_does_not",
+      "why": "★ Closing is an answer, not a proof of completeness. `Closing::Closed` carries `may_be_wrong`, true for every heuristic — so a consumer can tell a window that closed on a promise from one that closed on an estimate, which is the difference between *nothing more is coming* and *nothing more is expected*.",
+      "expect": {"perfect_may_be_wrong": false, "heuristic_may_be_wrong": true}
+    }
+  ],
+  "monotonicity_cases": [
+    {
+      "name": "★_a_watermark_never_moves_backwards_and_SAYS_when_it_tried_to",
+      "why": "★ §IV requires `W` non-decreasing in `τ`. The mark is private and `advance` is the only way to move it, so a retreat is unrepresentable in the state — and the rejected proposal is returned as `HeldBack` rather than dropped, because a source whose readings keep retreating is a fact worth seeing.",
+      "expect": {"advanced_to": 28800000, "held_back_proposed": 21600000, "held_at": 28800000, "current_after": 28800000}
+    },
+    {
+      "name": "why_monotonicity_is_required_a_closed_window_cannot_be_UN_closed",
+      "why": "The reason the requirement exists rather than the requirement restated: a watermark that retreated would re-open a window that had already emitted an answer, and every consumer of that answer would be holding something the system no longer claims. The tracker refuses, so the closed window stays closed.",
+      "expect": {"still_closed_after_a_retreating_reading": true}
+    },
+    {
+      "name": "★_this_is_NOT_the_clamp_EVT_5_warned_about",
+      "why": "★ Worth separating, because the shapes look alike and a careful reader should be able to tell them apart. EVT-5 refuses to floor a **measurement**, because doing so hides a fact about a clock. Here, non-decreasing **is the definition** of the object — §IV states it as a requirement, a retreat would un-close a closed window, and the rejected proposal is **reported** rather than discarded. One conceals an observation; the other maintains a stated invariant and says when it had to.",
+      "expect": {"held_back_is_reported_not_swallowed": true}
+    }
+  ],
+  "heuristic_cases": [
+    {
+      "name": "★_the_heuristic_is_ESTIMATED_FROM_OBSERVED_SKEW_not_invented",
+      "why": "★ Discipline carried from EVT-5: that slice deliberately invented no bound so this one could supply an estimate over the real distribution. The allowance is a **declared** percentile of the skews `skew_of` reports, and the reading says which percentile, what allowance it produced, and how many samples it saw — a small sample is still a heuristic, and saying how small is the honest part.",
+      "expect": {"kind": "Heuristic", "percentile": 100, "allowance": 1800000, "sampled": 3, "mark": 9000000}
+    },
+    {
+      "name": "★★_NO_VOLUME_OF_DATA_promotes_an_estimate_to_a_guarantee",
+      "why": "★★ Skew is heavy-tailed and unbounded (§III), so the largest skew ever observed is not a bound on the next one. *'We have seen a lot of data'* is not a source guarantee, and there is **no path in the module that turns it into one** — `estimate_heuristic` can only ever return `Heuristic`, at three samples or five hundred. That is what keeps the lateness policy mandatory rather than something a mature deployment could argue its way out of.",
+      "expect": {"kind_after_500_samples": "Heuristic", "may_be_wrong": true}
+    },
+    {
+      "name": "★★_an_UNMEASURED_source_is_not_a_PUNCTUAL_one",
+      "why": "★★ EVT-5's three readings paying off directly. `Unknown` and `Inferred` skews are not zero skew, so they cannot contribute a zero allowance — and with no observed skew at all the estimator returns an **error** rather than a bound of zero. A zero allowance from no evidence would close windows early on nothing, which is the same mistake as `W(τ)=τ` arrived at by a different route. The error names how many readings were unusable, so the caller knows the difference between *no data* and *no usable data*.",
+      "expect": {"error": "NoObservedSkew", "unusable": 2}
+    },
+    {
+      "name": "a_wider_percentile_is_never_a_later_watermark",
+      "why": "The monotonicity that makes the knob usable: asking for more allowance can only make the bound more conservative, never less. A tuning parameter that could tighten the bound by being loosened would be a trap.",
+      "expect": {"wide_mark_le_tight_mark": true}
+    }
+  ],
+  "lateness_cases": [
+    {
+      "name": "★★_a_window_CANNOT_BE_DECLARED_without_a_lateness_policy",
+      "why": "★★ The honest completion of a heuristic, made structural. `Window::new` takes a `Lateness` as an argument, and `Lateness` implements no `Default` — so the compiler, not a reviewer, is what stops a window existing without one. The reasoning is exact: you cannot promise the watermark is right, therefore you must say what you do when it is not.",
+      "expect": {"lateness_is_an_argument": true, "no_default_exists": true, "empty_window_refused": true}
+    },
+    {
+      "name": "★_drop_keeps_the_answer_final_and_LOGS_THE_FACT_ANYWAY",
+      "why": "★ The cheapest policy and the only stable one — the closed answer does not move, so no consumer ever sees a second version. Its cost is stated rather than hidden: it is wrong exactly when the late fact was material. And the fact still lands in the late log, because dropping it from the **answer** is not the same as pretending it never arrived — that distinction is the whole difference between a policy and a bug.",
+      "expect": {"outcome": "Dropped", "revision": 1, "late_log": 1, "retained_value": false}
+    },
+    {
+      "name": "★_late_fire_produces_a_SECOND_ANSWER_for_the_same_window",
+      "why": "★ The window is re-emitted with the late fact included, at a new revision — and the cost is the consumer's: it must be able to handle two answers for one window. Nothing is retained, because re-firing recomputes from the events rather than adjusting a remembered total.",
+      "expect": {"outcome": "LateFired", "revision": 2, "retained_value": false}
+    },
+    {
+      "name": "★★_retract_hands_downstream_BOTH_the_old_value_and_the_new_one",
+      "why": "★★ The only policy under which a downstream aggregate stays correct **without recomputation**: it is handed exactly what it already added, so it can subtract it, plus the correction to add. The case does that arithmetic rather than describing it. And the expense §IV names is real in the type — the window RETAINS its emitted value at close, which the other two policies do not.",
+      "expect": {"outcome": "Retracted", "retracted": 100, "corrected": 140, "downstream_after_subtracting": 140, "retained_value": true}
+    },
+    {
+      "name": "★_a_DROP_window_has_nothing_to_retract_EVEN_BY_MISTAKE",
+      "why": "★ The cost is in the state, not only in the prose. `WindowState` retains the emitted answer **only** under `AccumulateAndRetract`, so the other two policies structurally cannot issue a retraction — there is no remembered value to retract from. The expensive policy is expensive in the type, and the cheap ones are cheap in the type.",
+      "expect": {"drop_retains": false, "late_fire_retains": false, "retract_retains": true}
+    },
+    {
+      "name": "an_event_in_an_OPEN_window_is_not_late",
+      "why": "`NotLate` is a real answer rather than a failure — an ordinary event arriving before the window closed is not a lateness event at all, and treating it as one would put ordinary traffic in the late log.",
+      "expect": {"outcome": "NotLate", "late_log": 0}
+    },
+    {
+      "name": "★_the_window_is_HALF_OPEN_so_no_event_is_counted_twice",
+      "why": "★ `[a,b)` — an event exactly at `b` belongs to the NEXT window, not this one. Closed intervals would double-count every boundary event, which is the classic way a set of windows quietly stops partitioning time. Also checked through lateness: an event at the boundary offered to the closed earlier window is `NotLate` there, because it was never that window's event.",
+      "expect": {"first_contains_boundary": false, "second_contains_boundary": true, "boundary_event_not_late_in_first": true}
+    }
+  ]
+}
