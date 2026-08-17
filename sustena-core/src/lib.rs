@@ -75,6 +75,7 @@
 //! | Criticality — branching ratio σ̂ | [`criticality`] | R2 |
 //! | Suited domains · coverage · disorder | [`cynefin`] | R2 |
 //! | Boundary B · autopoietic closure | [`boundary`] | R2 |
+//! | Firewall F — what crosses B | [`flow`] | R2 |
 
 pub mod admission;
 pub mod approval;
@@ -93,6 +94,7 @@ pub mod editing;
 pub mod ensemble;
 pub mod error;
 pub mod event;
+pub mod flow;
 pub mod fold;
 pub mod goodhart;
 pub mod holarchy;
@@ -172,6 +174,10 @@ pub use editing::{
 };
 pub use event::{dedupe, merge, order, CausalStamp, Event, Observation, Provenance};
 pub use error::{FoldError, FoldResult, StateError, StateResult};
+pub use flow::{
+    check_flows, classify_movement, flows_of, Crossing, Flow, FlowDirection, FlowRefusal,
+    FlowRule, Movement,
+};
 pub use fold::{apply_mutation, diff_to_mutations, fold_events, FoldEvent};
 pub use inverse::{invert, is_reversible, InverseError};
 pub use kernel::{

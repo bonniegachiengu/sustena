@@ -44,6 +44,7 @@ use crate::mutation::Mutation;
 use crate::principal::{permitted, Denial, Memberships, Tier};
 use crate::predicate;
 use crate::boundary::{preserves_closure, BoundaryDecl, ClosureViolation};
+use crate::flow::{check_flows, flows_of, FlowRule, Movement};
 use crate::schema::Schema;
 use crate::transition::{check_all, TransitionRule};
 use crate::state::State;
@@ -92,6 +93,14 @@ pub struct Enforcement {
     /// one wants a migration, the other a
     /// [`crate::boundary::BoundaryToken`].
     pub boundary: Option<BoundaryDecl>,
+    /// `F(φ, s)` — the firewall over what crossed `B`.
+    ///
+    /// The third predicate family, and the one that is about **neither**
+    /// endpoint: two transitions with identical before-and-after states can
+    /// differ entirely in what crossed to produce them. Needs `boundary` to
+    /// mean anything, because *crossing* is `μ`'s question — declaring rules
+    /// with no boundary leaves them inert rather than guessing at one.
+    pub firewall: Vec<FlowRule>,
     /// `D(s, s')` — the transition constraints, evaluated over the (before,
     /// after) PAIR. Rate limits, monotonicity, and conservation.
     ///
@@ -314,7 +323,9 @@ pub fn execute_admitted(
     // ── effect ───────────────────────────────────────────────────────────────
     let mut working = State::new(state.clone());
     let mut events: Vec<EmittedEvent> = Vec::new();
-    let result = (meta.run)(&mut working, params, &mut events);
+    // Constraint §II: `candidate, flows = o.effect(copy(s), params, ctx)`.
+    let mut movements: Vec<Movement> = Vec::new();
+    let result = (meta.run)(&mut working, params, &mut events, &mut movements);
 
     if !result.is_ok() {
         // The operator refused on its own terms. Discard everything it touched:
@@ -442,6 +453,33 @@ pub fn execute_admitted(
         };
     }
 
+    // The firewall (Constraint §I–II):
+    //
+    //     admit_F(o,s) = admit(o,s) ∧ ⋀_{φ ∈ flows(o,s)} F(φ,s)
+    //
+    // A movement is what the operator DECLARED it moved; μ decides whether it
+    // crossed B and in which direction. An operator that declares no movement
+    // — or whose movements are all internal — satisfies F vacuously, which is
+    // why adding this term changes nothing for a sustain that declares no
+    // boundary and no rules.
+    //
+    // F is judged against the BEFORE state, as `F(φ, s)` is written: a rule
+    // reading a contacts register asks who you knew when you moved, not who
+    // you would know afterwards.
+    if !enforcement.firewall.is_empty() {
+        if let Some(decl) = enforcement.boundary.as_ref() {
+            let crossed = flows_of(&movements, &decl.read(state));
+            if let Err(refusal) = check_flows(&crossed, &enforcement.firewall, state) {
+                return Execution {
+                    result: OperatorResult::fail(refusal.to_string(), "firewall"),
+                    mutations: vec![],
+                    events: vec![],
+                    state: state.clone(),
+                };
+            }
+        }
+    }
+
     // ── commit ───────────────────────────────────────────────────────────────
     // The approval is spent here and nowhere else. Everything above this line
     // can refuse, and a refusal must leave the approval unspent — being turned
@@ -469,6 +507,7 @@ pub fn execute_admitted(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flow::FlowDirection;
     use serde_json::json;
 
     fn homestead_state() -> Value {
@@ -490,6 +529,7 @@ mod tests {
             ],
             schema: None,
             boundary: None,
+            firewall: vec![],
             transitions: vec![],
         }
     }
@@ -507,6 +547,7 @@ mod tests {
         state: &mut State,
         params: &Map<String, Value>,
         _events: &mut Vec<EmittedEvent>,
+        _movements: &mut Vec<Movement>,
     ) -> OperatorResult {
         let who = params.get("who").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let mut roster: Vec<Value> = state
@@ -616,6 +657,106 @@ mod tests {
                 ("source", json!("salary")),
                 ("entry_id", json!("e1")),
             ]),
+        );
+        assert_eq!(ex.result.status, meta::OperatorStatus::Ok, "{:?}", ex.result);
+    }
+
+    // ── the firewall F, at the gate ──────────────────────────────────────────
+
+    fn household() -> Value {
+        json!({
+            "roster": ["ama"],
+            "contacts": ["employer"],
+            "finances": {"liquid": {"balance": 1000.0}, "pockets": {},
+                         "income": {"monthly_total": 0.0, "sources": []}}
+        })
+    }
+
+    fn with_firewall(rules: Vec<FlowRule>) -> Enforcement {
+        Enforcement {
+            boundary: Some(
+                crate::boundary::BoundaryDecl::new(
+                    crate::boundary::Scope::new()
+                        .spanning("finances")
+                        .spanning("roster")
+                        .with_entity_register("roster"),
+                )
+                .owning("finances"),
+            ),
+            firewall: rules,
+            ..Enforcement::default()
+        }
+    }
+
+    /// ★★ The household's real case, through the gate: the SAME operator is
+    /// admitted or refused on the strength of who the counterparty is — which
+    /// is a fact about the crossing, not about either endpoint.
+    #[test]
+    fn the_firewall_refuses_an_inflow_from_an_unknown_counterparty() {
+        let reg = Registry::default();
+        let rules = vec![FlowRule::OnlyKnown {
+            id: "contacts_only".into(),
+            dir: Some(FlowDirection::In),
+            register: "contacts".into(),
+        }];
+
+        // Income from a known counterparty: admitted.
+        let ok = execute(
+            &reg, &reg.names(), &with_firewall(rules.clone()), &household(),
+            "budget.record_income",
+            &params(&[("amount", json!(500.0)), ("source", json!("employer")),
+                      ("entry_id", json!("e1"))]),
+        );
+        assert_eq!(ok.result.status, meta::OperatorStatus::Ok, "{:?}", ok.result);
+
+        // The same amount from a stranger: refused at the firewall, and
+        // nothing commits.
+        let before = household();
+        let no = execute(
+            &reg, &reg.names(), &with_firewall(rules), &before,
+            "budget.record_income",
+            &params(&[("amount", json!(500.0)), ("source", json!("loan_shark")),
+                      ("entry_id", json!("e2"))]),
+        );
+        assert_eq!(no.result.status, meta::OperatorStatus::Failed);
+        assert_eq!(no.result.constraint_violated.as_deref(), Some("firewall"));
+        assert_eq!(no.state, before);
+        assert!(no.mutations.is_empty() && no.events.is_empty());
+    }
+
+    /// ★★ Pocket-to-pocket is INTERNAL, so a firewall that forbids every
+    /// crossing still admits it. `μ` owns both ends, so nothing crossed `B`.
+    #[test]
+    fn an_internal_move_passes_a_firewall_that_forbids_everything() {
+        let reg = Registry::default();
+        let forbid_all = vec![FlowRule::Forbid {
+            id: "sealed".into(),
+            dir: None,
+            kind: None,
+        }];
+        let ex = execute(
+            &reg, &reg.names(), &with_firewall(forbid_all), &household(),
+            "budget.allocate",
+            &params(&[("pocket_name", json!("food")), ("amount", json!(100.0)),
+                      ("period", json!("monthly"))]),
+        );
+        assert_eq!(ex.result.status, meta::OperatorStatus::Ok, "{:?}", ex.result);
+    }
+
+    /// A sustain that declares rules but no boundary leaves them inert rather
+    /// than guessing at a boundary — and one that declares neither is
+    /// untouched by this row entirely.
+    #[test]
+    fn the_firewall_is_inert_without_a_boundary_to_cross() {
+        let reg = Registry::default();
+        let rules_only = Enforcement {
+            firewall: vec![FlowRule::Forbid { id: "sealed".into(), dir: None, kind: None }],
+            ..Enforcement::default()
+        };
+        let ex = execute(
+            &reg, &reg.names(), &rules_only, &household(), "budget.record_income",
+            &params(&[("amount", json!(500.0)), ("source", json!("anyone")),
+                      ("entry_id", json!("e3"))]),
         );
         assert_eq!(ex.result.status, meta::OperatorStatus::Ok, "{:?}", ex.result);
     }
@@ -824,7 +965,7 @@ mod tests {
             pawa_cost: 0,
             protocol: Protocol::Rpc,
             min_privilege: 0,
-            run: |state, _p, events| {
+            run: |state, _p, events, _movements| {
                 // Replace the whole finances record with one missing `liquid`.
                 let _ = state.set("finances", json!({"pockets": {}, "income": {}}));
                 events.push(EmittedEvent { name: "event.test.reshaped".into(), payload: json!({}) });
@@ -1026,6 +1167,7 @@ mod tests {
             invariants: vec![],
             schema: None,
             boundary: None,
+            firewall: vec![],
             transitions: vec![TransitionRule::Conservation {
                 id: "money_conserved".into(),
                 quantity: Quantity::new(
@@ -1051,7 +1193,7 @@ mod tests {
             pawa_cost: 0,
             protocol: Protocol::Rpc,
             min_privilege: 0,
-            run: |state, _p, events| {
+            run: |state, _p, events, _movements| {
                 let _ = state.set("finances.pockets.food.allocated", json!(25000));
                 events.push(EmittedEvent { name: "event.test.minted".into(), payload: json!({}) });
                 OperatorResult::ok(json!({}))
@@ -1126,6 +1268,7 @@ mod tests {
             invariants: vec![],
             schema: None,
             boundary: None,
+            firewall: vec![],
             transitions: vec![TransitionRule::RateLimit {
                 id: "no_big_moves".into(),
                 path: "finances.liquid.balance".into(),
@@ -1156,6 +1299,7 @@ mod tests {
             invariants: vec![("broken".into(), "this is (not ) valid".into())],
             schema: None,
             boundary: None,
+            firewall: vec![],
             transitions: vec![],
         };
         let ex = execute(&reg, &allowed(), &broken, &homestead_state(), "budget.allocate",

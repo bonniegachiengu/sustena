@@ -317,6 +317,7 @@ fn operator_vectors() {
             // no D, so no R1 vector can carry one.
             schema: None,
             boundary: None,
+            firewall: vec![],
             transitions: vec![],
         };
 

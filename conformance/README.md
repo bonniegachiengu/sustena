@@ -115,6 +115,7 @@ conformance/
     criticality.json    branching ratio σ̂ · slowing down (spec, R2)
     cynefin.json        suited domains · coverage · disorder (spec, R2)
     boundary.json       B = ⟨scope, μ⟩ · closure law     (spec, R2)
+    flow.json           F(φ,s) — what crosses B          (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -726,3 +727,28 @@ it is a bug** — nothing silently differs.
   edits and reads slightly off for a boundary change — reusing the type keeps
   **one** authority model, which is worth more than a perfectly-worded second
   one.
+
+- **`flow.json` — rust-ahead-of-python, with the conservation LAW at parity and
+  the FLOW notion not.** The reference has no flow notion at all — Constraint
+  §III's own Note says so. ★ **But the distinction is the whole point of the
+  row:** `transition.rs` already ships **conservation** as one of `D`'s
+  canonical shapes, and the reference gives `holon.transfer` real transactional
+  atomicity, so the conservation *law* is at parity. Conservation is over the
+  **pair of endpoints** — *the total is unchanged*. `F` is over the
+  **crossing** — *this specific movement is allowed*. The irreducibility case
+  shows them coming apart: 500 moved between two of your own pockets versus 500
+  sent out and 500 received back give **byte-identical** endpoints, and the
+  case runs the same `Conservation` rule with `Tolerance::Exact` — `D`'s
+  strongest form — over both and asserts it **passes both**. Only `F` separates
+  them, which is what makes *irreducible* a demonstration rather than a claim.
+  One false positive is worth stating carefully because it is a **real object,
+  not a coincidence**: `counterparty` appears in the reference as a
+  **transducer** field — the merchant parsed out of an M-Pesa or KCB SMS, and
+  the key `capture_classification_history` remembers a pocket against. That is
+  genuinely the same real-world entity; what it is not is a term the gate
+  reads. Knowing who you paid is not the same as having a rule about whether
+  you may. Four limits, including the named slot: **there is no clamp, and
+  deliberately it is *unrepresentable* rather than unimplemented** — capping
+  one side of a crossing is precisely §III's money-minting move, so a
+  whole-transition clamp is the follow-on rather than something shipped
+  half-safe.

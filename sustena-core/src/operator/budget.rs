@@ -14,6 +14,7 @@ use serde_json::{json, Map, Value};
 
 use super::meta::{OperatorMeta, OperatorResult, Protocol, Registry};
 use super::EmittedEvent;
+use crate::flow::Movement;
 use crate::state::State;
 
 fn num(params: &Map<String, Value>, key: &str) -> f64 {
@@ -61,6 +62,7 @@ fn record_income(
     state: &mut State,
     params: &Map<String, Value>,
     events: &mut Vec<EmittedEvent>,
+    movements: &mut Vec<Movement>,
 ) -> OperatorResult {
     let amount = num(params, "amount");
     let source = text(params, "source");
@@ -96,6 +98,10 @@ fn record_income(
     let _ = state.append("finances.income.sources", entry, id);
     let _ = state.increment("finances.income.monthly_total", &json!(amount));
 
+    // ★ The declared crossing: money arrived from `source`. Whether `source`
+    // is outside B is μ's question, not this operator's — see `crate::flow`.
+    movements.push(Movement::new("money", amount, &source, "finances.liquid"));
+
     events.push(EmittedEvent {
         name: "event.finances.income_received".into(),
         payload: json!({"amount": money(amount), "source": source}),
@@ -113,6 +119,7 @@ fn allocate(
     state: &mut State,
     params: &Map<String, Value>,
     events: &mut Vec<EmittedEvent>,
+    movements: &mut Vec<Movement>,
 ) -> OperatorResult {
     let pocket_name = text(params, "pocket_name");
     let amount = num(params, "amount");
@@ -138,6 +145,16 @@ fn allocate(
     }
     let _ = state.increment(&format!("{pocket_path}.allocated"), &json!(amount));
 
+    // ★ Liquid → pocket. Declared like any other movement — and because μ owns
+    // both ends, it classifies as INTERNAL and produces no flow at all. This is
+    // the pocket-to-pocket half of §I's irreducibility case.
+    movements.push(Movement::new(
+        "money",
+        amount,
+        "finances.liquid",
+        &format!("finances.pockets.{pocket_name}"),
+    ));
+
     events.push(EmittedEvent {
         name: "event.finances.pocket_allocated".into(),
         payload: json!({"pocket": pocket_name, "amount": money(amount)}),
@@ -156,6 +173,7 @@ fn add_pocket(
     state: &mut State,
     params: &Map<String, Value>,
     events: &mut Vec<EmittedEvent>,
+    _movements: &mut Vec<Movement>,
 ) -> OperatorResult {
     let raw = text(params, "pocket_name");
     let pocket_name = normalize_pocket_name(&raw);
@@ -197,6 +215,7 @@ fn spend(
     state: &mut State,
     params: &Map<String, Value>,
     events: &mut Vec<EmittedEvent>,
+    movements: &mut Vec<Movement>,
 ) -> OperatorResult {
     let pocket_name = text(params, "pocket_name");
     let amount = num(params, "amount");
@@ -238,6 +257,20 @@ fn spend(
     }
 
     let _ = state.increment(&format!("{pocket_path}.spent"), &json!(amount));
+
+    // ★ Money left the pocket toward `payee`. Spending with no declared payee
+    // names it "unknown" rather than inventing one — a crossing whose far side
+    // nobody recorded is exactly what a firewall should be able to refuse.
+    let payee = {
+        let p = text(params, "payee");
+        if p.is_empty() { "unknown".to_string() } else { p }
+    };
+    movements.push(Movement::new(
+        "money",
+        amount,
+        &format!("finances.pockets.{pocket_name}"),
+        &payee,
+    ));
 
     events.push(EmittedEvent {
         name: "event.finances.pocket_spent".into(),
@@ -318,7 +351,7 @@ pub fn register(registry: &mut Registry) {
         pawa_cost: 0,
         protocol: Protocol::Rpc,
         min_privilege: 0,
-        run: |state, _params, events| {
+        run: |state, _params, events, _movements| {
             let _ = state.set(
                 "finances.pockets.food",
                 json!({"allocated": -999.0, "spent": 0.0, "limit": 0.0}),

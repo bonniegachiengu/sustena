@@ -9,11 +9,26 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 
 use crate::operator::EmittedEvent;
+use crate::flow::Movement;
 use crate::state::State;
 
 /// The body of an operator. It may only reach state through `State`, which
 /// records every change — there is no way to write without recording.
-pub type OperatorFn = fn(&mut State, &Map<String, Value>, &mut Vec<EmittedEvent>) -> OperatorResult;
+/// The effect.
+///
+/// ★ Returns the candidate state (through `&mut State`), the events, **and the
+/// movements** — Constraint §II's `candidate, flows = o.effect(...)`. The
+/// movements are the fourth parameter rather than a return value only because
+/// Rust has no multiple return; the article's point is that the effect
+/// *produces* them, and it does.
+///
+/// A movement is **declared, never inferred from the endpoints**. If flows
+/// could be recovered by diffing before and after, `F` would be reducible to
+/// `D` — see `crate::flow`'s irreducibility case. Most operators declare none,
+/// and `F` is then vacuously satisfied.
+pub type OperatorFn =
+    fn(&mut State, &Map<String, Value>, &mut Vec<EmittedEvent>, &mut Vec<Movement>)
+        -> OperatorResult;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperatorResult {

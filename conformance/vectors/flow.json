@@ -1,0 +1,119 @@
+{
+  "conformance_version": 1,
+  "slice": "flow",
+  "phase": "R2",
+  "authored_from": "Articles (Serious)/technical/3B1B — Constraint - Formal Execution.md, §I (Boundary/firewall constraints: φ = ⟨dir, kind, qty, counterparty⟩, F(φ,s), and F's irreducibility to C or D) and §II (the gate, admit_F, and the effect returning candidate AND flows)",
+  "replayed_by": ["rust"],
+  "note": "The constraint layer's third predicate family. §4D deferred flows here explicitly, and the boundary they are deferred against is SUS-7's μ — shipped the slice before this one, which is what unblocked it.",
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "statement": "The reference has **no flow notion at all** — Constraint §III's own Note says so, and the greps agree: `counterparty` appears only as a transducer field on a parsed SMS (what the bank said), never as a term in a constraint. There is nothing that asks what crossed the boundary, because until μ existed there was no boundary for anything to cross.",
+    "★_the_counterweight_the_conservation_LAW_is_at_parity_the_FLOW_notion_is_not": "Precise, and the distinction is the whole point of the row. `transition.rs` already ships **conservation** — *'money is conserved across a transfer'* — as one of `D`'s three canonical shapes, and the reference gives `holon.transfer` real transactional atomicity. So the conservation LAW is at parity. But conservation is over the **pair of endpoints**: it says *the total is unchanged*. `F` is over the **crossing**: it says *this specific movement is allowed*. Those are different questions, and the irreducibility case below shows they come apart — two transitions that **both conserve**, with byte-identical endpoints, one admitted and one refused. D cannot tell them apart because there is nothing in the endpoints to tell apart.",
+    "term_by_term": {
+      "★ φ = ⟨dir, kind, qty, counterparty⟩": "RUST-AHEAD. No such record exists in the reference; a transfer is expressed as two state mutations, and the counterparty — if recorded at all — lands in an event payload, which is a log entry rather than a term the gate reads.",
+      "★★ F's irreducibility to C and D": "RUST-AHEAD, and it is the row's signature claim rather than a feature. Proven rather than asserted: same before, same after, both conserving, and only F separates them.",
+      "flows produced by the effect": "RUST-AHEAD. The reference's operator signature has no channel for them — which is not an oversight so much as a consequence: with nothing consuming flows there was nothing to produce.",
+      "conservation as a D shape": "AT PARITY — see the counterweight. Named here so *'the reference has no flow notion'* is not misread as *'the reference does not care whether money is conserved'*. It does, and it enforces it.",
+      "the clamp/conservation trap": "AT PARITY IN DISCIPLINE, and honoured here by construction. `admission.rs` already refuses a clamp on a conserved dimension at authoring time (R2 #11, `DeclError::ClampOnConserved`). This module goes further in the only way that costs nothing: `FlowRule` has **no clamp strategy at all**, so clamping one side of a crossing is unrepresentable rather than refused."
+    },
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "counterparty (real, but a different object)": "It appears in the reference as a **transducer** field — the merchant name parsed out of an M-Pesa or KCB SMS, and the key `capture_classification_history` remembers a pocket against. That is provenance on an observation, not a term in a predicate. Same word, and it is genuinely the same real-world entity, which is exactly why the distinction is worth stating: knowing who you paid is not the same as having a rule about whether you may.",
+      "flow / flows": "Bare `flow` hits are control-flow prose and UI copy (*'the classify flow'*, *'the capture flow'*). None is φ."
+    },
+    "what_python_does_have_and_why_it_is_not_this": "Conservation, atomicity, and a genuinely good record of who the counterparty was — the transducer extracts it, the classify flow remembers it, and the event log keeps it. What it does not have is any of that being *a term the gate reads*. The information exists and is never asked a question. That is a smaller gap than absence and a real one: the difference between recording who you paid and being able to refuse the payment.",
+    "the_honest_limits": "Four. (1) RULES ARE DECLARED SHAPES, not an expression language — four of them, no `eval`, the same discipline as `predicate`/`transition`. (2) ★ NO CLAMP, DELIBERATELY, and the deliberate part is that it is **unrepresentable** rather than merely unimplemented: capping one side of a crossing is precisely the money-minting move §III warns about. A whole-transition clamp — the projection applied to the step rather than to one flow — is a real, separate piece of work and is **the named slot**. (3) `qty` IS A NUMBER, not a typed quantity; conservation's integer-minor-unit discipline lives in `transition.rs` where the totals are. (4) F IS JUDGED AGAINST THE **BEFORE** STATE, as `F(φ, s)` is written — a rule reading a contacts register asks who you knew when you moved, not who you would know afterwards.",
+    "when_python_catches_up": "These cases become parity vectors unchanged; nothing in them is Rust-specific.",
+    "not_a_divergence_in": "R1 behaviour. Additive: `Enforcement` gains `firewall: Vec<FlowRule>` defaulting to empty, and a sustain with no rules — or with rules but no boundary — behaves exactly as before. The one genuinely invasive change is the operator signature, which gains a movements channel; every existing operator declares none and satisfies F vacuously."
+  },
+  "fixture": {
+    "why": "A household boundary owning `finances` with a roster and a contacts register — so μ has both an entity half and a path half to answer with, and `F(φ,s)`'s state argument has something real to read. `employer` is a known contact; `loan_shark` and `casino` are not.",
+    "scope_roots": ["finances", "roster"],
+    "entity_register": "roster",
+    "owned_prefixes": ["finances"],
+    "members": ["ama"],
+    "contacts": ["employer", "landlord"]
+  },
+  "crossing_cases": [
+    {
+      "name": "★_pocket_to_pocket_is_INTERNAL_and_produces_no_flow",
+      "why": "★ Crossing is μ's question, not the operator's. Both ends are owned, so nothing touched `B` and `F` has nothing to say — the operator declared a movement and μ classified it. This is the half of §I's irreducibility case that the household does every day.",
+      "movement": ["money", 500.0, "finances.pockets.food", "finances.pockets.savings"],
+      "expect": {"crossing": "Internal", "flows": 0}
+    },
+    {
+      "name": "★_an_outside_counterparty_makes_it_a_crossing_and_μ_picks_the_direction",
+      "why": "★ The operator says what moved and between whom; μ decides which side of `B` each end is on and therefore whether this is `in` or `out`. An operative should not have to know the boundary to describe its own effect.",
+      "expect": {"inbound_dir": "in", "inbound_counterparty": "employer", "outbound_dir": "out", "outbound_counterparty": "naivas"}
+    },
+    {
+      "name": "a_movement_between_two_outside_parties_is_reported_not_ignored",
+      "why": "Neither end owned means it did not cross **this** boundary, so it is not a flow — but it is reported as `Foreign` rather than silently dropped, because an operator declaring a movement between two outside parties is either a mistake or a thing worth seeing.",
+      "expect": {"crossing": "Foreign", "flows": 0}
+    },
+    {
+      "name": "an_owned_ENTITY_counts_as_inside_as_well_as_an_owned_path",
+      "why": "`Own(Σ) = {x : μ(x) = 1}` ranges over `Entities ∪ Paths`, so both readings are tried before concluding a party is outside. A movement from a household member to a household pocket is internal — which it plainly should be, and would not be if only paths were checked.",
+      "expect": {"crossing": "Internal"}
+    }
+  ],
+  "irreducibility_cases": [
+    {
+      "name": "★★_F_distinguishes_two_transitions_that_C_and_D_CANNOT",
+      "why": "★★ THE SIGNATURE PROOF, and §I's own example. (a) 500 moves between two of your own pockets. (b) 500 goes out to a casino and 500 comes back from it. **The before states are identical, the after states are identical, and both conserve** — so `C` sees one candidate, and `D` sees one pair, including its strongest shape. The case runs the SAME `TransitionRule::Conservation` over both and asserts it passes both, which is what makes *'irreducible'* a demonstration rather than a claim. Only `F` separates them, because only `F` is about the crossing rather than the endpoints. This is precisely §I's *'money moving between two of your own pockets and the same amount arriving from outside.'*",
+      "internal": [["money", 500.0, "finances.pockets.food", "finances.pockets.savings"]],
+      "round_trip": [["money", 500.0, "finances.pockets.food", "casino"], ["money", 500.0, "casino", "finances.pockets.savings"]],
+      "expect": {
+        "endpoints_identical": true,
+        "conservation_passes_both": true,
+        "internal_flows": 0,
+        "round_trip_flows": 2,
+        "internal_admitted": true,
+        "round_trip_refused": true
+      }
+    }
+  ],
+  "rule_cases": [
+    {
+      "name": "only_with_is_an_allowlist_and_max_qty_caps_one_crossing",
+      "why": "Two of the four declared shapes. `OnlyWith` names who you may deal with; `MaxQty` caps a **single** crossing — and the refusal names the counterparty or the amount rather than reporting a bare `false`, because a firewall that cannot say why is a firewall nobody will keep switched on.",
+      "expect": {"allowlist_refuses": "naivas", "cap_refuses_900": true, "cap_admits_50": true}
+    },
+    {
+      "name": "★_only_known_reads_the_register_from_STATE",
+      "why": "★ The shape that uses `F(φ, s)`'s state argument, which the article gives it and which would otherwise be inert. *'Only send to a counterparty already in your contacts'* is a rule about the household's own history — a firewall that could only see the flow would be a static allowlist, and this is the difference.",
+      "expect": {"known_admitted": "landlord", "stranger_refused": "stranger"}
+    },
+    {
+      "name": "a_rule_that_does_not_apply_is_silent",
+      "why": "An out-only cap says nothing about an in-flow. Worth pinning because the failure mode is a rule that quietly applies to more than its author meant — the direction and kind filters are the rule's scope, not decoration.",
+      "expect": {"inbound_passes_out_cap": true}
+    },
+    {
+      "name": "★_adding_a_rule_can_only_SHRINK_the_admissible_region",
+      "why": "★ §I: *'Conjunction is the only combinator [...] there is no priority order and no override. A constraint set is a set, and adding one can only ever shrink the admissible region. That monotonicity is what makes constraint sets safe to extend.'* Tested directly: a crossing admitted under no rules is refused once a forbidding rule is added, and a **more permissive second rule cannot undo the first**. There is no override to reach for.",
+      "expect": {"admitted_with_none": true, "refused_with_forbid": true, "permissive_rule_cannot_override": true}
+    },
+    {
+      "name": "no_flows_means_F_is_vacuously_satisfied",
+      "why": "The empty conjunction is true, and that is what makes this term additive: an operator that declares no movement — which is most of them — is unaffected by any firewall rule however strict.",
+      "expect": {"admitted": true}
+    }
+  ],
+  "gate_cases": [
+    {
+      "name": "★★_the_firewall_refuses_an_inflow_from_an_unknown_counterparty_AT_THE_GATE",
+      "why": "★★ The household's real case, through `execute` rather than through a predicate call. `budget.record_income` declares the crossing it produced; μ classifies it; `F` judges it. The **same operator with the same amount** is admitted from `employer` and refused from `loan_shark` — a difference that exists nowhere in the endpoints. On refusal the state is byte-identical and there are no mutations and no events, which is the gate's standing promise and had to survive gaining a fourth conjunct.",
+      "expect": {"known_source_ok": "employer", "unknown_source_refused": "loan_shark", "constraint_violated": "firewall", "state_untouched": true}
+    },
+    {
+      "name": "★_an_INTERNAL_move_passes_a_firewall_that_forbids_EVERYTHING",
+      "why": "★ The other side of the irreducibility case, at the gate. `budget.allocate` moves liquid into a pocket and both ends are owned, so a rule forbidding every crossing in both directions still admits it — because nothing crossed. A firewall that refused this would be one that had confused *moving money* with *moving money out*.",
+      "expect": {"admitted": true}
+    },
+    {
+      "name": "the_firewall_is_inert_without_a_boundary_to_cross",
+      "why": "Rules with no boundary are left inert rather than evaluated against a guessed one — the same refusal-to-fabricate as everywhere else. And it makes the term genuinely additive: a sustain that declares neither is untouched by this row, which is what lets every existing vector keep passing.",
+      "expect": {"admitted": true}
+    }
+  ]
+}
