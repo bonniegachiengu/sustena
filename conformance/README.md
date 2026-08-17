@@ -2011,3 +2011,32 @@ widget in its slot across recompositions needs memory of the last view, which
 `compose_view` does not keep; separate and harder. ★ The canonical panel list
 is the **household's**, not hardcoded here. And a `WHEN_ACTIVE` panel is
 indistinguishable from a widget once composed, deliberately.
+
+**Extended 2026-08-17 by the surface-block reconcile (+6 cases) — UI-5.**
+★★★ The pass flipped five rows that UI-1 had discharged and nobody had marked
+(UI-3/4/6/8/9) and found **one real residual**. UI-1's event-first eligibility
+withdraws an *event-bound* widget whose class did not fire — but a
+**Unit-bound** widget is always eligible, so one with nothing to show entered
+the ranking, scored `α·0 + λ·0.5 = 0.125`, and **was selected**, because the DP
+takes anything strictly above zero. That is §III's *unexplained `0`*, and it
+had survived four surface slices because each was looking at scoring rather
+than eligibility.
+
+★★ Closed with a **grounding condition before any ranking**: a widget is
+grounded when at least one declared input resolves to something real —
+present, non-null, and **not an empty container**, since an empty map or list
+is the *nothing to say* case. Ungrounded widgets **withdraw**: not scored, not
+excluded-with-a-score, **not counted in `candidates_considered`**.
+
+★ **Derived, not declared** (from the inputs UI-2 already checked), so a widget
+can no more declare itself grounded than cheap or persistent. ★ And the
+withdrawal is **reported** (`View::withdrawn`), because *never had anything to
+say* and *considered and outranked* are different facts: an exclusion carries a
+**score**, a withdrawal carries a **reason**.
+
+**Honest limits.** ★ Grounding is **any-of, not all-of** — one resolving input
+grounds a widget reading five, the permissive direction, since a card showing
+four of five still says something. ★ And it **does not apply to the persistent
+tier**: `ALWAYS` means always, and *nothing is here yet* is an answer a console
+is supposed to give.
+

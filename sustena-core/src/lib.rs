@@ -300,7 +300,7 @@ pub use curated::{
     attention_cost, compose_view, compose_with_panels, knapsack_select, rank_selection,
     salience, BindingKey,
     BindingTable, PolicyError, SaliencePolicy, UrgencyBasis,
-    Eligibility, Request, View, WidgetCandidate,
+    Eligibility, Request, View, WidgetCandidate, Withdrawn,
 };
 pub use panel::{PanelDecl, PanelError, PanelInView, PanelPolicy, PanelSet};
 pub use principal::{

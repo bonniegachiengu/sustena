@@ -546,6 +546,139 @@ fn ranks_are_positions_not_a_dense_sequence() {
     assert_eq!(items.iter().map(|i| i.rank).collect::<Vec<_>>(), vec![0, 0, 2]);
 }
 
+// ── UI-5: honest empty-slate suppression — the card withdraws ────────────────
+
+fn grounding_definition() -> Definition {
+    Definition::new(
+        Schema::new()
+            .declare("balance", DimType::Number { lo: None, hi: None })
+            .declare("pockets", DimType::Map { value: Box::new(DimType::Any) }),
+    )
+}
+
+fn balance_region() -> Region {
+    Region::new().bounding(Interval::new("balance", 0.0, 100.0)).weighing("balance", 1.0)
+}
+
+#[test]
+fn a_widget_with_nothing_to_say_withdraws_rather_than_scoring_low() {
+    // ★★★ THE PROPERTY: not a candidate at all, so not scored and not counted.
+    let set = WidgetSet::load(
+        vec![
+            WidgetDecl::new("pockets_card", "card").unit().reading("pockets"),
+            WidgetDecl::new("balance_card", "card").unit().reading("balance"),
+        ],
+        &grounding_definition(),
+        &Registry::default(),
+    )
+    .unwrap();
+    let view = compose_view(
+        &set,
+        &balance_region(),
+        &json!({"balance": 50.0, "pockets": {}}),
+        &[],
+        &Request::default(),
+        &SaliencePolicy::default(),
+    );
+    assert_eq!(view.candidates_considered, 1, "the empty card was never a candidate");
+    assert!(view.excluded.iter().all(|c| c.id != "pockets_card"), "not excluded — withdrawn");
+    assert_eq!(view.withdrawn.len(), 1);
+    assert_eq!(view.withdrawn[0].id, "pockets_card");
+    assert!(view.withdrawn[0].reason.contains("nothing to show"));
+}
+
+#[test]
+fn the_same_card_appears_the_moment_it_has_something_to_say() {
+    let set = WidgetSet::load(
+        vec![WidgetDecl::new("pockets_card", "card").unit().reading("pockets")],
+        &grounding_definition(),
+        &Registry::default(),
+    )
+    .unwrap();
+    let empty = compose_view(&set, &Region::new(), &json!({"pockets": {}}), &[],
+                             &Request::default(), &SaliencePolicy::default());
+    assert!(empty.selected.is_empty() && empty.withdrawn.len() == 1);
+
+    let filled = compose_view(&set, &Region::new(), &json!({"pockets": {"food": {}}}), &[],
+                              &Request::default(), &SaliencePolicy::default());
+    assert!(filled.withdrawn.is_empty());
+    assert_eq!(filled.selected.len(), 1);
+}
+
+#[test]
+fn withdrawal_is_a_different_answer_from_exclusion() {
+    // ★★ An excluded card carries a SCORE; a withdrawn one carries a REASON.
+    let set = WidgetSet::load(
+        vec![
+            WidgetDecl::new("empty", "card").unit().reading("pockets"),
+            WidgetDecl::new("loud", "card").unit().reading("balance"),
+            WidgetDecl::new("quiet", "card").unit().reading("balance"),
+        ],
+        &grounding_definition(),
+        &Registry::default(),
+    )
+    .unwrap();
+    let view = compose_view(
+        &set,
+        &balance_region(),
+        &json!({"balance": 900.0, "pockets": {}}),
+        &[],
+        &Request::default().with_budget(1),
+        &SaliencePolicy::default(),
+    );
+    assert_eq!(view.withdrawn.len(), 1, "one had nothing to say");
+    assert_eq!(view.excluded.len(), 1, "one was outranked");
+    assert!(view.excluded[0].score > 0.0, "and it can say what it scored");
+}
+
+#[test]
+fn a_widget_declaring_no_inputs_is_grounded_by_default() {
+    let set = WidgetSet::load(
+        vec![WidgetDecl::new("static", "card").unit()],
+        &Definition::new(Schema::new()),
+        &Registry::default(),
+    )
+    .unwrap();
+    let view = compose_view(&set, &Region::new(), &json!({}), &[], &Request::default(),
+                            &SaliencePolicy::default());
+    assert!(view.withdrawn.is_empty());
+    assert_eq!(view.candidates_considered, 1);
+}
+
+#[test]
+fn a_null_or_absent_input_does_not_ground_a_widget() {
+    let set = WidgetSet::load(
+        vec![WidgetDecl::new("card", "card").unit().reading("maybe")],
+        &Definition::new(Schema::new().declare("maybe", DimType::Any)),
+        &Registry::default(),
+    )
+    .unwrap();
+    for state in [json!({}), json!({"maybe": null}), json!({"maybe": []})] {
+        let view = compose_view(&set, &Region::new(), &state, &[], &Request::default(),
+                                &SaliencePolicy::default());
+        assert_eq!(view.withdrawn.len(), 1, "state {state} should withdraw the card");
+    }
+}
+
+#[test]
+fn grounding_does_not_apply_to_the_persistent_tier() {
+    // ★ ALWAYS means always: the household declared it unconditional.
+    let d = Definition::new(Schema::new().declare("mood", DimType::Any));
+    let p = PanelSet::load(
+        vec![PanelDecl::always(
+            WidgetDecl::new("console", "console").unit().reading("mood"),
+            "always informative",
+        )],
+        &d,
+        &Registry::default(),
+    )
+    .unwrap();
+    let view = compose_with_panels(&WidgetSet::empty(), &p, &Region::new(), &json!({}), &[],
+                                   &Request::default(), &SaliencePolicy::default());
+    assert_eq!(view.persistent.len(), 1);
+    assert!(view.withdrawn.is_empty(), "the persistent tier is not filtered");
+}
+
 // ── CTL-8: the persistent tier, outside the attention budget ─────────────────
 
 fn console_panel() -> PanelDecl {
@@ -835,6 +968,8 @@ fn the_recorded_divergence_keeps_its_counterweight() {
         "THE SUM-TO-ONE RULE IS A CONSTRAINT ON THE ARGUMENT, NOT A DERIVATION",
         "A SURFACE MUST RENDER `rank`, NOT THE ARRAY INDEX",
         "THE HOUSEHOLD CAN STILL ORDER ITS PEERS",
+        "GROUNDING IS PER-INPUT AND ANY-OF, NOT ALL-OF",
+        "GROUNDING DOES NOT APPLY TO THE PERSISTENT TIER",
     ] {
         assert!(limits.contains(term), "missing limit: {term}");
     }
@@ -850,5 +985,5 @@ fn the_recorded_divergence_keeps_its_counterweight() {
             assert!(seen.insert(c["name"].as_str().unwrap().to_string()), "duplicate case name");
         }
     }
-    assert_eq!(seen.len(), 39, "every declared case must be present");
+    assert_eq!(seen.len(), 45, "every declared case must be present");
 }

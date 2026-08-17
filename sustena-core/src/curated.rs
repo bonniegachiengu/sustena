@@ -67,6 +67,27 @@
 //! widgets. **The greedy move is self-defeating**, and that is asserted rather
 //! than argued.
 //!
+//! ## ★★ Honest empty-slate suppression: a card WITHDRAWS (UI-5)
+//!
+//! A widget with nothing to say is **not shown at all** — it is not scored
+//! low, it is **withdrawn before any ranking happens**. The distinction is the
+//! row's whole point: *considered and outranked* and *never had anything to
+//! say* are different facts, and rendering an unexplained `0` conflates them.
+//!
+//! ★★ **The grounding condition is derived, not declared.** A widget is
+//! grounded when at least one of its declared `inputs` resolves to something
+//! real in current state — present, non-null, and not an empty container. A
+//! card reading `finances.pockets` in a household with no pockets has nothing
+//! to say, and it says so by leaving. Derived from the inputs UI-2 already
+//! checked against `dim(S)`, so a widget cannot declare itself grounded any
+//! more than it can declare itself cheap or persistent.
+//!
+//! ★ **The withdrawal is reported, not silent** ([`View::withdrawn`]): a
+//! surface can say *N had nothing to show* separately from *N stayed quiet*,
+//! because those are different answers. And a widget declaring **no** inputs is
+//! grounded by default — it makes no claim about state, so there is nothing
+//! for state to fail to support.
+//!
 //! ## ★★★ The third salience surface: ORDERING (UI-13)
 //!
 //! *Salience is never rendered as salience* has three surfaces a widget could
@@ -136,6 +157,7 @@ use serde_json::Value;
 use crate::event::Event;
 use crate::panel::{PanelInView, PanelSet};
 use crate::region::Region;
+use crate::state::State;
 use crate::widget::{LoadedWidget, WidgetSet};
 
 /// `α` — the **article's declared preference** for urgency's weight, not a
@@ -398,6 +420,18 @@ impl Eligibility {
     }
 }
 
+/// A widget that never entered the ranking, and why (UI-5).
+///
+/// ★ Distinct from an exclusion: an excluded widget was **considered and
+/// outranked**, and carries a score. A withdrawn one had **nothing to say**,
+/// and carries a reason instead — there is no score to report because none was
+/// computed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Withdrawn {
+    pub id: String,
+    pub reason: String,
+}
+
 /// One scored candidate.
 ///
 /// ★ Named `WidgetCandidate`, not `Candidate` — `ooda::Candidate` is a
@@ -445,6 +479,10 @@ pub struct View {
     /// exclusion nobody can inspect is indistinguishable from a widget that was
     /// never considered.
     pub excluded: Vec<WidgetCandidate>,
+    /// ★★ Widgets that **withdrew** before ranking because nothing grounded
+    /// them (UI-5). Not counted in `candidates_considered` — they were never
+    /// candidates.
+    pub withdrawn: Vec<Withdrawn>,
     pub candidates_considered: usize,
     pub budget: usize,
     /// Attention actually spent **by the dynamic tier**. `budget - spent` is
@@ -497,6 +535,28 @@ fn basis_for(widget: &LoadedWidget, region: &Region) -> UrgencyBasis {
         undeclared.sort();
         UrgencyBasis::Undeclared { dimensions: undeclared }
     }
+}
+
+/// ★★ Does this widget have anything to say about current state? (UI-5)
+///
+/// Grounded when **at least one** declared input resolves to something real:
+/// present, non-null, and not an empty container. An empty map or list is the
+/// *nothing to say* case exactly — no pockets, no captures — and it is what
+/// distinguishes a card that should withdraw from one that should read zero.
+///
+/// ★ A widget declaring **no** inputs is grounded: it makes no claim about
+/// state, so there is nothing for state to fail to support. Refusing it would
+/// be inventing a requirement the row does not make.
+fn grounded(widget: &LoadedWidget, state: &State) -> bool {
+    if widget.inputs().is_empty() {
+        return true;
+    }
+    widget.inputs().iter().any(|path| match state.get(path) {
+        None | Some(Value::Null) => false,
+        Some(Value::Object(m)) => !m.is_empty(),
+        Some(Value::Array(a)) => !a.is_empty(),
+        Some(_) => true,
+    })
 }
 
 /// A widget's share of `d(s,V)`.
@@ -719,10 +779,13 @@ pub fn compose_with_panels(
         let considered = pool.len();
         let (selected, excluded) = knapsack_select(&pool, request.budget);
         let spent = selected.iter().map(|c| c.cost).sum();
+        let mut withdrawn = view.withdrawn;
+        withdrawn.extend(extra.withdrawn);
         view = View {
             persistent: Vec::new(),
             selected,
             excluded,
+            withdrawn,
             candidates_considered: considered,
             budget: request.budget,
             spent,
@@ -766,6 +829,28 @@ fn compose_dynamic(
         }
     }
 
+    // ★★ UI-5's grounding condition, enforced BEFORE any ranking: a widget
+    // with nothing to say withdraws rather than being scored low.
+    let reader = State::new(state.clone());
+    let mut withdrawn: Vec<Withdrawn> = Vec::new();
+    let eligible: Vec<(&LoadedWidget, Eligibility)> = eligible
+        .into_iter()
+        .filter(|(w, _)| {
+            if grounded(w, &reader) {
+                true
+            } else {
+                withdrawn.push(Withdrawn {
+                    id: w.id().to_string(),
+                    reason: format!(
+                        "nothing to show: none of {} resolves in current state",
+                        w.inputs().join(", ")
+                    ),
+                });
+                false
+            }
+        })
+        .collect();
+
     let candidates: Vec<WidgetCandidate> = eligible
         .into_iter()
         .map(|(w, why)| {
@@ -800,6 +885,7 @@ fn compose_dynamic(
         persistent: Vec::new(),
         selected,
         excluded,
+        withdrawn,
         candidates_considered: considered,
         budget: request.budget,
         spent,
@@ -1412,6 +1498,160 @@ mod tests {
         assert!(view.selected.is_empty(), "and not shown");
         assert_eq!(view.excluded[0].score, 0.0, "and it can say why");
         assert_eq!(view.spent, 0, "no attention spent on nothing");
+    }
+
+    // ── UI-5: honest empty-slate suppression — the card withdraws ────────────
+
+    #[test]
+    fn a_widget_with_nothing_to_say_withdraws_rather_than_scoring_low() {
+        // ★★★ THE PROPERTY. `pockets` is an empty map — the card has nothing to
+        // show. It is NOT a candidate, so it is not scored, not excluded with a
+        // score, and not counted in `candidates_considered`.
+        let d = Definition::new(
+            Schema::new()
+                .declare("balance", DimType::Number { lo: None, hi: None })
+                .declare("pockets", DimType::Map { value: Box::new(DimType::Any) }),
+        );
+        let set = WidgetSet::load(
+            vec![
+                WidgetDecl::new("pockets_card", "card").unit().reading("pockets"),
+                WidgetDecl::new("balance_card", "card").unit().reading("balance"),
+            ],
+            &d,
+            &Registry::default(),
+        )
+        .unwrap();
+        let r = Region::new().bounding(Interval::new("balance", 0.0, 100.0)).weighing("balance", 1.0);
+
+        let view = compose_view(
+            &set,
+            &r,
+            &json!({"balance": 50.0, "pockets": {}}),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        assert_eq!(view.candidates_considered, 1, "the empty card was never a candidate");
+        assert!(view.selected.iter().all(|c| c.id == "balance_card"));
+        assert!(view.excluded.iter().all(|c| c.id != "pockets_card"), "not excluded — withdrawn");
+        assert_eq!(view.withdrawn.len(), 1);
+        assert_eq!(view.withdrawn[0].id, "pockets_card");
+        assert!(view.withdrawn[0].reason.contains("nothing to show"));
+    }
+
+    #[test]
+    fn the_same_card_appears_the_moment_it_has_something_to_say() {
+        let d = Definition::new(
+            Schema::new().declare("pockets", DimType::Map { value: Box::new(DimType::Any) }),
+        );
+        let set = WidgetSet::load(
+            vec![WidgetDecl::new("pockets_card", "card").unit().reading("pockets")],
+            &d,
+            &Registry::default(),
+        )
+        .unwrap();
+        let r = Region::new();
+
+        let empty = compose_view(&set, &r, &json!({"pockets": {}}), &[], &Request::default(),
+                                 &SaliencePolicy::default());
+        assert!(empty.selected.is_empty() && empty.withdrawn.len() == 1);
+
+        let filled = compose_view(&set, &r, &json!({"pockets": {"food": {}}}), &[],
+                                  &Request::default(), &SaliencePolicy::default());
+        assert!(filled.withdrawn.is_empty());
+        assert_eq!(filled.selected.len(), 1);
+    }
+
+    #[test]
+    fn withdrawal_is_a_different_answer_from_exclusion() {
+        // ★★ "Never had anything to say" and "considered and outranked" are
+        // different facts, and the view keeps them in different lists — an
+        // excluded card carries a score, a withdrawn one carries a reason.
+        let d = Definition::new(
+            Schema::new()
+                .declare("balance", DimType::Number { lo: None, hi: None })
+                .declare("pockets", DimType::Map { value: Box::new(DimType::Any) }),
+        );
+        let set = WidgetSet::load(
+            vec![
+                WidgetDecl::new("empty", "card").unit().reading("pockets"),
+                WidgetDecl::new("loud", "card").unit().reading("balance"),
+                WidgetDecl::new("quiet", "card").unit().reading("balance"),
+            ],
+            &d,
+            &Registry::default(),
+        )
+        .unwrap();
+        let r = Region::new().bounding(Interval::new("balance", 0.0, 100.0)).weighing("balance", 1.0);
+        let view = compose_view(
+            &set,
+            &r,
+            &json!({"balance": 900.0, "pockets": {}}),
+            &[],
+            &Request::default().with_budget(1),
+            &SaliencePolicy::default(),
+        );
+        assert_eq!(view.withdrawn.len(), 1, "one had nothing to say");
+        assert_eq!(view.excluded.len(), 1, "one was outranked");
+        assert!(view.excluded[0].score > 0.0, "and it can say what it scored");
+    }
+
+    #[test]
+    fn a_widget_declaring_no_inputs_is_grounded_by_default() {
+        // ★ It makes no claim about state, so there is nothing for state to
+        // fail to support. Refusing it would invent a requirement.
+        let d = Definition::new(Schema::new());
+        let set =
+            WidgetSet::load(vec![WidgetDecl::new("static", "card").unit()], &d, &Registry::default())
+                .unwrap();
+        let view = compose_view(&set, &Region::new(), &json!({}), &[], &Request::default(),
+                                &SaliencePolicy::default());
+        assert!(view.withdrawn.is_empty());
+        assert_eq!(view.candidates_considered, 1);
+    }
+
+    #[test]
+    fn a_null_or_absent_input_does_not_ground_a_widget() {
+        let d = Definition::new(Schema::new().declare("maybe", DimType::Any));
+        let set = WidgetSet::load(
+            vec![WidgetDecl::new("card", "card").unit().reading("maybe")],
+            &d,
+            &Registry::default(),
+        )
+        .unwrap();
+        for state in [json!({}), json!({"maybe": null}), json!({"maybe": []})] {
+            let view = compose_view(&set, &Region::new(), &state, &[], &Request::default(),
+                                    &SaliencePolicy::default());
+            assert_eq!(view.withdrawn.len(), 1, "state {state} should withdraw the card");
+        }
+    }
+
+    #[test]
+    fn grounding_does_not_apply_to_the_persistent_tier() {
+        // ★ Deliberate: ALWAYS means always. A console that reads a dimension
+        // current state happens not to carry is still shown — the household
+        // declared it unconditional, and *nothing is here yet* is an answer.
+        let d = Definition::new(Schema::new().declare("mood", DimType::Any));
+        let p = PanelSet::load(
+            vec![crate::panel::PanelDecl::always(
+                WidgetDecl::new("console", "console").unit().reading("mood"),
+                "always informative",
+            )],
+            &d,
+            &Registry::default(),
+        )
+        .unwrap();
+        let view = compose_with_panels(
+            &WidgetSet::empty(),
+            &p,
+            &Region::new(),
+            &json!({}),
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        assert_eq!(view.persistent.len(), 1);
+        assert!(view.withdrawn.is_empty(), "the persistent tier is not filtered");
     }
 
     // ── CTL-8: the persistent tier, outside the attention budget ─────────────
