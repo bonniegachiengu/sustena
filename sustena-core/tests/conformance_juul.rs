@@ -17,6 +17,7 @@ use sustena_core::{
     approval::{EffectClass, NonceLedger},
     juul::{Affordability, Audit, Charge, Entry, Genesis, JuulLedger},
     operator::{execute, execute_afforded, Authorization, Enforcement, Execution, Registry},
+    governance::Parameters,
     pawa::{candidate_pawa, meter, PawaReading},
     CONFORMANCE_VERSION,
 };
@@ -65,7 +66,7 @@ fn reading_for(principal: &str) -> PawaReading {
         "budget.record_income",
         &params(&[("amount", json!(100.0)), ("source", json!("salary"))]),
     );
-    meter(&x, reg.get("budget.record_income").unwrap(), &e, "household", principal, 1_000)
+    meter(&x, reg.get("budget.record_income").unwrap(), &e, &Parameters::genesis(), "household", principal, 1_000)
         .expect("it committed")
 }
 
@@ -226,8 +227,14 @@ fn afforded(l: &mut JuulLedger, principal: &str) -> Execution {
     let names = reg.names();
     let e = Enforcement::default();
     let mut nonces = NonceLedger::new();
-    let mut aff =
-        Affordability::Metered { ledger: l, principal, sustain: "household", at: 1_000 };
+    let params_gov = Parameters::genesis();
+    let mut aff = Affordability::Metered {
+        ledger: l,
+        parameters: &params_gov,
+        principal,
+        sustain: "household",
+        at: 1_000,
+    };
     execute_afforded(
         &reg,
         &names,
@@ -292,8 +299,8 @@ fn the_candidate_price_equals_the_committed_readings_price() {
     let e = Enforcement::default();
     let x = execute(&reg, &reg.names(), &e, &state(), "budget.record_income", &income_params());
     let meta = reg.get("budget.record_income").unwrap();
-    let candidate = candidate_pawa(&x.mutations, &x.events, meta, &e);
-    let charged = meter(&x, meta, &e, "household", "bonnie", 1).unwrap();
+    let candidate = candidate_pawa(&x.mutations, &x.events, meta, &e, &Parameters::genesis());
+    let charged = meter(&x, meta, &e, &Parameters::genesis(), "household", "bonnie", 1).unwrap();
     assert_eq!(candidate, charged.pawa());
 }
 
@@ -334,8 +341,14 @@ fn a_run_refused_by_an_earlier_conjunct_never_reaches_the_charge() {
     let mut l = funded("bonnie", 1_000.0);
     let before = l.clone();
     let mut nonces = NonceLedger::new();
-    let mut aff =
-        Affordability::Metered { ledger: &mut l, principal: "bonnie", sustain: "household", at: 1 };
+    let params_gov = Parameters::genesis();
+    let mut aff = Affordability::Metered {
+        ledger: &mut l,
+        parameters: &params_gov,
+        principal: "bonnie",
+        sustain: "household",
+        at: 1,
+    };
     let x = execute_afforded(
         &reg,
         &names,

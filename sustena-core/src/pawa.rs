@@ -78,27 +78,21 @@
 
 use std::collections::BTreeMap;
 
+use crate::governance::Parameters;
 use crate::mutation::Mutation;
 use crate::operator::{EmittedEvent, Enforcement, Execution, OperatorMeta};
 
-/// Pawa per compute unit — one mutation, one event, one constraint evaluation.
-///
-/// ★★ **Declared, not calibrated.** See the module header.
-pub const KAPPA_COMPUTE: f64 = 1.0;
-
-/// Pawa per byte durably written.
-///
-/// ★★ **Declared, not calibrated.** See the module header.
-pub const KAPPA_STORAGE: f64 = 0.01;
-
-/// `pawa = κ_c·compute + κ_s·storage`.
-///
-/// Kept as one small pure function so PAWA-4's sandbox fitness term can reuse
-/// the **exact** pricing rather than duplicating it — two copies of a formula
-/// is two things to keep true.
-pub fn compute_pawa(compute: f64, storage: f64) -> f64 {
-    KAPPA_COMPUTE * compute + KAPPA_STORAGE * storage
-}
+// ★★★ **`κ` USED TO LIVE HERE AS TWO CONSTANTS, AND PAWA-11 MOVED IT.**
+//
+// A governed parameter cannot also be a hardcoded const that silently
+// overrides it, so the constants were demoted to
+// `Parameters::GENESIS_KAPPA_COMPUTE` / `GENESIS_KAPPA_STORAGE` — *the value κ
+// is declared with at genesis*, not *the value κ has* — and `compute_pawa` was
+// removed outright. Pricing now goes through `Parameters::price`, and `meter`
+// and `candidate_pawa` take the `&Parameters` in force.
+//
+// ★★ So **there is no path in this module that prices from a constant**: one
+// truth per parameter, the same discipline the treasury's balance got.
 
 /// The compute proxy: mutations + events + constraint evaluations.
 pub fn compute_units(mutations: usize, events: usize, constraint_evals: usize) -> usize {
@@ -212,6 +206,7 @@ pub fn meter(
     execution: &Execution,
     meta: &OperatorMeta,
     enforcement: &Enforcement,
+    parameters: &Parameters,
     sustain: &str,
     principal: &str,
     at: u64,
@@ -234,7 +229,7 @@ pub fn meter(
         at,
         compute,
         storage,
-        pawa: compute_pawa(compute as f64, storage as f64),
+        pawa: parameters.price(compute as f64, storage as f64),
         declared: meta.pawa_cost,
         elapsed_ms: None,
     })
@@ -277,10 +272,11 @@ pub fn candidate_pawa(
     events: &[EmittedEvent],
     meta: &OperatorMeta,
     enforcement: &Enforcement,
+    parameters: &Parameters,
 ) -> f64 {
     let compute =
         compute_units(mutations.len(), events.len(), constraint_eval_count(meta, enforcement));
-    compute_pawa(compute as f64, storage_bytes(mutations, events) as f64)
+    parameters.price(compute as f64, storage_bytes(mutations, events) as f64)
 }
 
 /// What a set of readings says about one operator.
@@ -371,6 +367,7 @@ impl Meter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::governance::Parameters;
     use crate::operator::{execute, Registry};
     use crate::schema::{DimType, Schema};
     use serde_json::{json, Map, Value};
@@ -419,14 +416,14 @@ mod tests {
     fn meter_run(op: &str, p: &[(&str, Value)], e: &Enforcement) -> Option<PawaReading> {
         let s = state();
         let x = run(op, p, e, &s);
-        meter(&x, registry().get(op).unwrap(), e, "household", "bonnie", 1_000)
+        meter(&x, registry().get(op).unwrap(), e, &Parameters::genesis(), "household", "bonnie", 1_000)
     }
 
     // ── the formula ──────────────────────────────────────────────────────────
 
     #[test]
     fn the_formula_is_kappa_c_compute_plus_kappa_s_storage() {
-        assert_eq!(compute_pawa(7.0, 542.0), 1.0 * 7.0 + 0.01 * 542.0);
+        assert_eq!(Parameters::genesis().price(7.0, 542.0), 12.42);
         assert_eq!(compute_units(3, 1, 2), 6);
     }
 
@@ -451,7 +448,7 @@ mod tests {
         assert_eq!(r.principal(), "bonnie");
         assert!(r.compute() > 0, "it mutated and emitted");
         assert!(r.storage() > 0, "and wrote real bytes");
-        assert_eq!(r.pawa(), compute_pawa(r.compute() as f64, r.storage() as f64));
+        assert_eq!(r.pawa(), Parameters::genesis().price(r.compute() as f64, r.storage() as f64));
     }
 
     #[test]
@@ -464,7 +461,7 @@ mod tests {
             .map(|e| serde_json::to_string(&e.payload).unwrap().len())
             .sum::<usize>()
             + serde_json::to_string(&x.mutations).unwrap().len();
-        let r = meter(&x, registry().get("budget.allocate").unwrap(), &off(), "h", "b", 1).unwrap();
+        let r = meter(&x, registry().get("budget.allocate").unwrap(), &off(), &Parameters::genesis(), "h", "b", 1).unwrap();
         assert_eq!(r.storage(), expected);
     }
 
@@ -510,7 +507,7 @@ mod tests {
         let s = state();
         let x = run("budget.allocate", &[("pocket_name", json!("food")), ("amount", json!(9_999.0))], &armed(), &s);
         assert!(!x.committed(), "the gate refused it");
-        assert!(meter(&x, registry().get("budget.allocate").unwrap(), &armed(), "h", "b", 1).is_none());
+        assert!(meter(&x, registry().get("budget.allocate").unwrap(), &armed(), &Parameters::genesis(), "h", "b", 1).is_none());
     }
 
     #[test]
@@ -521,7 +518,7 @@ mod tests {
 
         let s = state();
         let refused = run("budget.allocate", &[("pocket_name", json!("food")), ("amount", json!(9_999.0))], &armed(), &s);
-        if let Some(r) = meter(&refused, registry().get("budget.allocate").unwrap(), &armed(), "h", "b", 2) {
+        if let Some(r) = meter(&refused, registry().get("budget.allocate").unwrap(), &armed(), &Parameters::genesis(), "h", "b", 2) {
             m.record(r);
         }
         assert_eq!(m, before, "a refused run did zero real work and cost nothing");

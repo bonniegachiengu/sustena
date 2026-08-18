@@ -511,6 +511,10 @@ pub enum Affordability<'a> {
     /// `EffectClass::Live`'s `now` is.
     Metered {
         ledger: &'a mut JuulLedger,
+        /// ★★ The **governed** parameters in force (PAWA-11). Passed rather
+        /// than read from a constant, so the price the gate refuses on is the
+        /// same one the ledger is charged.
+        parameters: &'a crate::governance::Parameters,
         principal: &'a str,
         sustain: &'a str,
         at: u64,
@@ -527,6 +531,7 @@ impl Affordability<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::governance::Parameters;
     use crate::operator::{execute, Enforcement, Registry};
     use crate::pawa::meter;
     use serde_json::{json, Map, Value};
@@ -559,7 +564,7 @@ mod tests {
             "budget.record_income",
             &params(&[("amount", json!(100.0)), ("source", json!("salary"))]),
         );
-        meter(&x, reg.get("budget.record_income").unwrap(), &e, "household", principal, 1_000)
+        meter(&x, reg.get("budget.record_income").unwrap(), &e, &Parameters::genesis(), "household", principal, 1_000)
             .expect("it committed")
     }
 
@@ -584,8 +589,10 @@ mod tests {
         let names = reg.names();
         let e = Enforcement::default();
         let mut nonces = NonceLedger::new();
+        let params_gov = Parameters::genesis();
         let mut aff = Affordability::Metered {
             ledger: l,
+            parameters: &params_gov,
             principal,
             sustain: "household",
             at: 1_000,
@@ -654,8 +661,9 @@ mod tests {
         let reg = Registry::default();
         let e = Enforcement::default();
         let x = execute(&reg, &reg.names(), &e, &state(), "budget.record_income", &income_params());
-        let candidate = candidate_pawa(&x.mutations, &x.events, reg.get("budget.record_income").unwrap(), &e);
-        let charged = meter(&x, reg.get("budget.record_income").unwrap(), &e, "household", "bonnie", 1).unwrap();
+        let candidate =
+            candidate_pawa(&x.mutations, &x.events, reg.get("budget.record_income").unwrap(), &e, &Parameters::genesis());
+        let charged = meter(&x, reg.get("budget.record_income").unwrap(), &e, &Parameters::genesis(), "household", "bonnie", 1).unwrap();
         assert_eq!(candidate, charged.pawa());
     }
 
@@ -690,8 +698,9 @@ mod tests {
         let mut l = funded("bonnie", 1_000.0);
         let before = l.clone();
         let mut nonces = NonceLedger::new();
+        let params_gov = Parameters::genesis();
         let mut aff = Affordability::Metered {
-            ledger: &mut l, principal: "bonnie", sustain: "household", at: 1,
+            ledger: &mut l, parameters: &params_gov, principal: "bonnie", sustain: "household", at: 1,
         };
         // `params.amount > 0` is a declared guard on record_income.
         let x = execute_afforded(

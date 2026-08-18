@@ -131,6 +131,7 @@ pub mod event;
 pub mod flow;
 pub mod fold;
 pub mod goodhart;
+pub mod governance;
 pub mod harmonics;
 pub mod holarchy;
 pub mod inverse;
@@ -330,9 +331,8 @@ pub use treasury::{pay_out, PayOut};
 pub use royalty::{
     settle, split, Licence, Recipients, RevenueType, RoyaltyRole, Settlement, Share,
 };
-pub use pawa::{
-    candidate_pawa, compute_pawa, compute_units, constraint_eval_count, Meter, PawaReading, Stats,
-};
+pub use governance::{ParameterSpec, Parameters};
+pub use pawa::{candidate_pawa, compute_units, constraint_eval_count, Meter, PawaReading, Stats};
 pub use panel::{PanelDecl, PanelError, PanelInView, PanelPolicy, PanelSet};
 pub use strategy::{
     reachable_under, run as run_strategy, CompareOp, Condition, StepRecord, StrategyEdge,

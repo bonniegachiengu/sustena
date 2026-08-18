@@ -15,7 +15,8 @@ use std::path::PathBuf;
 use serde_json::{json, Map, Value};
 use sustena_core::{
     operator::{execute, Enforcement, Execution, Registry},
-    pawa::{compute_pawa, compute_units, constraint_eval_count, meter, Meter, PawaReading},
+    governance::Parameters,
+    pawa::{compute_units, constraint_eval_count, meter, Meter, PawaReading},
     schema::{DimType, Schema},
     CONFORMANCE_VERSION,
 };
@@ -89,14 +90,14 @@ fn run(op: &str, p: &[(&str, Value)], e: &Enforcement) -> Execution {
 
 fn meter_run(op: &str, p: &[(&str, Value)], e: &Enforcement) -> Option<PawaReading> {
     let x = run(op, p, e);
-    meter(&x, registry().get(op).unwrap(), e, "household", "bonnie", 1_000)
+    meter(&x, registry().get(op).unwrap(), e, &Parameters::genesis(), "household", "bonnie", 1_000)
 }
 
 // ── the formula ──────────────────────────────────────────────────────────────
 
 #[test]
 fn the_formula_is_kappa_c_compute_plus_kappa_s_storage() {
-    assert_eq!(compute_pawa(7.0, 542.0), 12.42);
+    assert_eq!(Parameters::genesis().price(7.0, 542.0), 12.42);
     assert_eq!(compute_units(3, 1, 2), 6);
 }
 
@@ -118,7 +119,7 @@ fn storage_is_the_real_serialized_size_not_an_estimate() {
         .map(|e| serde_json::to_string(&e.payload).unwrap().len())
         .sum::<usize>()
         + serde_json::to_string(&x.mutations).unwrap().len();
-    let r = meter(&x, registry().get("budget.allocate").unwrap(), &off(), "h", "b", 1).unwrap();
+    let r = meter(&x, registry().get("budget.allocate").unwrap(), &off(), &Parameters::genesis(), "h", "b", 1).unwrap();
     assert_eq!(r.storage(), expected);
 }
 
@@ -142,7 +143,7 @@ fn a_real_run_is_measured_from_what_it_actually_did() {
     assert_eq!(r.at(), 1_000, "host-supplied; the core has no clock");
     assert!(r.compute() > 0);
     assert!(r.storage() > 0);
-    assert_eq!(r.pawa(), compute_pawa(r.compute() as f64, r.storage() as f64));
+    assert_eq!(r.pawa(), Parameters::genesis().price(r.compute() as f64, r.storage() as f64));
 }
 
 #[test]
@@ -182,7 +183,7 @@ fn a_gate_refused_run_meters_nothing_at_all() {
     // ★★★ Not a zero reading — NO reading, and no other constructor exists.
     let x = run("budget.allocate", &[("pocket_name", json!("food")), ("amount", json!(9_999.0))], &armed());
     assert!(!x.committed(), "the gate refused it");
-    assert!(meter(&x, registry().get("budget.allocate").unwrap(), &armed(), "h", "b", 1).is_none());
+    assert!(meter(&x, registry().get("budget.allocate").unwrap(), &armed(), &Parameters::genesis(), "h", "b", 1).is_none());
 }
 
 #[test]
@@ -196,7 +197,7 @@ fn a_refusal_leaves_the_meter_byte_unchanged() {
         &[("pocket_name", json!("food")), ("amount", json!(9_999.0))],
         &armed(),
     );
-    if let Some(r) = meter(&refused, registry().get("budget.allocate").unwrap(), &armed(), "h", "b", 2) {
+    if let Some(r) = meter(&refused, registry().get("budget.allocate").unwrap(), &armed(), &Parameters::genesis(), "h", "b", 2) {
         m.record(r);
     }
     assert_eq!(m, before, "a refused run did zero real work and cost nothing");

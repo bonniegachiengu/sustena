@@ -593,8 +593,8 @@ pub fn execute_afforded(
     // candidate's mutations and events already exist, so pricing them is free.
     //
     // ★ Vacuous under `Unmetered`, which is what every pre-PAWA-3 caller passes.
-    if let Affordability::Metered { ledger, principal, .. } = affordability {
-        let cost = candidate_pawa(working.mutations(), &events, meta, enforcement);
+    if let Affordability::Metered { ledger, parameters, principal, .. } = affordability {
+        let cost = candidate_pawa(working.mutations(), &events, meta, enforcement, parameters);
         let balance = ledger.balance_of(principal);
         if balance < cost {
             return Execution {
@@ -639,8 +639,8 @@ pub fn execute_afforded(
     // anything uncommitted, so a refused run can never reach a charge — and the
     // charge cannot be `Insufficient`, because the identical cost was checked
     // against the identical balance a few lines above and nothing interleaves.
-    if let Affordability::Metered { ledger, principal, sustain, at } = affordability {
-        if let Some(reading) = meter(&execution, meta, enforcement, sustain, principal, *at) {
+    if let Affordability::Metered { ledger, parameters, principal, sustain, at } = affordability {
+        if let Some(reading) = meter(&execution, meta, enforcement, parameters, sustain, principal, *at) {
             ledger.charge(&reading);
         }
     }

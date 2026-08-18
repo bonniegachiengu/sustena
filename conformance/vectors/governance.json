@@ -1,0 +1,82 @@
+{
+  "conformance_version": 1,
+  "slice": "PAWA-11 — the parameters are a declared Sustain; a parameter change is an Enzyme",
+  "phase": "R2 (spec) — the reference's economic parameters are module constants, ungoverned",
+  "authored_from": "Pawa §6.5 (the economic parameters as declared Sustains, changed only through a gated Enzyme)",
+  "replayed_by": "sustena-core/tests/conformance_governance.rs",
+  "note": "Governance before issuance, because PAWA-8's whole safety property is that its schedule is changeable ONLY through governance. Internal throughout: changing a parameter moves no juul.",
+
+  "★★_the_STEP_0_reconcile": {
+    "★★★_1_PAWA_6's_treasury_is_the_TEMPLATE_and_it_is_reused_not_re_derived": "A governance Sustain is a `Definition` plus a state, exactly as `Σ_T` is. `governance.set_parameter` is an ordinary `OperatorMeta` on the ordinary `Registry`; `V_gov`'s bounds are ordinary invariants; a change needs the same `ApprovalToken`; `enforcement_of` is the same function the treasury reuses; and a change replays through `replay_under`, which knows nothing about governance. NO BESPOKE GOVERNANCE ENGINE EXISTS — the second time this build has made that claim and the second time it is checkable by looking at what was NOT written.",
+    "★★★_2_the_CONST_reconcile_and_what_it_forced": "`κ_c` and `κ_s` were module constants in `pawa.rs` — THE value, read directly by `compute_pawa`, which `meter`, `candidate_pawa` and PAWA-3's affordability conjunct all called. A governed parameter cannot ALSO be a hardcoded const that silently overrides it, so the constants were DEMOTED to `Parameters::GENESIS_KAPPA_COMPUTE` / `GENESIS_KAPPA_STORAGE` — *the value κ is declared with at genesis*, not *the value κ has* — and ★★★ `pawa::compute_pawa` WAS REMOVED OUTRIGHT. Pricing goes through `Parameters::price`, and `meter`, `candidate_pawa` and `Affordability::Metered` now carry the `&Parameters` in force. THERE IS NO PATH LEFT THAT PRICES FROM A CONSTANT — one truth per parameter, the same discipline the treasury's balance got, and the same reason: two sources that can diverge is worse than one that can be wrong.",
+    "★★_3_what_this_row_governs_NOW_and_what_it_names_as_follow_on": "GOVERNED NOW, END TO END: `κ_c` and `κ_s` — declared with bounds, changed only through the gated Enzyme, and the value in force is what the meter and the gate actually price with. NAMED AS FOLLOW-ON, WITH THE REASON: the ratified royalty schedule stays a constant in `royalty.rs`. Governing it needs a bound that does not exist here — THE FIVE SHARES MUST SUM TO 100 — and MYC-5's conservation theorem depends on exactly that. That is a real invariant to design deliberately, not a value to move, so it is left whole rather than half-wired. ★ The treasury's `φ_p` and `period_budget` are already declared in `Σ_T`'s own state (PAWA-6) rather than being constants, so they are governed by the treasury's own definition and need nothing here."
+  },
+
+  "divergence": {
+    "kind": "rust-only-spec-over-ungoverned-constants",
+    "statement": "The reference's economic parameters are module constants. `KAPPA_COMPUTE = 1.0` and `KAPPA_STORAGE = 0.01` in `pawa_meter.py`; the royalty percentages hardcoded inside `PawaLedger.charge`. Nothing declares them as governed, nothing bounds them, and nothing records a change — because changing one means editing and redeploying the module.",
+
+    "★★_what_is_at_parity_and_what_is_the_sharpening": {
+      "at parity — the parameters exist, and are declared and documented": "`pawa_meter.py` names its coefficients at module level with a docstring saying they are NOT calibrated against any real infrastructure cost model. That honesty is the reference's and this row keeps it verbatim: making a number revisable does not make it right.",
+      "★★★ the sharpening — a parameter change is a GATED ENZYME, not a redeploy": "Here a change goes through the same `admit` every operator does, needs an approval token bound to that one change, is refused if it leaves the declared range, and lands in the fold as an event. In the reference a change is a source edit: unbounded, unrecorded, unattributable and invisible to any audit.",
+      "★★ the sharpening — bounds as ordinary invariants": "`V_gov` declares each parameter's range and the ORDINARY gate refuses a breach with `enforcement_gate`. A negative coefficient would pay people to do work; an unbounded one would let a single change price every future run out of reach. Neither is expressible.",
+      "★★★ the sharpening — one truth, enforced by DELETION": "`compute_pawa` is gone. It is not deprecated, not kept for compatibility, not left as a convenience — removed, so no caller can price from a constant even by accident."
+    },
+
+    "the_honest_limits": "★★ ONLY TWO PARAMETERS ARE GOVERNED — `κ_c` and `κ_s`. The royalty schedule is named above as a deliberate follow-on with its reason (the sum-to-100 bound), and that is the honest state: the MECHANISM is complete and its COVERAGE is two parameters. ★★ A PARAMETER IS A SCALAR — `ParameterSpec` bounds one `f64` between a min and a max, so a schedule (five shares with a joint constraint) genuinely does not fit the shape this row built, which is the same reason it is a follow-on rather than an oversight. ★ NOTHING CONNECTS A CHANGE TO A COUNCIL — the approval token is required, and who may approve one is the host's question, exactly as it is for a treasury disbursement; PAWA-9/10's voting rules are their own rows. ★ NO CHANGE TAKES EFFECT AT A FUTURE TIME — a committed change is in force immediately, because this core has no clock; a scheduled parameter change would lean on EVT-11's `Recurrence`, and none is fabricated here. ★★ AND `Parameters::read` FALLS BACK TO GENESIS for a value the state does not carry, which is deliberate — an ungoverned deployment is running the DECLARED DEFAULTS, not running nothing — but it does mean a typo'd parameter name reads as the default rather than failing loudly. The `parameter_declared` refusal covers the write path; the read path is the softer half, and it is named."
+  },
+
+  "no_bespoke_engine_cases": [
+    {
+      "name": "a_parameter_change_is_an_ordinary_enzyme_with_ordinary_bounds",
+      "why": "★★★ The row's claim, checkable by what was NOT written. `governance.set_parameter` is on the ordinary registry with a declared `params` shape like any other operator, and `V_gov` is an ordinary invariant list carrying exactly two entries per declared parameter — a min and a max. No bound-checking code exists.",
+      "expect": {"registered": true, "invariants": "2 per parameter"}
+    },
+    {
+      "name": "a_valid_change_commits_and_records_the_event",
+      "why": "★★ Gated, recorded, and in the fold: a valid change commits through the real gate, the new value is in the resulting state, and exactly one `event.governance.parameter_changed` is appended carrying BOTH the old and the new value — so the event alone says what moved, without needing the state before it.",
+      "expect": {"committed": true, "events": 1, "payload": "from and to"}
+    },
+    {
+      "name": "a_parameters_value_is_the_fold_of_its_changes_over_genesis",
+      "why": "★★★ AUDITABLE BY REPLAY, and the recursion again: `replay_under` takes a `Definition` and knows nothing about governance, yet reconstructs a parameter's whole history — three changes replay to the last value, and all three are in the record. A parameter's current value is genesis plus its changes, nothing else.",
+      "expect": {"all_admitted": true, "final": 4.5, "steps": 3}
+    }
+  ],
+
+  "gated_cases": [
+    {
+      "name": "an_untokened_parameter_change_is_refused",
+      "why": "★★ A parameter change is a DELIBERATE ACT, not something an agent does alone — the same discipline that stops `Agent::act` firing a live effect and stops a strategy disbursing from the treasury. A token bound to a DIFFERENT change cannot admit this one, which is the same as having none for it: refused with `approval_token`, and the state is asserted unchanged.",
+      "expect": {"reason": "approval_token", "state": "unchanged"}
+    },
+    {
+      "name": "a_change_outside_the_declared_bound_is_refused_by_the_ordinary_gate",
+      "why": "★★ Both ends of the range, and refused with `enforcement_gate` — the SAME reason a household invariant breach gives, which is the evidence the bound is an ordinary invariant rather than a bespoke check. A negative coefficient would pay people to do work; an unbounded one would price every future run out of reach.",
+      "expect": {"negative": "refused", "over_max": "refused", "state": "unchanged"}
+    },
+    {
+      "name": "an_undeclared_parameter_cannot_be_invented",
+      "why": "★ Otherwise `V_gov` could be sidestepped entirely: bounds exist only for declared names, so a change that CREATED a name would be creating an ungoverned parameter. Refused with `parameter_declared`.",
+      "expect": {"reason": "parameter_declared"}
+    },
+    {
+      "name": "a_spec_whose_genesis_is_outside_its_own_bounds_is_refused",
+      "why": "★ A declaration that opens out of range would refuse every subsequent change while already being in breach — so it is refused at declaration time, along with a `min > max` range that nothing could satisfy.",
+      "expect": {"out_of_range_genesis": null, "inverted_range": null}
+    }
+  ],
+
+  "one_truth_cases": [
+    {
+      "name": "the_constants_are_genesis_values_and_the_governed_value_is_what_prices",
+      "why": "★★★ THE ONE-TRUTH PROOF. The genesis parameters price exactly as PAWA-1's constants did (`12.42` for the same inputs, unchanged). Then a governed change to `κ_c` is committed, and the parameters READ BACK FROM THAT STATE price differently — so the value in force is the governed one, and the old constant is not shadowing it. Asserted as an inequality against the genesis pricing, not just a new number.",
+      "expect": {"genesis_price": 12.42, "governed_price": "differs", "kappa_compute": 2.0}
+    },
+    {
+      "name": "an_ungoverned_state_reads_the_declared_genesis_values",
+      "why": "★ The honest fallback: a deployment with no governance state is running the DECLARED DEFAULTS, not running nothing. An empty state and a freshly-opened one both read as genesis. ★ Named as a limit too — a typo'd parameter name reads as the default rather than failing loudly, which the `parameter_declared` refusal only covers on the write path.",
+      "expect": {"empty_state": "genesis", "opening_state": "genesis"}
+    }
+  ]
+}

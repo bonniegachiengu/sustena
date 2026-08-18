@@ -145,6 +145,7 @@ conformance/
     juul.json           the ledger, the gate clause, + genesis  (spec, R2)
     royalty.json        the ratified five-way royalty split   (spec, R2)
     treasury.json       Sigma_T: the treasury as a Sustain    (spec, R2)
+    governance.json     parameters as a Sustain; change = Enzyme (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2654,3 +2655,40 @@ is **not expressible**.
 forge a mint through `with_entries` — **closed by detection, not construction**,
 and said so; **there is no burn**; a **zero allocation is allowed**; and
 **nothing ties a genesis to a Sustain** yet.
+
+---
+
+### `governance.json` — the parameters as a declared Sustain (PAWA-11, Pawa §6.5)
+**9 cases.** Built before PAWA-8, because issuance's safety property *is* that
+its schedule changes only through governance.
+
+★★★ **PAWA-6's treasury is the template, reused not re-derived.** An ordinary
+`Definition`, an ordinary Enzyme, **ordinary invariants** for `V_gov`, the same
+approval token, and it **replays through `replay_under`** — which knows nothing
+about governance. **No governance engine was written.**
+
+★★★ **The const reconcile forced a deletion.** `κ` was two module constants read
+directly by the meter and the gate. A governed parameter cannot also be a const
+that silently overrides it — so the constants were **demoted to genesis values**
+and **`pawa::compute_pawa` was removed outright**. Pricing goes through
+`Parameters::price`, threaded through `meter` / `candidate_pawa` /
+`Affordability`. **No path prices from a constant.** One truth, enforced by
+deletion.
+
+★★ **Gated, recorded, replayable** — all three tested: an untokened change is
+refused (`approval_token`); a valid one appends one event carrying **from and
+to**; and three replayed changes reconstruct the history.
+
+★ **Bounds are ordinary invariants** — out of range refuses with
+`enforcement_gate`; an **undeclared** parameter cannot be invented; a spec whose
+genesis is outside its own range is refused at declaration.
+
+★★ **Coverage is honest:** `κ_c`/`κ_s` governed **end to end**; the royalty
+schedule is a **named follow-on**, because governing it needs a **sum-to-100**
+bound that `ParameterSpec` (one scalar, min/max) cannot express — a follow-on,
+not an oversight.
+
+**Limits, all five recorded and asserted:** only two parameters governed; a
+parameter is a **scalar**; **no council** is connected; **no future-dated
+change** (no clock); and `Parameters::read` **falls back to genesis**, so a
+typo'd name reads as the default rather than failing loudly.
