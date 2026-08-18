@@ -14,9 +14,10 @@ use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
 use sustena_core::{
-    juul::{Charge, Entry, JuulLedger},
-    operator::{execute, Enforcement, Registry},
-    pawa::{meter, PawaReading},
+    approval::{EffectClass, NonceLedger},
+    juul::{Affordability, Charge, Entry, JuulLedger},
+    operator::{execute, execute_afforded, Authorization, Enforcement, Execution, Registry},
+    pawa::{candidate_pawa, meter, PawaReading},
     CONFORMANCE_VERSION,
 };
 
@@ -214,6 +215,145 @@ fn charging_one_principal_leaves_every_other_balance_untouched() {
     assert_eq!(l.total_in_circulation(), before - r.pawa(), "spent, not moved");
 }
 
+
+// ── PAWA-3: the out-of-pawa gate clause ──────────────────────────────────────
+
+fn income_params() -> Map<String, Value> {
+    params(&[("amount", json!(100.0)), ("source", json!("salary"))])
+}
+
+/// Run `budget.record_income` through the real gate under an economy.
+fn afforded(l: &mut JuulLedger, principal: &str) -> Execution {
+    let reg = Registry::default();
+    let names = reg.names();
+    let e = Enforcement::default();
+    let mut nonces = NonceLedger::new();
+    let mut aff =
+        Affordability::Metered { ledger: l, principal, sustain: "household", at: 1_000 };
+    execute_afforded(
+        &reg,
+        &names,
+        &e,
+        &state(),
+        "budget.record_income",
+        &income_params(),
+        &Authorization::Unchecked,
+        &EffectClass::Unchecked,
+        &mut nonces,
+        &mut aff,
+    )
+}
+
+#[test]
+fn an_affordable_run_commits_and_is_charged_exactly_once() {
+    let r = reading_for("bonnie");
+    let mut l = funded("bonnie", 100.0);
+    let x = afforded(&mut l, "bonnie");
+    assert!(x.committed(), "{:?}", x.result.reason);
+    assert_eq!(l.debits_of("bonnie").count(), 1, "once, not twice");
+    assert_eq!(l.balance_of("bonnie"), 100.0 - r.pawa());
+    assert_eq!(l.rebuild()["bonnie"], l.balance_of("bonnie"), "the fold still holds");
+}
+
+#[test]
+fn an_unaffordable_run_is_refused_and_charges_nothing() {
+    // ★★★ The gate stops the work BEFORE it costs anything.
+    let mut l = funded("bonnie", 1.0);
+    let before = l.clone();
+    let x = afforded(&mut l, "bonnie");
+
+    assert!(!x.committed(), "refused on cost");
+    assert_eq!(x.result.constraint_violated.as_deref(), Some("insufficient_pawa"));
+    assert_eq!(l, before, "balance byte-identical — no juul spent on a refused run");
+    assert_eq!(x.state, state(), "and state untouched");
+    assert!(x.mutations.is_empty() && x.events.is_empty());
+}
+
+#[test]
+fn it_prices_against_the_real_cost_not_the_declared_estimate() {
+    // ★★★ The reference's trap, as a test.
+    let reg = Registry::default();
+    assert_eq!(
+        reg.get("budget.record_income").unwrap().pawa_cost,
+        0,
+        "the declared estimate really is zero"
+    );
+    let real = reading_for("bonnie").pawa();
+    assert!(real > 0.0, "and the real cost really is not");
+
+    let mut l = funded("bonnie", real / 2.0);
+    let x = afforded(&mut l, "bonnie");
+    assert!(!x.committed(), "refused — so it read the measurement, not the guess");
+    assert_eq!(l.debits_of("bonnie").count(), 0);
+}
+
+#[test]
+fn the_candidate_price_equals_the_committed_readings_price() {
+    // ★★ Admitting on one price and charging another would be a real defect.
+    let reg = Registry::default();
+    let e = Enforcement::default();
+    let x = execute(&reg, &reg.names(), &e, &state(), "budget.record_income", &income_params());
+    let meta = reg.get("budget.record_income").unwrap();
+    let candidate = candidate_pawa(&x.mutations, &x.events, meta, &e);
+    let charged = meter(&x, meta, &e, "household", "bonnie", 1).unwrap();
+    assert_eq!(candidate, charged.pawa());
+}
+
+#[test]
+fn an_unmetered_call_behaves_exactly_as_before() {
+    // ★ Additive and opt-in-safe: no ledger ⇒ the clause is VACUOUS, not
+    // failing closed to broke.
+    let reg = Registry::default();
+    let names = reg.names();
+    let e = Enforcement::default();
+    let plain = execute(&reg, &names, &e, &state(), "budget.record_income", &income_params());
+
+    let mut nonces = NonceLedger::new();
+    let mut aff = Affordability::Unmetered;
+    let via = execute_afforded(
+        &reg,
+        &names,
+        &e,
+        &state(),
+        "budget.record_income",
+        &income_params(),
+        &Authorization::Unchecked,
+        &EffectClass::Unchecked,
+        &mut nonces,
+        &mut aff,
+    );
+    assert!(via.committed(), "an unfunded, unmetered caller still runs");
+    assert_eq!(via.state, plain.state, "byte-identical to the pre-PAWA-3 path");
+    assert_eq!(via.mutations, plain.mutations);
+    assert!(!aff.metered());
+}
+
+#[test]
+fn a_run_refused_by_an_earlier_conjunct_never_reaches_the_charge() {
+    let reg = Registry::default();
+    let names = reg.names();
+    let e = Enforcement::default();
+    let mut l = funded("bonnie", 1_000.0);
+    let before = l.clone();
+    let mut nonces = NonceLedger::new();
+    let mut aff =
+        Affordability::Metered { ledger: &mut l, principal: "bonnie", sustain: "household", at: 1 };
+    let x = execute_afforded(
+        &reg,
+        &names,
+        &e,
+        &state(),
+        "budget.record_income",
+        &params(&[("amount", json!(-5.0)), ("source", json!("s"))]),
+        &Authorization::Unchecked,
+        &EffectClass::Unchecked,
+        &mut nonces,
+        &mut aff,
+    );
+    assert!(!x.committed(), "the guard `params.amount > 0` turned it back");
+    assert_eq!(l, before, "a guard refusal charges nothing either");
+}
+
 // ── the recorded divergence ──────────────────────────────────────────────────
 
 #[test]
@@ -278,7 +418,37 @@ fn the_recorded_divergence_keeps_its_counterweight() {
     }
 
     let mut seen = BTreeSet::new();
-    for group in ["backing_cases", "affordability_cases", "fold_cases", "boundary_cases"] {
+    // ★★★ PAWA-3's own reconciles and finding must stay recorded too.
+    for key in [
+        "★★★_4_PAWA_3_the_candidate_ALREADY_EXISTS_at_gate_time_so_the_real_cost_is_free",
+        "★★★_5_PAWA_3_priced_against_the_MEASUREMENT_never_the_ESTIMATE",
+        "★★_6_PAWA_3_where_the_conjunct_SITS_and_why",
+    ] {
+        assert!(step0[key].as_str().is_some_and(|s| s.len() > 80), "missing reconcile: {key}");
+    }
+    let seam = d["★★★_PAWA_3_the_reference_HAS_the_seam_but_never_gates_on_cost"].as_str().unwrap();
+    assert!(seam.contains("At parity: the seam itself"));
+    assert!(seam.contains("THE CLAUSE NEVER FIRES"));
+    let additive =
+        d["★★_PAWA_3_additive_and_opt_in_safe_by_the_same_device_used_twice_before"].as_str().unwrap();
+    assert!(additive.contains("BYTE-FOR-BYTE"));
+    assert!(additive.contains("VACUOUS clause, not a fail-closed one"));
+    for term in [
+        "THE CHARGE CANNOT BE `Insufficient` BY CONSTRUCTION",
+        "THE LEDGER IS BORROWED MUTABLY FOR THE CALL",
+        "THE CLAUSE PRICES THE WHOLE RUN, NOT PER-NODE",
+        "NOTHING CREDITS ANYONE",
+    ] {
+        assert!(limits.contains(term), "missing PAWA-3 limit: {term}");
+    }
+
+    for group in [
+        "backing_cases",
+        "affordability_cases",
+        "fold_cases",
+        "boundary_cases",
+        "gate_clause_cases",
+    ] {
         for c in doc[group].as_array().unwrap_or_else(|| panic!("{group} is an array")) {
             assert!(
                 c["why"].as_str().is_some_and(|w| w.len() > 40),
@@ -288,5 +458,5 @@ fn the_recorded_divergence_keeps_its_counterweight() {
             assert!(seen.insert(c["name"].as_str().unwrap().to_string()), "duplicate case name");
         }
     }
-    assert_eq!(seen.len(), 12, "every declared case must be present");
+    assert_eq!(seen.len(), 18, "every declared case must be present");
 }

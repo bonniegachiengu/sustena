@@ -46,6 +46,8 @@ use crate::principal::{permitted_with, Denial, Memberships, SkinRegistry, Tier};
 use crate::predicate;
 use crate::boundary::{preserves_closure, BoundaryDecl, ClosureViolation};
 use crate::flow::{check_flows, flows_of, FlowRule, Movement};
+use crate::juul::Affordability;
+use crate::pawa::{candidate_pawa, meter};
 use crate::schema::Schema;
 use crate::transition::{check_all, TransitionRule};
 use crate::state::State;
@@ -227,6 +229,66 @@ pub fn execute_admitted(
     authorization: &Authorization,
     effect: &EffectClass,
     nonces: &mut NonceLedger,
+) -> Execution {
+    execute_afforded(
+        registry,
+        allowed,
+        enforcement,
+        state,
+        operator_name,
+        params,
+        authorization,
+        effect,
+        nonces,
+        &mut Affordability::Unmetered,
+    )
+}
+
+/// [`execute_admitted`], with the **out-of-pawa conjunct** in force.
+///
+/// ```text
+/// admit = guard ∧ permitted ∧ result∈A ∧ D ∧ F ∧ closure ∧ token ∧ balance ≥ pawa
+/// ```
+///
+/// ★★★ **Priced against the CANDIDATE's REAL cost, never the declared
+/// estimate.** By the time the gate runs, the effect has already been applied to
+/// a copy and the candidate's mutations and events exist — they had to, for `D`,
+/// the invariants and `F`. So the run's real cost is knowable **at gate time at
+/// no extra work**, and [`candidate_pawa`] returns exactly the number the
+/// committed [`crate::pawa::PawaReading`] will carry. `meta.pawa_cost` — the
+/// author's static guess — is **not** consulted: pricing against it is the
+/// reference's own wrong path, where the estimate is `0` everywhere and the
+/// clause therefore never refuses.
+///
+/// ★★ **Unaffordable ⇒ refuse and discard.** No commit, no state change, **no
+/// juul spent** — the candidate is thrown away exactly as any other gate
+/// refusal discards it, so *refusal charges nothing* joins *refusal meters
+/// nothing* rather than contradicting it. The refusal carries its own reason,
+/// `insufficient_pawa`, distinct from every other conjunct's.
+///
+/// ★ **Placed before the token redemption**, so being turned back on cost leaves
+/// an approval unspent — the same courtesy the invariant gate already gets.
+///
+/// ★★ **Affordable ⇒ commit, then charge**, exactly once, against the real
+/// committed reading rather than the pre-commit number. They are equal by
+/// construction; the *ledger entry* is the committed one, so every debit traces
+/// to a run that actually happened.
+///
+/// ★ [`Affordability::Unmetered`] makes the whole clause vacuous, and is what
+/// [`execute_admitted`] and [`execute`] pass — so every caller written before
+/// PAWA-3 behaves byte-for-byte as it did.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_afforded(
+    registry: &Registry,
+    allowed: &[String],
+    enforcement: &Enforcement,
+    state: &Value,
+    operator_name: &str,
+    params: &Map<String, Value>,
+    authorization: &Authorization,
+    effect: &EffectClass,
+    nonces: &mut NonceLedger,
+    affordability: &mut Affordability<'_>,
 ) -> Execution {
     let untouched = || Execution {
         result: OperatorResult::fail(
@@ -525,6 +587,30 @@ pub fn execute_admitted(
         }
     }
 
+    // ── balance ≥ pawa ───────────────────────────────────────────────────────
+    // PAWA-3's conjunct, and the last one before commit. It sits here because
+    // this is the first line at which the run's REAL cost is knowable: the
+    // candidate's mutations and events already exist, so pricing them is free.
+    //
+    // ★ Vacuous under `Unmetered`, which is what every pre-PAWA-3 caller passes.
+    if let Affordability::Metered { ledger, principal, .. } = affordability {
+        let cost = candidate_pawa(working.mutations(), &events, meta, enforcement);
+        let balance = ledger.balance_of(principal);
+        if balance < cost {
+            return Execution {
+                result: OperatorResult::fail(
+                    format!(
+                        "insufficient juul: '{operator_name}' costs {cost} pawa and                          '{principal}' has {balance}"
+                    ),
+                    "insufficient_pawa",
+                ),
+                mutations: vec![],
+                events: vec![],
+                state: state.clone(),
+            };
+        }
+    }
+
     // ── commit ───────────────────────────────────────────────────────────────
     // The approval is spent here and nowhere else. Everything above this line
     // can refuse, and a refusal must leave the approval unspent — being turned
@@ -541,12 +627,25 @@ pub fn execute_admitted(
         }
     }
 
-    Execution {
+    let execution = Execution {
         result,
         mutations: working.mutations().to_vec(),
         events,
         state: candidate,
+    };
+
+    // ── the debit ────────────────────────────────────────────────────────────
+    // ★★ On commit, once, against the REAL reading. `meter` returns `None` for
+    // anything uncommitted, so a refused run can never reach a charge — and the
+    // charge cannot be `Insufficient`, because the identical cost was checked
+    // against the identical balance a few lines above and nothing interleaves.
+    if let Affordability::Metered { ledger, principal, sustain, at } = affordability {
+        if let Some(reading) = meter(&execution, meta, enforcement, sustain, principal, *at) {
+            ledger.charge(&reading);
+        }
     }
+
+    execution
 }
 
 #[cfg(test)]

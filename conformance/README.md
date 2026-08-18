@@ -142,7 +142,7 @@ conformance/
     agent.json          omega assembled + under a warrant   (spec, R2)
     enzyme.json         I : e -> (o, theta), the proposer   (spec, R2)
     pawa.json           the pawa meter (odometer, no ledger) (parity+wiring)
-    juul.json           the juul ledger (balance, no transfer) (spec, R2)
+    juul.json           the juul ledger + the out-of-pawa gate (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2501,3 +2501,42 @@ reference's `get_balance` already sums deltas.
 **Limits, all six recorded and asserted:** nothing is wired into the gate;
 `credit` is an **ungated declaration**; the ledger is **in-memory**; a charge
 has **no counterparty**; balances are `f64`; and there is **no reversal**.
+
+---
+
+### `juul.json`, part 2 — the out-of-pawa gate clause (PAWA-3, Pawa §2)
+**18 cases now** (12 from PAWA-2, **6 added**).
+`admit = guard ∧ permitted ∧ result∈A ∧ D ∧ F ∧ closure ∧ token ∧ **balance ≥
+pawa**`.
+
+★★★ **STEP-0 settled the design fork by reading the gate.** The effect is
+already applied to a **copy** before the commit block — the candidate's
+mutations and events exist, because `D` and `F` needed them. So the real cost is
+knowable **at gate time at no extra work**, and `candidate_pawa` returns
+**exactly** what the committed `PawaReading` will carry (asserted; and
+`storage_bytes` was refactored so both price through the *identical* code).
+
+★★★ **Priced against the measurement, never the estimate.** `meta.pawa_cost` is
+not consulted — that is the reference's wrong path, where the estimate is `0`
+everywhere so the clause never fires. A test funds a principal with **half the
+real cost** while the declared estimate is `0`, and the gate refuses.
+
+★★ **Unaffordable ⇒ refuse and discard** — no commit, no state change, **no
+juul spent**; the ledger is asserted **byte-identical**, and the refusal carries
+its own reason `insufficient_pawa`. ★ Placed **before the token redemption**, so
+a cost refusal leaves an approval unspent.
+
+★★ **Affordable ⇒ commit, then charge exactly once** against the real committed
+reading; `rebuild() == balance_of()` still holds. ★ Two independent reasons a
+refused run cannot be charged: the clause refuses pre-commit, *and* `meter()`
+returns `None` for anything uncommitted.
+
+★★ **Additive and opt-in-safe:** `execute_admitted`/`execute` delegate with
+`Affordability::Unmetered`, so every pre-economy caller is **byte-for-byte**
+unchanged — and `Unmetered` is **vacuous, not fail-closed**: no economy declared
+is not the same as everyone being broke.
+
+**PAWA-3's own limits:** the commit-time charge **cannot be `Insufficient` by
+construction**; the ledger is **borrowed mutably for the call**; the clause
+prices **the whole run, not per node**; and **nothing credits anyone** — the
+hard boundary is unchanged.

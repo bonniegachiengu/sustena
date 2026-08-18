@@ -78,7 +78,8 @@
 
 use std::collections::BTreeMap;
 
-use crate::operator::{Enforcement, Execution, OperatorMeta};
+use crate::mutation::Mutation;
+use crate::operator::{EmittedEvent, Enforcement, Execution, OperatorMeta};
 
 /// Pawa per compute unit — one mutation, one event, one constraint evaluation.
 ///
@@ -224,7 +225,7 @@ pub fn meter(
         execution.events.len(),
         constraint_eval_count(meta, enforcement),
     );
-    let storage = storage_bytes(execution);
+    let storage = storage_bytes(&execution.mutations, &execution.events);
 
     Some(PawaReading {
         operator: meta.name.to_string(),
@@ -244,14 +245,42 @@ pub fn meter(
 /// ★ Exactly what a host writes to its own log — the reference sums
 /// `len(payload_json) + len(mutations_json)`, and this is that sum over the
 /// same two collections. Not an estimate.
-fn storage_bytes(execution: &Execution) -> usize {
-    let events: usize = execution
-        .events
+///
+/// ★★ Takes the two collections rather than an [`Execution`] so a **candidate**
+/// and the **committed reading** price through the identical code. Two copies
+/// of this would be two numbers that could disagree, which is precisely what
+/// PAWA-3's affordability clause must not have.
+fn storage_bytes(mutations: &[Mutation], events: &[EmittedEvent]) -> usize {
+    let payloads: usize = events
         .iter()
         .map(|e| serde_json::to_string(&e.payload).map(|s| s.len()).unwrap_or(0))
         .sum();
-    let mutations = serde_json::to_string(&execution.mutations).map(|s| s.len()).unwrap_or(0);
-    events + mutations
+    payloads + serde_json::to_string(mutations).map(|s| s.len()).unwrap_or(0)
+}
+
+/// ★★★ The cost of a **candidate** — before it has committed, and therefore
+/// before a [`PawaReading`] can exist.
+///
+/// PAWA-3's affordability conjunct needs a price at gate time, and the gate
+/// already holds the candidate's mutations and events (it built them to check
+/// `D`, the invariants and `F`). So the real cost is knowable **at no extra
+/// work** — and this returns **the same number** the committed reading will
+/// carry, because both go through `compute_units`, `constraint_eval_count` and
+/// `storage_bytes` above. That equality is asserted, not assumed.
+///
+/// ★ It returns a plain `f64` rather than a `PawaReading`, deliberately: a
+/// candidate has not committed, and PAWA-1's rule is that a reading exists only
+/// for a run that did real work. **This is a cost computation for affordability;
+/// the reading is the record of a debt actually incurred.**
+pub fn candidate_pawa(
+    mutations: &[Mutation],
+    events: &[EmittedEvent],
+    meta: &OperatorMeta,
+    enforcement: &Enforcement,
+) -> f64 {
+    let compute =
+        compute_units(mutations.len(), events.len(), constraint_eval_count(meta, enforcement));
+    compute_pawa(compute as f64, storage_bytes(mutations, events) as f64)
 }
 
 /// What a set of readings says about one operator.

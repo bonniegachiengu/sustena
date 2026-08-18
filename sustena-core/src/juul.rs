@@ -236,6 +236,42 @@ impl JuulLedger {
     }
 }
 
+/// Whether a pawa economy is in force for one call, and against which ledger.
+///
+/// ★★ **`Unmetered` is the default for every caller written before PAWA-3**,
+/// and it is named for the same reason [`crate::operator::Authorization::Unchecked`]
+/// and `EffectClass::Unchecked` are: *a bypass that reads as ordinary is the
+/// problem; one that has to be spelled out is not.* An absent ledger makes the
+/// affordability conjunct **vacuous** — it does **not** fail closed to broke,
+/// because a host that has not opted into an economy has not said everyone has
+/// zero juul, it has said there is no economy to price against.
+///
+/// ★ The same opt-in shape `Enforcement::enabled` uses for the invariant gate.
+#[derive(Debug)]
+pub enum Affordability<'a> {
+    /// No economy in force. The clause is vacuous and behaviour is byte-identical
+    /// to before PAWA-3.
+    Unmetered,
+    /// Price the candidate against this ledger, and charge the committed reading
+    /// to it.
+    ///
+    /// `at` is host-supplied because the core has no clock (ADR-0001), exactly as
+    /// `EffectClass::Live`'s `now` is.
+    Metered {
+        ledger: &'a mut JuulLedger,
+        principal: &'a str,
+        sustain: &'a str,
+        at: u64,
+    },
+}
+
+impl Affordability<'_> {
+    /// Whether an economy is in force at all.
+    pub fn metered(&self) -> bool {
+        matches!(self, Affordability::Metered { .. })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,6 +315,142 @@ mod tests {
         let mut l = JuulLedger::new();
         l.credit(principal, juul, "declared opening balance");
         l
+    }
+
+    // ── PAWA-3: the out-of-pawa gate clause ──────────────────────────────────
+
+    use crate::operator::execute_afforded;
+    use crate::pawa::candidate_pawa;
+    use crate::approval::{EffectClass, NonceLedger};
+    use crate::operator::Authorization;
+
+    fn income_params() -> Map<String, Value> {
+        params(&[("amount", json!(100.0)), ("source", json!("salary"))])
+    }
+
+    /// Run `budget.record_income` through the real gate under an economy.
+    fn afforded(l: &mut JuulLedger, principal: &str) -> crate::operator::Execution {
+        let reg = Registry::default();
+        let names = reg.names();
+        let e = Enforcement::default();
+        let mut nonces = NonceLedger::new();
+        let mut aff = Affordability::Metered {
+            ledger: l,
+            principal,
+            sustain: "household",
+            at: 1_000,
+        };
+        execute_afforded(
+            &reg,
+            &names,
+            &e,
+            &state(),
+            "budget.record_income",
+            &income_params(),
+            &Authorization::Unchecked,
+            &EffectClass::Unchecked,
+            &mut nonces,
+            &mut aff,
+        )
+    }
+
+    #[test]
+    fn an_affordable_run_commits_and_is_charged_exactly_once() {
+        let r = reading_for("bonnie");
+        let mut l = funded("bonnie", 100.0);
+        let x = afforded(&mut l, "bonnie");
+        assert!(x.committed(), "{:?}", x.result.reason);
+        assert_eq!(l.debits_of("bonnie").count(), 1, "once, not twice");
+        assert_eq!(l.balance_of("bonnie"), 100.0 - r.pawa());
+        assert_eq!(l.rebuild()["bonnie"], l.balance_of("bonnie"), "the fold still holds");
+    }
+
+    #[test]
+    fn an_unaffordable_run_is_refused_and_charges_nothing() {
+        // ★★★ The whole point: the gate stops the work BEFORE it costs anything.
+        let mut l = funded("bonnie", 1.0);
+        let before = l.clone();
+        let x = afforded(&mut l, "bonnie");
+
+        assert!(!x.committed(), "refused on cost");
+        assert_eq!(x.result.constraint_violated.as_deref(), Some("insufficient_pawa"));
+        assert_eq!(l, before, "balance byte-identical — no juul spent on a refused run");
+        assert_eq!(x.state, state(), "and state untouched");
+        assert!(x.mutations.is_empty() && x.events.is_empty());
+    }
+
+    #[test]
+    fn it_prices_against_the_real_cost_not_the_declared_estimate() {
+        // ★★★ The reference's trap: `budget.record_income` declares
+        // `pawa_cost = 0`, so an estimate-priced clause would ALWAYS admit.
+        let reg = Registry::default();
+        let declared = reg.get("budget.record_income").unwrap().pawa_cost;
+        assert_eq!(declared, 0, "the declared estimate really is zero");
+
+        let real = reading_for("bonnie").pawa();
+        assert!(real > 0.0, "and the real cost really is not");
+
+        // A balance that covers the ESTIMATE but not the MEASUREMENT.
+        let mut l = funded("bonnie", real / 2.0);
+        let x = afforded(&mut l, "bonnie");
+        assert!(!x.committed(), "refused — so it read the measurement");
+        assert_eq!(l.debits_of("bonnie").count(), 0);
+    }
+
+    #[test]
+    fn the_candidate_price_equals_the_committed_readings_price() {
+        // ★★ Pre-commit affordability and the post-commit debit are the SAME
+        // number, because both go through `compute_units` + `storage_bytes`.
+        let reg = Registry::default();
+        let e = Enforcement::default();
+        let x = execute(&reg, &reg.names(), &e, &state(), "budget.record_income", &income_params());
+        let candidate = candidate_pawa(&x.mutations, &x.events, reg.get("budget.record_income").unwrap(), &e);
+        let charged = meter(&x, reg.get("budget.record_income").unwrap(), &e, "household", "bonnie", 1).unwrap();
+        assert_eq!(candidate, charged.pawa());
+    }
+
+    #[test]
+    fn an_unmetered_call_behaves_exactly_as_before() {
+        // ★ Additive and opt-in-safe: no ledger means the clause is VACUOUS,
+        // not failing closed to broke.
+        let reg = Registry::default();
+        let names = reg.names();
+        let e = Enforcement::default();
+        let plain = execute(&reg, &names, &e, &state(), "budget.record_income", &income_params());
+
+        let mut nonces = NonceLedger::new();
+        let mut aff = Affordability::Unmetered;
+        let via = execute_afforded(
+            &reg, &names, &e, &state(), "budget.record_income", &income_params(),
+            &Authorization::Unchecked, &EffectClass::Unchecked, &mut nonces, &mut aff,
+        );
+        assert!(via.committed(), "an unfunded, unmetered caller still runs");
+        assert_eq!(via.state, plain.state, "byte-identical to the pre-PAWA-3 path");
+        assert_eq!(via.mutations, plain.mutations);
+        assert!(!aff.metered());
+    }
+
+    #[test]
+    fn a_run_refused_by_an_earlier_conjunct_never_reaches_the_charge() {
+        // ★ The clause is the LAST one before commit, so a guard refusal costs
+        // nothing either — and `meter` would refuse to read it regardless.
+        let reg = Registry::default();
+        let names = reg.names();
+        let e = Enforcement::default();
+        let mut l = funded("bonnie", 1_000.0);
+        let before = l.clone();
+        let mut nonces = NonceLedger::new();
+        let mut aff = Affordability::Metered {
+            ledger: &mut l, principal: "bonnie", sustain: "household", at: 1,
+        };
+        // `params.amount > 0` is a declared guard on record_income.
+        let x = execute_afforded(
+            &reg, &names, &e, &state(), "budget.record_income",
+            &params(&[("amount", json!(-5.0)), ("source", json!("s"))]),
+            &Authorization::Unchecked, &EffectClass::Unchecked, &mut nonces, &mut aff,
+        );
+        assert!(!x.committed());
+        assert_eq!(l, before, "a guard refusal charges nothing either");
     }
 
     // ── a debit is backed by a measurement ───────────────────────────────────
