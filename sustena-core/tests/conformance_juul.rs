@@ -234,6 +234,7 @@ fn afforded(l: &mut JuulLedger, principal: &str) -> Execution {
         principal,
         sustain: "household",
         at: 1_000,
+            serving: None,
     };
     execute_afforded(
         &reg,
@@ -348,6 +349,7 @@ fn a_run_refused_by_an_earlier_conjunct_never_reaches_the_charge() {
         principal: "bonnie",
         sustain: "household",
         at: 1,
+            serving: None,
     };
     let x = execute_afforded(
         &reg,

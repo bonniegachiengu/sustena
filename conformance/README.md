@@ -2784,3 +2784,39 @@ juul** (a bridge would be a made-up rate between two declared numbers); a
 governed κ of **zero** makes the budget vacuous (`ParameterSpec` bounds, it does
 not require positivity); **no period** (no clock); and the footprint still does
 not feed `compose_view`.
+
+---
+
+### `issuance.json` — the seam addendum (PAWA-8, Pawa §6.2 · 2026-08-18)
+**5 further cases**, appended to PAWA-8's own vector — the **same row's**
+residual closing, not a new module.
+
+★★★ **`issue` is now called from the core**, not by a host-side helper. A helper
+outside the core would be a *convention*, and this build's whole discipline is
+that a convention is not a mechanism.
+
+★★★ **One reading, two flows.** `Affordability::Metered` gained
+`serving: Option<(&Issuance, &str)>`, and the seam is **one `if let` in the
+debit block that already held the `PawaReading`**. The caller is **charged**
+`pawa`; the server is **issued** `rate × pawa_served` — **from the same
+reading**. Not a refund: two different amounts on two different balances, with
+the cost read off the **real debit entry** rather than reconstructed.
+
+★★ **Opt-in, visible at the call site.** An `Option` a caller must spell out,
+never a defaulted helper — *opting in creates money*, and a helper would make
+the **opt-out** the thing you had to notice. `serving()` is distinct from
+`metered()`: cost and earn are different decisions about different principals.
+
+★ **Backward compatibility measured**: `serving: None` appends exactly one entry
+(the debit) and issues nothing. A **refused** run reaches neither flow — reusing
+`meter`'s `None`-for-uncommitted rather than re-arguing it. A **zero governed
+rate** issues nothing even when opted in: permission, not creation.
+
+★★ **Conservation over a live path** — three real serving executions plus a
+royalty transfer — within a **stated** float tolerance, because the identity is
+exact in the reals and `f64` summation is not associative.
+
+**Limits:** one server, and a host naming itself is **trusted, not verified**
+(PAWA-9 owns verification and multi-server splitting); the seam is **opt-in**,
+so `serving: None` still means an economy that only shrinks — now a host's
+choice rather than a missing mechanism.

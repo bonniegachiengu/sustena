@@ -639,9 +639,29 @@ pub fn execute_afforded(
     // anything uncommitted, so a refused run can never reach a charge — and the
     // charge cannot be `Insufficient`, because the identical cost was checked
     // against the identical balance a few lines above and nothing interleaves.
-    if let Affordability::Metered { ledger, parameters, principal, sustain, at } = affordability {
-        if let Some(reading) = meter(&execution, meta, enforcement, parameters, sustain, principal, *at) {
-            ledger.charge(&reading);
+    // ── the debit, and the issuance seam ─────────────────────────────────────
+    // ★★★ **One reading, two flows.** The caller is CHARGED `pawa` and the
+    // server is ISSUED `rate × pawa` — from the *same* `PawaReading`, so the
+    // work that cost the one is the work that earned the other, and it is
+    // demonstrably not a refund: two different amounts on two different
+    // balances (PAWA-8).
+    if let Affordability::Metered { ledger, parameters, principal, sustain, at, serving } =
+        affordability
+    {
+        if let Some(reading) =
+            meter(&execution, meta, enforcement, parameters, sustain, principal, *at)
+        {
+            let charged = ledger.charge(&reading).charged();
+
+            // ★ Guarded on the charge having actually landed. It always does
+            // here — the identical cost was checked against the identical
+            // balance a few lines above and nothing interleaves — so this is
+            // defence in depth against a later refactor, not a claim that an
+            // unpayable run could reach it. Issuance rewards work that was
+            // genuinely served AND genuinely paid for.
+            if let (true, Some((issuance, server))) = (charged, *serving) {
+                ledger.issue(issuance, &reading, server, parameters);
+            }
         }
     }
 

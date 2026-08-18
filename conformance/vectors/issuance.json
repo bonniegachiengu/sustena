@@ -5,87 +5,163 @@
   "authored_from": "Pawa §6.2 (ongoing issuance: new juul enters by rewarding served pawa, on a declared, revisable schedule)",
   "replayed_by": "sustena-core/tests/conformance_issuance.rs",
   "note": "Built directly on PAWA-11, which is what makes it safe: the rate is a governed parameter, so the only way it moves is a gated, recorded, replayable Enzyme. Internal throughout: issuance mints the INTERNAL accounting unit and reaches no rail.",
-
   "★★_the_STEP_0_reconcile": {
     "★★★_1_TWO_MINTING_PATHS_AND_THEY_STAY_DISTINCT": "PAWA-7's `from_genesis` is a CONSTRUCTOR with no `mint` method beside it — genesis is one-time BY SHAPE, and its answer to who may mint is 'nobody, afterwards'. PAWA-8 is a SEPARATE, ONGOING path: `JuulLedger::issue`, a method on an existing ledger. It is deliberately NOT a second genesis — a genesis is a fixed value you read once and audit forever, while issuance is a rule that keeps applying, so it needs revision machinery a one-time seed does not have and does not want. ★★ The distinction is carried IN THE ENTRY: `Entry::Mint` (the one visible circulation-raiser, per MYC-6) now names a `MintAuthority`, either `Genesis(GenesisId)` or `Issued(IssuanceId)`. Neither id has a public constructor, so neither answer to 'where did this juul come from' can be written down without a real declaration behind it. ★ AND THE AUDIT HAD TO MOVE WITH IT: `Genesis::audit` previously treated any mint not naming this genesis as FOREIGN. An issuance mint is not foreign — it is legitimate — but silently skipping it would leave juul unaccounted for and break the audit's whole promise. So `Audit` gained an `issued` list: the honest statement is now 'exactly this genesis, PLUS this much issued under these declarations', not 'exactly this genesis'.",
     "★★★_2_THE_SCHEDULE_SHAPE_what_is_GOVERNED_vs_DECLARED_AT_SPEC": "PAWA-11's `ParameterSpec` bounds ONE SCALAR between a min and a max — that is exactly why the royalty schedule stayed a const. THE RATE FITS THAT SHAPE PERFECTLY: `issuance_rate` (juul per pawa served) is a declared, governed, revisable-only-through-an-Enzyme parameter, and `Schedule::Fixed` carries NO RATE OF ITS OWN, so the only place a rate can be read from is `Parameters` — the same one-truth discipline PAWA-11 enforced by deleting `compute_pawa`. THE SCHEDULE TYPE DOES NOT FIT, and is declared at the spec rather than governed: a DECAYING schedule needs an epoch or elapsed time to decay against and this core HAS NO CLOCK (ADR-0001); a TARGET-RATE schedule needs the rate DERIVED from current circulation against an inflation target, so the governed value would no longer be the rate at all — it would be a target, with the rate a function of ledger state that a static min/max on one path cannot bound. ★ So `Schedule` has ONE VARIANT, deliberately, rather than three with two unimplemented: a declared-but-inert variant reads as built, which is the exact defect this codebase keeps naming. The fixed-rate governed case ships whole; decaying and target-rate are named follow-ons WITH their reason.",
     "★★_3_ISSUANCE_NEEDED_NO_NEW_GOVERNANCE_MACHINERY": "The strongest evidence for both rows at once: adding a governed parameter was one const, one accessor and one line in `declared_parameters()`. No new Enzyme, no new gate, no new bound-checking code — `governance.set_parameter` already changes it, `V_gov` already bounds it, and the change already lands in the fold. PAWA-11 built the mechanism; PAWA-8 is its first outside customer."
   },
-
   "divergence": {
     "kind": "rust-only-spec-no-reference-issuance",
     "statement": "GREP-0. `issuance|monetary|inflation|mint|emission` across the reference's `sustena/` returns exactly ONE hit, and it is a false positive: `pawa.py`'s module docstring says 'a bulk transaction issuance from the SQLite log', meaning batch writes, not money creation. There is no issuance mechanism, no monetary policy, no schedule and no rate anywhere in the reference.",
-
     "★_the_greppable_false_positive_named_so_a_re_grepper_is_not_misled": "`sustena/core/pawa.py` line 23 — 'making Phase 3 a bulk transaction issuance from the SQLite log, not a schema change'. Unrelated sense of the word.",
-
     "★★_what_the_reference_DOES_have_and_why_it_is_the_cautionary_case": "`ONBOARDING_GRANT = 100` — 'Pawa granted to new users on signup'. TWO things are true about it and both matter. (1) It is DECLARED BUT UNWIRED: the constant is defined and NOTHING READS IT anywhere in the codebase, so the reference's only gesture at ongoing issuance does not actually issue. (2) If it were wired it would go through `PawaLedger.credit`, which raises a balance with no counterparty and is therefore an UNDECLARED MINT — structurally indistinguishable from a royalty credit in the same ledger, at an unbounded amount, changeable only by editing the module. That is precisely the Sybil-profitable inflation MYC-6 warned of: a per-signup mint at an ungoverned rate. ★ This is not a criticism of scaffolding that was never finished; it is why PAWA-8 was sequenced AFTER PAWA-11 rather than before.",
-
     "★★★_the_counterweight_what_issuance_COMPOSES_rather_than_invents": "This row wrote very little, because three earlier rows already did the work. PAWA-1's METER supplies the `PawaReading` — the measured work that earns the issuance, and the reason there is no `mint(amount)` to invent one. PAWA-7's `Entry::Mint` supplies the VISIBLE circulation-raiser, so an issuance is a mint and says so. PAWA-11's GOVERNANCE supplies the rate's revision path — gated, bounded, recorded, replayable. Issuance is the composition of those three, which is why it needed no new gate, no new Enzyme and no new engine.",
-
-    "the_honest_limits": "★★ ONE SERVER — on a single host there is one principal serving every run, and it earns the whole issuance. The core CANNOT know which machine served a run (it has no I/O, by ADR-0001), so `server` is host-supplied exactly as `at` is; splitting a reward across several servers, and verifying that any of them did the work claimed, is PAWA-9 and is NOT built here. ★★ ONE SCHEDULE SHAPE — fixed-rate only, with decaying and target-rate named above with the reason they do not fit. ★ NOTHING CALLS `issue` AUTOMATICALLY — there is no path where committing a run also issues, because the affordability conjunct is about the CALLER's balance and issuance is about the SERVER's, and wiring the two together is a host-side policy decision this core should not make for it. So a host that never calls `issue` has an economy that only ever shrinks, and that is the honest current default. ★ NO BURN — circulation falls only through cost debits; if a burn is ever added it gets its own variant, for the same reason a mint does. ★★ AND `Issuance` ITSELF IS UNGOVERNED — the RATE is governed, but WHICH issuance declarations exist is not: a host holding a `Genesis` or an `Issuance` value decides that. Closed by audit rather than by construction, exactly as PAWA-7's forgeable-`Mint` residual is, and named the same way rather than overclaimed."
+    "the_honest_limits": "★★ ONE SERVER — on a single host there is one principal serving every run, and it earns the whole issuance. The core CANNOT know which machine served a run (it has no I/O, by ADR-0001), so `server` is host-supplied exactly as `at` is; splitting a reward across several servers, and verifying that any of them did the work claimed, is PAWA-9 and is NOT built here. ★★ ONE SCHEDULE SHAPE — fixed-rate only, with decaying and target-rate named above with the reason they do not fit. ★★ `issue` IS NOW CALLED FROM THE CORE — this limit is CLOSED (2026-08-18, see the seam addendum above). `Affordability::Metered` carries `serving: Option<(&Issuance, &str)>`, and a committed metered run that opts in charges the caller and issues to the server FROM THE SAME READING. WHAT STAYS TRUE: it is OPT-IN, so a host that passes `serving: None` still has an economy that only shrinks — that is now a HOST'S CHOICE rather than a missing mechanism, which is the difference this closes. ★ NO BURN — circulation falls only through cost debits; if a burn is ever added it gets its own variant, for the same reason a mint does. ★★ AND `Issuance` ITSELF IS UNGOVERNED — the RATE is governed, but WHICH issuance declarations exist is not: a host holding a `Genesis` or an `Issuance` value decides that. Closed by audit rather than by construction, exactly as PAWA-7's forgeable-`Mint` residual is, and named the same way rather than overclaimed."
   },
-
   "governed_mint_cases": [
     {
       "name": "the_rate_is_zero_at_genesis_so_issuance_is_off_until_governance_switches_it_on",
       "why": "★★★ A statement, not a placeholder: an economy should not begin inflating because nobody chose a rate. At genesis `issuance_rate` is 0.0, so a real issuance against real measured work mints NOTHING and appends NO ENTRY — and total circulation is asserted byte-identical to the genesis total.",
-      "expect": {"minted": false, "amount": 0.0, "entries_appended": 0}
+      "expect": {
+        "minted": false,
+        "amount": 0.0,
+        "entries_appended": 0
+      }
     },
     {
       "name": "an_issuance_at_a_governed_rate_reflects_the_value_read_back_from_state",
       "why": "★★★ THE ROW'S CENTRAL PROOF, and it exercises PAWA-11 end to end. The rate is switched on by a REAL `governance.set_parameter` call through the REAL gate under a REAL approval token; the parameters are then READ BACK FROM THE RESULTING STATE (not from a const, not from the value passed in) and an issuance priced under them mints exactly `rate × pawa_served`. Asserted as an inequality against the genesis pricing too, so a const could not be silently shadowing it.",
-      "expect": {"minted": true, "amount": "rate × pawa_served", "differs_from_genesis": true}
+      "expect": {
+        "minted": true,
+        "amount": "rate × pawa_served",
+        "differs_from_genesis": true
+      }
     },
     {
       "name": "the_only_path_to_the_rate_is_the_gated_enzyme",
       "why": "★★ Issuance's whole safety property. An untokened change to `issuance_rate` is refused with `approval_token` and the state is unchanged, so the rate a later issuance prices from is unmoved — the refusal is asserted THROUGH to the issued amount, not just at the gate. And a rate above its declared ceiling is refused with `enforcement_gate`, the same reason a household breach gives.",
-      "expect": {"untokened": "approval_token", "over_ceiling": "enforcement_gate", "rate_unmoved": true}
+      "expect": {
+        "untokened": "approval_token",
+        "over_ceiling": "enforcement_gate",
+        "rate_unmoved": true
+      }
     },
     {
       "name": "a_rate_change_is_recorded_and_replayable_like_any_other_parameter",
       "why": "★ Issuance needed NO new governance machinery: the rate is an ordinary declared parameter, so a change appends the ordinary `event.governance.parameter_changed` carrying from and to, and replays through `replay_under` — which knows nothing about issuance either.",
-      "expect": {"event": "event.governance.parameter_changed", "replayed": true}
+      "expect": {
+        "event": "event.governance.parameter_changed",
+        "replayed": true
+      }
     }
   ],
-
   "denominated_in_work_cases": [
     {
       "name": "there_is_no_mint_amount_so_there_is_no_issuance_without_work",
       "why": "★★★ STRUCTURAL, not a check. `issue` takes a `PawaReading`, which has NO PUBLIC CONSTRUCTOR — the only source is metering an execution that COMMITTED. So the issued amount is always a function of work that genuinely happened, and there is no `mint(amount)` on the ledger to invent one. The same discipline as `charge(&PawaReading)`, turned the other way round.",
-      "expect": {"amount": "rate × the reading's own pawa"}
+      "expect": {
+        "amount": "rate × the reading's own pawa"
+      }
     },
     {
       "name": "the_caller_pays_and_the_server_earns_so_an_issuance_is_not_a_refund",
       "why": "★★ The reading's principal is WHO RAN THE OPERATOR and is charged for it; the server is WHOSE MACHINE DID THE WORK. Asserted as two distinct balances: after a charge and an issuance the caller is down by the cost and the server is up by the issuance, and neither number is the other.",
-      "expect": {"caller": "−cost", "server": "+issued"}
+      "expect": {
+        "caller": "−cost",
+        "server": "+issued"
+      }
     },
     {
       "name": "an_issuance_mint_names_the_issuance_that_authorised_it",
       "why": "★★ MYC-6 again: a mint must be visible AS a mint, and must name what allowed it. An issuance mint is an `Entry::Mint` — the same variant genesis writes — carrying `MintAuthority::Issued(id)`, so the two paths are distinguishable in the record without either becoming a silent credit.",
-      "expect": {"variant": "Entry::Mint", "authority": "Issued(iss-1)"}
+      "expect": {
+        "variant": "Entry::Mint",
+        "authority": "Issued(iss-1)"
+      }
     },
     {
       "name": "the_genesis_audit_names_issued_juul_rather_than_calling_it_foreign_or_ignoring_it",
       "why": "★★★ The reconcile made checkable. After a real issuance the audit is still CLEAN — an issuance mint is legitimate, not a defect — and the issued total is NAMED, so the whole supply is still explained: 'exactly this genesis, plus this much issued'. Both halves are asserted, because ignoring it would lose juul and calling it foreign would report a governed mint as a fault.",
-      "expect": {"clean": true, "foreign": [], "issued_total": "the issuance"}
+      "expect": {
+        "clean": true,
+        "foreign": [],
+        "issued_total": "the issuance"
+      }
     }
   ],
-
   "conservation_cases": [
     {
       "name": "issuance_is_the_second_and_only_other_circulation_raiser",
       "why": "★★★ THE EXTENDED ACCOUNTING, asserted exactly: `circulation = Σ(genesis mints) + Σ(issuance mints) − Σ(costs debited)`, with transfers contributing ZERO. Run through a real genesis, a real issuance, a real charge and a real royalty transfer, then checked as an equation — and `minted_total() − issued_total()` is asserted to be the genesis half, so the two mint terms are separable rather than merely summing correctly.",
-      "expect": {"circulation": "genesis + issued − debited", "transfers": 0.0}
+      "expect": {
+        "circulation": "genesis + issued − debited",
+        "transfers": 0.0
+      }
     },
     {
       "name": "a_transfer_of_issued_juul_still_moves_no_total",
       "why": "★ Issued juul is ordinary juul once it exists: PAWA-5's conserved transfer moves it between balances and `total_in_circulation` is asserted UNCHANGED. Issuance raises circulation once, at the mint, and never again.",
-      "expect": {"circulation_delta": 0.0}
+      "expect": {
+        "circulation_delta": 0.0
+      }
     },
     {
       "name": "the_no_rail_property_survives_a_second_way_of_creating_juul",
       "why": "★★★ THE HARD BOUNDARY, re-checked where the word most invites confusion (ADR-0001 D5, PAWA-13). A source grep over the PRODUCTION code of `issuance.rs` and `juul.rs` — tests and comment lines stripped, and SAID SO, because a boundary check that trips on its own prose proves nothing and one quietly narrowed to pass would prove less — finds no payment-rail vocabulary at all. Issuance mints the INTERNAL accounting unit: no real value, no redeemable claim, no cash-out, no rail.",
-      "expect": {"forbidden_terms_found": []}
+      "expect": {
+        "forbidden_terms_found": []
+      }
+    }
+  ],
+  "★★★_the_SEAM_addendum_2026_08_18": {
+    "what_this_closes": "PAWA-8's sharpest residual, recorded in its own limits as **NOTHING CALLS `issue` AUTOMATICALLY** — so a host that never called it had an economy that only ever shrank. That is now closed IN THE CORE rather than by a host-side helper, which would only have half-closed it: a helper outside the core is a convention, and this build's whole discipline is that a convention is not a mechanism.",
+    "★★★_ONE_READING_TWO_FLOWS_which_is_why_it_is_NOT_a_refund": "`Affordability::Metered` gained `serving: Option<(&Issuance, &str)>`, and the seam is ONE `if let` inside the block that already existed — the debit block, which already holds the very `PawaReading` issuance needs. The caller is CHARGED `pawa` and the server is ISSUED `rate * pawa_served` FROM THE SAME READING, so the work that cost the one is exactly the work that earned the other. It is demonstrably not a refund and the test says so as an inequality: two different amounts landing on two different balances, with the caller's own balance asserted DOWN by the cost while the server's is UP by the issuance.",
+    "★★_OPT_IN_AND_VISIBLE_AT_THE_CALL_SITE": "`serving` is an `Option` a caller must SPELL OUT, not a defaulted helper. Opting in CREATES MONEY, so it should be visible where it happens — and a constructor that filled it in would make the OPT-OUT the thing you had to notice. The same reason `Unmetered` and `Unchecked` are spelled out. ★ `Affordability::serving()` is kept distinct from `metered()` on purpose: metering makes a run COST something and serving makes it EARN something, which are different decisions about different principals.",
+    "★_defence_in_depth_not_a_semantic_claim": "The issuance is guarded on the charge having actually landed. It always does at that line — the identical cost was checked against the identical balance a few lines above and nothing interleaves — so the guard is protection against a later refactor, NOT a claim that an unpayable run could reach it. Said plainly rather than left to read as a real branch.",
+    "★★_what_the_seam_still_does_NOT_do": "It does not decide WHO the server is — the core cannot know which machine served a run (no I/O, ADR-0001), so the server is host-supplied exactly as `at` is, and a host naming itself is trusted rather than verified. VERIFYING a serving claim, and SPLITTING a reward across several servers, are both PAWA-9 and are not built here. ★ And the seam issues on a COMMITTED run only: a refused run meters nothing, so it earns nothing — which is the same `meter` returns `None` property PAWA-2's debit already relies on, reused rather than re-argued."
+  },
+  "seam_cases": [
+    {
+      "name": "a_committed_serving_run_charges_the_caller_and_issues_to_the_server",
+      "why": "★★★ THE SEAM, PROVEN AS TWO NUMBERS ON TWO BALANCES. One real `execute_afforded` call under a governed rate: the caller's balance is asserted DOWN by exactly the metered cost, the server's UP by exactly `rate * cost`, and the two figures asserted DIFFERENT — so it is structurally not a refund. The issuance mint names the issuance that authorised it, and the server is a principal the caller never was.",
+      "expect": {
+        "caller": "-cost",
+        "server": "+rate*cost",
+        "distinct": true
+      }
+    },
+    {
+      "name": "a_metered_run_that_does_not_opt_in_issues_nothing_and_appends_nothing",
+      "why": "★★ BACKWARD COMPATIBILITY, ASSERTED NOT ASSUMED. With `serving: None` — what every pre-seam caller passes — a committed metered run appends EXACTLY ONE entry, the debit, and `issued_total()` stays zero. The ledger is compared against a separately-run identical execution, so 'byte-identical to before' is a measured claim rather than a stated one.",
+      "expect": {
+        "entries_added": 1,
+        "issued_total": 0.0
+      }
+    },
+    {
+      "name": "a_refused_run_serves_nothing_because_it_meters_nothing",
+      "why": "★★ Reuses PAWA-2's property rather than re-arguing it: `meter` returns `None` for anything uncommitted, so a run refused by the gate reaches neither the charge nor the issuance. Proven with a real gate refusal under a serving `Affordability` — no debit, no mint, ledger byte-identical.",
+      "expect": {
+        "charged": false,
+        "issued": false,
+        "ledger": "unchanged"
+      }
+    },
+    {
+      "name": "a_zero_governed_rate_serves_nothing_even_when_opted_in",
+      "why": "★ The genesis posture reaching the seam: issuance is OFF until a governed act switches it on, so a host that opts INTO serving under the genesis rate still mints nothing and appends nothing. Opting in is permission, not creation — the amount is still the governed rate times the measured work.",
+      "expect": {
+        "opted_in": true,
+        "issued_total": 0.0
+      }
+    },
+    {
+      "name": "conservation_still_balances_with_the_seam_live",
+      "why": "★★★ THE ACCOUNTING, RE-ASSERTED WITH THE SEAM RUNNING rather than only over hand-built entries: after several real gated, metered, SERVING executions plus a royalty transfer, `circulation == genesis + issued - debited` holds exactly, and `minted_total - issued_total == genesis.total()` still separates the two mint terms. The seam adds a second circulation-raiser to a live path and the equation is unchanged.",
+      "expect": {
+        "circulation": "genesis + issued - debited",
+        "separable": true
+      }
     }
   ]
 }

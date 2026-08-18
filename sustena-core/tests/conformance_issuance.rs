@@ -20,8 +20,11 @@ use sustena_core::{
         Parameters, ISSUANCE_RATE,
     },
     issuance::{Issuance, Schedule},
-    juul::{Entry, Genesis, JuulLedger, MintAuthority},
-    operator::{execute, execute_admitted, Authorization, Enforcement, Execution, Registry},
+    juul::{Affordability, Entry, Genesis, JuulLedger, MintAuthority},
+    operator::{
+        execute, execute_admitted, execute_afforded, Authorization, Enforcement, Execution,
+        Registry,
+    },
     pawa::{meter, PawaReading},
     semantic::{replay_under, CallOutcome, EnzymeCall, ReplayMode},
     CONFORMANCE_VERSION,
@@ -423,7 +426,10 @@ fn the_recorded_divergence_keeps_its_counterweight() {
     for term in [
         "ONE SERVER",
         "ONE SCHEDULE SHAPE",
-        "NOTHING CALLS `issue` AUTOMATICALLY",
+        // the CLOSED limit must stay recorded AS closed, with what still stays
+        // true beside it — a stale limit is worse than a missing one.
+        "`issue` IS NOW CALLED FROM THE CORE",
+        "it is OPT-IN",
         "NO BURN",
         "`Issuance` ITSELF IS UNGOVERNED",
     ] {
@@ -431,7 +437,9 @@ fn the_recorded_divergence_keeps_its_counterweight() {
     }
 
     let mut seen = BTreeSet::new();
-    for group in ["governed_mint_cases", "denominated_in_work_cases", "conservation_cases"] {
+    for group in
+        ["governed_mint_cases", "denominated_in_work_cases", "conservation_cases", "seam_cases"]
+    {
         for c in doc[group].as_array().unwrap_or_else(|| panic!("{group} is an array")) {
             assert!(
                 c["why"].as_str().is_some_and(|w| w.len() > 40),
@@ -441,5 +449,205 @@ fn the_recorded_divergence_keeps_its_counterweight() {
             assert!(seen.insert(c["name"].as_str().unwrap().to_string()), "duplicate case name");
         }
     }
-    assert_eq!(seen.len(), 11, "every declared case must be present");
+    assert_eq!(seen.len(), 16, "every declared case must be present");
+
+    // The seam addendum must keep its reasons, not just its verdict.
+    let seam = &doc["★★★_the_SEAM_addendum_2026_08_18"];
+    assert!(seam["what_this_closes"].as_str().unwrap().contains("IN THE CORE"));
+    let flows =
+        seam["★★★_ONE_READING_TWO_FLOWS_which_is_why_it_is_NOT_a_refund"]
+            .as_str()
+            .unwrap();
+    assert!(flows.contains("SAME READING"));
+    assert!(flows.contains("not a refund"));
+    assert!(seam["★★_OPT_IN_AND_VISIBLE_AT_THE_CALL_SITE"]
+        .as_str()
+        .unwrap()
+        .contains("CREATES MONEY"));
+    assert!(seam["★_defence_in_depth_not_a_semantic_claim"]
+        .as_str()
+        .unwrap()
+        .contains("NOT a claim"));
+    assert!(seam["★★_what_the_seam_still_does_NOT_do"]
+        .as_str()
+        .unwrap()
+        .contains("PAWA-9"));
+}
+
+// -- the seam: a committed run charges the caller and issues to the server ----
+
+fn governed(rate: f64) -> Parameters {
+    Parameters::read(&json!({"parameters": {"issuance_rate": rate}}))
+}
+
+/// Run `budget.record_income` through the real gate under a real economy,
+/// optionally **serving** -- the seam's only entry point.
+fn afforded(
+    ledger: &mut JuulLedger,
+    caller: &str,
+    parameters: &Parameters,
+    serving: Option<(&Issuance, &str)>,
+) -> Execution {
+    let reg = Registry::default();
+    let names = reg.names();
+    let e = Enforcement::default();
+    let mut nonces = NonceLedger::new();
+    let mut aff = Affordability::Metered {
+        ledger,
+        parameters,
+        principal: caller,
+        sustain: "household",
+        at: 1_000,
+        serving,
+    };
+    assert_eq!(aff.serving(), serving.is_some(), "serving is not metering");
+    execute_afforded(
+        &reg,
+        &names,
+        &e,
+        &household(),
+        "budget.record_income",
+        &params(&[("amount", json!(100.0)), ("source", json!("salary"))]),
+        &Authorization::Unchecked,
+        &EffectClass::Unchecked,
+        &mut nonces,
+        &mut aff,
+    )
+}
+
+#[test]
+fn a_committed_serving_run_charges_the_caller_and_issues_to_the_server() {
+    // ★★★ ONE READING, TWO FLOWS — different numbers on different balances,
+    // which is what makes it not a refund.
+    let g = Genesis::declared("g-1", &[("bonnie", 500.0)]).unwrap();
+    let p = governed(2.0);
+    let iss = issuance();
+    let mut l = JuulLedger::from_genesis(&g);
+
+    let x = afforded(&mut l, "bonnie", &p, Some((&iss, "host-0")));
+    assert!(x.committed(), "{:?}", x.result.reason);
+
+    // ★ Read the cost off the REAL debit entry rather than reconstructing it by
+    // subtraction: the ledger records what was charged, and asking it is both
+    // exact and closer to the claim being made.
+    let cost = match l.debits_of("bonnie").next().expect("the caller was charged") {
+        Entry::Debit { amount, .. } => *amount,
+        other => panic!("expected a debit, got {other:?}"),
+    };
+    assert!(cost > 0.0, "the caller was really charged");
+    assert_eq!(l.balance_of("bonnie"), 500.0 - cost, "and the caller is down by exactly that");
+    assert_eq!(l.balance_of("host-0"), 2.0 * cost, "the server earned rate x the work");
+    assert_ne!(cost, l.balance_of("host-0"), "two different numbers — not a refund");
+
+    // ★ And the mint names what authorised it, on a principal the caller never was.
+    match l.entries().last().expect("an entry was appended") {
+        Entry::Mint { authority, principal, .. } => {
+            assert_eq!(authority, &MintAuthority::Issued(iss.id().clone()));
+            assert_eq!(principal, "host-0");
+        }
+        other => panic!("expected an issuance mint, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_metered_run_that_does_not_opt_in_issues_nothing_and_appends_nothing() {
+    // ★★ Backward compatibility, MEASURED rather than stated: `serving: None`
+    // is what every pre-seam caller passes.
+    let g = Genesis::declared("g-1", &[("bonnie", 500.0)]).unwrap();
+    let p = governed(2.0);
+    let mut plain = JuulLedger::from_genesis(&g);
+    let before = plain.entries().len();
+
+    let x = afforded(&mut plain, "bonnie", &p, None);
+    assert!(x.committed());
+    assert_eq!(plain.entries().len(), before + 1, "the debit, and only the debit");
+    assert_eq!(plain.issued_total(), 0.0);
+    assert_eq!(plain.total_in_circulation(), g.total() - (500.0 - plain.balance_of("bonnie")));
+}
+
+#[test]
+fn a_refused_run_serves_nothing_because_it_meters_nothing() {
+    // ★★ Reuses PAWA-2's property rather than re-arguing it: `meter` returns
+    // `None` for anything uncommitted, so neither flow is reached.
+    let g = Genesis::declared("g-1", &[("bonnie", 500.0)]).unwrap();
+    let p = governed(2.0);
+    let iss = issuance();
+    let mut l = JuulLedger::from_genesis(&g);
+    let before = l.clone();
+
+    let reg = Registry::default();
+    let mut nonces = NonceLedger::new();
+    let mut aff = Affordability::Metered {
+        ledger: &mut l,
+        parameters: &p,
+        principal: "bonnie",
+        sustain: "household",
+        at: 1_000,
+        serving: Some((&iss, "host-0")),
+    };
+    // An operator the definition does not allow — refused before any commit.
+    let x = execute_afforded(
+        &reg,
+        &["budget.spend".to_string()],
+        &Enforcement::default(),
+        &household(),
+        "budget.record_income",
+        &params(&[("amount", json!(100.0)), ("source", json!("salary"))]),
+        &Authorization::Unchecked,
+        &EffectClass::Unchecked,
+        &mut nonces,
+        &mut aff,
+    );
+    assert!(!x.committed(), "the fixture must refuse");
+    assert_eq!(l, before, "no debit, no mint, nothing at all");
+}
+
+#[test]
+fn a_zero_governed_rate_serves_nothing_even_when_opted_in() {
+    // ★ Opting in is PERMISSION, not creation: the amount is still the governed
+    // rate times the measured work, and at genesis that rate is zero.
+    let g = Genesis::declared("g-1", &[("bonnie", 500.0)]).unwrap();
+    let iss = issuance();
+    let mut l = JuulLedger::from_genesis(&g);
+    let x = afforded(&mut l, "bonnie", &Parameters::genesis(), Some((&iss, "host-0")));
+    assert!(x.committed());
+    assert_eq!(l.issued_total(), 0.0);
+    assert_eq!(l.balance_of("host-0"), 0.0, "opted in, and still nothing was created");
+}
+
+#[test]
+fn conservation_still_balances_with_the_seam_live() {
+    // ★★★ The accounting re-asserted over a LIVE path, not hand-built entries.
+    let g = Genesis::declared("g-1", &[("bonnie", 500.0)]).unwrap();
+    let p = governed(1.5);
+    let iss = issuance();
+    let mut l = JuulLedger::from_genesis(&g);
+
+    for _ in 0..3 {
+        assert!(afforded(&mut l, "bonnie", &p, Some((&iss, "host-0"))).committed());
+    }
+    assert!(l.transfer("host-0", "ada", 1.0, "royalty:contributor").charged());
+
+    let debited: f64 = l
+        .entries()
+        .iter()
+        .filter_map(|e| match e {
+            Entry::Debit { amount, .. } => Some(*amount),
+            _ => None,
+        })
+        .sum();
+    // ★ Compared within a tolerance, and SAID SO: the identity is exact in the
+    // reals, but f64 summation over many entries is not associative, so the
+    // slack is about the REPRESENTATION and not about the claim. A bit-exact
+    // assertion here would be testing IEEE-754, not the accounting.
+    let near = |a: f64, b: f64, what: &str| {
+        assert!((a - b).abs() < 1e-9, "{what}: {a} vs {b}");
+    };
+    near(
+        l.total_in_circulation(),
+        g.total() + l.issued_total() - debited,
+        "circulation = genesis + issuance - costs, transfers at zero",
+    );
+    near(l.minted_total() - l.issued_total(), g.total(), "the two mint terms stay separable");
+    assert!(l.issued_total() > 0.0, "and the seam really did issue");
 }

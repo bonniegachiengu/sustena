@@ -658,6 +658,24 @@ pub enum Affordability<'a> {
         principal: &'a str,
         sustain: &'a str,
         at: u64,
+        /// ★★★ **The issuance seam** (PAWA-8): which declared issuance is in
+        /// force, and **which host served the work**.
+        ///
+        /// `None` — the default a caller must spell out — means a committed run
+        /// is **charged and nothing is issued**, exactly as before this field
+        /// existed. `Some` opts in, and the server earns
+        /// `rate × pawa_served` from the **same reading** the caller was
+        /// charged from.
+        ///
+        /// ★★ Deliberately **`Option`, not a defaulted helper**: opting in
+        /// creates money, so it should be *visible at the call site*, and a
+        /// constructor that filled this in would make the opt-out the thing you
+        /// had to notice. The same reason `Unmetered` and `Unchecked` are
+        /// spelled out rather than defaulted.
+        ///
+        /// ★ The core cannot know which machine served a run (no I/O, by
+        /// ADR-0001), so the server is host-supplied exactly as `at` is.
+        serving: Option<(&'a Issuance, &'a str)>,
     },
 }
 
@@ -665,6 +683,16 @@ impl Affordability<'_> {
     /// Whether an economy is in force at all.
     pub fn metered(&self) -> bool {
         matches!(self, Affordability::Metered { .. })
+    }
+
+    /// ★ Whether a committed run will also **issue** to a server.
+    ///
+    /// Distinct from [`Affordability::metered`] on purpose: metering makes a
+    /// run **cost** something, serving makes it **earn** something, and they
+    /// are opted into separately because they are different decisions about
+    /// different principals.
+    pub fn serving(&self) -> bool {
+        matches!(self, Affordability::Metered { serving: Some(_), .. })
     }
 }
 
@@ -736,6 +764,7 @@ mod tests {
             principal,
             sustain: "household",
             at: 1_000,
+            serving: None,
         };
         execute_afforded(
             &reg,
@@ -841,6 +870,7 @@ mod tests {
         let params_gov = Parameters::genesis();
         let mut aff = Affordability::Metered {
             ledger: &mut l, parameters: &params_gov, principal: "bonnie", sustain: "household", at: 1,
+            serving: None,
         };
         // `params.amount > 0` is a declared guard on record_income.
         let x = execute_afforded(
