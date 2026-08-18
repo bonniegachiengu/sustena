@@ -148,6 +148,7 @@ pub mod operative;
 pub mod operator;
 pub mod panel;
 pub mod path;
+pub mod pawa;
 pub mod period;
 pub mod observability;
 pub mod ooda;
@@ -320,6 +321,7 @@ pub use curated::{
     BindingTable, PolicyError, SaliencePolicy, UrgencyBasis,
     Eligibility, Request, View, WidgetCandidate, Withdrawn,
 };
+pub use pawa::{compute_pawa, compute_units, constraint_eval_count, Meter, PawaReading, Stats};
 pub use panel::{PanelDecl, PanelError, PanelInView, PanelPolicy, PanelSet};
 pub use strategy::{
     reachable_under, run as run_strategy, CompareOp, Condition, StepRecord, StrategyEdge,

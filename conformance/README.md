@@ -141,6 +141,7 @@ conformance/
     learning.json       vary / select / retain over memes  (spec, R2)
     agent.json          omega assembled + under a warrant   (spec, R2)
     enzyme.json         I : e -> (o, theta), the proposer   (spec, R2)
+    pawa.json           the pawa meter (odometer, no ledger) (parity+wiring)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2420,3 +2421,43 @@ contains **"from"**. **The name is the contract; the prose is not.**
 app-layer; EVT-15's **recorder half is not built**; number extraction is
 deliberately dull; narrowing is **exact-token, not fuzzy**; **one question at a
 time**; and **nothing here commits**.
+
+---
+
+### `pawa.json` — the pawa meter (PAWA-1, Pawa §1)
+**13 cases**, R1-style **parity** (the formula and the recording) **plus Rust
+wiring** — the Python meter is real and shipped, so this is not an R2 spec row.
+
+★★★ **The hard boundary, and it is ADR-0001 D5.** The economy layer is
+**internal accounting on a single host**. Juul is a utility unit: never real
+money, never a real transfer, never a payment rail. **Issuing a real,
+transferable token is a distinct, later, human-authorised act — out of scope.**
+`pawa.rs` keeps that structurally: **no balance at all**, no debit, no credit,
+no ledger. The **odometer, not the gas pump**.
+
+★★★ **Parity, term by term:** `pawa = κ_c·compute + κ_s·storage`;
+`compute = mutations + events + constraint_evals`; `storage` = **real bytes
+durably added** (asserted equal to the independently-computed serialization);
+κ_c = 1.0, κ_s = 0.01; wall-clock **excluded**. The sustain's invariants count
+**only when the gate actually ran** — otherwise it would be measuring a check
+that never happened.
+
+★★★ **Structurally stronger than the reference:** there, metering sits inside a
+success branch (a discipline). Here `PawaReading` has **no public constructor**
+and `meter()` returns `None` for anything uncommitted — *a refusal meters
+nothing* is a **property of the type**. Asserted twice, including a `Meter`
+**byte-identical** across an attempted refused run.
+
+★★ **Reproducible:** an identical run meters an identical pawa, and two
+readings differing **only** in `elapsed_ms` price identically. The core has no
+clock, so `at` is host-supplied — it cannot mint a time and cannot price one.
+
+★★ **Declared vs measured stay apart:** `pawa_cost` is the author's static
+estimate; the meter is reality. Both ride on the reading, so the gap is a
+readable finding. ★★ **κ is declared and explicitly uncalibrated** — no
+calibration was invented.
+
+**Limits, all six recorded and asserted:** κ uncalibrated; **nothing touches a
+balance**; the timestamp is **host-supplied**; `Meter` is **in-memory**; the
+compute proxy is a **count, not a cost model**; and **nothing calls `meter()`
+from `execute_admitted` yet**.

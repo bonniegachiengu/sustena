@@ -1,0 +1,112 @@
+{
+  "conformance_version": 1,
+  "slice": "PAWA-1 — the pawa meter",
+  "phase": "R1-style parity (the formula and the recording) + Rust integration over `Execution`",
+  "authored_from": "Pawa §1 (pawa(o,θ,s) = κ_c·compute + κ_s·storage); ported from apps/api/sustena/core/pawa_meter.py (Slice 15, 2026-08-02)",
+  "replayed_by": "sustena-core/tests/conformance_pawa.rs",
+  "note": "The economy layer opens with the ODOMETER, not the gas pump. Nothing here touches a balance — that is PAWA-2, and even that is internal accounting.",
+
+  "★★★_the_hard_boundary_and_it_is_ADR_0001_D5": "The SOFTWARE — meter, ledger, gating, royalty settlement, treasury accounting, governance — is buildable now on a single host as INTERNAL ACCOUNTING. Issuing a real, public, transferable token is a DISTINCT, LATER, HUMAN-AUTHORISED ACT and is OUT OF SCOPE for this layer. Juul is a utility unit tracked internally: never real money, never a real transfer, never a payment rail (the egress hard boundary holds alongside it). This module is the easiest place in the layer to keep that promise structurally, because it has NO BALANCE AT ALL: no debit, no credit, no ledger. A `PawaReading` is an inert record of what a run cost.",
+
+  "★★_the_STEP_0_reconcile": {
+    "★★★_1_parity_with_the_Python_meter_term_by_term": "`pawa_meter.py` is real and shipped (PAWA-1 ✅ app-layer, Slice 15). Ported exactly: `pawa = κ_c·compute + κ_s·storage`; `compute = mutation_count + event_count + constraint_eval_count`; `storage` = real bytes durably added (the serialized events + mutations, which is what the reference sums as `len(payload_json) + len(mutations_json)`); `κ_c = 1.0`, `κ_s = 0.01`, DECLARED AND EXPLICITLY UNCALIBRATED; and wall-clock DELIBERATELY EXCLUDED from the formula, recorded only as a secondary non-authoritative field. The `constraint_eval_count` distinction ports too: an operator's own declared pre/post-conditions always count, and the sustain's invariants count ONLY WHEN THE ENFORCEMENT GATE ACTUALLY RAN.",
+    "★★★_2_the_DECLARED_cost_and_the_MEASURED_one_are_different_things_and_stay_apart": "`compose::Enzyme::pawa_cost: u32` (and `OperatorMeta::pawa_cost`) is the AUTHOR'S DECLARED ESTIMATE — static, known before the run, composing by summation so a pipeline's declared cost is the sum of its parts'. The meter is the MEASURED REALITY — dynamic, known only after a real run. The reference keeps exactly this split, and neither replaces the other. Rather than pick one, `PawaReading::declared()` carries the author's number BESIDE the measured one, so where they disagree the gap is visible rather than lost — and the test asserts a real case where the declared 0 was an underestimate.",
+    "★★_3_what_is_RUST_WIRING_rather_than_parity": "The reference meters inside `SustainEngine.execute_operator`, reading `mutations`/`published`/`spec` off its own engine. This core has no engine and no events table — `execute_admitted` returns an `Execution { result, mutations, events, state }`, so `meter()` takes that value and the operator's `OperatorMeta` + the call's `Enforcement`. The timestamp is HOST-SUPPLIED because ADR-0001 gives this core no clock, the same reason `EffectClass::Live` carries a `now`. And the accumulation (`Meter`) is in-memory and deliberately dull: durable metering storage is the host's, exactly as the event log is."
+  },
+
+  "divergence": {
+    "kind": "parity-plus-rust-wiring",
+    "statement": "The Python meter is real, so the formula and the recording are a genuine parity port — this is not an R2-spec row. What is Rust-only is the integration surface: `Execution` instead of an engine's internals, a host-supplied timestamp, and an in-memory `Meter`.",
+
+    "★★★_the_structural_strengthening_over_the_reference": "The reference meters inside an `if result.succeeded:` branch — correct, and a DISCIPLINE somebody has to keep. Here `PawaReading` has NO PUBLIC CONSTRUCTOR and `meter()` is the only way to obtain one, returning `None` for anything that did not commit. So *a refusal meters nothing* is a PROPERTY OF THE TYPE: a reading for a run that did no work is not merely absent, it is unconstructible. Same mechanism as `Capability`, `Score` and `VisualSpec`, applied to a claim about cost.",
+
+    "★★_the_kappa_honesty_carried_verbatim": "`KAPPA_COMPUTE = 1.0` and `KAPPA_STORAGE = 0.01` are DECLARED NUMBERS THAT HAVE NOT BEEN FITTED to any real infrastructure cost model. Storage being priced far more granularly than a compute unit is a SHAPE argument (it matches how real systems meter storage against operation count), not a calibration. Naming them unfitted is the same honesty as OPV-7's `κ` and `Fidelity`'s declared-never-measured claim: a number declared, not a number claimed correct. No calibration was invented to make the row look finished.",
+
+    "term_by_term": {
+      "pawa": "`compute_pawa(compute, storage) -> f64` — one small pure function, so PAWA-4's sandbox fitness term can reuse the EXACT pricing rather than duplicating it.",
+      "compute": "`compute_units(mutations, events, constraint_evals) -> usize` — a reproducible proxy, and never wall-clock.",
+      "storage": "`storage_bytes(&Execution)` — the serialized events' payloads plus the serialized mutations. Real bytes, not an estimate.",
+      "constraint_eval_count": "`(meta, enforcement)` — declared pre/post always; the sustain's invariants only when `enforcement.enabled`.",
+      "the reading": "`⟨operator, at, compute, storage, sustain, principal⟩` plus the author's `declared` estimate and an optional, never-priced `elapsed_ms`."
+    },
+
+    "the_honest_limits": "★★ κ IS DECLARED AND UNCALIBRATED — the row is the odometer's mechanism, not its pricing. ★★★ NOTHING HERE TOUCHES A BALANCE — no debit, no credit, no ledger; PAWA-2 is a separate slice and PAWA-3's gate clause a separate one after it. ★ THE TIMESTAMP IS HOST-SUPPLIED — the core has no clock, so it cannot mint one and therefore cannot price one. ★★ `Meter` IS IN-MEMORY — durable metering storage is the host's, exactly as the event log is; this exists so *what did this operator cost* is answerable from the core's own readings without a second formula. ★ THE COMPUTE PROXY IS A COUNT, NOT A COST MODEL — one mutation and one constraint evaluation are priced identically, which is almost certainly wrong in reality and is exactly what a future calibration would fix. ★★ AND NOTHING CALLS `meter()` FROM `execute_admitted` YET — metering is the caller's step, deliberately: wiring it into the gate would make every existing call site meter whether its host wanted a meter or not, and the host owns durable recording anyway."
+  },
+
+  "formula_cases": [
+    {
+      "name": "the_formula_is_kappa_c_compute_plus_kappa_s_storage",
+      "why": "Parity, term by term, with the reference's own `compute_pawa` and `compute_units`. Kept as pure functions so PAWA-4 can reuse the exact pricing rather than growing a second copy of it.",
+      "expect": {"pawa(7, 542)": 12.42, "compute_units(3,1,2)": 6}
+    },
+    {
+      "name": "a_sustains_invariants_count_only_when_the_gate_actually_ran",
+      "why": "★★ The reference's own distinction, and it is a measurement question rather than a bookkeeping one: a sustain that has not armed enforcement genuinely had ZERO invariant checks performed against this call, so counting them would be measuring a check that never happened.",
+      "expect": {"gate_off": "declared only", "gate_armed": "declared + the sustain's invariants"}
+    },
+    {
+      "name": "storage_is_the_real_serialized_size_not_an_estimate",
+      "why": "★ Computed from the real records about to be written — the serialized event payloads plus the serialized mutations — and asserted equal to that sum computed independently in the test, so it cannot drift into an approximation.",
+      "expect": {"storage": "== serialized(events.payload) + serialized(mutations)"}
+    },
+    {
+      "name": "arming_the_gate_raises_the_compute_reading_by_the_invariants_checked",
+      "why": "The same call under an armed gate genuinely did MORE work — two more predicate evaluations — and the meter says so. Measurement following reality, which is what distinguishes a meter from an estimate.",
+      "expect": {"compute_delta": 2, "pawa_increases": true}
+    }
+  ],
+
+  "measurement_cases": [
+    {
+      "name": "a_real_run_is_measured_from_what_it_actually_did",
+      "why": "★★ Metering, not estimating: the reading's compute comes from the mutations and events the run genuinely produced and the checks it was genuinely subject to, and `pawa` is exactly `compute_pawa` of those two — asserted, so the stored number cannot drift from the formula.",
+      "expect": {"compute": ">0", "storage": ">0", "pawa": "== compute_pawa(compute, storage)"}
+    },
+    {
+      "name": "an_identical_run_meters_an_identical_pawa",
+      "why": "★★★ REPRODUCIBILITY, which is the whole reason wall-clock is excluded. The same operator with the same params against the same state meters byte-identically — so a reading is comparable across runs, across machines and across time.",
+      "expect": {"compute": "equal", "storage": "equal", "pawa": "equal"}
+    },
+    {
+      "name": "elapsed_time_is_recorded_but_never_priced",
+      "why": "★★ The exclusion made observable rather than merely intended: two readings differing ONLY in `elapsed_ms` price identically, and a reading with no host-supplied elapsed reports `None` rather than inventing a zero.",
+      "expect": {"pawa": "unchanged by elapsed_ms", "default_elapsed": null}
+    },
+    {
+      "name": "the_declared_cost_is_carried_beside_the_measurement_not_replaced_by_it",
+      "why": "★ The static/measured split kept visible. `pawa_cost` is the author's estimate and the meter is the reality; a reading carries both, so the case where the declared 0 was an underestimate is a FINDING a caller can read rather than a discrepancy the meter silently resolved.",
+      "expect": {"declared": "== OperatorMeta::pawa_cost", "measured": "> declared"}
+    }
+  ],
+
+  "refusal_cases": [
+    {
+      "name": "a_gate_refused_run_meters_nothing_at_all",
+      "why": "★★★ NOT A ZERO READING — NO READING. `PawaReading` has no public constructor and `meter()` returns `None` for anything that did not commit, so *a refusal meters nothing* is a property of the type. The reference achieves the same by metering inside a success branch; here it is unconstructible rather than merely unreached.",
+      "expect": {"meter": null}
+    },
+    {
+      "name": "a_refusal_leaves_the_meter_byte_unchanged",
+      "why": "★★ The same discipline at the collection level and asserted byte-for-byte: a `Meter` before and after an attempted refused run is EQUAL. A gate refusal did zero real work, so charging it would be inventing a cost nobody paid — the same rule the advisory, capture and egress slices each keep.",
+      "expect": {"meter": "byte-identical"}
+    },
+    {
+      "name": "a_never_run_operator_has_no_reading_rather_than_a_zero",
+      "why": "★★ Honest absence. `stats_for` returns `None` for an operator that has never run, and an empty meter returns `None` for everything — because ZERO IS A MEASUREMENT (a read-only operator can genuinely cost little) and *never measured* is not.",
+      "expect": {"never_run": null, "empty_meter": null}
+    }
+  ],
+
+  "boundary_cases": [
+    {
+      "name": "stats_accumulate_over_repeated_runs",
+      "why": "The accumulation is real arithmetic over real readings — runs, totals, mean — and the per-sustain and per-principal totals agree with it. A sustain with no readings totals 0.0, which is correct here because it is a SUM over an empty set rather than a claim about an unmeasured operator.",
+      "expect": {"runs": 3, "mean": "total / runs", "other_sustain": 0.0}
+    },
+    {
+      "name": "a_reading_is_inert_and_moves_no_value",
+      "why": "★★★ THE HARD BOUNDARY, asserted. There is no debit, no credit and no balance anywhere in this module: a reading only says what a run cost, and recording one changes nothing. PAWA-2's ledger is a separate slice — and even that is internal accounting, never real money and never a payment rail.",
+      "expect": {"state": "unchanged", "balance_touched": false}
+    }
+  ]
+}
