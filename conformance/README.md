@@ -143,6 +143,7 @@ conformance/
     enzyme.json         I : e -> (o, theta), the proposer   (spec, R2)
     pawa.json           the pawa meter (odometer, no ledger) (parity+wiring)
     juul.json           the juul ledger + the out-of-pawa gate (spec, R2)
+    royalty.json        the ratified five-way royalty split   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2540,3 +2541,39 @@ is not the same as everyone being broke.
 construction**; the ledger is **borrowed mutably for the call**; the clause
 prices **the whole run, not per node**; and **nothing credits anyone** — the
 hard boundary is unchanged.
+
+---
+
+### `royalty.json` — the ratified royalty schedule (PAWA-5 + MYC-5)
+**12 cases.** The **first** slice in the economy layer with a **transfer** in it.
+
+★★★ **So the hard boundary is restated structurally, three ways.** A transfer
+moves juul **only between ledger balances**; `Entry::Transfer` carries **both
+ends in one value**, so `ΣΔ = 0` holds **by shape** and half a transfer is
+**unspellable** (a `TransferOut`/`TransferIn` pair would be a real hole, since
+`with_entries` accepts arbitrary entries); and there is **no juul→real path** —
+no cash-out, no redemption, no rail. **Juul is not redeemable, and that absence
+IS the distinction.** Proven by reading the source, production code only.
+
+★★★ **The reference's four-way split is SUPERSEDED, not ported** — it has zero
+callers, and MYC-5 names the migration explicitly.
+
+★★ **Five recipients, two revenue types:** usage `70/15/5/5/5`, access
+`80/10/3/2/5`. The **proposer** share and the revenue-type split are what the
+old four-way could not express.
+
+★★★ **Conservation is a THEOREM.** Integer floors with **the remainder assigned
+to the validator** — the leftover is not discarded, *it is where the last share
+comes from*. Tested adversarially: 1, 2, 3, 7, 97, 997, 7919, 65537, 999983,
+both schedules. ★★★ And **an absent role's share folds into the treasury**,
+never dropped — the single-host case, which the reference has no answer for.
+
+★★ **Cost and royalty stay apart:** a cost **leaves circulation**; a royalty
+**reallocates** it. ★ `Free` transfers nothing; an unaffordable royalty is
+refused **wholesale**, because a partial settlement would leave the split
+unconserved against its own schedule.
+
+**Limits, all five recorded and asserted:** the **treasury is a named principal,
+not yet a Sustain** (PAWA-6); `settle` is **not wired into the gate**; the
+**royalty base is caller-supplied**; a partial settlement is **refused
+wholesale**; and **nothing here mints**.

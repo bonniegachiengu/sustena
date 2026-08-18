@@ -161,6 +161,7 @@ pub mod region;
 pub mod preattentive;
 pub mod principal;
 pub mod router;
+pub mod royalty;
 pub mod schema;
 pub mod semantic;
 pub mod stranding;
@@ -324,6 +325,9 @@ pub use curated::{
     Eligibility, Request, View, WidgetCandidate, Withdrawn,
 };
 pub use juul::{Affordability, Charge, Entry, JuulLedger};
+pub use royalty::{
+    settle, split, Licence, Recipients, RevenueType, RoyaltyRole, Settlement, Share,
+};
 pub use pawa::{
     candidate_pawa, compute_pawa, compute_units, constraint_eval_count, Meter, PawaReading, Stats,
 };

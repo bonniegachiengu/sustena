@@ -70,20 +70,57 @@ pub enum Entry {
     /// A metered cost, spent. ★ Carries the **reading** it was charged from, so
     /// every debit can be traced to the run that incurred it.
     Debit { principal: String, amount: f64, operator: String, sustain: String, at: u64 },
+    /// ★★★ A **conserved reallocation** between two balances — PAWA-5's royalty
+    /// movement.
+    ///
+    /// **One entry, not a pair.** A `TransferOut` and a matching `TransferIn`
+    /// would be two records that a caller could write half of; a single entry
+    /// carrying *both ends* makes an unbalanced transfer **unspellable**. Its
+    /// contribution to `from` is `−amount` and to `to` is `+amount`, so
+    /// `ΣΔ = 0` **by the shape of the value**, not by a check run over it.
+    ///
+    /// ★★ And it is the **only** thing here that moves juul between principals.
+    /// A [`Entry::Debit`] has no counterparty (a cost leaves circulation); a
+    /// transfer has two and changes no total.
+    Transfer { from: String, to: String, amount: f64, reason: String },
 }
 
 impl Entry {
-    pub fn principal(&self) -> &str {
+    /// ★ This entry's signed effect on **one** principal's balance.
+    ///
+    /// A credit adds, a debit subtracts, and a transfer does **both** — which
+    /// is why the signature takes a principal rather than returning a single
+    /// number. `0.0` for anyone the entry does not touch.
+    pub fn delta_for(&self, principal: &str) -> f64 {
         match self {
-            Entry::Credit { principal, .. } | Entry::Debit { principal, .. } => principal,
+            Entry::Credit { principal: p, amount, .. } if p == principal => *amount,
+            Entry::Debit { principal: p, amount, .. } if p == principal => -*amount,
+            Entry::Transfer { from, amount, .. } if from == principal => -*amount,
+            Entry::Transfer { to, amount, .. } if to == principal => *amount,
+            _ => 0.0,
         }
     }
 
-    /// The signed effect on a balance. Credits add, debits subtract.
-    pub fn delta(&self) -> f64 {
+    /// Every principal this entry touches — one for a credit or debit, two for
+    /// a transfer.
+    pub fn touches(&self) -> Vec<&str> {
+        match self {
+            Entry::Credit { principal, .. } | Entry::Debit { principal, .. } => {
+                vec![principal.as_str()]
+            }
+            Entry::Transfer { from, to, .. } => vec![from.as_str(), to.as_str()],
+        }
+    }
+
+    /// ★★ This entry's effect on the **total** in circulation.
+    ///
+    /// A credit raises it, a debit lowers it, and **a transfer is exactly zero**
+    /// — the conservation law, read straight off the variant.
+    pub fn circulation_delta(&self) -> f64 {
         match self {
             Entry::Credit { amount, .. } => *amount,
             Entry::Debit { amount, .. } => -*amount,
+            Entry::Transfer { .. } => 0.0,
         }
     }
 }
@@ -189,7 +226,42 @@ impl JuulLedger {
 
     /// The fold, for one principal.
     pub fn balance_of(&self, principal: &str) -> f64 {
-        self.entries.iter().filter(|e| e.principal() == principal).map(Entry::delta).sum()
+        self.entries.iter().map(|e| e.delta_for(principal)).sum()
+    }
+
+    /// ★★★ Move juul from one balance to another — **the only transfer there
+    /// is**, and PAWA-5's royalty movement.
+    ///
+    /// Appends a single [`Entry::Transfer`], so it is **conserved by the shape
+    /// of the entry**: total circulation is provably unchanged, because
+    /// `circulation_delta` for that variant is `0.0` and no other code path
+    /// creates one.
+    ///
+    /// ★★ **Internal, and there is no rail.** This moves juul between two
+    /// balances in this ledger and nothing else. There is no cash-out, no
+    /// external counterparty, no redemption — juul is not convertible into
+    /// anything, which is what makes an internal reallocation structurally
+    /// distinguishable from a real payment (ADR-0001 D5, PAWA-13).
+    ///
+    /// Refuses if `from` cannot cover it, leaving the ledger untouched — the
+    /// same honest-refusal shape as [`JuulLedger::charge`]. A self-transfer is
+    /// refused too: it is not a movement, and recording one would put a
+    /// meaningless entry in an append-only log.
+    pub fn transfer(&mut self, from: &str, to: &str, amount: f64, reason: &str) -> Charge {
+        let balance = self.balance_of(from);
+        if from == to || amount < 0.0 {
+            return Charge::Insufficient { required: amount, balance };
+        }
+        if balance < amount {
+            return Charge::Insufficient { required: amount, balance };
+        }
+        self.entries.push(Entry::Transfer {
+            from: from.to_string(),
+            to: to.to_string(),
+            amount,
+            reason: reason.to_string(),
+        });
+        Charge::Charged { spent: amount, balance: balance - amount }
     }
 
     /// ★★ Recompute every balance from the entries alone.
@@ -202,7 +274,9 @@ impl JuulLedger {
     pub fn rebuild(&self) -> BTreeMap<&str, f64> {
         let mut out: BTreeMap<&str, f64> = BTreeMap::new();
         for e in &self.entries {
-            *out.entry(e.principal()).or_insert(0.0) += e.delta();
+            for p in e.touches() {
+                *out.entry(p).or_insert(0.0) += e.delta_for(p);
+            }
         }
         out
     }
@@ -225,14 +299,14 @@ impl JuulLedger {
     /// else. That is a deliberate posture and PAWA-6's treasury is where a
     /// destination would be introduced, if one ever is.
     pub fn total_in_circulation(&self) -> f64 {
-        self.entries.iter().map(Entry::delta).sum()
+        self.entries.iter().map(Entry::circulation_delta).sum()
     }
 
     /// Every debit charged against one principal, in order.
     pub fn debits_of<'a>(&'a self, principal: &'a str) -> impl Iterator<Item = &'a Entry> {
         self.entries
             .iter()
-            .filter(move |e| e.principal() == principal && matches!(e, Entry::Debit { .. }))
+            .filter(move |e| matches!(e, Entry::Debit { principal: p, .. } if p == principal))
     }
 }
 
