@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use serde_json::{json, Map, Value};
 use sustena_core::{
     approval::{EffectClass, NonceLedger},
-    juul::{Affordability, Audit, Charge, Entry, Genesis, JuulLedger},
+    juul::{Affordability, Audit, Charge, Entry, Genesis, JuulLedger, MintAuthority},
     operator::{execute, execute_afforded, Authorization, Enforcement, Execution, Registry},
     governance::Parameters,
     pawa::{candidate_pawa, meter, PawaReading},
@@ -379,7 +379,7 @@ fn a_mint_is_its_own_variant_and_names_the_declaration_that_authorised_it() {
     assert_eq!(l.mints().count(), 2);
     for m in l.mints() {
         match m {
-            Entry::Mint { genesis, .. } => assert_eq!(genesis, g.id()),
+            Entry::Mint { authority, .. } => assert_eq!(authority, &MintAuthority::Genesis(g.id().clone())),
             other => panic!("{other:?}"),
         }
     }
@@ -448,7 +448,7 @@ fn a_ledgers_money_supply_is_exactly_its_declared_genesis() {
 
     let audit = g.audit(&l);
     assert!(audit.clean(), "{}", audit.describe());
-    assert_eq!(audit, Audit { foreign: vec![], mismatched: vec![], undeclared: vec![] });
+    assert_eq!(audit, Audit { foreign: vec![], mismatched: vec![], undeclared: vec![], issued: vec![] });
 }
 
 #[test]
@@ -461,7 +461,7 @@ fn an_audit_names_a_mint_that_the_declaration_does_not_explain() {
     entries.push(Entry::Mint {
         principal: "mallory".into(),
         amount: 500.0,
-        genesis: g.id().clone(),
+        authority: MintAuthority::Genesis(g.id().clone()),
     });
     let audit = g.audit(&JuulLedger::with_entries(entries));
     assert!(!audit.clean());

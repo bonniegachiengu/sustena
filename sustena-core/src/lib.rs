@@ -135,6 +135,7 @@ pub mod governance;
 pub mod harmonics;
 pub mod holarchy;
 pub mod inverse;
+pub mod issuance;
 pub mod juul;
 pub mod kernel;
 pub mod learned;
@@ -326,7 +327,8 @@ pub use curated::{
     BindingTable, PolicyError, SaliencePolicy, UrgencyBasis,
     Eligibility, Request, View, WidgetCandidate, Withdrawn,
 };
-pub use juul::{Affordability, Audit, Charge, Entry, Genesis, GenesisId, JuulLedger};
+pub use issuance::{Issuance, IssuanceId, Issued, Schedule};
+pub use juul::{Affordability, Audit, Charge, Entry, Genesis, GenesisId, JuulLedger, MintAuthority};
 pub use treasury::{pay_out, PayOut};
 pub use royalty::{
     settle, split, Licence, Recipients, RevenueType, RoyaltyRole, Settlement, Share,

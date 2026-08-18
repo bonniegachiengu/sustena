@@ -146,6 +146,7 @@ conformance/
     royalty.json        the ratified five-way royalty split   (spec, R2)
     treasury.json       Sigma_T: the treasury as a Sustain    (spec, R2)
     governance.json     parameters as a Sustain; change = Enzyme (spec, R2)
+    issuance.json       ongoing issuance: the governed mint      (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2692,3 +2693,52 @@ not an oversight.
 parameter is a **scalar**; **no council** is connected; **no future-dated
 change** (no clock); and `Parameters::read` **falls back to genesis**, so a
 typo'd name reads as the default rather than failing loudly.
+
+---
+
+### `issuance.json` — ongoing issuance, the governed mint (PAWA-8, Pawa §6.2)
+**11 cases.** The row PAWA-11 was built to make safe.
+
+★★★ **Two minting paths, and they stay distinct.** Genesis is a **constructor**
+— one-time by shape, *who may mint = nobody, afterwards*. Issuance is a
+**method** on an existing ledger, and **not a second genesis**: a fixed value
+you audit forever versus a rule that keeps applying. Carried in the entry as
+**`MintAuthority::{Genesis, Issued}`**, neither id publicly constructible.
+★★ **And the audit moved with it**: an issuance mint is not *foreign* and must
+not be *ignored*, so `Audit` gained an **`issued`** list — *exactly this
+genesis, **plus** this much issued*.
+
+★★★ **Denominated in work, structurally.** `issue` takes a **`PawaReading`**,
+which has no public constructor — the mirror of `charge(&PawaReading)`. **No
+`mint(amount)` exists, so no issuance exists without work.** The **caller pays
+and the server earns**: an issuance is not a refund.
+
+★★★ **The rate is governed — the whole safety property.** `Schedule::Fixed`
+carries **no rate of its own**, so pricing can only come from `Parameters`.
+Proven end to end: switched on by a real gated Enzyme, **read back out of the
+resulting state**, asserted ≠ the genesis pricing. Untokened → `approval_token`,
+asserted **through to the issued amount**; over-ceiling → `enforcement_gate`.
+
+★★ **The schedule TYPE is declared, not governed**, and `Schedule` has **one
+variant deliberately**: decaying needs a **clock** this core does not have, and
+target-rate would make the governed value a *target* with the rate derived from
+ledger state — neither fits `ParameterSpec`'s one scalar. Declared-but-inert
+variants read as built, so they are named follow-ons instead.
+
+★★ **Issuance is OFF at genesis** (`rate = 0.0`) — a zero rate issues nothing
+and **appends nothing**. ★★ **Accounting**: `circulation = Σ(genesis) +
+Σ(issuance) − Σ(costs)`, transfers at zero, with the two mint terms asserted
+**separable**.
+
+★★★ **Divergence — grep-0.** One hit, a **named false positive** (`pawa.py`'s
+*"bulk transaction issuance from the SQLite log"*). The reference's cautionary
+case is `ONBOARDING_GRANT = 100`: **declared and read by nothing**, and had it
+been wired it would go through `credit` — an **undeclared mint**, unbounded,
+source-edit-only. **Counterweight**: PAWA-1's meter, PAWA-7's `Entry::Mint`,
+PAWA-11's governance. **No new gate, no new Enzyme, no new engine.**
+
+**Limits, all five recorded and asserted:** one server (PAWA-9 owns
+distribution); one schedule shape; **nothing calls `issue` automatically**, so a
+host that never calls it has an economy that only shrinks; no burn; and
+**`Issuance` itself is ungoverned** — closed by audit, like PAWA-7's forgeable
+`Mint`.

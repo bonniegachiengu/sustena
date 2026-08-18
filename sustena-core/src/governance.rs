@@ -74,6 +74,7 @@ impl ParameterSpec {
 pub struct Parameters {
     kappa_compute: f64,
     kappa_storage: f64,
+    issuance_rate: f64,
 }
 
 impl Parameters {
@@ -86,12 +87,20 @@ impl Parameters {
     pub const GENESIS_KAPPA_COMPUTE: f64 = 1.0;
     /// The genesis value of `κ_s`. See [`Parameters::GENESIS_KAPPA_COMPUTE`].
     pub const GENESIS_KAPPA_STORAGE: f64 = 0.01;
+    /// ★★★ **Issuance is OFF at genesis** (PAWA-8), and that is a statement,
+    /// not a placeholder: an economy should not begin inflating because nobody
+    /// chose a rate. Switching it on takes a deliberate, gated, recorded
+    /// governance act — which is exactly the safety property issuance needs,
+    /// since an ungoverned rate is the Sybil-profitable inflation MYC-6 warned
+    /// of.
+    pub const GENESIS_ISSUANCE_RATE: f64 = 0.0;
 
     /// The declared genesis parameters — what `Σ_gov` opens with.
     pub fn genesis() -> Parameters {
         Parameters {
             kappa_compute: Self::GENESIS_KAPPA_COMPUTE,
             kappa_storage: Self::GENESIS_KAPPA_STORAGE,
+            issuance_rate: Self::GENESIS_ISSUANCE_RATE,
         }
     }
 
@@ -111,6 +120,7 @@ impl Parameters {
         Parameters {
             kappa_compute: get(KAPPA_COMPUTE, Self::GENESIS_KAPPA_COMPUTE),
             kappa_storage: get(KAPPA_STORAGE, Self::GENESIS_KAPPA_STORAGE),
+            issuance_rate: get(ISSUANCE_RATE, Self::GENESIS_ISSUANCE_RATE),
         }
     }
 
@@ -120,6 +130,17 @@ impl Parameters {
 
     pub fn kappa_storage(&self) -> f64 {
         self.kappa_storage
+    }
+
+    /// ★★★ **Juul issued per pawa served** (PAWA-8) — the governed rate, and
+    /// the **only** place it lives.
+    ///
+    /// [`crate::issuance::Schedule::Fixed`] carries no rate of its own, so an
+    /// issuance can only be priced from here — meaning the sole path to
+    /// changing how fast new juul enters is `governance.set_parameter`, through
+    /// the gate, under an approval token, recorded and replayable.
+    pub fn issuance_rate(&self) -> f64 {
+        self.issuance_rate
     }
 
     /// `pawa = κ_c·compute + κ_s·storage`, under **these** parameters.
@@ -136,6 +157,8 @@ impl Parameters {
 pub const KAPPA_COMPUTE: &str = "kappa_compute";
 /// See [`KAPPA_COMPUTE`].
 pub const KAPPA_STORAGE: &str = "kappa_storage";
+/// PAWA-8's issuance rate — juul minted per pawa served.
+pub const ISSUANCE_RATE: &str = "issuance_rate";
 
 /// The parameters this row governs, with their declared bounds.
 ///
@@ -147,6 +170,14 @@ pub fn declared_parameters() -> Vec<ParameterSpec> {
         ParameterSpec::declared(KAPPA_COMPUTE, Parameters::GENESIS_KAPPA_COMPUTE, 0.0, 1_000.0)
             .expect("the genesis value is within its own bounds"),
         ParameterSpec::declared(KAPPA_STORAGE, Parameters::GENESIS_KAPPA_STORAGE, 0.0, 1_000.0)
+            .expect("the genesis value is within its own bounds"),
+        // ★★ The ceiling is expressed against a meaning, not picked: a rate of
+        // **1.0 is break-even**, where an issuance exactly replaces what the
+        // run burned. Above that the economy nets new juul per run, so a bound
+        // of 10× break-even is the declared limit on how fast that may happen —
+        // and an UNBOUNDED rate is precisely the Sybil-profitable inflation
+        // MYC-6 named. Non-negative for the same reason κ is.
+        ParameterSpec::declared(ISSUANCE_RATE, Parameters::GENESIS_ISSUANCE_RATE, 0.0, 10.0)
             .expect("the genesis value is within its own bounds"),
     ]
 }
