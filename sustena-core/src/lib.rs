@@ -233,7 +233,8 @@ pub use belief::{
     SilenceSpec,
 };
 pub use semantic::{
-    is_deterministic, replay_under, CallOutcome, EnzymeCall, ReplayMode, SemanticOutcome,
+    enforcement_of, is_deterministic, replay_under, CallOutcome, EnzymeCall, ReplayMode,
+    SemanticOutcome,
 };
 pub use stranding::{assess_edit, EditImpact, HistoryStranded, InstanceHistory, Remedy};
 pub use damping::{

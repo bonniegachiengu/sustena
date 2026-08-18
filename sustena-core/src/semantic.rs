@@ -201,7 +201,15 @@ impl SemanticOutcome {
 }
 
 /// The gate inputs a [`Definition`] supplies. `D′` needs no new type.
-pub(crate) fn enforcement_of(d: &Definition) -> Enforcement {
+///
+/// ★ **Made `pub` for the demo example, and it belongs public.** It was
+/// `pub(crate)` only because nothing outside the crate had needed it yet — and
+/// [`crate::treasury::enforcement`] and [`crate::governance::enforcement`] are
+/// already public one-line wrappers over exactly this call. A holder of a
+/// `Definition` with no way to obtain its gate would be a real gap: the
+/// definition IS the household's rules, and being unable to arm them from
+/// outside would make every non-treasury, non-governance Sustain second-class.
+pub fn enforcement_of(d: &Definition) -> Enforcement {
     Enforcement {
         enabled: true,
         invariants: d.invariants.clone(),
