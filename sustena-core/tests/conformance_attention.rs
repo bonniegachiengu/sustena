@@ -14,9 +14,18 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use sustena_core::{
+    governance::Parameters,
+    approval::{Binding, EffectClass, NonceLedger, Simulated},
     attention::{
-        broad_scan, narrow_scan, scan, Aperture, Attention, AttentionError, Reframing, Stance,
+        broad_scan, narrow_scan, scan, Aperture, Attended, Attention, AttentionBudget,
+        AttentionError, Reframing, Stance,
     },
+    council::ProposalStatus,
+    governance::{
+        declared_parameters, definition, enforcement, opening_state, register as register_gov,
+        ATTENTION_KAPPA,
+    },
+    operator::{execute_admitted, Authorization, Registry},
     curated::DEFAULT_BUDGET,
     detect::CusumSpec,
     monitor::{MonitorEngine, SustainWatch},
@@ -78,7 +87,7 @@ fn broad() -> Aperture {
 #[test]
 fn an_attention_carries_both_and_there_is_no_way_to_declare_one() {
     // ★★★ Two required fields, no Option, no single-attention constructor.
-    let a = Attention::declared(narrow(), broad(), 100).unwrap();
+    let a = Attention::declared(narrow(), broad(), 100.0, &Parameters::genesis()).unwrap();
     assert_eq!(a.stances(), [Stance::Narrow, Stance::Broad].into_iter().collect());
 }
 
@@ -89,7 +98,7 @@ fn a_pair_that_is_one_region_twice_is_refused() {
     let n2 = Aperture::declared(2, 4, 3).unwrap();
     assert_eq!((n1.stance(), n2.stance()), (Stance::Narrow, Stance::Narrow));
     assert_eq!(
-        Attention::declared(n1, n2, 1000),
+        Attention::declared(n1, n2, 1000.0, &Parameters::genesis()),
         Err(AttentionError::NotTwoRegions { both: Stance::Narrow })
     );
 }
@@ -111,22 +120,22 @@ fn the_stance_is_read_off_the_axes_not_declared() {
 
 #[test]
 fn deep_and_narrow_costs_the_same_as_broad_and_shallow() {
-    assert_eq!(Aperture::declared(1, 4, 3).unwrap().cost(), 12);
-    assert_eq!(Aperture::declared(12, 1, 1).unwrap().cost(), 12);
+    assert_eq!(Aperture::declared(1, 4, 3).unwrap().cost_under(&Parameters::genesis()), 12.0);
+    assert_eq!(Aperture::declared(12, 1, 1).unwrap().cost_under(&Parameters::genesis()), 12.0);
 }
 
 #[test]
 fn raising_an_axis_is_paid_for_by_lowering_another() {
-    let budget = 12;
-    assert!(Aperture::declared(2, 2, 3).unwrap().affordable(budget));
-    assert!(!Aperture::declared(2, 4, 3).unwrap().affordable(budget), "no free axis");
-    assert!(Aperture::declared(2, 4, 1).unwrap().affordable(budget), "resolution paid for depth");
+    let budget = 12.0;
+    assert!(Aperture::declared(2, 2, 3).unwrap().affordable_under(budget, &Parameters::genesis()));
+    assert!(!Aperture::declared(2, 4, 3).unwrap().affordable_under(budget, &Parameters::genesis()), "no free axis");
+    assert!(Aperture::declared(2, 4, 1).unwrap().affordable_under(budget, &Parameters::genesis()), "resolution paid for depth");
 }
 
 #[test]
 fn an_attention_over_budget_is_refused() {
     assert!(matches!(
-        Attention::declared(narrow(), broad(), 10),
+        Attention::declared(narrow(), broad(), 10.0, &Parameters::genesis()),
         Err(AttentionError::OverBudget { .. })
     ));
 }
@@ -269,14 +278,38 @@ fn the_recorded_divergence_keeps_its_counterweight() {
 
     let limits = d["the_honest_limits"].as_str().unwrap();
     for term in [
-        "`B_att` IS A NUMBER, NOT A BALANCE",
+        // ★★ The two CLOSED limits must stay recorded AS closed — a stale
+        // limit is worse than a missing one, and a silently dropped one is
+        // worse than both.
+        "`B_att` IS NOW A BALANCE",
+        "ATTENTION IS NOW CALLED FROM AN OPERATIVE",
+        // ★ And what stays true must stay named beside them.
+        "still not denominated in juul",
+        "declared and uncalibrated",
         "THE STANCE BOUNDARY IS A DECLARED HEURISTIC",
         "THE PATH DESCENDS INTO THE FIRST CHILD",
         "BROAD REPORTS THE FIRST FRAME CHANGE",
-        "NOTHING CALLS ATTENTION FROM AN OPERATIVE YET",
     ] {
         assert!(limits.contains(term), "missing limit: {term}");
     }
+
+    // ★★★ The addendum must keep the reasons, not just the verdicts.
+    let add = &doc["★★★_the_B_att_addendum_2026_08_18"];
+    assert!(add["what_this_addendum_closes"].as_str().unwrap().contains("WAS A NUMBER"));
+    assert!(add["★★★_the_identity_holds_BY_CONSTRUCTION_not_by_check"]
+        .as_str()
+        .unwrap()
+        .contains("FOLD"));
+    let clamp = add["★★★_REFUSED_NEVER_CLAMPED_and_the_reason_is_STRUCTURAL"].as_str().unwrap();
+    assert!(clamp.contains("NOT on taste"), "the reason must stay, not just the policy");
+    assert!(clamp.contains("UNSOUND HERE"));
+    let kap = add["★★_kappa_att_is_now_GOVERNED_and_the_constant_was_DELETED"].as_str().unwrap();
+    assert!(kap.contains("REMOVED OUTRIGHT"));
+    assert!(kap.contains("NO PATH PRICES AN APERTURE FROM A CONSTANT"));
+    assert!(add["★_what_is_governed_and_what_is_deliberately_NOT"]
+        .as_str()
+        .unwrap()
+        .contains("BOUNDED, not POSITIVE"), "the kappa-of-zero limit must stay named");
 
     let mut seen = BTreeSet::new();
     for group in [
@@ -285,6 +318,7 @@ fn the_recorded_divergence_keeps_its_counterweight() {
         "path_not_subtree_cases",
         "two_output_types_cases",
         "footprint_cases",
+        "b_att_cases",
     ] {
         for c in doc[group].as_array().unwrap() {
             assert!(
@@ -295,5 +329,167 @@ fn the_recorded_divergence_keeps_its_counterweight() {
             assert!(seen.insert(c["name"].as_str().unwrap().to_string()), "duplicate case name");
         }
     }
-    assert_eq!(seen.len(), 15, "every declared case must be present");
+    assert_eq!(seen.len(), 23, "every declared case must be present");
+}
+
+// ── ★★★ B_att: a balance, not a number ───────────────────────────────────────
+
+fn budget(n: f64) -> AttentionBudget {
+    AttentionBudget::allocated(n).expect("a real allocation")
+}
+
+fn attention_pair() -> Attention {
+    Attention::declared(narrow(), broad(), 100.0, &Parameters::genesis()).unwrap()
+}
+
+/// The identity, as an equation. ★ Checked at EVERY step, because an identity
+/// that only holds at the end is a coincidence.
+fn assert_identity(b: &AttentionBudget) {
+    assert_eq!(
+        b.spent() + b.remaining(),
+        b.allocation(),
+        "spent + remaining == allocated, by the shape of the type"
+    );
+}
+
+#[test]
+fn the_budget_identity_holds_as_an_equation_over_a_real_sequence() {
+    let p = Parameters::genesis();
+    let a = attention_pair();
+    let per_turn = a.cost_under(&p);
+    let mut b = budget(per_turn * 2.5);
+    assert_identity(&b);
+
+    // Two affordable turns.
+    for turn in 1..=2 {
+        assert!(b.spend(&a, &p).spent(), "turn {turn} is affordable");
+        assert_identity(&b);
+        assert_eq!(b.spends().len(), turn);
+        assert_eq!(b.spent(), per_turn * turn as f64);
+    }
+
+    // A third does not fit in the half-turn that is left.
+    let refused = b.spend(&a, &p);
+    assert!(!refused.spent(), "{}", refused.describe());
+    assert_identity(&b);
+    assert_eq!(b.spends().len(), 2, "a refusal is not a spend");
+
+    // ★ And renewal is the HOST saying a period turned — same allocation, no spends.
+    let fresh = b.renew();
+    assert_eq!(fresh.allocation(), b.allocation());
+    assert_eq!(fresh.spent(), 0.0);
+    assert_identity(&fresh);
+}
+
+#[test]
+fn an_unaffordable_attention_is_refused_and_the_budget_is_byte_identical() {
+    let p = Parameters::genesis();
+    let a = attention_pair();
+    let mut b = budget(1.0);
+    let before = b.clone();
+
+    match b.spend(&a, &p) {
+        Attended::OverBudget { cost, remaining } => {
+            assert_eq!(cost, a.cost_under(&p));
+            assert_eq!(remaining, 1.0);
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert_eq!(b, before, "nothing was appended");
+    assert_eq!(b.spend(&a, &p).shortfall(), Some(a.cost_under(&p) - 1.0), "how much short");
+}
+
+#[test]
+fn clamping_is_unsound_because_it_can_flip_a_stance() {
+    // ★★★ The reason the policy is REFUSE, proven rather than argued.
+    let n = Aperture::declared(3, 2, 2).unwrap();
+    assert_eq!(n.stance(), Stance::Narrow, "b=3 against d*rho=4");
+
+    // A clamp would shrink an axis to fit. Lowering resolution by one...
+    let clamped = Aperture::declared(3, 2, 1).unwrap();
+    assert_eq!(clamped.stance(), Stance::Broad, "...and the stance FLIPS");
+
+    // ...so the pair a clamp produced would be Broad twice — exactly what
+    // `Attention::declared` refuses outright.
+    assert_eq!(
+        Attention::declared(clamped, broad(), 1_000.0, &Parameters::genesis()),
+        Err(AttentionError::NotTwoRegions { both: Stance::Broad }),
+        "a clamp could silently produce the attention this module forbids"
+    );
+}
+
+#[test]
+fn there_is_no_spend_amount_so_a_cost_cannot_be_invented() {
+    // ★★★ Structural: `spend` takes an `Attention`, which cannot be built
+    // except through `declared` — and each record NAMES what it paid for.
+    let p = Parameters::genesis();
+    let a = attention_pair();
+    let mut b = budget(1_000.0);
+    assert!(b.spend(&a, &p).spent());
+
+    let record = &b.spends()[0];
+    assert_eq!(record.attention(), &a, "what was this spent on stays answerable");
+    assert_eq!(record.cost(), a.cost_under(&p));
+    assert_eq!(b.spent(), record.cost(), "the fold is the record");
+}
+
+#[test]
+fn a_zero_allocation_refuses_everything_visibly_and_a_negative_one_is_not_a_budget() {
+    let p = Parameters::genesis();
+    let mut zero = budget(0.0);
+    assert!(!zero.spend(&attention_pair(), &p).spent(), "attend to nothing, honestly");
+    assert_identity(&zero);
+    assert!(AttentionBudget::allocated(-1.0).is_none(), "already past before spending");
+    assert!(AttentionBudget::allocated(f64::NAN).is_none());
+}
+
+#[test]
+fn the_governed_kappa_is_what_prices_an_aperture_and_no_constant_remains() {
+    // ★ Parity first: the genesis coefficient prices exactly as the deleted
+    // constant did.
+    let genesis = Parameters::genesis();
+    let a = Aperture::declared(1, 4, 3).unwrap();
+    assert_eq!(a.cost_under(&genesis), 12.0);
+
+    // ★★★ Then a REAL gated change, read back out of the resulting state.
+    let d = definition(&declared_parameters());
+    let mut params = serde_json::Map::new();
+    params.insert("name".into(), json!(ATTENTION_KAPPA));
+    params.insert("value".into(), json!(2.0));
+    let token = Simulated::from_sandbox(
+        "gov-1",
+        Binding::new("governance.set_parameter", &params),
+        Ok(()),
+    )
+    .expect("the sandbox committed")
+    .voted(ProposalStatus::Passed)
+    .expect("passed")
+    .approve("bonnie", 1, 9_999);
+
+    let mut reg = Registry::default();
+    register_gov(&mut reg);
+    let x = execute_admitted(
+        &reg,
+        &d.operators,
+        &enforcement(&d),
+        &opening_state(&declared_parameters()),
+        "governance.set_parameter",
+        &params,
+        &Authorization::Unchecked,
+        &EffectClass::Live { token: &token, now: 1_000 },
+        &mut NonceLedger::new(),
+    );
+    assert!(x.committed(), "{:?}", x.result.reason);
+
+    let live = Parameters::read(&x.state);
+    assert_eq!(live.attention_kappa(), 2.0);
+    assert_eq!(a.cost_under(&live), 24.0);
+    assert_ne!(a.cost_under(&live), a.cost_under(&genesis), "not shadowed by a constant");
+
+    // ★★ And the coefficient reaches the ENFORCEMENT, not just the arithmetic:
+    // a budget that afforded this attention at genesis kappa refuses it now.
+    let pair = Attention::declared(narrow(), broad(), 100.0, &genesis).unwrap();
+    let mut b = budget(pair.cost_under(&genesis));
+    assert!(b.clone().spend(&pair, &genesis).spent(), "affordable at genesis");
+    assert!(!b.spend(&pair, &live).spent(), "and refused at the governed value");
 }

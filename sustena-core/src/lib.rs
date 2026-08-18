@@ -298,7 +298,9 @@ pub use operator::{
     Registry,
 };
 pub use capability::{Amplification, Attenuation, Capability, Rights};
-pub use agent::{Agent, Considered, MemeTrustPolicy, Reasoning, Warrant, WarrantError};
+pub use agent::{
+    Agent, Attending, Considered, MemeTrustPolicy, Reasoning, Warrant, WarrantError,
+};
 pub use learned::{
     BoundError, FixedRule, IngressBound, LearnedRule, RuleSet, RuleTrust, Screening, TrustPolicy,
 };
@@ -341,8 +343,8 @@ pub use strategy::{
     StrategyError, StrategyGraph, StrategyNode, Walk, WalkOutcome,
 };
 pub use attention::{
-    broad_scan, narrow_scan, scan, Aperture, Attention, AttentionError, Reframing, Scan,
-    Score, Stance,
+    broad_scan, narrow_scan, scan, Aperture, Attended, Attention, AttentionBudget, AttentionError,
+    AttentionSpend, AttentionSpending, Reframing, Scan, Score, Stance,
 };
 pub use models::{
     Agreement, EffectiveN, Fidelity, ModelAgreement, Projection, SelfModel, WorldModel,

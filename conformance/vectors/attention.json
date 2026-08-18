@@ -3,16 +3,16 @@
   "slice": "attention",
   "phase": "R2",
   "authored_from": "Articles (Serious)/technical/3B1B — Operative - Formal Execution.md, §V (attention = ⟨narrow, broad⟩, the ⟨b,d,ρ⟩ meter, path-with-fringes); Ashby's law of requisite variety; Cowan 2001 for the hold this composes with",
-  "replayed_by": ["rust"],
+  "replayed_by": [
+    "rust"
+  ],
   "note": "★★ Reference-less: the two-attention shape exists in the reference **only by convention** and is undeclared. So the counterweight is not a parity grep but **internal consistency** — three constraints already built here that this row had to stay true to.",
-
   "★★★_the_STEP_0_constraint_that_replaces_the_missing_counterweight": {
     "the_risk": "★★★ The salience family closed rival-importance on **four** surfaces — brightness (MON-7), score (UI-1/UI-7), position (UI-13), exemption (CTL-8). A **scoring** attention is exactly where a fifth could open: an operative that could raise its own narrow score would have a rival notion of *important* sitting beside `d(s,V)`, which is the one thing this codebase has spent four slices making impossible.",
     "★★★_the_enforcement": "`Score` has **no public constructor and no public fields**. The only way to obtain one is `narrow_scan`, which computes `value` from `Region::distance` — the household's own `d(s,V)` — and nowhere else. An operative cannot mint a score, cannot raise its own, and has **no field anywhere** in which to declare a rival metric. Same mechanism as `VisualSpec` (MON-7) and `Capability` (IMM-7), applied to the fifth surface. ★ The absence is checked too: a sustain whose state cannot be read yields **no score**, not a fabricated zero.",
     "★_and_the_stance_is_read_not_declared": "★ A second, smaller version of the same discipline: `Aperture::stance()` classifies narrow-vs-broad **off `⟨b,d,ρ⟩` itself**, so an operative cannot call a broad aperture *narrow* by saying so — there is no field to say it in. Which matters, because *both non-empty* is enforced by comparing stances.",
     "the_three_internal_constraints_this_row_leaned_on": "★ In place of a parity half: **(1)** `d(s,V)` and the four-surface salience family — attention must consume the one urgency, not rival it. **(2)** The `⊕` composition tree — depth's substrate already exists as `MonitorEngine`'s parent relation, the same structure `holarchy::escalate` climbs, so no parallel tree was introduced. **(3)** UI-1's `K ≈ 4` — attention's footprint is what may enter the hold, so the two had to compose rather than compete."
   },
-
   "divergence": {
     "kind": "rust-only-spec",
     "statement": "R2, reference-less. The two-attention shape exists in the reference **as a convention rather than a declaration**: `should_evaluate()` is documented *'ALWAYS cheap: threshold check only, zero LLM calls'* against an expensive `evaluate()` — a genuine cheap-scan / costly-look split, honoured by discipline and 27 grep hits. But there is no aperture, no `⟨b,d,ρ⟩`, no cost function, no reframing type, and nothing structural preventing an operative from having only one of the two.",
@@ -33,9 +33,8 @@
       "resolution (15 hits, none the ρ axis)": "Path resolution, placeholder resolution, `MergeResolution`. Different word entirely.",
       "★ should_evaluate (27 hits, and it is the REAL one)": "★ The opposite of a false positive and the counterweight's own evidence: the cheap-scan discipline, documented and honoured. Named so it is not overlooked while the noisier greps are being dismissed."
     },
-    "the_honest_limits": "★★ **`B_att` IS A NUMBER, NOT A BALANCE** — the cost function `κ·b·d·ρ` and the bound are real and enforced, but `κ` is **declared and uncalibrated** (exactly like `pawa_meter`'s own coefficients, and stated in the same words) and the budget is a `usize` a caller supplies. Wiring it to a real juul balance is economy-adjacent and parked with juul-spending; **the cost DISCIPLINE is this slice, the money is not**. · ★★ **THE STANCE BOUNDARY IS A DECLARED HEURISTIC** — `b > d·ρ` separates *many things glanced at* from *few things closely*. It is a modelling choice, not a derivation, and it is named as one rather than presented as falling out of §V; what §V does give is that the two are **regions**, and that is what the code encodes. · ★ **THE PATH DESCENDS INTO THE FIRST CHILD** — one child per level is what makes the walk linear, and *which* child is currently the tree's own order rather than a chosen one. A caller wanting the most-urgent child would need the scores the scan produces, which is a real follow-on and is named rather than silently defaulted into. · ★ **BROAD REPORTS THE FIRST FRAME CHANGE, NOT ALL OF THEM** — one reframing trigger is enough to say *the frame you were scoring in has changed*; enumerating every breach would be a second scoring pass wearing a different name. · ★★ **NOTHING CALLS ATTENTION FROM AN OPERATIVE YET** — `ω` still has no `attention` field, for the same reason it had no `Π` slot: *a declared-but-inert field reads as built*. Wiring `⟨narrow, broad⟩` onto `Operative` belongs with the row that gives it a caller, and the same is true of feeding the scan's footprint into `compose_view`'s candidate pool."
+    "the_honest_limits": "★★ **`B_att` IS NOW A BALANCE — the limit this vector used to record is CLOSED** (2026-08-18, see the addendum above). `AttentionBudget` makes it a real spendable quantity: `spent` is the fold of an append-only spend list, `spent + remaining == allocated` holds by construction, an unaffordable attention is **refused** (never clamped — clamping is *unsound* here, and proven so), and a refusal appends nothing. `κ_att` is **governed** (PAWA-11) and the module constant was **deleted**. ★★ **WHAT STAYS TRUE**: `κ_att` is still **declared and uncalibrated** — an attention unit and a compute unit are the same word on two unmeasured scales — and **`B_att` is still not denominated in juul**. Bridging them needs `κ_att` and `κ_c` calibrated *against each other*, which neither is, so an exchange rate today would be a made-up number between two declared ones. Parked with the calibration, and named rather than half-wired. ★ **AND THE ALLOCATION IS THE HOST'S**, per operative, deliberately not governed — see the addendum. · ★★ **THE STANCE BOUNDARY IS A DECLARED HEURISTIC** — `b > d·ρ` separates *many things glanced at* from *few things closely*. It is a modelling choice, not a derivation, and it is named as one rather than presented as falling out of §V; what §V does give is that the two are **regions**, and that is what the code encodes. · ★ **THE PATH DESCENDS INTO THE FIRST CHILD** — one child per level is what makes the walk linear, and *which* child is currently the tree's own order rather than a chosen one. A caller wanting the most-urgent child would need the scores the scan produces, which is a real follow-on and is named rather than silently defaulted into. · ★ **BROAD REPORTS THE FIRST FRAME CHANGE, NOT ALL OF THEM** — one reframing trigger is enough to say *the frame you were scoring in has changed*; enumerating every breach would be a second scoring pass wearing a different name. · ★★ **ATTENTION IS NOW CALLED FROM AN OPERATIVE — this limit is also CLOSED**, by the agent-wiring slice: `Agent` holds `⟨narrow, broad⟩` as a required field and `Agent::act` genuinely runs both scans, with what attention chose becoming what `Π` is triggered with. Corrected here because it was still recorded as open, and a stale limit is worse than a missing one. ★ **WHAT STAYS TRUE**: the scan's footprint still does **not** feed `compose_view`'s candidate pool — that composition is real, named in the original limit, and still unbuilt."
   },
-
   "both_attentions_cases": [
     {
       "name": "★★★_an_attention_carries_both_and_there_is_no_way_to_declare_one",
@@ -58,7 +57,6 @@
       "expect": "⟨1,3,4⟩ narrow, ⟨12,1,1⟩ broad"
     }
   ],
-
   "closed_trade_cases": [
     {
       "name": "★★_deep_and_narrow_costs_the_same_as_broad_and_shallow",
@@ -76,7 +74,6 @@
       "expect": "Err(OverBudget)"
     }
   ],
-
   "path_not_subtree_cases": [
     {
       "name": "★★★_the_scan_is_a_path_with_fringes_and_visits_at_most_b_times_d",
@@ -94,7 +91,6 @@
       "expect": "visited empty, reached_depth = 0"
     }
   ],
-
   "two_output_types_cases": [
     {
       "name": "★★★_narrow_returns_a_Score_and_it_comes_from_d_s_V",
@@ -117,12 +113,88 @@
       "expect": "FrameHolds when every breach is inside the task branch"
     }
   ],
-
   "footprint_cases": [
     {
       "name": "★_the_scan_footprint_can_be_wide_while_the_hold_stays_four",
       "why": "★ The reconcile with UI-1, in one sentence: **anything can scan widely and hold four; nothing can hold widely.** Pawa bounds the *scan* — what may be looked at this period — and `K ≈ 4` bounds the *hold*. The footprint is the set attention visited, and it is what may enter the knapsack; the knapsack's own bound is unchanged by how widely the sweep went. Two budgets over two different things, composing rather than competing.",
       "expect": "footprint wider than the hold; DEFAULT_BUDGET still 4"
+    }
+  ],
+  "★★★_the_B_att_addendum_2026_08_18": {
+    "what_this_addendum_closes": "OPV-7 recorded two residuals that are now FALSE, and a stale limit is worse than a missing one — so both are corrected here rather than quietly dropped. (1) **`B_att` WAS A NUMBER, NOT A BALANCE.** The cost function and a declaration-time bound were real, but nothing was ever SPENT: a second scan cost exactly what the first did, and an operative could attend without limit. That is the same shape of lie as a `debit(amount)` with no reading behind it, and it is closed the same way — `AttentionBudget` makes `B_att` a real spendable quantity. (2) **NOTHING CALLED ATTENTION FROM AN OPERATIVE.** That was closed earlier, by the agent-wiring slice: `Agent` holds `⟨narrow, broad⟩` and `Agent::act` genuinely runs both scans. It is corrected here because it was still recorded as open.",
+    "★★★_the_identity_holds_BY_CONSTRUCTION_not_by_check": "`spent` is the FOLD of an append-only spend list and `remaining` is `allocated - spent`, so `spent + remaining == allocated` is true BY THE SHAPE OF THE TYPE. There is no stored `spent` field that could drift from the spends that produced it — the same discipline as `state = fold(events)` and `JuulLedger`'s balance, one layer up. It is asserted as an EQUATION over a real sequence of spends and refusals, at every step, not spot-checked at the end.",
+    "★★★_REFUSED_NEVER_CLAMPED_and_the_reason_is_STRUCTURAL": "The obvious alternative is to clamp — shrink an axis until the aperture fits. It is rejected, and NOT on taste. `Aperture::stance` classifies by `b > d*rho`, so lowering `rho` or `d` CAN FLIP A NARROW APERTURE TO BROAD — and `Attention::declared` exists to refuse a pair that is ONE REGION TWICE, because declaring the same aperture under two names is the partition of the council arriving through the back door. A clamp could therefore silently produce exactly the attention this module already forbids anyone from declaring. So clamping is UNSOUND HERE, not merely unspecified — and that is proven by a case that flips a real stance, not argued. ★ And the operative is TOLD: an unaffordable turn returns `Reasoning::AttentionUnaffordable` rather than quietly scanning less than it declared. Silently over-served and silently under-served are the same defect wearing different signs.",
+    "★★_kappa_att_is_now_GOVERNED_and_the_constant_was_DELETED": "`attention::KAPPA` was a module constant read by `Aperture::cost()`. One row after PAWA-11 deleted `pawa::compute_pawa` and both its constants for exactly this reason, leaving a third in place would have been an inconsistency to explain away. So `KAPPA` was DEMOTED to `Parameters::GENESIS_ATTENTION_KAPPA` and `Aperture::cost()` REMOVED OUTRIGHT in favour of `cost_under(&Parameters)`. NO PATH PRICES AN APERTURE FROM A CONSTANT. ★ The genesis value is `1.0`, exactly the constant it replaced, so every already-declared aperture costs what it always did — the whole pre-existing suite passes unchanged, which is the parity evidence. ★ TWO CONSEQUENT DELETIONS, both the same one-truth move one level down: `Scan.cost: usize` became `Scan.aperture` plus `cost_under`, and `SelfModel`'s `attention_budget: usize` field — which stored the COST and called it the BUDGET, a naming defect that only became visible once a real budget existed — was removed rather than renamed, replaced by the attention itself plus `attention_cost_under`.",
+    "★_what_is_governed_and_what_is_deliberately_NOT": "GOVERNED: `kappa_att`, because it is a coefficient of the cost MODEL and one number is the right number. NOT GOVERNED: the ALLOCATION. How much attention THIS operative gets THIS period is a policy that legitimately differs between operatives, so a single governed scalar would be the wrong shape — the same judgement PAWA-8 made about its `Schedule` type. It is host-supplied per operative, and said so rather than defaulted into a global number nobody chose. ★★ AND A REAL LIMIT OF THE GOVERNED HALF: `ParameterSpec` expresses BOUNDED, not POSITIVE, so a governed `kappa_att` of ZERO makes every scan free and the budget vacuous. Note the asymmetry with `issuance_rate`, where zero is a SAFE policy (create no money) while here it DISABLES AN ENFORCEMENT MECHANISM. What can still be said is that it would be a VISIBLE change — gated, recorded, replayable — rather than a source edit."
+  },
+  "b_att_cases": [
+    {
+      "name": "the_budget_identity_holds_as_an_equation_over_a_real_sequence",
+      "why": "★★★ `spent + remaining == allocated`, asserted AT EVERY STEP of a real sequence of spends and refusals rather than once at the end — because an identity that only holds at the end is a coincidence. `spent` is the fold of the append-only spend list, so there is no stored total to drift, and `spends().len()` is asserted alongside so a refusal is visibly not an entry.",
+      "expect": {
+        "identity": "spent + remaining == allocated",
+        "checked": "every step"
+      }
+    },
+    {
+      "name": "an_unaffordable_attention_is_refused_and_the_budget_is_byte_identical",
+      "why": "★★ The same honest-refusal shape as `Charge::Insufficient`: `OverBudget` reports both numbers so a caller can say HOW MUCH SHORT, and NOTHING IS APPENDED — the budget is compared byte-for-byte before and after, not just by its remaining figure.",
+      "expect": {
+        "spent": false,
+        "budget": "unchanged",
+        "shortfall": "reported"
+      }
+    },
+    {
+      "name": "clamping_is_unsound_because_it_can_flip_a_stance",
+      "why": "★★★ THE REASON THE POLICY IS REFUSE, PROVEN RATHER THAN ARGUED. A real declared two-region pair is taken, and the narrow aperture's `rho` is lowered exactly as a clamp would — and its `stance()` FLIPS to Broad. A clamped attention would then be Broad twice, which `Attention::declared` refuses outright as `NotTwoRegions`. So clamping could silently produce the one attention this module forbids anyone from declaring: unsound, not merely unspecified.",
+      "expect": {
+        "before": "Narrow",
+        "after_clamp": "Broad",
+        "pair_would_be": "NotTwoRegions"
+      }
+    },
+    {
+      "name": "there_is_no_spend_amount_so_a_cost_cannot_be_invented",
+      "why": "★★★ Structural, and the same mechanism as `charge(&PawaReading)` and `issue(&PawaReading)` one layer down: `spend` takes an `Attention`, which cannot be constructed except through `Attention::declared` — which already refuses a one-region pair and an unaffordable one. So every spend is backed by a real, well-formed attention, and each recorded spend NAMES the attention it paid for, so WHAT WAS THIS SPENT ON stays answerable.",
+      "expect": {
+        "spend_takes": "Attention",
+        "record_names": "the attention"
+      }
+    },
+    {
+      "name": "an_agent_that_cannot_afford_to_look_does_not_look_and_says_so",
+      "why": "★★★ The wiring, not just the type. `Agent::act_within` charges `B_att` BEFORE either scan runs, so an exhausted budget stops the turn with `Reasoning::AttentionUnaffordable` carrying both numbers — a FIFTH honest outcome, distinct from `NothingInView`, because an exhausted budget and an empty household are different facts about a turn. ★ The order is deliberate: the charge comes before broad attention's word, since a turn that could not afford to look has not discovered that the frame holds — it has discovered nothing.",
+      "expect": {
+        "reasoning": "AttentionUnaffordable",
+        "scanned": "nothing",
+        "ran": false
+      }
+    },
+    {
+      "name": "attention_is_charged_once_for_the_pair_not_once_per_aperture",
+      "why": "★★ The two attentions are ONE MIND'S. Billing them separately would let a turn afford narrow, spend it, and then discover it could not afford broad — leaving the operative with exactly the half-mind OPV-7's two-required-fields rule exists to prevent. Asserted as an exact figure: one turn spends `narrow + broad`, and the budget records ONE spend, not two.",
+      "expect": {
+        "spends": 1,
+        "cost": "narrow + broad"
+      }
+    },
+    {
+      "name": "an_unbudgeted_agent_is_byte_identical_to_before_this_row",
+      "why": "★★ The delegating-variant compatibility pattern, for the fourth time (`run`/`run_with_effect`/`run_under`, `execute_admitted`/`execute_afforded`, and now `act`/`act_within`). `Agent::act` delegates with `AttentionSpending::Unbudgeted`, so every pre-existing caller and every R1 vector is unchanged — and the refusal branch is asserted UNREACHABLE under `Unbudgeted` rather than assumed, by running an agent whose attention costs more than any budget would allow and confirming it still reasons.",
+      "expect": {
+        "unbudgeted": "vacuous",
+        "identical": true
+      }
+    },
+    {
+      "name": "the_governed_kappa_is_what_prices_an_aperture_and_no_constant_remains",
+      "why": "★★★ The one-truth proof, one level up from PAWA-11's. The genesis `kappa_att` prices exactly as the deleted constant did (`1.0`, so `<1,4,3>` still costs 12). Then a REAL gated `governance.set_parameter` doubles it, the parameters are READ BACK OUT OF THE RESULTING STATE, and the same aperture costs twice as much — asserted as an inequality against the genesis pricing, so nothing could be silently shadowing it. And a budget that afforded the attention at genesis kappa REFUSES it at the governed one, which is the coefficient reaching the enforcement rather than just the arithmetic.",
+      "expect": {
+        "genesis": 12.0,
+        "governed": 24.0,
+        "then_refused": true
+      }
     }
   ]
 }

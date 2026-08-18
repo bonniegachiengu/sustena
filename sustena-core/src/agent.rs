@@ -123,7 +123,9 @@ use std::collections::BTreeSet;
 use serde_json::{Map, Value};
 
 use crate::approval::EffectClass;
-use crate::attention::{broad_scan, narrow_scan, scan, Attention, Reframing, Scan, Score};
+use crate::attention::{
+    broad_scan, narrow_scan, scan, Attended, Attention, AttentionSpending, Reframing, Scan, Score,
+};
 use crate::capability::{Amplification, Attenuation, Capability, Rights};
 use crate::learning::{learn, Feedback, LearningRound, LibraryError, MemeLibrary, MemeProvenance, VaryOp};
 use crate::models::SelfModel;
@@ -155,6 +157,18 @@ pub enum Reasoning {
     /// `Π` ran. `focus` is the sustain narrow attention ranked worst-first, and
     /// its `urgency` is `d(s,V)` — the one urgency, not a rival.
     Reasoned { focus: String, urgency: f64, walk: Box<Walk> },
+    /// ★★★ `B_att` could not cover this turn's attention, so **nothing was
+    /// scanned and nothing ran**.
+    ///
+    /// The fifth honest outcome, and it is a **refusal rather than a clamp**:
+    /// shrinking an axis to fit could flip an aperture's
+    /// [`Stance`](crate::attention::Stance) and silently produce the
+    /// one-region-twice attention [`Attention::declared`] exists to forbid. An
+    /// operative that is told it cannot afford to look is in a different
+    /// position from one quietly given a narrower view and left believing it
+    /// looked — *silently over-served* and *silently under-served* are the same
+    /// defect wearing different signs.
+    AttentionUnaffordable { cost: f64, remaining: f64 },
 }
 
 impl Reasoning {
@@ -178,6 +192,33 @@ impl Reasoning {
             Reasoning::Reasoned { focus, urgency, walk } => {
                 format!("reasoned about '{focus}' (d(s,V) = {urgency}): {:?}", walk.outcome)
             }
+            Reasoning::AttentionUnaffordable { cost, remaining } => format!(
+                "did not look: this attention costs {cost} and {remaining} of B_att is left"
+            ),
+        }
+    }
+}
+
+/// Whether the turn could afford to look, and what it found if it could.
+///
+/// ★ A **third answer**, not a `None`: *nothing was in view* and *I could not
+/// afford to look* are different facts about a turn, and collapsing them would
+/// make an exhausted budget indistinguishable from an empty household.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Attending {
+    /// The attention was paid for (or none was in force), and here is what it
+    /// found.
+    Attended(Considered),
+    /// ★★ `B_att` could not cover it, so **neither aperture ran**.
+    Unaffordable { cost: f64, remaining: f64 },
+}
+
+impl Attending {
+    /// What was found, if the turn could afford to look.
+    pub fn considered(&self) -> Option<&Considered> {
+        match self {
+            Attending::Attended(c) => Some(c),
+            Attending::Unaffordable { .. } => None,
         }
     }
 }
@@ -351,13 +392,58 @@ impl Agent {
         task_branch: &BTreeSet<&str>,
         state_of: impl Fn(&str) -> Option<Value>,
     ) -> Considered {
+        match self.consider_within(
+            &mut AttentionSpending::Unbudgeted,
+            engine,
+            from,
+            region,
+            task_branch,
+            state_of,
+        ) {
+            Attending::Attended(c) => c,
+            // ★ Unreachable under `Unbudgeted`: the clause is vacuous, so there
+            // is nothing to be over. Pinned by a test rather than assumed.
+            Attending::Unaffordable { cost, remaining } => {
+                unreachable!("Unbudgeted cannot refuse: cost {cost}, remaining {remaining}")
+            }
+        }
+    }
+
+    /// ★★★ Look, **paying for it**.
+    ///
+    /// The attention is charged against `B_att` **before either scan runs**, so
+    /// an operative that cannot afford to look does not look — the budget is
+    /// not a report written after the fact.
+    ///
+    /// ★★ Charged **once per turn for the pair**, not once per aperture: the
+    /// two attentions are one mind's, `Attention::cost_under` is their sum, and
+    /// billing them separately would let a turn afford narrow, spend it, and
+    /// then discover it could not afford broad — leaving the operative with
+    /// exactly the half-mind OPV-7's *two required fields* exist to prevent.
+    pub fn consider_within(
+        &self,
+        spending: &mut AttentionSpending<'_>,
+        engine: &MonitorEngine,
+        from: &str,
+        region: &Region,
+        task_branch: &BTreeSet<&str>,
+        state_of: impl Fn(&str) -> Option<Value>,
+    ) -> Attending {
+        if let AttentionSpending::Budgeted { budget, parameters } = spending {
+            if let Attended::OverBudget { cost, remaining } =
+                budget.spend(&self.attention, parameters)
+            {
+                return Attending::Unaffordable { cost, remaining };
+            }
+        }
+
         let narrow = scan(engine, from, self.attention.narrow());
         let ranked = narrow_scan(&narrow, region, &state_of);
 
         let broad = scan(engine, from, self.attention.broad());
         let reframing = broad_scan(&broad, region, task_branch, &state_of);
 
-        Considered { scan: narrow, ranked, reframing }
+        Attending::Attended(Considered { scan: narrow, ranked, reframing })
     }
 
     // ── authority ────────────────────────────────────────────────────────────
@@ -415,7 +501,52 @@ impl Agent {
         enforcement: &Enforcement,
         state: &Value,
     ) -> Reasoning {
-        let considered = self.consider(engine, from, region, task_branch, &state_of);
+        self.act_within(
+            &mut AttentionSpending::Unbudgeted,
+            meme_id,
+            warrant,
+            engine,
+            from,
+            region,
+            task_branch,
+            state_of,
+            registry,
+            allowed,
+            enforcement,
+            state,
+        )
+    }
+
+    /// ★★★ The one path, **under a real attention budget**.
+    ///
+    /// Identical to [`Agent::act`] except that looking costs something. ★ The
+    /// order matters and is deliberate: **`B_att` is charged first**, before
+    /// broad attention gets its word, because a turn that cannot afford to look
+    /// has not discovered that the frame holds — it has discovered nothing.
+    #[allow(clippy::too_many_arguments)]
+    pub fn act_within(
+        &self,
+        spending: &mut AttentionSpending<'_>,
+        meme_id: &str,
+        warrant: Warrant<'_>,
+        engine: &MonitorEngine,
+        from: &str,
+        region: &Region,
+        task_branch: &BTreeSet<&str>,
+        state_of: impl Fn(&str) -> Option<Value>,
+        registry: &Registry,
+        allowed: &[String],
+        enforcement: &Enforcement,
+        state: &Value,
+    ) -> Reasoning {
+        // 1 — pay to look, or do not look.
+        let considered =
+            match self.consider_within(spending, engine, from, region, task_branch, &state_of) {
+                Attending::Attended(c) => c,
+                Attending::Unaffordable { cost, remaining } => {
+                    return Reasoning::AttentionUnaffordable { cost, remaining }
+                }
+            };
 
         // 2 — broad attention has the first word.
         if considered.reframing.triggered() {
@@ -509,6 +640,7 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::governance::Parameters;
     use crate::attention::Aperture;
     use crate::detect::CusumSpec;
     use crate::ensemble::ModelTemplate;
@@ -541,7 +673,8 @@ mod tests {
         Attention::declared(
             Aperture::declared(2, 3, 2).unwrap(),
             Aperture::declared(12, 1, 1).unwrap(),
-            100,
+            100.0,
+            &Parameters::genesis(),
         )
         .unwrap()
     }
@@ -853,7 +986,10 @@ mod tests {
         let a = agent();
         let m = a.self_model("m0", &["household"]).unwrap();
         assert_eq!(m.operative_id(), "mentor");
-        assert_eq!(m.attention_budget(), a.attention().cost());
+        assert_eq!(
+        m.attention_cost_under(&Parameters::genesis()),
+        a.attention().cost_under(&Parameters::genesis())
+    );
         assert_eq!(m.objectives(), a.operative().utility().m());
         assert!(a.self_model("nope", &["household"]).is_none());
     }

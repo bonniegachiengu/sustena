@@ -278,8 +278,17 @@ pub struct SelfModel {
     moves: BTreeSet<String>,
     /// `|u_i|`.
     objectives: usize,
-    /// `V̂_i` — the operative's own viability: what it must not spend past.
-    attention_budget: usize,
+    /// ★★ The operative's own **attention**, so its per-turn spend is
+    /// derivable under the governed `κ_att` (OPV-7 / B_att).
+    ///
+    /// ★ This field used to be `attention_budget: usize` holding
+    /// `attention.cost()` — *the cost*, named *the budget*. With `B_att` now a
+    /// real spendable [`AttentionBudget`](crate::attention::AttentionBudget)
+    /// the two are genuinely different things, so the misnamed field was
+    /// **removed** rather than renamed: `V̂_i` is what bounds the spend and
+    /// lives with the budget, and what a self-model knows is what the operative
+    /// costs to run.
+    attention: Attention,
 }
 
 impl SelfModel {
@@ -295,7 +304,7 @@ impl SelfModel {
             boundary: boundary.iter().map(|s| (*s).to_string()).collect(),
             moves: strategy.moves().into_iter().map(str::to_string).collect(),
             objectives: operative.utility().m(),
-            attention_budget: attention.cost(),
+            attention: *attention,
         }
     }
 
@@ -315,8 +324,14 @@ impl SelfModel {
         self.objectives
     }
 
-    pub fn attention_budget(&self) -> usize {
-        self.attention_budget
+    /// The operative's declared attention.
+    pub fn attention(&self) -> &Attention {
+        &self.attention
+    }
+
+    /// What one turn of attending costs it, under the governed `κ_att`.
+    pub fn attention_cost_under(&self, parameters: &crate::governance::Parameters) -> f64 {
+        self.attention.cost_under(parameters)
     }
 
     /// ★★★ CELL's recursion, honestly: the operative-as-a-Sustain is itself
@@ -404,6 +419,7 @@ impl Agreement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::governance::Parameters;
     use crate::attention::Aperture;
     use crate::ensemble::Prob;
     use crate::operative::{Cynefin, Objective, Sense, Utility};
@@ -451,7 +467,8 @@ mod tests {
         Attention::declared(
             Aperture::declared(1, 3, 4).unwrap(),
             Aperture::declared(12, 1, 1).unwrap(),
-            100,
+            100.0,
+            &Parameters::genesis(),
         )
         .unwrap()
     }
@@ -469,7 +486,10 @@ mod tests {
             m.moves(),
             &strategy().moves().into_iter().map(str::to_string).collect::<BTreeSet<_>>()
         );
-        assert_eq!(m.attention_budget(), attention().cost());
+        assert_eq!(
+            m.attention_cost_under(&Parameters::genesis()),
+            attention().cost_under(&Parameters::genesis())
+        );
     }
 
     #[test]

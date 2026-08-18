@@ -75,6 +75,7 @@ pub struct Parameters {
     kappa_compute: f64,
     kappa_storage: f64,
     issuance_rate: f64,
+    attention_kappa: f64,
 }
 
 impl Parameters {
@@ -94,6 +95,14 @@ impl Parameters {
     /// since an ungoverned rate is the Sybil-profitable inflation MYC-6 warned
     /// of.
     pub const GENESIS_ISSUANCE_RATE: f64 = 0.0;
+    /// ★★ `κ_att` — OPV-7's attention coefficient, `pawa(a) = κ·b·d·ρ`. Its
+    /// genesis value is **`1.0`, exactly the constant it replaces**, so the
+    /// cost of every already-declared aperture is unchanged.
+    ///
+    /// Still **uncalibrated**, in the same words as `κ_c`: an attention unit
+    /// and a compute unit are the same word on two unmeasured scales, and
+    /// saying so is the honest position. See [`crate::attention`].
+    pub const GENESIS_ATTENTION_KAPPA: f64 = 1.0;
 
     /// The declared genesis parameters — what `Σ_gov` opens with.
     pub fn genesis() -> Parameters {
@@ -101,6 +110,7 @@ impl Parameters {
             kappa_compute: Self::GENESIS_KAPPA_COMPUTE,
             kappa_storage: Self::GENESIS_KAPPA_STORAGE,
             issuance_rate: Self::GENESIS_ISSUANCE_RATE,
+            attention_kappa: Self::GENESIS_ATTENTION_KAPPA,
         }
     }
 
@@ -121,6 +131,7 @@ impl Parameters {
             kappa_compute: get(KAPPA_COMPUTE, Self::GENESIS_KAPPA_COMPUTE),
             kappa_storage: get(KAPPA_STORAGE, Self::GENESIS_KAPPA_STORAGE),
             issuance_rate: get(ISSUANCE_RATE, Self::GENESIS_ISSUANCE_RATE),
+            attention_kappa: get(ATTENTION_KAPPA, Self::GENESIS_ATTENTION_KAPPA),
         }
     }
 
@@ -143,6 +154,13 @@ impl Parameters {
         self.issuance_rate
     }
 
+    /// ★★ `κ_att` — the coefficient in `pawa(a) = κ·b·d·ρ` (OPV-7), and the
+    /// **only** place it lives. [`crate::attention::Aperture`] has no constant
+    /// left to read, so an aperture can only be priced from here.
+    pub fn attention_kappa(&self) -> f64 {
+        self.attention_kappa
+    }
+
     /// `pawa = κ_c·compute + κ_s·storage`, under **these** parameters.
     ///
     /// ★★★ The formula did not change; where its coefficients come from did.
@@ -159,6 +177,8 @@ pub const KAPPA_COMPUTE: &str = "kappa_compute";
 pub const KAPPA_STORAGE: &str = "kappa_storage";
 /// PAWA-8's issuance rate — juul minted per pawa served.
 pub const ISSUANCE_RATE: &str = "issuance_rate";
+/// OPV-7's attention coefficient — `pawa(a) = κ·b·d·ρ`.
+pub const ATTENTION_KAPPA: &str = "attention_kappa";
 
 /// The parameters this row governs, with their declared bounds.
 ///
@@ -178,6 +198,16 @@ pub fn declared_parameters() -> Vec<ParameterSpec> {
         // and an UNBOUNDED rate is precisely the Sybil-profitable inflation
         // MYC-6 named. Non-negative for the same reason κ is.
         ParameterSpec::declared(ISSUANCE_RATE, Parameters::GENESIS_ISSUANCE_RATE, 0.0, 10.0)
+            .expect("the genesis value is within its own bounds"),
+        // ★ Bounded like the other coefficients. ★★ Note the honest limit:
+        // `ParameterSpec` expresses *bounded*, not *positive*, so a governed
+        // `κ_att` of ZERO makes every scan free and the attention budget
+        // vacuous. Recorded as a residual rather than hidden — but note the
+        // asymmetry with `issuance_rate`, where zero is a *safe* policy (create
+        // no money) while here it *disables an enforcement mechanism*. What
+        // this row can still say is that it would be a **visible** change:
+        // gated, recorded and replayable, rather than a source edit.
+        ParameterSpec::declared(ATTENTION_KAPPA, Parameters::GENESIS_ATTENTION_KAPPA, 0.0, 1_000.0)
             .expect("the genesis value is within its own bounds"),
     ]
 }

@@ -937,6 +937,7 @@ impl LearningTrace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::governance::Parameters;
     use crate::attention::Aperture;
     use crate::operative::{Cynefin, Objective, Sense, Utility};
     use crate::region::Interval;
@@ -1011,7 +1012,8 @@ mod tests {
         Attention::declared(
             Aperture::declared(1, 3, 4).unwrap(),
             Aperture::declared(12, 1, 1).unwrap(),
-            100,
+            100.0,
+            &Parameters::genesis(),
         )
         .unwrap()
     }

@@ -44,6 +44,19 @@
 //! runs), **resolution** (how finely each visited sustain is sampled). Cost is
 //! `pawa(a) = κ·b·d·ρ`, bounded by `B_att`.
 //!
+//! ★★★ **And `B_att` is a BALANCE, not a number.** OPV-7 shipped the cost
+//! function and a declaration-time bound but nothing that was ever *spent*, so
+//! a second scan cost what the first did — a declared cost with nothing behind
+//! it. [`AttentionBudget`] closes that: `spent` is the **fold** of an
+//! append-only spend list, `spent + remaining == allocated` holds **by the
+//! shape of the type**, an unaffordable attention is **refused** (never
+//! clamped — see the type's docs for why clamping is *unsound*, not merely
+//! unspecified), and a refusal appends nothing.
+//!
+//! ★★ `κ_att` is **governed** (PAWA-11): the module constant was demoted to
+//! [`Parameters::GENESIS_ATTENTION_KAPPA`] and `Aperture::cost()` deleted, so
+//! **nothing prices an aperture from a constant**.
+//!
 //! ★ Depth is the genuinely new axis and it is a property of **position in the
 //! composition tree**, so it walks the real one: [`MonitorEngine`]'s parent
 //! chain, the same structure `holarchy::escalate` climbs. Escalation goes up;
@@ -88,13 +101,22 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
+use crate::governance::Parameters;
 use crate::monitor::MonitorEngine;
 use crate::region::Region;
 
-/// `κ` — the cost coefficient. **Declared, and uncalibrated**, exactly like
-/// `pawa_meter`'s own coefficients: there is no measurement behind the number
-/// yet, and saying so is the honest position.
-pub const KAPPA: usize = 1;
+// ★★★ **`κ` USED TO LIVE HERE AS A CONSTANT, AND B_ATT MOVED IT.**
+//
+// It is now [`Parameters::GENESIS_ATTENTION_KAPPA`] — *the value κ_att is
+// declared with at genesis*, not *the value it has* — and `Aperture::cost()`
+// was **removed outright** in favour of [`Aperture::cost_under`], which takes
+// the governed [`Parameters`]. The same demotion-and-deletion PAWA-11 applied
+// to `κ_c`/`κ_s`, for the same reason: a governed parameter cannot also be a
+// hardcoded const that silently overrides it.
+//
+// ★★ So **there is no path in this module that prices an aperture from a
+// constant**. The genesis value is `1.0`, exactly the constant it replaced, so
+// every already-declared aperture costs what it always did.
 
 /// Which region of the aperture space an aperture lands in.
 ///
@@ -111,12 +133,15 @@ pub enum Stance {
 }
 
 /// Why an attention could not be declared.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// ★ No `Eq` — [`AttentionError::OverBudget`] carries real-valued costs, since
+/// `κ_att` is a governed `f64` rather than the integer constant it replaced.
+#[derive(Debug, Clone, PartialEq)]
 pub enum AttentionError {
     /// An axis at zero is not an aperture — it is *look at nothing*.
     ZeroAxis { axis: &'static str },
     /// `κ·b·d·ρ` exceeds `B_att`.
-    OverBudget { cost: usize, budget: usize },
+    OverBudget { cost: f64, budget: f64 },
     /// ★★★ Both apertures land in the same region. Declaring one aperture
     /// under two names is the narrow/broad partition arriving through the back
     /// door, and §V is explicit that both belong to **one** mind.
@@ -173,16 +198,20 @@ impl Aperture {
         self.resolution
     }
 
-    /// `pawa(a) = κ·b·d·ρ`.
+    /// `pawa(a) = κ·b·d·ρ`, under the **governed** `κ_att`.
     ///
     /// ★ The **product** form is what makes the trade closed: under a fixed
     /// budget, raising one axis must be paid for by lowering another.
-    pub fn cost(&self) -> usize {
-        KAPPA * self.breadth * self.depth * self.resolution
+    ///
+    /// ★★ Takes the parameters rather than reading a constant, so the cost an
+    /// aperture is refused on is the same one it is charged.
+    pub fn cost_under(&self, parameters: &Parameters) -> f64 {
+        parameters.attention_kappa()
+            * (self.breadth * self.depth * self.resolution) as f64
     }
 
-    pub fn affordable(&self, budget: usize) -> bool {
-        self.cost() <= budget
+    pub fn affordable_under(&self, budget: f64, parameters: &Parameters) -> bool {
+        self.cost_under(parameters) <= budget
     }
 
     /// Which region this aperture lands in.
@@ -228,15 +257,21 @@ pub struct Attention {
 impl Attention {
     /// Declare both. Refuses a pair that is one region twice, and a pair whose
     /// **combined** spend exceeds the budget.
+    /// ★ Two different bounds, and both are real. **Here** the question is
+    /// *can this pair be afforded at all*, once, against a period's whole
+    /// allocation — a property of the declaration. [`AttentionBudget::spend`]
+    /// asks the other one: *can it be afforded now, given what has already
+    /// been spent* — a property of the sequence.
     pub fn declared(
         narrow: Aperture,
         broad: Aperture,
-        budget: usize,
+        budget: f64,
+        parameters: &Parameters,
     ) -> Result<Attention, AttentionError> {
         if narrow.stance() == broad.stance() {
             return Err(AttentionError::NotTwoRegions { both: narrow.stance() });
         }
-        let cost = narrow.cost() + broad.cost();
+        let cost = narrow.cost_under(parameters) + broad.cost_under(parameters);
         if cost > budget {
             return Err(AttentionError::OverBudget { cost, budget });
         }
@@ -251,15 +286,243 @@ impl Attention {
         &self.broad
     }
 
-    /// `pawa(narrow) + pawa(broad)`.
-    pub fn cost(&self) -> usize {
-        self.narrow.cost() + self.broad.cost()
+    /// `pawa(narrow) + pawa(broad)`, under the **governed** `κ_att`.
+    pub fn cost_under(&self, parameters: &Parameters) -> f64 {
+        self.narrow.cost_under(parameters) + self.broad.cost_under(parameters)
     }
 
     /// ★ Both regions are visited, by construction. Asserted as a set so the
     /// claim is checkable rather than argued.
     pub fn stances(&self) -> BTreeSet<Stance> {
         [self.narrow.stance(), self.broad.stance()].into_iter().collect()
+    }
+}
+
+// ── `B_att` — a real, spendable budget ───────────────────────────────────────
+
+/// One attention actually paid for.
+///
+/// ★★★ **`spend` takes an [`Attention`], not an amount** — the same discipline
+/// as [`charge(&PawaReading)`](crate::juul::JuulLedger::charge) and
+/// [`issue(&PawaReading)`](crate::juul::JuulLedger::issue), applied one layer
+/// up. There is **no `spend(amount)`** on the budget, and an `Attention` cannot
+/// be constructed except through [`Attention::declared`], which already refuses
+/// a one-region pair and an unaffordable one. So a spend is always backed by a
+/// real, well-formed attention, and **a cost cannot be invented**.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttentionSpend {
+    attention: Attention,
+    cost: f64,
+}
+
+impl AttentionSpend {
+    /// The attention this spend paid for — so *what was this spent on* stays
+    /// answerable, exactly as a [`Debit`](crate::juul::Entry::Debit) carries
+    /// the run that incurred it.
+    pub fn attention(&self) -> &Attention {
+        &self.attention
+    }
+
+    pub fn cost(&self) -> f64 {
+        self.cost
+    }
+}
+
+/// What a spend against `B_att` did.
+///
+/// ★★ `OverBudget` is a **normal outcome, not an error** — the same shape as
+/// [`Charge::Insufficient`](crate::juul::Charge::Insufficient). It reports both
+/// numbers so a caller can say *how much short*, and **nothing is appended**,
+/// so the budget is byte-identical afterwards.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Attended {
+    /// Paid for, and here is what is left.
+    Spent { cost: f64, remaining: f64 },
+    /// ★★★ **Refused, not clamped** — and that is not a preference. See
+    /// [`AttentionBudget::spend`].
+    OverBudget { cost: f64, remaining: f64 },
+}
+
+impl Attended {
+    pub fn spent(&self) -> bool {
+        matches!(self, Attended::Spent { .. })
+    }
+
+    /// How far short a refusal was. `None` when it was paid.
+    pub fn shortfall(&self) -> Option<f64> {
+        match self {
+            Attended::OverBudget { cost, remaining } => Some(cost - remaining),
+            Attended::Spent { .. } => None,
+        }
+    }
+
+    pub fn describe(&self) -> String {
+        match self {
+            Attended::Spent { cost, remaining } => {
+                format!("attended at {cost}; {remaining} of B_att left")
+            }
+            Attended::OverBudget { cost, remaining } => {
+                format!("over B_att: this attention costs {cost} and {remaining} is left")
+            }
+        }
+    }
+}
+
+/// `B_att` — the attention budget, as a **real spendable quantity**.
+///
+/// ★★★ **The residual OPV-7 recorded, closed.** That row's own words were that
+/// `B_att` was *a number, not a balance*: the cost function and the
+/// declaration-time bound were real, but nothing was ever **spent**, so a
+/// second scan cost exactly what the first did and an operative could attend
+/// without limit. A cost with nothing behind it is the same shape of lie as
+/// PAWA-2's `debit(amount)` — and it is closed the same way.
+///
+/// ## ★★ The identity holds by construction, not by check
+///
+/// `spent` is the **fold of an append-only spend list** and `remaining` is
+/// `allocated − spent`, so
+///
+/// ```text
+/// spent + remaining == allocated
+/// ```
+///
+/// is true **by the shape of the type**. There is no stored `spent` field that
+/// could drift from the spends that produced it — the same discipline as
+/// `state = fold(events)` and [`JuulLedger`](crate::juul::JuulLedger)'s balance.
+///
+/// ## ★★★ Refused, never clamped — and the reason is structural
+///
+/// The obvious alternative is to *clamp*: shrink an axis until the aperture
+/// fits. It is rejected, and not on taste. [`Aperture::stance`] classifies by
+/// `b > d·ρ`, so **lowering `ρ` or `d` can flip a Narrow aperture to Broad** —
+/// and [`Attention::declared`] exists to refuse a pair that is **one region
+/// twice**, because *declaring the same aperture under two names is the
+/// partition of the council arriving through the back door*. A clamp could
+/// therefore silently produce exactly the attention the module already forbids
+/// anyone from declaring. It is proven, not argued: see the conformance case
+/// `clamping_is_unsound_because_it_can_flip_a_stance`.
+///
+/// ★ And the operative is told. An unaffordable attention stops the turn with
+/// [`Reasoning::AttentionUnaffordable`](crate::agent::Reasoning) rather than
+/// quietly scanning less than it declared — *silently over-served* and
+/// *silently under-served* are the same defect wearing different signs.
+///
+/// ## ★ The allocation is the host's, per operative — deliberately not governed
+///
+/// `κ_att` **is** governed (PAWA-11), because it is a coefficient of the cost
+/// *model* and one number is the right number. The **allocation** is not, and
+/// that is a judgement rather than an omission: how much attention *this*
+/// operative gets *this* period is a policy that legitimately differs between
+/// operatives, so a single governed scalar would be the wrong shape — the same
+/// reason PAWA-8's `Schedule` type is declared-at-spec rather than governed.
+///
+/// ★★ There is **no period here.** This core has no clock (ADR-0001), so it
+/// cannot know when a period turns; [`AttentionBudget::renew`] is the *host*
+/// saying one has.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttentionBudget {
+    allocated: f64,
+    spends: Vec<AttentionSpend>,
+}
+
+impl AttentionBudget {
+    /// Allocate `B_att` for a period.
+    ///
+    /// ★ Refuses a negative or non-finite allocation: a budget you are already
+    /// past before spending anything is not a budget. **Zero is allowed** and
+    /// is the honest *attend to nothing* — every spend is refused, visibly.
+    pub fn allocated(budget: f64) -> Option<AttentionBudget> {
+        if budget < 0.0 || !budget.is_finite() {
+            return None;
+        }
+        Some(AttentionBudget { allocated: budget, spends: Vec::new() })
+    }
+
+    /// `B_att`, as declared.
+    pub fn allocation(&self) -> f64 {
+        self.allocated
+    }
+
+    /// ★★ The **fold** — there is no stored total to drift.
+    pub fn spent(&self) -> f64 {
+        self.spends.iter().map(|s| s.cost).sum()
+    }
+
+    /// `allocated − spent`.
+    pub fn remaining(&self) -> f64 {
+        self.allocated - self.spent()
+    }
+
+    /// ★★★ Pay for one attention, or refuse.
+    ///
+    /// Takes the [`Attention`] itself, so the cost is always computed from a
+    /// real declared pair under the **governed** `κ_att` — the caller cannot
+    /// name a number. On refusal **nothing is appended**, so the budget is
+    /// unchanged and the identity still holds.
+    ///
+    /// ★ It never clamps; see the type's own docs for why that is unsound here
+    /// rather than merely unspecified.
+    pub fn spend(&mut self, attention: &Attention, parameters: &Parameters) -> Attended {
+        let cost = attention.cost_under(parameters);
+        let remaining = self.remaining();
+        if cost > remaining {
+            return Attended::OverBudget { cost, remaining };
+        }
+        self.spends.push(AttentionSpend { attention: *attention, cost });
+        Attended::Spent { cost, remaining: remaining - cost }
+    }
+
+    /// Every spend, in order — the record `spent()` folds.
+    pub fn spends(&self) -> &[AttentionSpend] {
+        &self.spends
+    }
+
+    /// ★ A fresh period at the same allocation.
+    ///
+    /// The core has **no clock**, so it cannot know when a period turns: this
+    /// is the host saying one has, exactly as `at` and `now` are host-supplied
+    /// everywhere else.
+    pub fn renew(&self) -> AttentionBudget {
+        AttentionBudget { allocated: self.allocated, spends: Vec::new() }
+    }
+
+    /// Load a host's durable copy. ★ The same door
+    /// [`JuulLedger::with_entries`](crate::juul::JuulLedger::with_entries) and
+    /// `NonceLedger::with_spent` open: the core holds the decision, the host
+    /// holds the durability.
+    pub fn with_spends<I: IntoIterator<Item = AttentionSpend>>(
+        budget: f64,
+        spends: I,
+    ) -> Option<AttentionBudget> {
+        let mut b = AttentionBudget::allocated(budget)?;
+        b.spends = spends.into_iter().collect();
+        Some(b)
+    }
+}
+
+/// Whether an attention budget is in force for one turn, and which.
+///
+/// ★★ `Unbudgeted` is the default for every caller written before this row,
+/// and it is named for the same reason
+/// [`Affordability::Unmetered`](crate::juul::Affordability::Unmetered),
+/// `Authorization::Unchecked` and `EffectClass::Unchecked` are: *a bypass that
+/// reads as ordinary is the problem; one that has to be spelled out is not.*
+/// An absent budget makes the clause **vacuous** — it does not fail closed to
+/// *attend to nothing*, because a host that has not allocated attention has not
+/// said the operative may look at nothing, it has said there is no budget in
+/// force.
+#[derive(Debug)]
+pub enum AttentionSpending<'a> {
+    /// No budget in force. Behaviour is byte-identical to before this row.
+    Unbudgeted,
+    /// Charge each turn's attention against this budget, at these parameters.
+    Budgeted { budget: &'a mut AttentionBudget, parameters: &'a Parameters },
+}
+
+impl AttentionSpending<'_> {
+    /// Whether a budget is in force at all.
+    pub fn budgeted(&self) -> bool {
+        matches!(self, AttentionSpending::Budgeted { .. })
     }
 }
 
@@ -316,13 +579,21 @@ impl Reframing {
 pub struct Scan {
     /// The sustains visited, in visit order — attention's **footprint**.
     pub visited: Vec<String>,
-    /// What it cost.
-    pub cost: usize,
+    /// ★★ The aperture this scan was run with — so the cost is **derivable
+    /// from the governed `κ_att`** rather than frozen at whatever the
+    /// coefficient happened to be. A stored number would be the shadow
+    /// constant this row exists to remove, one level down.
+    pub aperture: Aperture,
     /// How deep the path actually went (bounded by `d` and by the tree).
     pub reached_depth: usize,
 }
 
 impl Scan {
+    /// What this scan cost, under the governed `κ_att`.
+    pub fn cost_under(&self, parameters: &Parameters) -> f64 {
+        self.aperture.cost_under(parameters)
+    }
+
     /// ★ The footprint, as a set — what may enter the `K ≈ 4` hold.
     pub fn footprint(&self) -> BTreeSet<&str> {
         self.visited.iter().map(String::as_str).collect()
@@ -369,7 +640,7 @@ pub fn scan(engine: &MonitorEngine, from: &str, aperture: &Aperture) -> Scan {
         here = kids[0].to_string();
     }
 
-    Scan { visited, cost: aperture.cost(), reached_depth: reached }
+    Scan { visited, aperture: *aperture, reached_depth: reached }
 }
 
 /// Narrow: score the candidates the scan reached, from `d(s,V)`.
@@ -464,7 +735,7 @@ mod tests {
     #[test]
     fn an_attention_carries_both_and_there_is_no_way_to_declare_one() {
         // ★★★ Two required fields, no Option, no single-attention constructor.
-        let a = Attention::declared(narrow(), broad(), 100).unwrap();
+        let a = Attention::declared(narrow(), broad(), 100.0, &Parameters::genesis()).unwrap();
         assert_eq!(a.stances(), [Stance::Narrow, Stance::Broad].into_iter().collect());
     }
 
@@ -476,7 +747,7 @@ mod tests {
         assert_eq!(n1.stance(), Stance::Narrow);
         assert_eq!(n2.stance(), Stance::Narrow);
         assert_eq!(
-            Attention::declared(n1, n2, 1000),
+            Attention::declared(n1, n2, 1000.0, &Parameters::genesis()),
             Err(AttentionError::NotTwoRegions { both: Stance::Narrow })
         );
     }
@@ -507,25 +778,83 @@ mod tests {
         // the same spend and neither axis is free.
         let deep = Aperture::declared(1, 4, 3).unwrap();
         let wide = Aperture::declared(12, 1, 1).unwrap();
-        assert_eq!(deep.cost(), 12);
-        assert_eq!(wide.cost(), 12);
+        assert_eq!(deep.cost_under(&Parameters::genesis()), 12.0);
+        assert_eq!(wide.cost_under(&Parameters::genesis()), 12.0);
+    }
+
+    // ── B_att: a balance, not a number ───────────────────────────────────────
+
+    fn pair() -> Attention {
+        Attention::declared(narrow(), broad(), 100.0, &Parameters::genesis()).unwrap()
+    }
+
+    #[test]
+    fn spent_plus_remaining_is_always_the_allocation() {
+        let p = Parameters::genesis();
+        let a = pair();
+        let mut b = AttentionBudget::allocated(a.cost_under(&p) * 2.0).unwrap();
+        for _ in 0..3 {
+            b.spend(&a, &p);
+            assert_eq!(b.spent() + b.remaining(), b.allocation());
+        }
+        assert_eq!(b.spends().len(), 2, "the third did not fit and was not appended");
+    }
+
+    #[test]
+    fn a_refusal_leaves_the_budget_byte_identical() {
+        let p = Parameters::genesis();
+        let mut b = AttentionBudget::allocated(1.0).unwrap();
+        let before = b.clone();
+        assert!(!b.spend(&pair(), &p).spent());
+        assert_eq!(b, before);
+    }
+
+    #[test]
+    fn every_spend_names_the_attention_it_paid_for() {
+        let p = Parameters::genesis();
+        let a = pair();
+        let mut b = AttentionBudget::allocated(1_000.0).unwrap();
+        assert!(b.spend(&a, &p).spent());
+        assert_eq!(b.spends()[0].attention(), &a);
+        assert_eq!(b.spends()[0].cost(), a.cost_under(&p));
+    }
+
+    #[test]
+    fn a_governed_kappa_change_moves_what_an_aperture_costs() {
+        let genesis = Parameters::genesis();
+        let doubled = Parameters::read(&json!({"parameters": {"attention_kappa": 2.0}}));
+        let a = Aperture::declared(1, 4, 3).unwrap();
+        assert_eq!(a.cost_under(&genesis), 12.0, "the deleted constant's own value");
+        assert_eq!(a.cost_under(&doubled), 24.0);
+    }
+
+    #[test]
+    fn a_host_can_reload_a_budget_and_renew_a_period() {
+        let p = Parameters::genesis();
+        let a = pair();
+        let mut b = AttentionBudget::allocated(1_000.0).unwrap();
+        b.spend(&a, &p);
+        let reloaded = AttentionBudget::with_spends(1_000.0, b.spends().to_vec()).unwrap();
+        assert_eq!(reloaded, b, "the core holds the decision, the host the durability");
+        assert_eq!(b.renew().spent(), 0.0);
     }
 
     #[test]
     fn raising_an_axis_is_paid_for_by_lowering_another() {
-        let budget = 12;
+
+        let budget = 12.0;
         let a = Aperture::declared(2, 2, 3).unwrap();
-        assert!(a.affordable(budget));
+        assert!(a.affordable_under(budget, &Parameters::genesis()));
         // Doubling depth alone breaks the budget...
-        assert!(!Aperture::declared(2, 4, 3).unwrap().affordable(budget));
+        assert!(!Aperture::declared(2, 4, 3).unwrap().affordable_under(budget, &Parameters::genesis()));
         // ...unless resolution pays for it.
-        assert!(Aperture::declared(2, 4, 1).unwrap().affordable(budget));
+        assert!(Aperture::declared(2, 4, 1).unwrap().affordable_under(budget, &Parameters::genesis()));
     }
 
     #[test]
     fn an_attention_over_budget_is_refused() {
         assert!(matches!(
-            Attention::declared(narrow(), broad(), 10),
+            Attention::declared(narrow(), broad(), 10.0, &Parameters::genesis()),
             Err(AttentionError::OverBudget { .. })
         ));
     }

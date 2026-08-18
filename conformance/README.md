@@ -2742,3 +2742,45 @@ distribution); one schedule shape; **nothing calls `issue` automatically**, so a
 host that never calls it has an economy that only shrinks; no burn; and
 **`Issuance` itself is ungoverned** — closed by audit, like PAWA-7's forgeable
 `Mint`.
+
+---
+
+### `attention.json` — the B_att addendum (OPV-7, Operative §V · 2026-08-18)
+**8 further cases**, appended to the original row's vector rather than given
+their own file: this is the **same module**, not a new one.
+
+★★★ **STEP-0 corrected the brief.** `Attention::declared` had *always* refused
+an over-budget pair, so the cost function and a **declaration-time** bound were
+already real. OPV-7's own residual was precise: **`B_att` is a number, not a
+balance** — nothing was ever *spent*. A second recorded residual, *nothing calls
+attention from an operative*, had **already been closed** by the agent-wiring
+slice and was still recorded as open. Both are corrected in the vector, because
+**a stale limit is worse than a missing one**.
+
+★★★ **The identity by construction**: `spent` is the **fold** of an append-only
+list, so `spent + remaining == allocated` is true by the type's shape —
+asserted as an equation **at every step**, not once at the end.
+
+★★★ **Refused, never clamped, and the reason is structural.** `stance()`
+classifies by `b > d·ρ`, so a clamp **can flip Narrow to Broad** and silently
+produce the one-region-twice attention `Attention::declared` forbids. Proven by
+flipping a real stance, not argued.
+
+★★ **No `spend(amount)`** — `spend` takes an `Attention`, the mirror of
+`charge(&PawaReading)`. **Charged once for the pair**, because billing the
+apertures separately would leave the operative a half-mind.
+
+★★ **Wired**: `Agent::act_within` charges *before either scan runs*;
+`Reasoning::AttentionUnaffordable` is the **fifth** honest outcome; `act`
+delegates via `Unbudgeted` (the delegating-variant pattern's fourth use).
+
+★★ **`κ_att` governed, the constant deleted** — genesis `1.0`, exactly the value
+it replaced, so the whole prior suite passes unchanged. A real gated change
+doubles it, and **a budget that afforded an attention at genesis κ refuses it at
+the governed one**.
+
+**Limits still standing:** `κ_att` **uncalibrated**; **`B_att` not denominated in
+juul** (a bridge would be a made-up rate between two declared numbers); a
+governed κ of **zero** makes the budget vacuous (`ParameterSpec` bounds, it does
+not require positivity); **no period** (no clock); and the footprint still does
+not feed `compose_view`.

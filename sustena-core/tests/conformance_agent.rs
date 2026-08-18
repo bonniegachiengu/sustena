@@ -14,8 +14,9 @@ use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
 use sustena_core::{
+    governance::Parameters,
     agent::{Agent, MemeTrustPolicy, Reasoning, Warrant, WarrantError},
-    attention::{Aperture, Attention},
+    attention::{Aperture, AttentionBudget, AttentionSpending, Attention},
     capability::{Amplification, Attenuation, Capability, Rights},
     detect::CusumSpec,
     ensemble::ModelTemplate,
@@ -75,7 +76,8 @@ fn attention() -> Attention {
     Attention::declared(
         Aperture::declared(2, 3, 2).unwrap(),
         Aperture::declared(12, 1, 1).unwrap(),
-        100,
+        100.0,
+        &Parameters::genesis(),
     )
     .unwrap()
 }
@@ -450,7 +452,10 @@ fn the_self_model_is_derived_from_the_agents_own_parts() {
     let a = agent();
     let m = a.self_model("m0", &["household"]).unwrap();
     assert_eq!(m.operative_id(), a.id());
-    assert_eq!(m.attention_budget(), a.attention().cost());
+    assert_eq!(
+        m.attention_cost_under(&Parameters::genesis()),
+        a.attention().cost_under(&Parameters::genesis())
+    );
     assert_eq!(m.objectives(), a.operative().utility().m());
     assert!(a.self_model("nope", &["household"]).is_none(), "not an empty model — none");
 }
@@ -702,4 +707,102 @@ fn the_recorded_divergence_keeps_its_counterweight() {
         }
     }
     assert_eq!(seen.len(), 22, "every declared case must be present");
+}
+
+// ── ★★★ B_att, wired: an agent that cannot afford to look does not look ──────
+
+fn att_budget(n: f64) -> AttentionBudget {
+    AttentionBudget::allocated(n).expect("a real allocation")
+}
+
+/// One turn under an explicit attention budget.
+fn turn_within(a: &Agent, spending: &mut AttentionSpending<'_>, meme_id: &str) -> Reasoning {
+    let cap = warrant_for(a, meme_id);
+    a.act_within(
+        spending,
+        meme_id,
+        Warrant::new(&cap, "household"),
+        &engine(),
+        "household",
+        &region(),
+        &BTreeSet::new(),
+        healthy,
+        &Registry::default(),
+        &allowed(),
+        &Enforcement::default(),
+        &state(),
+    )
+}
+
+#[test]
+fn an_agent_that_cannot_afford_to_look_does_not_look_and_says_so() {
+    let a = agent();
+    let p = Parameters::genesis();
+    let mut b = att_budget(1.0);
+    let mut spending = AttentionSpending::Budgeted { budget: &mut b, parameters: &p };
+
+    match turn_within(&a, &mut spending, "m0") {
+        Reasoning::AttentionUnaffordable { cost, remaining } => {
+            assert_eq!(cost, a.attention().cost_under(&p));
+            assert_eq!(remaining, 1.0);
+        }
+        other => panic!("expected an unaffordable turn, got {}", other.describe()),
+    }
+    // ★★ Distinct from `NothingInView`: an exhausted budget and an empty
+    // household are different facts about a turn.
+    assert_eq!(b.spends().len(), 0, "a refusal is not a spend");
+    assert_eq!(b.spent(), 0.0);
+}
+
+#[test]
+fn attention_is_charged_once_for_the_pair_not_once_per_aperture() {
+    // ★★ The two attentions are ONE MIND'S: billing them separately would let
+    // a turn afford narrow, spend it, then discover it could not afford broad.
+    let a = agent();
+    let p = Parameters::genesis();
+    let expected = a.attention().narrow().cost_under(&p) + a.attention().broad().cost_under(&p);
+    let mut b = att_budget(expected * 3.0);
+    {
+        let mut spending = AttentionSpending::Budgeted { budget: &mut b, parameters: &p };
+        assert!(turn_within(&a, &mut spending, "m0").ran());
+    }
+    assert_eq!(b.spends().len(), 1, "one turn, one spend");
+    assert_eq!(b.spent(), expected);
+    assert_eq!(b.spent() + b.remaining(), b.allocation());
+}
+
+#[test]
+fn a_budgeted_agent_runs_until_the_budget_runs_out() {
+    let a = agent();
+    let p = Parameters::genesis();
+    let per_turn = a.attention().cost_under(&p);
+    let mut b = att_budget(per_turn * 2.0);
+
+    for turn in 1..=2 {
+        let mut spending = AttentionSpending::Budgeted { budget: &mut b, parameters: &p };
+        assert!(turn_within(&a, &mut spending, "m0").ran(), "turn {turn} is affordable");
+    }
+    let mut spending = AttentionSpending::Budgeted { budget: &mut b, parameters: &p };
+    assert!(
+        matches!(
+            turn_within(&a, &mut spending, "m0"),
+            Reasoning::AttentionUnaffordable { .. }
+        ),
+        "and the third is not"
+    );
+}
+
+#[test]
+fn an_unbudgeted_agent_is_byte_identical_to_before_this_row() {
+    // ★★ The delegating-variant compatibility pattern, fourth use. The refusal
+    // branch is asserted UNREACHABLE under `Unbudgeted` rather than assumed:
+    // an agent whose attention costs more than the zero budget above would
+    // allow still reasons, because the clause is vacuous.
+    let a = agent();
+    let plain = turn(&a, "m0", &Enforcement::default());
+    let mut spending = AttentionSpending::Unbudgeted;
+    let delegated = turn_within(&a, &mut spending, "m0");
+    assert!(!spending.budgeted());
+    assert_eq!(plain.describe(), delegated.describe(), "act delegates to act_within");
+    assert!(plain.ran());
 }

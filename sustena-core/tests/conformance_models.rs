@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 use serde_json::{Map, Value};
 use sustena_core::{
+    governance::Parameters,
     attention::{Aperture, Attention},
     ensemble::{ModelTemplate, Prob, Scenario},
     models::{Agreement, EffectiveN, Fidelity, Projection, SelfModel, WorldModel},
@@ -80,7 +81,8 @@ fn attention() -> Attention {
     Attention::declared(
         Aperture::declared(1, 3, 4).unwrap(),
         Aperture::declared(12, 1, 1).unwrap(),
-        100,
+        100.0,
+        &Parameters::genesis(),
     )
     .unwrap()
 }
@@ -97,7 +99,10 @@ fn the_self_model_is_built_from_omegas_own_parts() {
         m.moves(),
         &strategy().moves().into_iter().map(str::to_string).collect::<BTreeSet<_>>()
     );
-    assert_eq!(m.attention_budget(), attention().cost());
+    assert_eq!(
+            m.attention_cost_under(&Parameters::genesis()),
+            attention().cost_under(&Parameters::genesis())
+        );
 }
 
 #[test]

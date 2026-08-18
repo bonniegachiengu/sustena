@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
 use sustena_core::{
+    governance::Parameters,
     attention::{Aperture, Attention},
     learning::{
         learn, retain, select, vary, Feedback, Fitness, LearningTrace, LibraryError, LibraryScope,
@@ -100,7 +101,8 @@ fn attention() -> Attention {
     Attention::declared(
         Aperture::declared(1, 3, 4).unwrap(),
         Aperture::declared(12, 1, 1).unwrap(),
-        100,
+        100.0,
+        &Parameters::genesis(),
     )
     .unwrap()
 }
