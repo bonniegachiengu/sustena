@@ -239,6 +239,7 @@ fn gate_vectors() {
     registry.register(OperatorMeta {
         name: "test.mint",
         description: "Credits a pocket with no matching debit. Exists to prove D refuses it.",
+        params: vec![],
         constraints: vec![],
         post_constraints: vec![],
         side_effects: vec!["event.test.minted"],

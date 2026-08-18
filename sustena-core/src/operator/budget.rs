@@ -12,7 +12,7 @@
 
 use serde_json::{json, Map, Value};
 
-use super::meta::{OperatorMeta, OperatorResult, Protocol, Registry};
+use super::meta::{OperatorMeta, OperatorResult, ParamDecl, Protocol, Registry};
 use super::EmittedEvent;
 use crate::flow::Movement;
 use crate::state::State;
@@ -296,6 +296,13 @@ pub fn register(registry: &mut Registry) {
     registry.register(OperatorMeta {
         name: "budget.record_income",
         description: "Record income into the liquid balance.",
+        params: vec![
+            ParamDecl::number("amount"),
+            ParamDecl::text("source"),
+            ParamDecl::text("entry_id").optional(),
+            ParamDecl::text("frequency").optional(),
+            ParamDecl::text("received_at").optional(),
+        ],
         constraints: vec!["params.amount > 0".into()],
         post_constraints: vec![],
         side_effects: vec!["event.finances.income_received"],
@@ -309,6 +316,10 @@ pub fn register(registry: &mut Registry) {
     registry.register(OperatorMeta {
         name: "budget.allocate",
         description: "Move an amount from liquid balance into a named budget pocket.",
+        params: vec![
+            ParamDecl::naming("pocket_name", "finances.pockets"),
+            ParamDecl::number("amount"),
+        ],
         constraints: vec![
             "params.amount > 0".into(),
             "finances.liquid.balance >= params.amount".into(),
@@ -325,6 +336,10 @@ pub fn register(registry: &mut Registry) {
     registry.register(OperatorMeta {
         name: "budget.add_pocket",
         description: "Create an empty pocket without moving money.",
+        params: vec![
+            ParamDecl::text("pocket_name"),
+            ParamDecl::number("limit").optional(),
+        ],
         constraints: vec![],
         post_constraints: vec![],
         side_effects: vec!["event.finances.pocket_created"],
@@ -338,6 +353,11 @@ pub fn register(registry: &mut Registry) {
     registry.register(OperatorMeta {
         name: "budget.spend",
         description: "Spend from a pocket's remaining balance.",
+        params: vec![
+            ParamDecl::naming("pocket_name", "finances.pockets"),
+            ParamDecl::number("amount"),
+            ParamDecl::text("payee").optional(),
+        ],
         constraints: vec!["params.amount > 0".into()],
         post_constraints: vec![],
         side_effects: vec!["event.finances.pocket_spent"],
@@ -355,6 +375,7 @@ pub fn register(registry: &mut Registry) {
     registry.register(OperatorMeta {
         name: "test.force_negative",
         description: "Force a pocket negative. Exists to prove the gate refuses it.",
+        params: vec![],
         constraints: vec![],
         post_constraints: vec![],
         side_effects: vec!["event.test.forced"],

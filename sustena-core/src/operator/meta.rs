@@ -68,6 +68,75 @@ impl OperatorResult {
     }
 }
 
+/// What kind of value a parameter takes.
+///
+/// Three, and deliberately coarse: this is enough for a proposer to know *how
+/// to look for* a value in a description, and no more. A richer type lattice
+/// belongs to the DSL, not here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamKind {
+    Number,
+    Text,
+    Any,
+}
+
+/// One parameter an operator declares.
+///
+/// ★★ **Declared, not introspected — and that is a real difference from the
+/// reference, named rather than smoothed over.** Python's `ℐ` reads
+/// `inspect.signature(meta.fn)`, so its parameter list cannot drift from the
+/// body. A Rust operator is an `OperatorFn` reading a `Map<String, Value>` by
+/// name, so there is **no signature to introspect** and the honest analogue is
+/// a declaration. That trades one risk for another and both are worth stating:
+/// a declaration **can** disagree with the body (introspection cannot), but it
+/// **is** the contract, where an introspected signature is only an accident of
+/// how the body was written.
+///
+/// An operator that declares **no** parameters is not a lie — it is a
+/// statement that a proposer cannot build `θ` for it, and
+/// [`crate::enzyme::propose`] reports that as a **named gap** rather than
+/// guessing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParamDecl {
+    pub name: &'static str,
+    pub kind: ParamKind,
+    /// Whether `θ` is incomplete without it.
+    pub required: bool,
+    /// ★★★ A state path whose **keys** are the legal values — e.g.
+    /// `finances.pockets` for a pocket name.
+    ///
+    /// This is what lets a proposer match a value against *the sustain's own
+    /// live state* without the core knowing what a pocket is. The reference
+    /// hardcodes pocket-matching; declaring the path instead keeps the
+    /// mechanism generic over any sustain that names a collection.
+    pub names_within: Option<&'static str>,
+}
+
+impl ParamDecl {
+    pub fn number(name: &'static str) -> Self {
+        ParamDecl { name, kind: ParamKind::Number, required: true, names_within: None }
+    }
+
+    pub fn text(name: &'static str) -> Self {
+        ParamDecl { name, kind: ParamKind::Text, required: true, names_within: None }
+    }
+
+    /// A name drawn from a live-state collection.
+    pub fn naming(name: &'static str, within: &'static str) -> Self {
+        ParamDecl {
+            name,
+            kind: ParamKind::Text,
+            required: true,
+            names_within: Some(within),
+        }
+    }
+
+    pub fn optional(mut self) -> Self {
+        self.required = false;
+        self
+    }
+}
+
 /// How an operator is triggered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
@@ -81,6 +150,9 @@ pub enum Protocol {
 pub struct OperatorMeta {
     pub name: &'static str,
     pub description: &'static str,
+    /// ★★ `θ`'s shape, **declared**. See [`ParamDecl`] for why this is a
+    /// declaration here where the reference introspects a signature.
+    pub params: Vec<ParamDecl>,
     /// Pre-conditions. Checked before the body runs; a failure runs nothing.
     pub constraints: Vec<String>,
     /// Post-conditions, checked against the MUTATED state before commit.

@@ -125,6 +125,7 @@ pub mod disaggregation;
 pub mod division;
 pub mod editing;
 pub mod ensemble;
+pub mod enzyme;
 pub mod error;
 pub mod event;
 pub mod flow;
@@ -286,7 +287,7 @@ pub use operative::{
 };
 pub use operator::{
     execute, execute_admitted, execute_as, Authorization, Enforcement, Execution, OperatorMeta,
-    OperatorResult,
+    OperatorResult, ParamDecl, ParamKind,
     Registry,
 };
 pub use capability::{Amplification, Attenuation, Capability, Rights};
@@ -355,6 +356,7 @@ pub use vclock::{
 pub use version::{
     PathRollback, PreImage, Rollback, VersionDag, VersionError, VersionNode,
 };
+pub use enzyme::{propose_call, CallProposal, Effect, Proposed};
 pub use ensemble::{
     DeadDrop, DeadDropBook, DecisionNode, Ensemble, EnsembleAnalysis, EnsembleError, InvariantSet,
     ModelTemplate, Prob, Resolution, RewardBasis, Scenario,

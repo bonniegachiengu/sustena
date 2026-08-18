@@ -290,6 +290,7 @@ mod tests {
         OperatorMeta {
             name: "test.force_negative",
             description: "Force a pocket negative. Exists to prove the gate refuses it.",
+            params: vec![],
             constraints: guard.iter().map(|s| s.to_string()).collect(),
             post_constraints: post.iter().map(|s| s.to_string()).collect(),
             side_effects: vec![],

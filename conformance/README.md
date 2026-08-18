@@ -140,6 +140,7 @@ conformance/
     models.json         M_self, M_world, effective-N       (spec, R2)
     learning.json       vary / select / retain over memes  (spec, R2)
     agent.json          omega assembled + under a warrant   (spec, R2)
+    enzyme.json         I : e -> (o, theta), the proposer   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2377,3 +2378,45 @@ after a learning round; `MemeTrustPolicy` does not distinguish *which* household
 a meme came from; **the core issues no capability** (`Capability::issue` needs
 host-held `Memberships`); and `learn_from` still scores on the caller's terms,
 because making a variant's **fitness** depend on who asked is a larger claim.
+
+---
+
+### `enzyme.json` — `ℐ : ε → (o, θ)` (follow-on wiring 3, Curated UI §VIII)
+**12 cases, R2 (spec).** ★★ The **last** of the three follow-on wirings, and it
+discharges **two** residuals with one piece.
+
+★★★ **They were genuinely one consumer, and UI-11's row says so:** *"queue it as
+a real core slice **when a Rust-side caller exists** — the natural one is an
+Enzyme-call proposer over `Definition` + `Registry`, **which is also what
+EVT-15's `EnzymeCall` residual would consume**."* And EVT-15's side checks out:
+`EnzymeCall` had **no producer at all** — every one was hand-built in a test.
+
+★★★ **But scoped honestly.** EVT-15's residual asks for a **recorder**
+(`execute` writing a call log); this builds the **proposer**. `EnzymeCall` now
+has a producer and `replay_under` now consumes something it was not handed by
+hand — **producer ✅, recorder ⬜**, because the log is host state.
+
+★★★ **`θ` is DECLARED where the reference introspects.** No Rust signature
+exists to introspect, so `OperatorMeta` gained `params: Vec<ParamDecl>`. Both
+directions of the trade are stated. The property that matters survives: **a
+proposal can never carry a field the operator does not declare.**
+
+★★★ **Pocket matching generalised**: a parameter declares `names_within` and
+values are matched against the keys **actually present** at that path — the core
+never learns what a pocket is.
+
+★★ **All three of UI-11's rules, each a distinct outcome:** a hint eliminating
+every candidate is treated as **no hint** (fall back and ask); history
+**pre-fills but never silently** (`from_history`); and the output is a
+**candidate** — nothing runs, state byte-identical, the confirm is never
+skipped. ★ A remembered pocket that no longer exists is **rejected** — pre-fill
+is not a bypass.
+
+★★ **A design flaw a test caught:** narrowing also used the operator's *prose*,
+so *"spend 50 from food"* matched `budget.allocate` too — its description
+contains **"from"**. **The name is the contract; the prose is not.**
+
+**Limits, all six recorded and asserted:** the app-layer **feed** stays
+app-layer; EVT-15's **recorder half is not built**; number extraction is
+deliberately dull; narrowing is **exact-token, not fuzzy**; **one question at a
+time**; and **nothing here commits**.

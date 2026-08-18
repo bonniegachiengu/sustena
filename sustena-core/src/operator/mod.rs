@@ -37,7 +37,7 @@ pub mod meta;
 
 use serde_json::{Map, Value};
 
-pub use meta::{OperatorFn, OperatorMeta, OperatorResult, Registry};
+pub use meta::{OperatorFn, OperatorMeta, OperatorResult, ParamDecl, ParamKind, Registry};
 
 use crate::approval::{Binding, EffectClass, NonceLedger};
 use crate::mutation::Mutation;
@@ -609,6 +609,7 @@ mod tests {
         r.register(crate::operator::meta::OperatorMeta {
             name: "roster.admit",
             description: "Append a name to the roster — an ordinary operator that moves μ.",
+            params: vec![],
             constraints: vec![],
             post_constraints: vec![],
             side_effects: vec![],
@@ -816,6 +817,7 @@ mod tests {
         crate::operator::meta::OperatorMeta {
             name: "test.unsound",
             description: "Declares a postcondition its own effect makes impossible.",
+            params: vec![],
             constraints: vec![],
             post_constraints: vec!["finances.pockets.food.allocated >= 0".into()],
             side_effects: vec![],
@@ -1167,6 +1169,7 @@ mod tests {
         reg.register(OperatorMeta {
             name: "test.reshape",
             description: "Removes a declared dimension. Exists to prove the gate refuses it.",
+            params: vec![],
             constraints: vec![],
             post_constraints: vec![],
             side_effects: vec!["event.test.reshaped"],
@@ -1396,6 +1399,7 @@ mod tests {
         reg.register(OperatorMeta {
             name: "test.mint",
             description: "Credits a pocket with no matching debit. Exists to prove D refuses it.",
+            params: vec![],
             constraints: vec![],
             post_constraints: vec![],
             side_effects: vec!["event.test.minted"],

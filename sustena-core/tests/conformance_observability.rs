@@ -69,6 +69,7 @@ fn op(name: &'static str, reads: &[&str], writes: Option<&[&str]>) -> OperatorMe
     OperatorMeta {
         name,
         description: "",
+        params: vec![],
         constraints: reads.iter().map(|r| format!("{r} >= 0")).collect(),
         post_constraints: vec![],
         side_effects: vec![],

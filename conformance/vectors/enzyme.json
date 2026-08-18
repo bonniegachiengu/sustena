@@ -1,0 +1,111 @@
+{
+  "conformance_version": 1,
+  "slice": "Follow-on wiring 3 — the deterministic Enzyme-call proposer (ℐ : ε → (o, θ))",
+  "phase": "R2 (spec) — internal wiring; the reference's own ℐ is app-layer, so there is no parity half",
+  "authored_from": "3B1B — Curated UI - Formal Execution.md §VIII (effect-first capture); and the two named residuals it discharges — UI-11's 'named core slice' and EVT-15's un-produced EnzymeCall",
+  "replayed_by": "sustena-core/tests/conformance_enzyme.rs",
+  "note": "The LAST of the three follow-on wirings. Both residuals asked for the same missing piece and each said so in its own row; this builds it once.",
+
+  "★★_the_STEP_0_reconcile": {
+    "★★★_1_the_two_residuals_ARE_one_consumer_and_UI_11's_row_says_so": "UI-11 was deferred with an explicit condition: 'queue it as a real core slice WHEN A RUST-SIDE CALLER EXISTS — the natural one is an Enzyme-call proposer over `Definition` + `Registry`, WHICH IS ALSO WHAT EVT-15's `EnzymeCall` RESIDUAL WOULD CONSUME. Until then it stays app-layer, and the reason is a missing consumer rather than a missing capability.' EVT-15 shipped `EnzymeCall` with NO producer at all — grep-confirmed: every one in the crate was hand-built in a test (`EnzymeCall::new(...)` in `semantic.rs` and `stranding.rs` test modules, nowhere else). One piece, wanted twice.",
+    "★★★_2_but_the_discharge_is_SCOPED_HONESTLY_because_EVT_15_wanted_a_DIRECTION_this_does_not_build": "EVT-15's residual is worded 'EnzymeCall not wired to `execute` (nothing yet RECORDS an EnzymeCall when an operator runs)' — that is the OTHER direction, a recorder over the host's call log. This slice builds the PROPOSER: description → candidate call. It gives `EnzymeCall` a real producer and gives `replay_under` something it did not have to be handed by hand, which is the half that was blocking UI-11. It does NOT make `execute` write a call log, because that log is HOST STATE (a durable per-sustain history, exactly like the capture history UI-11 named as app-layer). Both halves are stated in the tracker rather than one being claimed for the other.",
+    "★★★_3_θ_IS_DECLARED_HERE_WHERE_THE_REFERENCE_INTROSPECTS_and_that_is_a_real_difference": "UI-11's row says 'θ from the Enzyme's real `inspect.signature` so never more fields than it declares'. A Rust operator is an `OperatorFn` reading a `Map<String, Value>` BY NAME — there is NO SIGNATURE TO INTROSPECT — so the honest analogue is a declaration, and `OperatorMeta` gained `params: Vec<ParamDecl>`. The trade goes both ways and both directions are named: a declaration CAN disagree with the body (introspection cannot), but it IS the contract, where an introspected signature is only an accident of how the body was written. The property UI-11 actually cares about survives either way — a proposal can never carry a field the operator does not declare, because `propose_call` only writes names it read off the declaration.",
+    "★★★_4_pocket_matching_GENERALISED_rather_than_ported": "The reference hardcodes matching against pockets. Here a parameter declares `names_within: Some(\"finances.pockets\")` and the proposer matches candidate values against THE KEYS ACTUALLY PRESENT AT THAT PATH IN THIS STATE. So the core never learns what a pocket is, and any sustain that names a collection gets the same behaviour for free — the same declared-rather-than-baked-in move as `Region`'s weights or an invariant's authority."
+  },
+
+  "divergence": {
+    "kind": "rust-only-internal-wiring",
+    "statement": "The reference's `ℐ` is app-layer (`effect_capture.py`), by the ING rows' own decision about the transducer — so there is no parity half to grep. The counterweight is the two residuals, which between them named this exact consumer, its inputs, and its rules.",
+
+    "★★★_the_counterweight_is_the_two_named_residuals": "UI-11's row named the caller ('an Enzyme-call proposer over `Definition` + `Registry`'), named the inputs ('a `Definition`, a `Registry` and a state value, all of which this core already holds'), and named the rules this slice had to keep ('a hint that eliminates every candidate is treated as NO hint; history may pre-fill but NEVER SILENTLY and never skips the confirm'). EVT-15's named the missing producer. Neither is a grep, and both are stronger than one: they were written in advance, by the slices that declined to build this early, and they say what it has to do rather than merely that it should exist.",
+
+    "★★_what_this_slice_REUSES_rather_than_reinvents": {
+      "the output": "`semantic::EnzymeCall` — EVT-15's own type, not a parallel one. Proven by handing a proposed call straight to `replay_under` and getting `CallOutcome::Admitted`.",
+      "the operator set": "`Definition::operators` ∩ `Registry` — the definition's real allow-list, so an operator outside it is REJECTED rather than fabricated.",
+      "the parameter shape": "`OperatorMeta::params`, the declared analogue of the reference's signature introspection.",
+      "the live values": "`State::get(path)`'s own dot-path walk, the same reader `Region` uses."
+    },
+
+    "★★_a_real_design_flaw_a_TEST_caught_not_inspection": "The first version narrowed operator candidates using both the operator's NAME segments and words from its own `description`. 'spend 50 from food' then matched `budget.allocate` as well as `budget.spend` — because `budget.allocate`'s description contains the word 'FROM'. A description is prose written for a human; using it as a matching vocabulary turns ordinary English into operator hints, which is precisely the accidental inference this module exists to refuse. Fixed at the root: THE NAME IS THE CONTRACT, THE PROSE IS NOT, so the vocabulary is the dotted name's own segments and nothing else.",
+
+    "the_greppable_false_positives_named_so_nobody_re_derives_them": {
+      "propose (many hits)": "`consensus::propose` is a Paxos ballot — hence `propose_call` here, the THIRTY-FOURTH collision.",
+      "Proposal (many hits)": "`operative::Proposal` is what an operative puts forward (a `LegalMove` plus who proposed it) — hence `CallProposal`, the THIRTY-FIFTH.",
+      "infer / inference (reference side)": "`effect_capture.py`'s `infer()` is the app-layer original this ports the INFERENCE of, not the plumbing around it."
+    },
+
+    "the_honest_limits": "★★ THE APP-LAYER FEED STAYS APP-LAYER — the transducer (`parse_message`, the SMS shapes) and the capture history arrive as an `Effect`'s `text` and `known`, two plain values; this slice ports the inference, not the plumbing, and UI-10 is untouched. ★★ EVT-15's RECORDER HALF IS NOT BUILT — nothing makes `execute` write a call log, because that log is host state; this closes the producer half only. ★ NUMBER EXTRACTION IS DELIBERATELY DULL — the first token that parses as `f64`, with no currency grammar, because a currency grammar belongs to the transducer. ★★ OPERATOR NARROWING IS EXACT-TOKEN, NOT FUZZY — no stemming, no synonyms, no edit distance; a description that does not contain a name segment falls through to the full candidate set and ASKS, which is the honest behaviour but does mean a real household needs the app layer's richer matching in front of it. ★ ONE QUESTION AT A TIME — `NeedsDisambiguation` reports the FIRST unresolved field in declaration order rather than all of them, matching the reference's own round-trip shape. ★★ AND NOTHING HERE COMMITS — `propose_call` runs no operator and touches no state; turning a candidate into a real act stays the human-gated approval path that follow-on wiring 2 made structural."
+  },
+
+  "inference_cases": [
+    {
+      "name": "a_described_effect_becomes_a_candidate_over_the_real_registry",
+      "why": "★★★ `ε → (o, θ)`, end to end and over real objects: 'spend 50 from food' resolves the operator from the definition's own allow-list, the pocket from this state's own keys, and the amount from the text — and `from_history` is empty, because nothing here was remembered.",
+      "expect": {"operator": "budget.spend", "pocket_name": "food", "amount": 50.0, "from_history": []}
+    },
+    {
+      "name": "the_pocket_is_matched_against_this_states_own_keys",
+      "why": "★★ Generic by construction: the core never learns what a pocket is. The parameter declares `names_within` and the candidate values are the keys actually present at that path, so a different sustain naming a different collection gets the same behaviour with no code change.",
+      "expect": {"pocket_name": "rent"}
+    },
+    {
+      "name": "a_proposal_never_carries_a_field_the_operator_does_not_declare",
+      "why": "★★★ UI-11's core property, and it survives the declared-instead-of-introspected substitution intact: every key in the proposed `θ` is checked to be one the operator's own `params` list declares, because that list is the only thing the builder ever reads names from.",
+      "expect": {"params_subset_of_declared": true}
+    }
+  ],
+
+  "gap_cases": [
+    {
+      "name": "an_unnamed_pocket_is_a_named_gap_with_the_real_options",
+      "why": "★★ Not a guess. A description naming no live pocket returns `NeedsDisambiguation` whose options are **this sustain's own** pocket names — the values a human can actually tap — rather than a fabricated best match.",
+      "expect": {"field": "pocket_name", "options": ["food", "rent"]}
+    },
+    {
+      "name": "a_missing_amount_is_a_gap_with_no_fabricated_options",
+      "why": "★ The distinction between *ambiguous* and *missing*. An amount has no enumerable option list, so `options` is EMPTY — manufacturing a tap-list of plausible numbers would be exactly the invention this refuses.",
+      "expect": {"field": "amount", "options": []}
+    },
+    {
+      "name": "a_description_matching_nothing_asks_rather_than_reporting_no_match",
+      "why": "★★★ UI-11's own rule, verbatim: *a hint that eliminates every candidate is treated as NO hint*. 'something happened' narrows to zero, so the proposer falls back to the FULL candidate set and asks — it does not report that nothing matches.",
+      "expect": {"field": "operator", "options_len": 3}
+    }
+  ],
+
+  "rejection_cases": [
+    {
+      "name": "an_operator_outside_the_definition_is_rejected",
+      "why": "★★ A proposal naming something the definition does not permit is REJECTED, not fabricated — even when the caller states it explicitly as a known fact. The definition's allow-list is the authority on what exists here.",
+      "expect": {"outcome": "Rejected"}
+    },
+    {
+      "name": "a_remembered_pocket_that_no_longer_exists_is_rejected_not_proposed",
+      "why": "★★★ History pre-fill is NOT a bypass. A remembered value that names a collection member must still BE one in the current state — a pocket since renamed away is rejected rather than proposed, which is the same staleness discipline OPV-6's history check keeps.",
+      "expect": {"outcome": "Rejected"}
+    },
+    {
+      "name": "an_operator_with_no_declared_params_cannot_have_a_theta_invented_for_it",
+      "why": "★★ The third honest answer, and the reason declaring nothing is not a lie: an operator with an empty `params` list yields `CannotInfer` naming exactly that, rather than the proposer guessing a shape from the body it cannot see.",
+      "expect": {"outcome": "CannotInfer"}
+    }
+  ],
+
+  "candidate_cases": [
+    {
+      "name": "a_remembered_value_is_reported_as_remembered",
+      "why": "★★ *History may pre-fill but never silently.* A value taken from `known` is listed in `from_history` and an inferred one is not, so a caller can always show where each field came from rather than presenting a memory as an inference.",
+      "expect": {"from_history": ["pocket_name"], "inferred": ["amount"]}
+    },
+    {
+      "name": "proposing_runs_nothing_and_leaves_the_state_alone",
+      "why": "★★★ The output is a CANDIDATE, never an execution. `propose_call` consults the definition, the registry and the state's keys and writes nowhere — asserted byte-identical — so turning it real stays the human-gated approval path.",
+      "expect": {"state": "byte-identical"}
+    },
+    {
+      "name": "a_proposed_call_is_exactly_what_evt_15s_replay_consumes",
+      "why": "★★★ THE DISCHARGE, end to end. A proposed `EnzymeCall` is handed straight to EVT-15's own `replay_under` and comes back `CallOutcome::Admitted` — so `EnzymeCall` finally has a producer, and `replay_under` finally has something it was not handed by hand. One slice, both residuals' shared piece.",
+      "expect": {"outcome": "Admitted", "operator": "budget.spend"}
+    }
+  ]
+}
