@@ -1,0 +1,105 @@
+{
+  "conformance_version": 1,
+  "slice": "PAWA-6 — the treasury is itself a Sustain, Σ_T",
+  "phase": "R2 (spec) — the reference has a treasury ID and nothing else",
+  "authored_from": "Pawa §5 (the treasury as a Sustain; allocate/grant/disburse, a reserve floor and category caps in V_T, the protocol fee fraction φ_p and a periodic budget)",
+  "replayed_by": "sustena-core/tests/conformance_treasury.rs",
+  "note": "The row whose whole point is that it needs NO NEW MACHINERY. A treasury is a clean instance of the recursion — a Definition plus a state, admitted like any Enzyme and replayed like any Sustain.",
+
+  "★★★_the_hard_boundary_still_holds_and_by_the_same_device_as_PAWA_5": "A treasury outflow is a `JuulLedger::transfer` — a CONSERVED reallocation between two internal balances, `ΣΔ = 0`, total circulation unchanged. The treasury CANNOT MINT: nothing in the module raises the total, and the only variant that would is one that does not exist (PAWA-7 genesis, PAWA-8 issuance). It also cannot pay out more than it holds — refused by its own guard AND by the ledger, two independent guards where neither is redundant: the operator's keeps the STATE honest, the ledger's keeps the BALANCE so. ★ And the no-rail property is untouched: an outflow's destination is another principal in this same ledger, and there is no juul→real path anywhere.",
+
+  "★★_the_STEP_0_reconcile": {
+    "★★★_1_no_new_machinery_and_that_is_the_ROW": "A treasury is a `Definition` (schema + `V_T` + allowed operators) plus a state, exactly as a household is. Its `allocate`/`grant`/`disburse` are ordinary `OperatorMeta` values on the ordinary `Registry`; every one goes through the SAME `execute_admitted`; `V_T` is checked by the SAME enforcement gate; a disbursement needs the SAME `ApprovalToken`. There is no treasury engine, no treasury branch in the gate, and nothing in `execute_admitted` that knows a treasury exists. THE RECURSION IS THE SUBSTANCE — a treasury is governed exactly as a household is, and if it needed its own engine that claim would be false.",
+    "★★★_2_ONE_TRUTH_for_the_juul_and_how_the_state_relates_to_the_ledger": "The `JuulLedger` is the one truth. The Sustain's state carries `treasury.balance`, but it is NEVER INDEPENDENTLY MUTATED: every outflow operator REQUIRES a `ledger_balance` parameter and writes `ledger_balance − amount`, so the state figure is a SAME-CALL PROJECTION of the ledger and cannot drift across calls. ★★ And the two halves move together or not at all — `pay_out` runs the gate AND performs the transfer, and performs it ONLY IF THE GATE ADMITTED. A refusal leaves both untouched, so there is no rollback path to get wrong, because there is only one function that moves either.",
+    "★★_3_the_reserve_floor_is_an_ORDINARY_INVARIANT_not_a_bespoke_check": "`V_T` is a set of predicates, so the floor is literally `treasury.balance >= <floor>` in the definition's invariant list, and a breach is refused with `enforcement_gate` — the SAME reason and the SAME shape a household invariant breach produces. Category caps are the same device. No floor-checking code was written.",
+    "★_4_φ_p_and_the_periodic_budget_are_DECLARED_PARAMETERS": "The protocol fee fraction and the period budget are carried in the treasury's state as declared values. Changing them is GOVERNANCE (PAWA-11) and is deliberately not an operator here: this row declares them, it does not decide who may move them. ★ The recurring-allocation mechanism is a named slot — EVT-11's `Recurrence` is the natural primitive and nothing here fabricates a scheduler, since ADR-0001 gives this core no clock."
+  },
+
+  "divergence": {
+    "kind": "rust-only-spec-over-a-reference-that-has-only-an-id",
+    "statement": "The reference has `NETWORK_TREASURY_ID = \"sustena.network_treasury\"` — a STRING CONSTANT naming a principal that royalty shares are credited to. That is the whole of it.",
+
+    "★★_what_is_at_parity_and_what_is_the_sharpening": {
+      "at parity — the treasury as a named recipient": "That a share of every charge accrues to a network treasury, identified by a stable id. `NETWORK_TREASURY_ID` expresses exactly that, and PAWA-5's `Recipients::treasury` is its counterpart here.",
+      "★★★ the sharpening — the treasury as a real, gated SUSTAIN": "The reference's treasury has no state, no viable region, no operators and no gate: juul accrues to an id and nothing governs what leaves it, because nothing can leave it — there is no disbursement path at all. Here it is a `Definition` with `V_T`, three Enzymes, and outflows that go through the full gate.",
+      "★★ the sharpening — a RESERVE FLOOR that actually refuses": "A floor is meaningless without something that enforces it. Because `V_T` is an ordinary invariant list, the existing gate refuses a breaching payout with `enforcement_gate`, and the ledger is asserted byte-identical afterwards.",
+      "★★ the sharpening — every outflow is HUMAN-GATED": "A disbursement runs under `EffectClass::Live`, so it needs an `ApprovalToken` bound to that one act and single-use. An agent or a strategy cannot disburse on its own — the same discipline that stops `Agent::act` firing a live effect, and the same one egress keeps."
+    },
+
+    "★★★_a_real_finding_a_TEST_caught_not_inspection": "A declared category cap over a category the state does not hold REFUSES EVERYTHING. The cap is `treasury.allocations.grants <= 500`; with `allocations` empty, the predicate compares `None` to a number, which is a TYPE ERROR — and the gate then turns back EVERY operation on the treasury, including an unrelated grant that has nothing to do with that category. Four tests failed on it at once. ★★ Fixed at the root rather than by making the gate lenient: A DECLARED CAP IMPLIES THE CATEGORY EXISTS, so `opening_state` takes the same cap list the definition declared and seeds each at zero. That is the same class of problem UI-2's load-time typecheck exists for — a rule referencing a dimension the state does not hold — and making the gate tolerate an absent dimension would have been the wrong fix, because then a cap over a typo'd category would silently never fire.",
+
+    "the_honest_limits": "★★ NOTHING CHECKS THAT THE DEFINITION AND THE OPENING STATE AGREE — `opening_state` takes the caps by convention, and a caller who passes a different list gets the refuse-everything behaviour the finding above describes. A `typecheck` over `V_T`'s referenced paths against the schema is the real fix and is UI-2's own device, applied to a definition rather than a widget. ★★ THE PERIODIC BUDGET IS A DECLARED NUMBER, NOT A MECHANISM — nothing recurs, because ADR-0001 gives this core no clock; EVT-11's `Recurrence` is the primitive a host would drive it from, and a scheduler is not fabricated here. ★ `φ_p` IS DECLARED AND UNCONSUMED — no code reads the protocol fee fraction yet, because what charges it is the Arena's settlement, not the treasury's own operators. ★★ A GRANT IS A TRANSFER, NOT A MINT — and MYC-6 draws a later, different distinction in which a grant IS a mint. That is deliberately not this row: a minting grant would need an issuance policy nobody has declared, so building one now would be inventing governance. ★ THE TREASURY IS NOT YET COMPOSED — `⊕` with a household is available in principle (it is a Sustain like any other) and is not exercised here; the recursion is demonstrated through `replay_under` instead. ★★ AND `pay_out` TAKES THE TOKEN AS AN ARGUMENT — the core cannot mint one (only the simulate→vote→approve chain can), so who approves a disbursement is the host's question, exactly as who approves any live effect is."
+  },
+
+  "no_new_machinery_cases": [
+    {
+      "name": "the_treasury_is_an_ordinary_definition_with_ordinary_operators",
+      "why": "★★★ THE ROW. Every operator the definition permits is found on the ordinary `Registry` with ordinary metadata (including a declared `params` shape like any other), and `V_T`'s reserve floor is an ordinary entry in the same invariant list a household uses. Nothing marks any of it as a treasury's.",
+      "expect": {"operators": "all in the registry", "reserve_floor": "an ordinary invariant"}
+    },
+    {
+      "name": "an_allocation_moves_no_juul_at_all",
+      "why": "★ `allocate` is a CATEGORISATION, not a payment: the earmark appears, the balance is unchanged, and total circulation is untouched. Keeping the two apart is what lets a cap constrain commitments without constraining the balance.",
+      "expect": {"allocation": 250.0, "balance": "unchanged", "circulation": "unchanged"}
+    },
+    {
+      "name": "the_treasury_replays_under_its_own_definition_like_any_sustain",
+      "why": "★★★ THE RECURSION, made concrete rather than argued: EVT-15's `replay_under` takes a `Definition` and a `Registry` and knows nothing about treasuries — and a treasury call replays under `Σ_T` exactly as a household call replays under its own definition.",
+      "expect": {"outcome": "Admitted"}
+    }
+  ],
+
+  "viable_region_cases": [
+    {
+      "name": "a_payout_that_would_breach_the_reserve_floor_is_refused_by_the_ordinary_gate",
+      "why": "★★ Balance 150, floor 100, paying 80 would leave 70. Refused — and refused with `enforcement_gate`, THE SAME REASON a household invariant breach gives, which is the evidence that no bespoke floor check exists. The transfer is not even attempted, and the ledger is asserted byte-identical.",
+      "expect": {"reason": "enforcement_gate", "moved": null, "ledger": "byte-identical"}
+    },
+    {
+      "name": "a_payout_that_stays_above_the_floor_commits",
+      "why": "The other half of the boundary: paying 40 from 150 leaves 110, above the floor, so it commits and the recipient is credited. A floor that refused everything would pass the refusal test and fail this one.",
+      "expect": {"treasury": 110.0, "recipient": 40.0}
+    },
+    {
+      "name": "a_category_cap_is_the_same_device_as_the_floor",
+      "why": "★ A cap of 500 on `grants` refuses an allocation of 600, with the same `enforcement_gate` reason — so caps and floors are one mechanism, not two. ★★ And this is where the finding lives: a cap over a category the state does not hold refuses EVERYTHING, which four tests caught at once.",
+      "expect": {"committed": false, "reason": "enforcement_gate"}
+    }
+  ],
+
+  "conservation_cases": [
+    {
+      "name": "a_treasury_outflow_leaves_total_circulation_unchanged",
+      "why": "★★★ A grant is a CONSERVED TRANSFER, not a mint: circulation before and after is identical, and the treasury's remaining balance plus the recipient's equals the original total. The treasury cannot create juul, and the only variant that could does not exist.",
+      "expect": {"circulation": "unchanged", "treasury + recipient": "== before"}
+    },
+    {
+      "name": "the_treasury_cannot_pay_out_more_than_it_holds",
+      "why": "★ Refused by the operator's own guard with `treasury_solvent`, before the ledger is ever asked — and the ledger would refuse it too. Two independent guards, neither redundant: one keeps the state honest, the other the balance.",
+      "expect": {"reason": "treasury_solvent", "ledger": "byte-identical"}
+    },
+    {
+      "name": "the_states_balance_is_a_projection_of_the_ledger_not_a_second_record",
+      "why": "★★★ ONE TRUTH. After a real payout the candidate state's `treasury.balance` is asserted EQUAL to the ledger's balance for the treasury — because the operator was handed the ledger's figure this same call and wrote `ledger_balance − amount`, rather than decrementing a number it had been keeping.",
+      "expect": {"state.balance": "== ledger.balance_of(treasury)"}
+    },
+    {
+      "name": "a_disbursement_draws_down_its_own_earmark",
+      "why": "★ So an allocation cannot be spent twice: disbursing 120 against a 300 earmark leaves 180 earmarked. A `grant` has no earmark to reduce, which is what distinguishes the two outflows.",
+      "expect": {"allocation_after": 180.0}
+    }
+  ],
+
+  "human_gate_cases": [
+    {
+      "name": "a_payout_without_a_valid_token_is_refused",
+      "why": "★★ Every disbursement is human-gated. A token bound to a DIFFERENT act cannot admit this one — which is the same thing as having no token for it — so the gate refuses with `approval_token`, the transfer is not attempted, and the ledger is byte-identical. An agent or a strategy cannot disburse on its own, the same discipline that stops `Agent::act` firing a live effect.",
+      "expect": {"reason": "approval_token", "moved": null, "ledger": "byte-identical"}
+    },
+    {
+      "name": "a_token_is_single_use_so_a_payout_cannot_be_replayed",
+      "why": "★★ The nonce is spent at commit, so re-presenting the same approval for the same act is refused and NOTHING MOVES TWICE — the ledger after the replay attempt is asserted identical to the ledger after the first, legitimate payout. At-least-once delivery must not become pay-twice.",
+      "expect": {"first": "paid", "replay": "refused", "ledger": "unchanged by the replay"}
+    }
+  ]
+}

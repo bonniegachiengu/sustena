@@ -170,6 +170,7 @@ pub mod state;
 pub mod strategy;
 pub mod tenet;
 pub mod transition;
+pub mod treasury;
 pub mod vclock;
 pub mod version;
 pub mod watermark;
@@ -325,6 +326,7 @@ pub use curated::{
     Eligibility, Request, View, WidgetCandidate, Withdrawn,
 };
 pub use juul::{Affordability, Charge, Entry, JuulLedger};
+pub use treasury::{pay_out, PayOut};
 pub use royalty::{
     settle, split, Licence, Recipients, RevenueType, RoyaltyRole, Settlement, Share,
 };

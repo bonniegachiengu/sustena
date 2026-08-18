@@ -144,6 +144,7 @@ conformance/
     pawa.json           the pawa meter (odometer, no ledger) (parity+wiring)
     juul.json           the juul ledger + the out-of-pawa gate (spec, R2)
     royalty.json        the ratified five-way royalty split   (spec, R2)
+    treasury.json       Sigma_T: the treasury as a Sustain    (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2577,3 +2578,42 @@ unconserved against its own schedule.
 not yet a Sustain** (PAWA-6); `settle` is **not wired into the gate**; the
 **royalty base is caller-supplied**; a partial settlement is **refused
 wholesale**; and **nothing here mints**.
+
+---
+
+### `treasury.json` — the treasury as a Sustain `Σ_T` (PAWA-6, Pawa §5)
+**12 cases.** The row whose point is that it needed **no new machinery**.
+
+★★★ **A treasury is a `Definition` plus a state, exactly as a household is.**
+Its three Enzymes are ordinary `OperatorMeta` values on the ordinary registry;
+they go through the **same** `execute_admitted`; `V_T` is checked by the **same**
+gate; disbursements need the **same** `ApprovalToken`. Nothing in the gate knows
+a treasury exists — and a treasury call **replays through `replay_under`**,
+which knows nothing about treasuries either.
+
+★★ **The reserve floor is an ordinary invariant** — `treasury.balance >= floor`
+— so a breach refuses with **`enforcement_gate`**, the same reason a household
+breach gives. **No floor-checking code was written.** Caps are the same device.
+
+★★★ **One truth for the juul:** the ledger is authoritative, and the state's
+balance is a **same-call projection** (every outflow requires `ledger_balance`
+and writes `ledger_balance − amount`). `pay_out` runs the gate **and** the
+transfer, and the transfer **only if the gate admitted** — so there is no
+rollback path to get wrong.
+
+★★★ **Outflows are conserved transfers, never mints** — circulation unchanged,
+and the treasury cannot pay out more than it holds (two independent guards).
+★★ **Every disbursement is human-gated:** a token for a different act is
+refused, and a **replayed** token leaves the ledger identical — *at-least-once
+delivery must not become pay-twice*.
+
+★★★ **A finding a test caught:** a declared cap over a category the state does
+not hold **refuses everything** (`None <= 500` is a type error). Fixed at the
+root — *a declared cap implies the category exists* — because making the gate
+lenient would let a cap over a **typo'd** category silently never fire.
+
+**Limits, all six recorded and asserted:** nothing checks the definition and
+opening state agree; the periodic budget is **a number, not a mechanism**;
+`φ_p` is **declared and unconsumed**; a grant is **a transfer, not a mint**; the
+treasury is **not yet composed**; and `pay_out` **takes the token as an
+argument**.

@@ -201,7 +201,7 @@ impl SemanticOutcome {
 }
 
 /// The gate inputs a [`Definition`] supplies. `D′` needs no new type.
-fn enforcement_of(d: &Definition) -> Enforcement {
+pub(crate) fn enforcement_of(d: &Definition) -> Enforcement {
     Enforcement {
         enabled: true,
         invariants: d.invariants.clone(),
