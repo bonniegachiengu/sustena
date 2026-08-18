@@ -397,6 +397,7 @@ pub fn pay_out(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::juul::Genesis;
     use crate::approval::{Binding, Simulated};
     use crate::council::ProposalStatus;
 
@@ -414,9 +415,7 @@ mod tests {
     }
 
     fn funded(juul: f64) -> JuulLedger {
-        let mut l = JuulLedger::new();
-        l.credit("treasury", juul, "royalty share");
-        l
+        JuulLedger::from_genesis(&Genesis::declared("g0", &[("treasury", juul)]).unwrap())
     }
 
     fn params(pairs: &[(&str, Value)]) -> Map<String, Value> {

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 use sustena_core::{
-    juul::JuulLedger,
+    juul::{Genesis, JuulLedger},
     royalty::{settle, split, Licence, Recipients, RevenueType, RoyaltyRole, Settlement, Share},
     CONFORMANCE_VERSION,
 };
@@ -47,9 +47,7 @@ fn all_five() -> Recipients {
 }
 
 fn funded(payer: &str, juul: f64) -> JuulLedger {
-    let mut l = JuulLedger::new();
-    l.credit(payer, juul, "opening");
-    l
+    JuulLedger::from_genesis(&Genesis::declared("g0", &[(payer, juul)]).unwrap())
 }
 
 fn share_of(shares: &[Share], role: RoyaltyRole) -> u64 {

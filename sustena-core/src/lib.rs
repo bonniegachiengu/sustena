@@ -325,7 +325,7 @@ pub use curated::{
     BindingTable, PolicyError, SaliencePolicy, UrgencyBasis,
     Eligibility, Request, View, WidgetCandidate, Withdrawn,
 };
-pub use juul::{Affordability, Charge, Entry, JuulLedger};
+pub use juul::{Affordability, Audit, Charge, Entry, Genesis, GenesisId, JuulLedger};
 pub use treasury::{pay_out, PayOut};
 pub use royalty::{
     settle, split, Licence, Recipients, RevenueType, RoyaltyRole, Settlement, Share,

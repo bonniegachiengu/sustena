@@ -55,6 +55,143 @@ use std::collections::BTreeMap;
 
 use crate::pawa::PawaReading;
 
+/// The identity of a declared genesis.
+///
+/// ★★★ **No public constructor.** The only way to obtain one is
+/// [`Genesis::declared`], so an [`Entry::Mint`] cannot be written down without
+/// a real declaration behind it — the same mechanism as `Capability`, `Score`,
+/// `VisualSpec` and `PawaReading`, applied to the authority to create money.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GenesisId(String);
+
+impl GenesisId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for GenesisId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// `g : principals → Juul` — the declared genesis distribution.
+///
+/// ★★ *Declared in the open once, and auditable forever.* It is a **value**,
+/// not a procedure: a fixed map anyone can read, hash and check a ledger
+/// against ([`Genesis::audit`]). Its answer to *who may mint* is structural
+/// rather than governed — **nobody may, afterwards**, because
+/// [`JuulLedger::from_genesis`] is a constructor and there is no method that
+/// mints into a ledger that already exists.
+///
+/// ★ Ongoing minting is a different question and a different row: issuance
+/// (PAWA-8) needs a **declared, revisable schedule changed only through
+/// governance** (PAWA-11), which is exactly the machinery a one-time seed does
+/// not need and therefore does not have here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Genesis {
+    id: GenesisId,
+    /// Ordered, so the declaration reads and hashes the same way twice.
+    distribution: BTreeMap<String, f64>,
+}
+
+impl Genesis {
+    /// Declare the distribution. ★ Refuses a negative allocation: a genesis
+    /// that took juul from someone would not be a genesis.
+    pub fn declared(id: &str, distribution: &[(&str, f64)]) -> Option<Genesis> {
+        if id.trim().is_empty() || distribution.iter().any(|(_, a)| *a < 0.0 || !a.is_finite()) {
+            return None;
+        }
+        Some(Genesis {
+            id: GenesisId(id.to_string()),
+            distribution: distribution.iter().map(|(p, a)| ((*p).to_string(), *a)).collect(),
+        })
+    }
+
+    pub fn id(&self) -> &GenesisId {
+        &self.id
+    }
+
+    /// What `g` allocates to a principal — `0.0` for anyone it does not name.
+    pub fn allocation_for(&self, principal: &str) -> f64 {
+        self.distribution.get(principal).copied().unwrap_or(0.0)
+    }
+
+    /// Every principal `g` names, with its allocation.
+    pub fn distribution(&self) -> &BTreeMap<String, f64> {
+        &self.distribution
+    }
+
+    /// `Σ g` — all the juul that has ever existed under this declaration.
+    pub fn total(&self) -> f64 {
+        self.distribution.values().sum()
+    }
+
+    /// ★★★ **Audit a ledger against this declaration.**
+    ///
+    /// *Declared in the open once, auditable forever*: every mint in the ledger
+    /// must name **this** genesis and match **its** allocation, and every
+    /// allocation must appear. So a ledger's entire money supply is explained by
+    /// a value anyone can read — and a mint that exceeded, invented or omitted
+    /// an allocation is **named**, not merely absent from a total.
+    pub fn audit(&self, ledger: &JuulLedger) -> Audit {
+        let mut minted: BTreeMap<&str, f64> = BTreeMap::new();
+        let mut foreign = Vec::new();
+        for e in ledger.entries() {
+            if let Entry::Mint { principal, amount, genesis } = e {
+                if genesis != &self.id {
+                    foreign.push(genesis.as_str().to_string());
+                    continue;
+                }
+                *minted.entry(principal.as_str()).or_insert(0.0) += *amount;
+            }
+        }
+
+        let mut mismatched = Vec::new();
+        for (principal, declared) in &self.distribution {
+            let got = minted.remove(principal.as_str()).unwrap_or(0.0);
+            if got != *declared {
+                mismatched.push((principal.clone(), *declared, got));
+            }
+        }
+        // Anything left minted under this genesis was never declared in it.
+        let undeclared: Vec<String> = minted.keys().map(|k| (*k).to_string()).collect();
+
+        Audit { foreign, mismatched, undeclared }
+    }
+}
+
+/// What an audit found. ★ Empty on every field means the ledger's money supply
+/// is **exactly** the declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Audit {
+    /// Mints naming a different genesis than the one audited against.
+    pub foreign: Vec<String>,
+    /// `(principal, declared, minted)` where the two disagree.
+    pub mismatched: Vec<(String, f64, f64)>,
+    /// Principals minted to that `g` never named.
+    pub undeclared: Vec<String>,
+}
+
+impl Audit {
+    pub fn clean(&self) -> bool {
+        self.foreign.is_empty() && self.mismatched.is_empty() && self.undeclared.is_empty()
+    }
+
+    pub fn describe(&self) -> String {
+        if self.clean() {
+            return "the ledger's money supply is exactly its declared genesis".to_string();
+        }
+        format!(
+            "{} foreign mint(s), {} mismatched allocation(s), {} undeclared principal(s)",
+            self.foreign.len(),
+            self.mismatched.len(),
+            self.undeclared.len()
+        )
+    }
+}
+
 /// One append-only ledger line.
 ///
 /// ★ `Debit` and `Credit` are deliberately **different variants**, not a signed
@@ -63,10 +200,20 @@ use crate::pawa::PawaReading;
 /// come from" unanswerable.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Entry {
-    /// A declared starting balance. ★ Named apart from a debit on purpose —
-    /// this is the only thing in the module that increases a balance, and
-    /// genesis proper is PAWA-7's row, not this one.
-    Credit { principal: String, amount: f64, reason: String },
+    /// ★★★ **A MINT** — juul brought into existence, raising total circulation.
+    ///
+    /// This variant exists because **a mint must be visible as a mint**
+    /// (MYC-6). A transfer is bounded by the payer and self-limiting; a mint is
+    /// **unbounded** — it inflates the unit and makes Sybil registration
+    /// directly profitable. *Both are legitimate designs; only one of them is
+    /// legitimate **undeclared**.* So minting is never a "credit that happens to
+    /// go up": it is its own variant, and it **names the declaration that
+    /// authorised it**, so *where did this juul come from* stays answerable
+    /// forever.
+    ///
+    /// ★★ [`GenesisId`] has **no public constructor**, so a `Mint` cannot be
+    /// written down without a real declared [`Genesis`] behind it.
+    Mint { principal: String, amount: f64, genesis: GenesisId },
     /// A metered cost, spent. ★ Carries the **reading** it was charged from, so
     /// every debit can be traced to the run that incurred it.
     Debit { principal: String, amount: f64, operator: String, sustain: String, at: u64 },
@@ -93,7 +240,7 @@ impl Entry {
     /// number. `0.0` for anyone the entry does not touch.
     pub fn delta_for(&self, principal: &str) -> f64 {
         match self {
-            Entry::Credit { principal: p, amount, .. } if p == principal => *amount,
+            Entry::Mint { principal: p, amount, .. } if p == principal => *amount,
             Entry::Debit { principal: p, amount, .. } if p == principal => -*amount,
             Entry::Transfer { from, amount, .. } if from == principal => -*amount,
             Entry::Transfer { to, amount, .. } if to == principal => *amount,
@@ -105,7 +252,7 @@ impl Entry {
     /// a transfer.
     pub fn touches(&self) -> Vec<&str> {
         match self {
-            Entry::Credit { principal, .. } | Entry::Debit { principal, .. } => {
+            Entry::Mint { principal, .. } | Entry::Debit { principal, .. } => {
                 vec![principal.as_str()]
             }
             Entry::Transfer { from, to, .. } => vec![from.as_str(), to.as_str()],
@@ -114,14 +261,30 @@ impl Entry {
 
     /// ★★ This entry's effect on the **total** in circulation.
     ///
-    /// A credit raises it, a debit lowers it, and **a transfer is exactly zero**
-    /// — the conservation law, read straight off the variant.
+    /// ★★★ **Only a [`Entry::Mint`] raises it.** A debit lowers it (a cost has
+    /// no counterparty, so spending removes juul from circulation) and a
+    /// transfer is **exactly zero** — the conservation law, read straight off
+    /// the variant rather than computed and checked.
+    ///
+    /// So the accounting is exactly:
+    ///
+    /// ```text
+    /// circulation = Σ(mints) − Σ(costs debited)
+    /// ```
+    ///
+    /// with transfers contributing nothing. There are no burns yet; if one is
+    /// ever added it will be **its own variant**, for the same reason a mint is.
     pub fn circulation_delta(&self) -> f64 {
         match self {
-            Entry::Credit { amount, .. } => *amount,
+            Entry::Mint { amount, .. } => *amount,
             Entry::Debit { amount, .. } => -*amount,
             Entry::Transfer { .. } => 0.0,
         }
+    }
+
+    /// Whether this entry brought juul into existence.
+    pub fn is_mint(&self) -> bool {
+        matches!(self, Entry::Mint { .. })
     }
 }
 
@@ -179,18 +342,33 @@ impl JuulLedger {
         JuulLedger::default()
     }
 
-    /// Declare a starting balance.
+    /// ★★★ **Open a ledger from its declared genesis — the only mint there is.**
     ///
-    /// ★★ The **only** thing here that increases a balance, and it is named
-    /// apart from a debit so the two can never be confused. It is not a mint in
-    /// the economic sense and not a transfer: nothing is taken from anyone.
-    /// Genesis (PAWA-7) and issuance (PAWA-8) are their own rows.
-    pub fn credit(&mut self, principal: &str, amount: f64, reason: &str) {
-        self.entries.push(Entry::Credit {
-            principal: principal.to_string(),
-            amount,
-            reason: reason.to_string(),
-        });
+    /// A **constructor**, deliberately, not a method: you cannot mint *into* an
+    /// existing ledger, so genesis is **one-time by shape**. Ongoing minting is
+    /// issuance (PAWA-8) and is a **separate, governed path** that does not
+    /// exist — so today, *every juul that exists was declared in `g`*.
+    ///
+    /// ★ [`JuulLedger::new`] remains, and gives a ledger with **no juul at all**
+    /// — which is the honest empty case, not a shortcut around genesis.
+    pub fn from_genesis(genesis: &Genesis) -> JuulLedger {
+        JuulLedger {
+            entries: genesis
+                .distribution
+                .iter()
+                .map(|(principal, amount)| Entry::Mint {
+                    principal: principal.clone(),
+                    amount: *amount,
+                    genesis: genesis.id.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Every mint in this ledger, in order. ★ The audit trail: total
+    /// circulation can only have risen through these.
+    pub fn mints(&self) -> impl Iterator<Item = &Entry> {
+        self.entries.iter().filter(|e| e.is_mint())
     }
 
     /// ★★★ **`balance ← balance − pawa`, admitted only if `balance ≥ pawa`.**
@@ -386,9 +564,7 @@ mod tests {
     }
 
     fn funded(principal: &str, juul: f64) -> JuulLedger {
-        let mut l = JuulLedger::new();
-        l.credit(principal, juul, "declared opening balance");
-        l
+        JuulLedger::from_genesis(&Genesis::declared("g0", &[(principal, juul)]).unwrap())
     }
 
     // ── PAWA-3: the out-of-pawa gate clause ──────────────────────────────────
@@ -527,6 +703,146 @@ mod tests {
         assert_eq!(l, before, "a guard refusal charges nothing either");
     }
 
+    // ── ★★★ PAWA-7 genesis + MYC-6: minting is declared and visible ──────────
+
+    fn g_two() -> Genesis {
+        Genesis::declared("genesis-2026", &[("bonnie", 100.0), ("cira", 40.0)]).unwrap()
+    }
+
+    #[test]
+    fn a_mint_is_its_own_variant_and_names_the_declaration_that_authorised_it() {
+        // ★★★ MYC-6: a mint is VISIBLE as a mint, never a silent credit.
+        let g = g_two();
+        let l = JuulLedger::from_genesis(&g);
+        assert_eq!(l.mints().count(), 2);
+        for m in l.mints() {
+            match m {
+                Entry::Mint { genesis, .. } => assert_eq!(genesis, g.id()),
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn circulation_is_raised_only_by_a_mint() {
+        // ★★★ The accounting: circulation = Σ(mints) − Σ(costs debited),
+        // transfers contributing nothing.
+        let g = g_two();
+        let mut l = JuulLedger::from_genesis(&g);
+        assert_eq!(l.total_in_circulation(), g.total());
+
+        // A transfer raises nothing.
+        assert!(l.transfer("bonnie", "cira", 25.0, "gift").charged());
+        assert_eq!(l.total_in_circulation(), g.total());
+
+        // A debit lowers it, and nothing anywhere raises it again.
+        let r = reading_for("bonnie");
+        assert!(l.charge(&r).charged());
+        assert_eq!(l.total_in_circulation(), g.total() - r.pawa());
+
+        let minted: f64 = l.mints().map(|m| m.circulation_delta()).sum();
+        assert_eq!(minted, g.total(), "every juul in existence came from a mint");
+    }
+
+    #[test]
+    fn an_empty_ledger_has_no_juul_because_it_has_no_genesis() {
+        // ★ The honest empty case: no declaration, no money — not a shortcut
+        // around genesis.
+        let l = JuulLedger::new();
+        assert_eq!(l.total_in_circulation(), 0.0);
+        assert_eq!(l.mints().count(), 0);
+    }
+
+    #[test]
+    fn genesis_is_one_time_because_it_is_a_constructor_not_a_method() {
+        // ★★★ There is no `mint` method: you cannot mint INTO an existing
+        // ledger. A second genesis makes a second ledger, not more juul in this
+        // one — so the one-time-ness is a property of the shape.
+        let g = g_two();
+        let l = JuulLedger::from_genesis(&g);
+        let before = l.total_in_circulation();
+
+        let other = Genesis::declared("some-other", &[("mallory", 1_000_000.0)]).unwrap();
+        let _elsewhere = JuulLedger::from_genesis(&other);
+        assert_eq!(l.total_in_circulation(), before, "another declaration is another ledger");
+    }
+
+    #[test]
+    fn a_genesis_refuses_a_negative_allocation() {
+        // ★ A genesis that took juul from someone would not be a genesis.
+        assert!(Genesis::declared("g", &[("bonnie", -1.0)]).is_none());
+        assert!(Genesis::declared("", &[("bonnie", 1.0)]).is_none(), "and it must be named");
+    }
+
+    // ── ★★ auditability: declared once, checkable forever ───────────────────
+
+    #[test]
+    fn a_ledgers_money_supply_is_exactly_its_declared_genesis() {
+        let g = g_two();
+        let mut l = JuulLedger::from_genesis(&g);
+        // Trading and spending change balances, never the declaration.
+        l.transfer("bonnie", "cira", 30.0, "gift");
+        l.charge(&reading_for("cira"));
+
+        let audit = g.audit(&l);
+        assert!(audit.clean(), "{}", audit.describe());
+        assert_eq!(audit, Audit { foreign: vec![], mismatched: vec![], undeclared: vec![] });
+    }
+
+    #[test]
+    fn an_audit_names_a_mint_that_the_declaration_does_not_explain() {
+        // ★★ A ledger reloaded from a host's durable copy could carry a mint
+        // the declaration never made. The audit NAMES it rather than letting a
+        // total quietly absorb it.
+        let g = g_two();
+        let mut entries = JuulLedger::from_genesis(&g).entries().to_vec();
+        entries.push(Entry::Mint {
+            principal: "mallory".into(),
+            amount: 500.0,
+            genesis: g.id().clone(),
+        });
+        let audit = g.audit(&JuulLedger::with_entries(entries));
+        assert!(!audit.clean());
+        assert_eq!(audit.undeclared, vec!["mallory".to_string()]);
+    }
+
+    #[test]
+    fn an_audit_names_a_mint_from_a_foreign_declaration() {
+        let g = g_two();
+        let other = Genesis::declared("not-ours", &[("mallory", 1.0)]).unwrap();
+        let mut entries = JuulLedger::from_genesis(&g).entries().to_vec();
+        entries.extend(JuulLedger::from_genesis(&other).entries().to_vec());
+        let audit = g.audit(&JuulLedger::with_entries(entries));
+        assert!(!audit.clean());
+        assert_eq!(audit.foreign, vec!["not-ours".to_string()]);
+    }
+
+    #[test]
+    fn a_balance_is_fully_explained_by_genesis_plus_the_folded_entries() {
+        // ★★★ The fold over genesis: every balance equals its allocation plus
+        // everything that happened to it, with nothing unexplained.
+        let g = g_two();
+        let mut l = JuulLedger::from_genesis(&g);
+        l.transfer("bonnie", "cira", 30.0, "gift");
+        let r = reading_for("cira");
+        l.charge(&r);
+
+        for who in ["bonnie", "cira"] {
+            let since_genesis: f64 = l
+                .entries()
+                .iter()
+                .filter(|e| !e.is_mint())
+                .map(|e| e.delta_for(who))
+                .sum();
+            assert_eq!(
+                l.balance_of(who),
+                g.allocation_for(who) + since_genesis,
+                "{who}'s balance is genesis plus the fold, exactly"
+            );
+        }
+        assert_eq!(l.rebuild()["bonnie"], l.balance_of("bonnie"), "and rebuild still agrees");
+    }
+
     // ── a debit is backed by a measurement ───────────────────────────────────
 
     #[test]
@@ -551,9 +867,9 @@ mod tests {
     #[test]
     fn a_run_is_charged_to_whoever_made_it() {
         // ★ The principal comes off the reading; a caller cannot redirect it.
-        let mut l = JuulLedger::new();
-        l.credit("bonnie", 100.0, "opening");
-        l.credit("cira", 100.0, "opening");
+        let mut l = JuulLedger::from_genesis(
+            &Genesis::declared("g0", &[("bonnie", 100.0), ("cira", 100.0)]).unwrap(),
+        );
         l.charge(&reading_for("bonnie"));
         assert!(l.balance_of("bonnie") < 100.0);
         assert_eq!(l.balance_of("cira"), 100.0, "somebody else's bill is not theirs");
@@ -656,7 +972,7 @@ mod tests {
         // ★ So "where did this juul come from" stays answerable.
         let mut l = funded("bonnie", 100.0);
         l.charge(&reading_for("bonnie"));
-        assert!(matches!(l.entries()[0], Entry::Credit { .. }));
+        assert!(matches!(l.entries()[0], Entry::Mint { .. }));
         assert!(matches!(l.entries()[1], Entry::Debit { .. }));
         assert_eq!(l.debits_of("bonnie").count(), 1, "the credit is not a debit");
     }
@@ -665,9 +981,9 @@ mod tests {
     fn charging_one_principal_leaves_every_other_balance_untouched() {
         // ★★★ There is no transfer in this module: nobody is credited by a
         // charge, so no method here can move juul between principals.
-        let mut l = JuulLedger::new();
-        l.credit("bonnie", 100.0, "opening");
-        l.credit("cira", 50.0, "opening");
+        let mut l = JuulLedger::from_genesis(
+            &Genesis::declared("g0", &[("bonnie", 100.0), ("cira", 50.0)]).unwrap(),
+        );
         let before_total = l.total_in_circulation();
         let r = reading_for("bonnie");
         l.charge(&r);

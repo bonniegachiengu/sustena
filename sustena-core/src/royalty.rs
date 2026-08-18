@@ -327,6 +327,7 @@ pub fn settle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::juul::Genesis;
 
     fn recipients_all() -> Recipients {
         Recipients::new("ada", "treasury")
@@ -336,9 +337,7 @@ mod tests {
     }
 
     fn funded(payer: &str, juul: f64) -> JuulLedger {
-        let mut l = JuulLedger::new();
-        l.credit(payer, juul, "opening");
-        l
+        JuulLedger::from_genesis(&Genesis::declared("g0", &[(payer, juul)]).unwrap())
     }
 
     // ── ★★★ conservation, as a theorem ──────────────────────────────────────

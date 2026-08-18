@@ -17,7 +17,7 @@ use sustena_core::{
     approval::{ApprovalToken, Binding, EffectClass, NonceLedger, Simulated},
     council::ProposalStatus,
     editing::Definition,
-    juul::JuulLedger,
+    juul::{Genesis, JuulLedger},
     operator::{execute_admitted, Authorization, Registry},
     semantic::{replay_under, CallOutcome, EnzymeCall, ReplayMode},
     treasury::{definition, enforcement, opening_state, pay_out, register, PayOut},
@@ -62,9 +62,7 @@ fn state_of(balance: f64) -> Value {
 }
 
 fn funded(juul: f64) -> JuulLedger {
-    let mut l = JuulLedger::new();
-    l.credit("treasury", juul, "royalty share");
-    l
+    JuulLedger::from_genesis(&Genesis::declared("g0", &[("treasury", juul)]).unwrap())
 }
 
 fn params(pairs: &[(&str, Value)]) -> Map<String, Value> {

@@ -142,7 +142,7 @@ conformance/
     agent.json          omega assembled + under a warrant   (spec, R2)
     enzyme.json         I : e -> (o, theta), the proposer   (spec, R2)
     pawa.json           the pawa meter (odometer, no ledger) (parity+wiring)
-    juul.json           the juul ledger + the out-of-pawa gate (spec, R2)
+    juul.json           the ledger, the gate clause, + genesis  (spec, R2)
     royalty.json        the ratified five-way royalty split   (spec, R2)
     treasury.json       Sigma_T: the treasury as a Sustain    (spec, R2)
 ```
@@ -2617,3 +2617,40 @@ opening state agree; the periodic budget is **a number, not a mechanism**;
 `φ_p` is **declared and unconsumed**; a grant is **a transfer, not a mint**; the
 treasury is **not yet composed**; and `pay_out` **takes the token as an
 argument**.
+
+---
+
+### `juul.json`, part 3 — genesis and the visible mint (PAWA-7 + MYC-6)
+**27 cases now** (12 from PAWA-2, 6 from PAWA-3, **9 added**).
+
+★★★ **The reconcile found the defect in our own code.** PAWA-2's `credit`
+**raised circulation** — so it **was an undeclared mint**, exactly what MYC-6
+forbids. **It is gone**: `Entry::Credit` became **`Entry::Mint`**, which
+**names the declaration that authorised it**, and the only producer is
+`from_genesis`. Every call site was migrated. *There is no path that raises
+circulation silently.*
+
+★★★ **One-time by shape:** `from_genesis` is a **constructor** and there is
+**no `mint` method** — a second declaration makes a **second ledger**. So *who
+may mint* is answered **nobody, afterwards**, which is why genesis needed no
+governance and PAWA-8 genuinely will.
+
+★★ **Genesis is the base, everything since is the fold:**
+`balance == allocation + Σ(non-mint entries)`, asserted exactly — **no juul
+unexplained** — and `rebuild()` still agrees. ★★ **`Genesis::audit` NAMES what
+it finds** (`foreign` / `mismatched` / `undeclared`), because those three send a
+reader somewhere different.
+
+★★ **The accounting:** `circulation = Σ(mints) − Σ(costs)`, transfers at zero.
+
+★★★ **And the boundary where the word invites confusion: minting the INTERNAL
+unit is not issuing a real coin.** No real value, no redeemable claim, no rail.
+
+★ **Divergence:** the reference's `ONBOARDING_GRANT = 100` has **zero callers**
+and its **kind is unstated** — mint or transfer is not said. Here that ambiguity
+is **not expressible**.
+
+**PAWA-7's own limits:** `GenesisId` is unforgeable but a `Genesis` holder could
+forge a mint through `with_entries` — **closed by detection, not construction**,
+and said so; **there is no burn**; a **zero allocation is allowed**; and
+**nothing ties a genesis to a Sustain** yet.

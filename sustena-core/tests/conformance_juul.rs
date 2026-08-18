@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use serde_json::{json, Map, Value};
 use sustena_core::{
     approval::{EffectClass, NonceLedger},
-    juul::{Affordability, Charge, Entry, JuulLedger},
+    juul::{Affordability, Audit, Charge, Entry, Genesis, JuulLedger},
     operator::{execute, execute_afforded, Authorization, Enforcement, Execution, Registry},
     pawa::{candidate_pawa, meter, PawaReading},
     CONFORMANCE_VERSION,
@@ -70,9 +70,7 @@ fn reading_for(principal: &str) -> PawaReading {
 }
 
 fn funded(principal: &str, juul: f64) -> JuulLedger {
-    let mut l = JuulLedger::new();
-    l.credit(principal, juul, "declared opening balance");
-    l
+    JuulLedger::from_genesis(&Genesis::declared("g0", &[(principal, juul)]).unwrap())
 }
 
 // ── a debit is backed by a measurement ───────────────────────────────────────
@@ -98,9 +96,9 @@ fn a_charge_is_always_backed_by_a_real_metered_run() {
 
 #[test]
 fn a_run_is_charged_to_whoever_made_it() {
-    let mut l = JuulLedger::new();
-    l.credit("bonnie", 100.0, "opening");
-    l.credit("cira", 100.0, "opening");
+    let mut l = JuulLedger::from_genesis(
+        &Genesis::declared("g0", &[("bonnie", 100.0), ("cira", 100.0)]).unwrap(),
+    );
     l.charge(&reading_for("bonnie"));
     assert!(l.balance_of("bonnie") < 100.0);
     assert_eq!(l.balance_of("cira"), 100.0, "somebody else's bill is not theirs");
@@ -197,7 +195,7 @@ fn a_debit_reduces_circulation_and_creates_nothing() {
 fn a_credit_and_a_debit_are_different_entries_not_a_signed_number() {
     let mut l = funded("bonnie", 100.0);
     l.charge(&reading_for("bonnie"));
-    assert!(matches!(l.entries()[0], Entry::Credit { .. }));
+    assert!(matches!(l.entries()[0], Entry::Mint { .. }));
     assert!(matches!(l.entries()[1], Entry::Debit { .. }));
     assert_eq!(l.debits_of("bonnie").count(), 1, "the credit is not a debit");
 }
@@ -205,9 +203,9 @@ fn a_credit_and_a_debit_are_different_entries_not_a_signed_number() {
 #[test]
 fn charging_one_principal_leaves_every_other_balance_untouched() {
     // ★★★ There is no transfer here: nobody is credited by a charge.
-    let mut l = JuulLedger::new();
-    l.credit("bonnie", 100.0, "opening");
-    l.credit("cira", 50.0, "opening");
+    let mut l = JuulLedger::from_genesis(
+        &Genesis::declared("g0", &[("bonnie", 100.0), ("cira", 50.0)]).unwrap(),
+    );
     let before = l.total_in_circulation();
     let r = reading_for("bonnie");
     l.charge(&r);
@@ -354,6 +352,146 @@ fn a_run_refused_by_an_earlier_conjunct_never_reaches_the_charge() {
     assert_eq!(l, before, "a guard refusal charges nothing either");
 }
 
+// ── ★★★ PAWA-7 genesis + MYC-6: minting is declared and visible ─────────────
+
+fn g_two() -> Genesis {
+    Genesis::declared("genesis-2026", &[("bonnie", 100.0), ("cira", 40.0)]).unwrap()
+}
+
+#[test]
+fn a_mint_is_its_own_variant_and_names_the_declaration_that_authorised_it() {
+    // ★★★ MYC-6: a mint is VISIBLE as a mint, never a silent credit.
+    let g = g_two();
+    let l = JuulLedger::from_genesis(&g);
+    assert_eq!(l.mints().count(), 2);
+    for m in l.mints() {
+        match m {
+            Entry::Mint { genesis, .. } => assert_eq!(genesis, g.id()),
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+#[test]
+fn circulation_is_raised_only_by_a_mint() {
+    // ★★★ The accounting: circulation = Σ(mints) − Σ(costs debited),
+    // transfers contributing nothing.
+    let g = g_two();
+    let mut l = JuulLedger::from_genesis(&g);
+    assert_eq!(l.total_in_circulation(), g.total());
+
+    // A transfer raises nothing.
+    assert!(l.transfer("bonnie", "cira", 25.0, "gift").charged());
+    assert_eq!(l.total_in_circulation(), g.total());
+
+    // A debit lowers it, and nothing anywhere raises it again.
+    let r = reading_for("bonnie");
+    assert!(l.charge(&r).charged());
+    assert_eq!(l.total_in_circulation(), g.total() - r.pawa());
+
+    let minted: f64 = l.mints().map(|m| m.circulation_delta()).sum();
+    assert_eq!(minted, g.total(), "every juul in existence came from a mint");
+}
+
+#[test]
+fn an_empty_ledger_has_no_juul_because_it_has_no_genesis() {
+    // ★ The honest empty case: no declaration, no money — not a shortcut
+    // around genesis.
+    let l = JuulLedger::new();
+    assert_eq!(l.total_in_circulation(), 0.0);
+    assert_eq!(l.mints().count(), 0);
+}
+
+#[test]
+fn genesis_is_one_time_because_it_is_a_constructor_not_a_method() {
+    // ★★★ There is no `mint` method: you cannot mint INTO an existing
+    // ledger. A second genesis makes a second ledger, not more juul in this
+    // one — so the one-time-ness is a property of the shape.
+    let g = g_two();
+    let l = JuulLedger::from_genesis(&g);
+    let before = l.total_in_circulation();
+
+    let other = Genesis::declared("some-other", &[("mallory", 1_000_000.0)]).unwrap();
+    let _elsewhere = JuulLedger::from_genesis(&other);
+    assert_eq!(l.total_in_circulation(), before, "another declaration is another ledger");
+}
+
+#[test]
+fn a_genesis_refuses_a_negative_allocation() {
+    // ★ A genesis that took juul from someone would not be a genesis.
+    assert!(Genesis::declared("g", &[("bonnie", -1.0)]).is_none());
+    assert!(Genesis::declared("", &[("bonnie", 1.0)]).is_none(), "and it must be named");
+}
+
+// ── ★★ auditability: declared once, checkable forever ───────────────────
+
+#[test]
+fn a_ledgers_money_supply_is_exactly_its_declared_genesis() {
+    let g = g_two();
+    let mut l = JuulLedger::from_genesis(&g);
+    // Trading and spending change balances, never the declaration.
+    l.transfer("bonnie", "cira", 30.0, "gift");
+    l.charge(&reading_for("cira"));
+
+    let audit = g.audit(&l);
+    assert!(audit.clean(), "{}", audit.describe());
+    assert_eq!(audit, Audit { foreign: vec![], mismatched: vec![], undeclared: vec![] });
+}
+
+#[test]
+fn an_audit_names_a_mint_that_the_declaration_does_not_explain() {
+    // ★★ A ledger reloaded from a host's durable copy could carry a mint
+    // the declaration never made. The audit NAMES it rather than letting a
+    // total quietly absorb it.
+    let g = g_two();
+    let mut entries = JuulLedger::from_genesis(&g).entries().to_vec();
+    entries.push(Entry::Mint {
+        principal: "mallory".into(),
+        amount: 500.0,
+        genesis: g.id().clone(),
+    });
+    let audit = g.audit(&JuulLedger::with_entries(entries));
+    assert!(!audit.clean());
+    assert_eq!(audit.undeclared, vec!["mallory".to_string()]);
+}
+
+#[test]
+fn an_audit_names_a_mint_from_a_foreign_declaration() {
+    let g = g_two();
+    let other = Genesis::declared("not-ours", &[("mallory", 1.0)]).unwrap();
+    let mut entries = JuulLedger::from_genesis(&g).entries().to_vec();
+    entries.extend(JuulLedger::from_genesis(&other).entries().to_vec());
+    let audit = g.audit(&JuulLedger::with_entries(entries));
+    assert!(!audit.clean());
+    assert_eq!(audit.foreign, vec!["not-ours".to_string()]);
+}
+
+#[test]
+fn a_balance_is_fully_explained_by_genesis_plus_the_folded_entries() {
+    // ★★★ The fold over genesis: every balance equals its allocation plus
+    // everything that happened to it, with nothing unexplained.
+    let g = g_two();
+    let mut l = JuulLedger::from_genesis(&g);
+    l.transfer("bonnie", "cira", 30.0, "gift");
+    let r = reading_for("cira");
+    l.charge(&r);
+
+    for who in ["bonnie", "cira"] {
+        let since_genesis: f64 = l
+            .entries()
+            .iter()
+            .filter(|e| !e.is_mint())
+            .map(|e| e.delta_for(who))
+            .sum();
+        assert_eq!(
+            l.balance_of(who),
+            g.allocation_for(who) + since_genesis,
+            "{who}'s balance is genesis plus the fold, exactly"
+        );
+    }
+    assert_eq!(l.rebuild()["bonnie"], l.balance_of("bonnie"), "and rebuild still agrees");
+}
+
 // ── the recorded divergence ──────────────────────────────────────────────────
 
 #[test]
@@ -417,6 +555,36 @@ fn the_recorded_divergence_keeps_its_counterweight() {
         assert!(limits.contains(term), "missing limit: {term}");
     }
 
+    // ★★★ PAWA-7 + MYC-6's reconciles and finding must stay recorded too.
+    for key in [
+        "★★★_7_PAWA_7_the_reconcile_that_MATTERED_credit_WAS_an_undeclared_mint",
+        "★★★_8_PAWA_7_one_time_ness_is_STRUCTURAL_because_from_genesis_is_a_CONSTRUCTOR",
+        "★★_9_PAWA_7_minting_the_INTERNAL_unit_is_not_issuing_a_real_coin",
+    ] {
+        assert!(step0[key].as_str().is_some_and(|s| s.len() > 80), "missing reconcile: {key}");
+    }
+    let mint = step0["★★★_7_PAWA_7_the_reconcile_that_MATTERED_credit_WAS_an_undeclared_mint"]
+        .as_str()
+        .unwrap();
+    assert!(mint.contains("WAS A MINT"), "the finding must stay named");
+    assert!(mint.contains("legitimate UNDECLARED"), "and MYC-6's own sentence kept");
+    assert!(step0["★★_9_PAWA_7_minting_the_INTERNAL_unit_is_not_issuing_a_real_coin"]
+        .as_str()
+        .unwrap()
+        .contains("Minting juul ≠ issuing a coin"));
+
+    let grant = d["★★★_PAWA_7_the_reference_has_a_grant_whose_KIND_IS_UNDECLARED"].as_str().unwrap();
+    assert!(grant.contains("ZERO CALLERS"));
+    assert!(grant.contains("KIND IS UNSTATED"));
+    for term in [
+        "`GenesisId` HAS NO PUBLIC CONSTRUCTOR",
+        "THERE IS NO BURN",
+        "A GENESIS ALLOCATION OF ZERO IS ALLOWED",
+        "NOTHING TIES A GENESIS TO A SUSTAIN",
+    ] {
+        assert!(limits.contains(term), "missing PAWA-7 limit: {term}");
+    }
+
     let mut seen = BTreeSet::new();
     // ★★★ PAWA-3's own reconciles and finding must stay recorded too.
     for key in [
@@ -448,6 +616,8 @@ fn the_recorded_divergence_keeps_its_counterweight() {
         "fold_cases",
         "boundary_cases",
         "gate_clause_cases",
+        "genesis_cases",
+        "audit_cases",
     ] {
         for c in doc[group].as_array().unwrap_or_else(|| panic!("{group} is an array")) {
             assert!(
@@ -458,5 +628,5 @@ fn the_recorded_divergence_keeps_its_counterweight() {
             assert!(seen.insert(c["name"].as_str().unwrap().to_string()), "duplicate case name");
         }
     }
-    assert_eq!(seen.len(), 18, "every declared case must be present");
+    assert_eq!(seen.len(), 27, "every declared case must be present");
 }
