@@ -1,0 +1,106 @@
+{
+  "conformance_version": 1,
+  "slice": "PAWA-2 — the juul ledger",
+  "phase": "R2-with-a-reference-concept — `PawaLedger` exists in Python but its `charge()` has zero callers, and the live `deduct()` path charges the wrong number",
+  "authored_from": "Pawa §2 (juul as the unit of account; balance ← balance − pawa, admitted only if balance ≥ pawa); reconciled against apps/api/sustena/core/pawa.py",
+  "replayed_by": "sustena-core/tests/conformance_juul.rs",
+  "note": "The balance PAWA-1's readings are charged against. Still the odometer's other half, not a wallet: internal accounting only.",
+
+  "★★★_the_hard_boundary_and_it_is_ADR_0001_D5": "A juul balance is an INTERNAL ACCOUNTING FACT ON A SINGLE HOST — never real money, never a transferable asset, never a payment rail. Issuing a real, public, transferable token is a DISTINCT, LATER, HUMAN-AUTHORISED ACT and is out of scope. ★★ Here that is STRUCTURAL rather than promised: the module has NO TRANSFER (no method moves juul between principals; a charge has no counterparty at all), NO MINT (nothing creates juul except `credit`, which DECLARES a starting balance and is deliberately named apart from a debit — genesis is PAWA-7 and issuance PAWA-8), and NO RAIL (no I/O anywhere, by ADR-0001). A test asserts that charging one principal leaves every other balance untouched — because there is nothing that could move it.",
+
+  "★★_the_STEP_0_reconcile": {
+    "★★★_1_there_is_no_juul_ledger_in_Rust_and_the_two_existing_Ledgers_are_different_things": "Grep-confirmed before building. `approval::NonceLedger` records SPENT APPROVAL-TOKEN NONCES (single-use redemption at the gate) and `consensus::Ledger` is a PAXOS ACCEPTOR SET. Neither is a balance, and conflating any of the three would be a genuine confusion — hence `JuulLedger`, the thirty-seventh collision, with the newcomer taking the longer name.",
+    "★★★_2_a_PawaReading_is_what_a_debit_CONSUMES_and_that_is_made_structural": "PAWA-1 shipped `PawaReading` with NO PUBLIC CONSTRUCTOR — the only source is `pawa::meter` over an `Execution` that COMMITTED. So `charge(&PawaReading)` means a debit is always backed by a real, measured, genuinely-committed run. THERE IS NO `debit(amount)` IN THIS MODULE: a charge cannot be invented, and a caller wanting to spend juul must first have done work that cost it. This is the structural question the PAWA-1 report left open, answered by the signature rather than by a check.",
+    "★★_3_the_affordability_rule_here_is_the_LEDGER'S_not_the_gate's": "`charge` returns `Insufficient` when the balance will not cover the reading. That is the ledger's own answer about its own balance. The GATE CLAUSE that refuses an operator RUN on insufficient balance — `admit = guard ∧ constraints ∧ token_ok ∧ balance ≥ pawa` — is PAWA-3 and is NOT this slice. Nothing here is wired into `execute_admitted`."
+  },
+
+  "divergence": {
+    "kind": "rust-only-with-a-scaffolded-reference-concept",
+    "statement": "The LEDGER CONCEPT exists in Python (`core/pawa.py::PawaLedger`) but the piece PAWA-2 is about is not in force there — and reconciling it turned up a finding the brief did not have.",
+
+    "★★★_the_finding_the_reference's_LIVE_debit_path_charges_the_WRONG_NUMBER": "The brief said `charge()` is scaffolded with zero callers, and that is exactly right — grep-confirmed, its only other mention in the whole reference is a docstring. BUT `deduct()`, the method `charge()` itself calls, HAS FOUR REAL CALLERS: `budget.py`, `calendar.py`, `procurement.py` and `tasks.py` each call `ctx.pawa.deduct(...)` on every operator run. So the reference DOES have a wired debit path. ★★★ What it charges is `meta.pawa_cost` — THE AUTHOR'S STATIC DECLARED ESTIMATE — and every one of those operators declares `pawa_cost = 0`, so the live path debits nothing on every call. `budget.py`'s own docstring says so: *'For budget operators (pawa_cost=0) this is always a no-op ... The call is still made explicitly so the pattern is established for paid operators in later epics.'* ★★ That is PAWA-1's static-versus-measured split showing up as a real consequence: **the reference's live debit path is wired to the estimate, not to the measurement**, and the meter's readings — which are real and non-zero — reach no ledger at all. Naming it because it is precisely the wire this slice's `charge(&PawaReading)` signature makes impossible to get wrong.",
+
+    "★★_what_is_at_parity_and_what_is_the_sharpening": {
+      "at parity — the concept": "A per-principal balance, an insufficient-balance refusal that returns rather than raises (`deduct` returns `False`, `charge` returns `Insufficient`), and zero-cost calls succeeding trivially.",
+      "★ at parity, and NOT this row's invention — the fold": "The reference's `get_balance` is ALREADY a fold: `select(func.sum(pawa_ledger.c.delta))` over an append-only delta table. Saying the fold-based balance is a Rust sharpening would have been wrong, and it is recorded here as parity.",
+      "★★★ the sharpening — a debit backed by a measurement": "`deduct(user_id, sustain_id, amount: int, reason: str)` takes a BARE INTEGER: any caller can debit any amount for any stated reason. `charge(&PawaReading)` takes a value that cannot be constructed except by metering a committed run — so the amount, the principal, the operator and the sustain all come off the measurement and none can be supplied by the caller.",
+      "★★ the sharpening — credit and debit are different variants": "The reference's ledger table is a signed `delta` column. Here `Entry::{Credit, Debit}` are distinct variants, so *where did this juul come from* stays answerable — and a debit carries the operator and sustain that incurred it, so it is traceable to its run."
+    },
+
+    "★_what_is_deliberately_NOT_ported": "`PawaLedger.charge()`'s 70/20/5/5 ROYALTY SPLIT is not here. That is MYC-5/PAWA-5's concern, it distributes to a contributor, a treasury, a referrer and a validator — every one of which is a TRANSFER — and this slice has no transfer by design. Porting it would have breached the hard boundary in the first module that touches a balance.",
+
+    "the_honest_limits": "★★ NOTHING IS WIRED INTO THE GATE — `execute_admitted` neither meters nor charges; PAWA-3 is the gate clause and it is the next row. ★★ `credit` IS AN UNGATED DECLARATION — any caller can declare any opening balance, because genesis (PAWA-7) and issuance (PAWA-8) are the rows that decide who may. It is named apart from a debit precisely so that gap is visible rather than hidden inside a signed number. ★ THE LEDGER IS IN-MEMORY — durable storage is the host's, exactly as the event log and the meter are; `with_entries` is the reload door, the same shape `NonceLedger::with_spent` uses. ★★ A CHARGE HAS NO COUNTERPARTY — spending REMOVES juul from circulation rather than moving it anywhere, which is a deliberate posture and is asserted; PAWA-6's treasury is where a destination would be introduced if one ever is. ★ BALANCES ARE `f64` — the meter produces a real-valued pawa, so the ledger matches it; a fixed-point or integer-minor-unit representation is a real decision that belongs with the calibration of κ, not before it. ★★ AND THERE IS NO REVOCATION OR REVERSAL — no method un-charges an entry, because the ledger is append-only; a correction would be a compensating entry, which is a row nobody has written yet."
+  },
+
+  "backing_cases": [
+    {
+      "name": "a_charge_is_always_backed_by_a_real_metered_run",
+      "why": "★★★ THE STRUCTURAL PROPERTY OF THIS SLICE. `charge` takes a `PawaReading`, and a `PawaReading` has no public constructor — the only source is `pawa::meter` over a COMMITTED execution. There is no `debit(amount)` anywhere in the module, so a charge cannot be invented, and the resulting debit carries the operator and sustain it came from.",
+      "expect": {"debit.amount": "== reading.pawa()", "debit.operator": "budget.record_income"}
+    },
+    {
+      "name": "a_run_is_charged_to_whoever_made_it",
+      "why": "★ The principal comes off the reading, not off an argument, so a caller cannot redirect the bill to somebody else. Another funded principal's balance is asserted untouched.",
+      "expect": {"other_balance": "unchanged"}
+    }
+  ],
+
+  "affordability_cases": [
+    {
+      "name": "a_charge_is_admitted_only_if_the_balance_covers_it",
+      "why": "★★ `balance ← balance − pawa`, admitted only if `balance ≥ pawa` — the row's own rule, and the resulting balance is asserted to be exactly the difference rather than approximately it.",
+      "expect": {"spent": "== reading.pawa()", "balance": "opening − pawa"}
+    },
+    {
+      "name": "an_unaffordable_charge_is_refused_and_the_balance_is_byte_identical",
+      "why": "★★ An honest refusal, not an error: `Insufficient` carries both numbers so a caller can say HOW MUCH short. And the whole ledger is asserted BYTE-IDENTICAL afterwards — nothing was appended, which is the refusal-changes-nothing discipline every prior slice keeps.",
+      "expect": {"charged": false, "shortfall": "required − balance", "ledger": "byte-identical"}
+    },
+    {
+      "name": "a_refused_charge_never_clamps_the_balance_to_zero",
+      "why": "★ Clamping would silently lose the overspend AND report a debit that did not happen. The balance is asserted unchanged and the debit count zero — refusal is refusal, not a partial charge.",
+      "expect": {"balance": "unchanged", "debits": 0}
+    },
+    {
+      "name": "a_balance_exactly_equal_to_the_cost_is_affordable",
+      "why": "The rule is `balance ≥ pawa`, not `>`. A balance that exactly covers a run is spent to zero, which is a real boundary worth pinning rather than leaving to the reader.",
+      "expect": {"charged": true, "balance": 0.0}
+    },
+    {
+      "name": "an_unfunded_principal_starts_at_zero_and_cannot_spend",
+      "why": "★ A principal with no entries has a balance of 0.0 — correctly, because that is a SUM OVER AN EMPTY SET rather than a claim about anything unmeasured — and therefore cannot afford a non-zero run.",
+      "expect": {"balance": 0.0, "charged": false}
+    }
+  ],
+
+  "fold_cases": [
+    {
+      "name": "the_balance_is_the_fold_of_the_entries_and_rebuilds_identically",
+      "why": "★★ The `state = fold(events)` discipline one layer up. There is NO STORED BALANCE FIELD that could drift — the fold IS the balance — so `rebuild` agreeing with `balance_of` is true by construction rather than kept true by care. The entry list is asserted append-only: one credit and three debits after three charges.",
+      "expect": {"rebuild": "== balance_of", "entries": 4}
+    },
+    {
+      "name": "a_hosts_durable_entries_rebuild_the_same_balance",
+      "why": "★ The host holds durability, the core holds the decision — the same split `NonceLedger::with_spent` uses. A ledger reloaded from its own entries is asserted EQUAL to the original, so a host's round trip cannot silently change a balance.",
+      "expect": {"reloaded": "== original"}
+    }
+  ],
+
+  "boundary_cases": [
+    {
+      "name": "a_debit_reduces_circulation_and_creates_nothing",
+      "why": "★ CONSERVATION, stated as the posture it is: a cost debit has NO COUNTERPARTY, so spending REMOVES juul from circulation rather than moving it to someone else. Total circulation is asserted to fall by exactly the pawa spent.",
+      "expect": {"circulation_after": "before − pawa"}
+    },
+    {
+      "name": "a_credit_and_a_debit_are_different_entries_not_a_signed_number",
+      "why": "★ So *where did this juul come from* stays answerable. The reference's table is a signed `delta` column; here the two are distinct variants, and `debits_of` returns only the debits — a credit is never counted as one.",
+      "expect": {"entries[0]": "Credit", "entries[1]": "Debit", "debits": 1}
+    },
+    {
+      "name": "charging_one_principal_leaves_every_other_balance_untouched",
+      "why": "★★★ THE HARD BOUNDARY, asserted: there is NO TRANSFER in this module. Nobody is credited by a charge, so no method here can move juul between principals — the other principal's balance is unchanged and circulation falls, rather than the juul appearing somewhere else.",
+      "expect": {"other_balance": "unchanged", "circulation": "fell — spent, not moved"}
+    }
+  ]
+}

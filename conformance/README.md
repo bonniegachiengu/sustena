@@ -142,6 +142,7 @@ conformance/
     agent.json          omega assembled + under a warrant   (spec, R2)
     enzyme.json         I : e -> (o, theta), the proposer   (spec, R2)
     pawa.json           the pawa meter (odometer, no ledger) (parity+wiring)
+    juul.json           the juul ledger (balance, no transfer) (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2461,3 +2462,42 @@ calibration was invented.
 balance**; the timestamp is **host-supplied**; `Meter` is **in-memory**; the
 compute proxy is a **count, not a cost model**; and **nothing calls `meter()`
 from `execute_admitted` yet**.
+
+---
+
+### `juul.json` — the juul ledger (PAWA-2, Pawa §2)
+**12 cases.** The balance PAWA-1's readings are charged against — and the first
+module in the build that holds a balance at all.
+
+★★★ **So the hard boundary is structural, not promised.** Internal accounting
+on a single host; never real money, never a **transferable asset**, never a
+payment rail. This module has **no transfer** (a charge has *no counterparty* —
+spending removes juul from circulation rather than moving it), **no mint** (only
+`credit`, which *declares* an opening balance, named apart from a debit), and
+**no rail**. Asserted: charging one principal leaves every other balance
+untouched.
+
+★★★ **A debit cannot exist without a measurement behind it.** `charge` takes a
+**`PawaReading`**, which has no public constructor — its only source is
+`pawa::meter` over a **committed** execution. **There is no `debit(amount)`**,
+so a charge cannot be invented and the principal cannot be redirected.
+
+★★ **`balance ← balance − pawa`, admitted only if `balance ≥ pawa`** (`≥`, not
+`>`). `Insufficient` is an **honest refusal**, carries how far short, and
+appends **nothing** — the ledger is asserted **byte-identical**. It **never
+clamps to zero**.
+
+★★ **The balance is a FOLD** — append-only entries summed on read, no stored
+balance to drift, so `rebuild() == balance_of()` holds by construction. `Credit`
+and `Debit` are **distinct variants**, not a signed delta.
+
+★★★ **A finding the brief did not have:** `charge()` is indeed scaffolded with
+zero callers — but **`deduct()` has four real callers**, and it charges
+`meta.pawa_cost`, the **static estimate**, which is `0` for every one of them.
+**The reference's live debit path is wired to the estimate, not the
+measurement.** ★ And the fold is credited as **parity, not a sharpening**: the
+reference's `get_balance` already sums deltas.
+
+**Limits, all six recorded and asserted:** nothing is wired into the gate;
+`credit` is an **ungated declaration**; the ledger is **in-memory**; a charge
+has **no counterparty**; balances are `f64`; and there is **no reversal**.

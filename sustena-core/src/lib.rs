@@ -134,6 +134,7 @@ pub mod goodhart;
 pub mod harmonics;
 pub mod holarchy;
 pub mod inverse;
+pub mod juul;
 pub mod kernel;
 pub mod learned;
 pub mod learning;
@@ -321,6 +322,7 @@ pub use curated::{
     BindingTable, PolicyError, SaliencePolicy, UrgencyBasis,
     Eligibility, Request, View, WidgetCandidate, Withdrawn,
 };
+pub use juul::{Charge, Entry, JuulLedger};
 pub use pawa::{compute_pawa, compute_units, constraint_eval_count, Meter, PawaReading, Stats};
 pub use panel::{PanelDecl, PanelError, PanelInView, PanelPolicy, PanelSet};
 pub use strategy::{
