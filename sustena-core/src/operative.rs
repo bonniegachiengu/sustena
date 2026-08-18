@@ -119,6 +119,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use thiserror::Error;
 
+use crate::models::{Agreement, EffectiveN, WorldModel};
+
 /// A point of `S` — declared dimension readings. `u_i` is evaluated here.
 pub type StatePoint = BTreeMap<String, f64>;
 
@@ -567,10 +569,22 @@ pub fn geometric_mean(utilities: &[f64]) -> Result<f64, OperativeError> {
 /// `ω_i = ⟨u_i, Π_i, attention_i, M_self_i, M_world_i, dom_i⟩` — the parts of
 /// it this slice builds.
 ///
-/// **No `S`, no `T`.** That absence *is* the sharing constraint. `Π`
-/// (OPV-4), `attention` (OPV-7), `M_self`/`M_world` (OPV-11) and learning
-/// (OPV-6) are follow-ons and have no placeholder here, because a declared-but-
-/// inert field reads as built.
+/// **No `S`, no `T`.** That absence *is* the sharing constraint, and it holds
+/// for the assembled agent too.
+///
+/// ★★ **The omission comment this doc used to carry is now resolved, and the
+/// resolution is not "the fields were added".** `Π` (OPV-4), `attention`
+/// (OPV-7), `M_self`/`M_world` (OPV-11) and learning (OPV-6) were left off
+/// because *a declared-but-inert field reads as built*. All four now exist —
+/// so they are composed by [`crate::agent::Agent`], where every one of them is
+/// **read on a real reasoning path**, rather than added here as `Option`s a
+/// method might find missing. That would have been the same defect, committed
+/// instead of dodged. This type stays the boundary: `⟨u_i, dom_i⟩`, and no
+/// world.
+///
+/// ★ `M_world` is the exception that proves the rule: §VII says **one per
+/// household**, so it hangs on [`Omega`] (see [`Omega::modelling`]) and no
+/// operative owns a private one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Operative {
     id: String,
@@ -668,6 +682,17 @@ pub struct Ranking {
 pub struct Omega {
     world: Shared,
     members: Vec<Operative>,
+    /// ★★★ `M_world` — **one per household**, per §VII. It lives here, on the
+    /// population that already owns the one world, and **not** on any
+    /// [`Operative`]: a private world-model per operative would contradict the
+    /// article outright and would make the correlation below undetectable.
+    ///
+    /// `Option`, and honestly so: a population that has not authored a model
+    /// does not have one, and [`crate::models::WorldModel::declared`] requires
+    /// a fidelity claim with a basis — inventing one would be exactly the
+    /// confidence §VII warns about. The absence is **read**, not merely
+    /// stored: see [`Omega::agreement_over`].
+    world_model: Option<WorldModel>,
 }
 
 impl Omega {
@@ -675,6 +700,38 @@ impl Omega {
         Self {
             world,
             members: Vec::new(),
+            world_model: None,
+        }
+    }
+
+    /// Declare the household's `M_world`.
+    pub fn modelling(mut self, model: WorldModel) -> Self {
+        self.world_model = Some(model);
+        self
+    }
+
+    /// `M_world`, if this household has declared one.
+    pub fn world_model(&self) -> Option<&WorldModel> {
+        self.world_model.as_ref()
+    }
+
+    /// ★★★ **OPV-11's keystone, fired off real population state.**
+    ///
+    /// If these `headcount` operatives all agreed while reasoning through the
+    /// household's **one** `M_world`, that is not `headcount` independent
+    /// confirmations — forking gives independence of *sampling*, not of
+    /// *assumptions*. [`Agreement::via_shared_model`] cannot return
+    /// [`EffectiveN::Independent`], so the masquerade is unspellable rather
+    /// than discouraged; and when no model is declared there genuinely is no
+    /// shared assumption to correlate on, so the honest answer is
+    /// `Independent`.
+    ///
+    /// ★ No estimate is offered for the shared case, because the shortfall
+    /// depends on how wrong the model is — which nobody inside it can measure.
+    pub fn agreement_over(&self, headcount: usize) -> EffectiveN {
+        match &self.world_model {
+            Some(m) => Agreement::via_shared_model(headcount, m).effective_n(),
+            None => Agreement::independent(headcount).effective_n(),
         }
     }
 

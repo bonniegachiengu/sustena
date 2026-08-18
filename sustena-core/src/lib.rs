@@ -102,6 +102,7 @@
 //! | Stranding: states vs histories, three remedies | [`stranding`] | R2 |
 
 pub mod admission;
+pub mod agent;
 pub mod attention;
 pub mod approval;
 pub mod capability;
@@ -289,6 +290,7 @@ pub use operator::{
     Registry,
 };
 pub use capability::{Amplification, Attenuation, Capability, Rights};
+pub use agent::{Agent, Considered, Reasoning};
 pub use learned::{
     BoundError, FixedRule, IngressBound, LearnedRule, RuleSet, RuleTrust, Screening, TrustPolicy,
 };

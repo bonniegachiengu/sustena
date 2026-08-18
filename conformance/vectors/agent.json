@@ -1,0 +1,121 @@
+{
+  "conformance_version": 1,
+  "slice": "Follow-on wiring 1 — the deep-bundle faculties onto ω",
+  "phase": "R2 (spec) — internal wiring; no article mechanism and no Python parity to grep",
+  "authored_from": "3B1B — Operative - Formal Execution.md, §I (ω's parts), §V (the two attentions), §VII (one M_world per household); and the omission comments the four deep-bundle slices left behind",
+  "replayed_by": "sustena-core/tests/conformance_agent.rs",
+  "note": "The four faculties Π (OPV-4), attention (OPV-7), M_self/M_world (OPV-11) and the meme library (OPV-6) were each deliberately left OFF Operative, with the same stated reason each time. This slice puts them on — and the whole test of it is that they are GENUINELY USED rather than merely held.",
+
+  "★★_the_STEP_0_reconcile": {
+    "★★★_1_the_discipline_runs_in_REVERSE_now": "Four slices left a faculty off ω with the identical comment: 'follow-ons ... have no placeholder here, because a declared-but-inert field reads as built'. All four now exist, so the omission's reason has expired and the wiring is legitimate. But the SAME sentence now governs the wiring: a field ω merely stores, that no method reads, would be the exact defect the omissions were dodging — committed instead. So the acceptance test of this slice is not 'is the field there' but 'is it READ on a real path'.",
+    "★★★_2_so_the_faculties_are_REQUIRED_not_OPTIONAL": "Adding `attention: Option<Attention>` and `library: Option<MemeLibrary>` to `Operative` would have made every method that needs them fail at runtime on a missing field — a guard, and a field that may or may not be built, which is the inert shape in a different costume. Instead `Agent` composes `⟨Operative, Attention, MemeLibrary⟩` with NO Option, NO Default and NO partially-assembled constructor. An agent without attention would be OPV-7's half-mind and is unrepresentable; `Operative` stays exactly the boundary OPV-1 built.",
+    "★★★_3_there_was_no_operative_level_dispatch_to_wire_INTO": "Checked before designing: the Rust core has no `decide`/`evaluate`/`should_evaluate` on an operative. What exists is `mixture::Mixture::route` → `Dispatch::run(f)` — the router picks WHICH operative acts, and `f` is applied to the selected tickets and to nothing else. What `f` DOES was entirely the caller's business. So `Agent::act` is exactly what such an `f` calls, and `Agent::operative()` hands back the `&Operative` a `Contender` borrows. Two halves of one path — the router selects, the agent reasons — rather than a parallel loop.",
+    "★★_4_M_self_is_a_DERIVATION_not_a_field": "`SelfModel::of(&Operative, &StrategyGraph, &Attention, boundary)` already composes it from ω's own parts. Storing a copy would let it drift from the library it describes, so `Agent::self_model(meme_id, boundary)` derives on demand and returns `None` for a meme the agent does not hold — a self-model of a strategy you do not have is not a model of yourself.",
+    "★★★_5_M_world_is_the_HOUSEHOLD'S_and_belongs_on_Omega": "§VII: ONE M_world per household, forked per councillor. So it hangs on `Omega` — the population that already owns the one world — and `Agent` has NO `WorldModel` field at all. Making each ω own a private world-model would contradict the article outright AND would make the shared-model correlation undetectable, since the correlation is precisely what happens when several operatives reason through the SAME model."
+  },
+
+  "divergence": {
+    "kind": "rust-only-internal-wiring",
+    "statement": "No article mechanism and no Python parity: this slice adds no new law, it connects four already-built ones. So the counterweight is not a grep — it is the OMISSION COMMENTS themselves, which predicted exactly this slice and stated the standard it has to meet.",
+
+    "★★★_the_counterweight_is_the_omission_comments": "`operative.rs` said it once and four slices repeated it: 'Π (OPV-4), attention (OPV-7), M_self/M_world (OPV-11) and learning (OPV-6) are follow-ons and have no placeholder here, BECAUSE A DECLARED-BUT-INERT FIELD READS AS BUILT.' OPV-4's residual repeated it for Π, OPV-7's for attention, OPV-11's for both models, OPV-6's for the library. That is the standard, written in advance by the slices that declined to meet it early — and it is a harder counterweight than a parity grep, because it names the specific failure this slice could commit.",
+
+    "★★_so_the_per_faculty_genuine_use_paths_are_stated_and_tested": {
+      "Π (OPV-4) + the library (OPV-6)": "`Agent::act` runs a meme's `StrategyGraph` through `strategy::run`, node by node through the real gate; `Agent::learn_from` runs a full vary/select/retain round over the agent's OWN library. Both load-bearing, and the library it learns into IS the library it reasons from — one object, so there is no sync step that could be forgotten.",
+      "attention (OPV-7)": "`Agent::consider` scans the real ⊕ tree with the narrow aperture, ranks by `d(s,V)` via `narrow_scan`, and runs `broad_scan` outside the task's branch. `Agent::act` then USES both: a fired `Reframing` ENDS the turn before Π runs, and the top-scoring focus becomes Π's `trigger_event`. Attention filters and parameterises what Π sees.",
+      "M_self (OPV-11)": "`Agent::self_model` derives it from the agent's own parts via `SelfModel::of` — never stored, so it cannot drift.",
+      "M_world (OPV-11)": "On `Omega`, not on the agent. Read by `Omega::agreement_over(headcount)`, which returns `EffectiveN::BoundedAbove` when a shared model is declared and `EffectiveN::Independent` when one genuinely is not."
+    },
+
+    "★★_the_one_chosen_semantic_named_as_one": "A fired `Reframing` STOPS the turn — `Reasoning::Reframed`, and Π does not run. That is a decision, not a derivation, and the reason is exactly the anti-inert rule: the alternative was to compute a `Reframing` and drop it on the floor, which would make broad attention a faculty that runs and changes nothing. Reasoning inside a frame you have just been told is wrong is also the failure mode OPV-7's two output types exist to prevent, so stopping is the reading that makes the type earn its place.",
+
+    "the_props_that_had_to_survive_and_are_asserted": "★★★ `Agent` holds NO `Shared` — the world is an argument to every method that needs it, so OPV-1's Prop 1 (a move must be minted from the world) and Prop 2 (`Shared::reachable` is not given the population) are untouched. Proven behaviourally, not just by inspection: the same agent handed a NARROWER world refuses a variation naming a move that world lacks, which could not happen if the world were carried. ★★★ And `SelfModel::moves_within(&Shared)` still holds on a LEARNED meme — Prop 1 → Prop 3 → variation → M_self, through the assembled agent.",
+
+    "the_honest_limits": "★★ `Agent` IS A SEPARATE TYPE FROM `Operative`, NOT A WIDENED ONE — chosen so the faculties can be required rather than optional, at the cost of two names for what the article calls one thing (`Operative` is `⟨u,dom⟩`, `Agent` is the assembled ω). ★ THE ROUTER STILL TAKES `&Operative`, NOT `&Agent` — `mixture::Contender` is unchanged, so a caller wires `Agent::operative()` into a `Contender` and calls `Agent::act` from the `Dispatch::run` closure; no `route_agents` convenience exists yet, deliberately, because inventing one before a caller needs it is how a parallel path starts. ★★ ATTENTION'S SCAN NEEDS A `MonitorEngine`, WHICH IS HOST STATE — so `consider`/`act` take it as an argument rather than the agent holding one, for the same reason it holds no `Shared`. ★ THE FOCUS IS THE SINGLE WORST-RANKED SUSTAIN — `K ≈ 4` bounds the hold in UI-1, and threading a held SET rather than one focus into Π's trigger is a real follow-on this slice does not take. ★ `learn_from` DOES NOT CONSULT `M_world` — the `Feedback::PredictionDiverged` trigger exists and an `Omega`-level helper that builds one from a household projection would be the natural next connection; nothing here fabricates it. ★★ AND NO AGENT IS EVER CONSTRUCTED BY THE CORE — assembling one is the host's job, exactly as declaring a `WorldModel` is."
+  },
+
+  "attention_cases": [
+    {
+      "name": "attention_ranks_by_the_households_own_urgency",
+      "why": "★ The narrow aperture reaches real children of the real ⊕ tree and `narrow_scan` scores them from `Region::distance`. `Score` has no public constructor, so an agent cannot mint one — the urgency stays the household's, not a rival metric the agent declares.",
+      "expect": {"ranked_non_empty": true, "values_from": "Region::distance"}
+    },
+    {
+      "name": "attention_parameterises_what_the_strategy_is_triggered_with",
+      "why": "★★ The proof that attention is not computed beside Π: the top-scoring focus is written into the strategy's `trigger_event`, and the walk's own accumulated map carries it back. What attention chose is what Π was pointed at.",
+      "expect": {"trigger_event.focus": "equals the reported focus"}
+    },
+    {
+      "name": "a_changed_frame_stops_the_turn_before_the_strategy_runs",
+      "why": "★★ Broad attention has the first word, and this is the chosen semantic named in the divergence block. A sustain outside V and outside the task's branch ends the turn as `Reframed` with Π unrun — the alternative was computing a `Reframing` and dropping it, which is precisely the inert faculty this slice exists to avoid.",
+      "expect": {"reasoning": "Reframed", "ran": false}
+    }
+  ],
+
+  "reasoning_cases": [
+    {
+      "name": "a_reasoning_turn_runs_the_agents_own_strategy_through_the_gate",
+      "why": "★★ The load-bearing wiring. The agent reasons by running a meme from its OWN library through `strategy::run`, which admits every node — so Π and the library are both genuinely exercised on one path.",
+      "expect": {"outcome": "ReachedExit", "state_moved": true}
+    },
+    {
+      "name": "the_gate_still_refuses_inside_a_reasoning_turn",
+      "why": "★★★ `Agent::act` adds NO bypass. With the household's own `liquid_non_negative` armed, a meme that would take the balance negative is refused by the gate mid-walk and the turn reports it — the agent chooses whether and about what to run, never whether the gate applies.",
+      "expect": {"outcome": "Refused"}
+    },
+    {
+      "name": "an_unknown_meme_is_reported_not_silently_skipped",
+      "why": "A meme id the library does not hold is `NoSuchMeme`, not a silent no-op — *it is not there* and *it ran and did nothing* are different facts, the same discipline as `WalkOutcome::StepsExhausted`.",
+      "expect": {"reasoning": "NoSuchMeme"}
+    },
+    {
+      "name": "nothing_in_view_is_a_distinct_answer_from_a_strategy_finding_nothing",
+      "why": "★ The third answer. Scanning from a leaf reaches nothing, so there is no focus and Π is not run — which must not be reported the same way as a strategy that ran and returned nothing.",
+      "expect": {"reasoning": "NothingInView", "scanned": 0}
+    }
+  ],
+
+  "learning_cases": [
+    {
+      "name": "an_agent_learns_over_its_own_library",
+      "why": "★★ OPV-6 exercised on ω itself: a real vary/select/retain round, triggered by a real `Feedback`, that grows this agent's own scoped library and records the `Fitness` that kept the survivor.",
+      "expect": {"changed_the_library": true, "retained_by": "Viable"}
+    },
+    {
+      "name": "what_it_learned_is_immediately_reasonable_with",
+      "why": "★★★ The two faculties are the same object. The meme a learning round retained can be run by the very next `act` with no reload, re-registration or sync step — which is what makes the wiring real rather than two features that happen to sit on one struct.",
+      "expect": {"ran": true}
+    }
+  ],
+
+  "props_cases": [
+    {
+      "name": "the_world_is_an_argument_never_a_field",
+      "why": "★★★ OPV-1's Prop 1 and Prop 2 survive, proven BEHAVIOURALLY rather than by inspection. The same agent, handed a NARROWER `Shared`, refuses a variation naming a move that world lacks — which could not happen if the agent carried a world of its own. `Agent` has no `Shared` field and no constructor that would take one.",
+      "expect": {"variants": 0, "refused_with": "MoveNotInT", "kept": 0}
+    },
+    {
+      "name": "the_self_model_still_moves_within_the_shared_world_after_learning",
+      "why": "★★★ CELL's recursion through the assembled agent, and the whole chain in one assertion: Prop 1 (minting) → Prop 3 (nodes hold `LegalMove`) → variation (OPV-6 rebuilds through the same constructors) → `M_self` (OPV-11). A learned self-model still cannot escape `T`.",
+      "expect": {"moves_contains": "budget.allocate", "moves_within": true}
+    },
+    {
+      "name": "the_self_model_is_derived_from_the_agents_own_parts",
+      "why": "★ Derived, never stored: the budget comes from the agent's own `Attention`, the objective count from its own `Utility`, the moves from the named meme's `Π`. And a meme the agent does not hold yields `None` rather than an empty model.",
+      "expect": {"attention_budget": "the agent's own", "unknown_meme": null}
+    }
+  ],
+
+  "world_model_cases": [
+    {
+      "name": "the_world_model_hangs_on_the_population_not_on_an_agent",
+      "why": "★★★ §VII's *one per household*, structurally: `Omega::modelling` is the only way to declare one and `Agent` has no `WorldModel` field, so a private per-operative world-model is not something this core can be asked for.",
+      "expect": {"omega.world_model().id": "household"}
+    },
+    {
+      "name": "several_agents_sharing_one_model_are_not_independent_confirmations",
+      "why": "★★★ OPV-11's keystone, now fired off REAL population state rather than a hand-built `Agreement`. A household with a declared `M_world` reports `BoundedAbove` for any headcount; a household without one reports `Independent`, because with no shared model there genuinely is no shared assumption to correlate on.",
+      "expect": {"with_model": "BoundedAbove", "without_model": "Independent"}
+    }
+  ]
+}

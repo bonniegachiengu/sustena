@@ -139,6 +139,7 @@ conformance/
     attention.json      narrow + broad, the <b,d,p> meter  (spec, R2)
     models.json         M_self, M_world, effective-N       (spec, R2)
     learning.json       vary / select / retain over memes  (spec, R2)
+    agent.json          omega assembled: the faculties on  (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2278,3 +2279,50 @@ crossover; `vary` is **declared, not sampled** (ADR-0001 forbids RNG);
 (*forgetting is a separate decision from learning*); extending at the exit
 **moves the exit**; selection scores the **end state only**; **nothing wires a
 library onto `ω` yet**; and **no cost is charged for a round**.
+
+---
+
+### `agent.json` — `ω` assembled (follow-on wiring 1, Operative §I/§V/§VII)
+**14 cases, R2 (spec).** ★★ **No article mechanism and no Python parity** —
+this slice connects four already-built laws rather than adding a fifth. The
+counterweight is the **omission comments** the four deep-bundle slices left
+behind.
+
+★★★ **The discipline runs in reverse now.** Four slices left a faculty off
+`Operative` with the identical reason — *a declared-but-inert field reads as
+built* — and all four now exist, so the omission has expired. But the same
+sentence governs the wiring: a field `ω` merely stores would be **that defect
+committed instead of dodged**. So the acceptance test is *is it read on a real
+path*, not *is the field there*.
+
+★★★ **Required, not optional.** `Agent` composes
+`⟨Operative, Attention, MemeLibrary⟩` with no `Option`, no `Default` and no
+partially-assembled constructor — an agent without attention would be OPV-7's
+half-mind and is unrepresentable. `Operative` stays the boundary OPV-1 built.
+
+★★★ **`Agent` holds no `Shared`**, so Prop 1 and Prop 2 are untouched — proven
+**behaviourally**: the same agent handed a *narrower* world refuses a variation
+naming a move that world lacks, and admits it when handed the wider one.
+
+★★ **One path, three faculties, in order.** `Agent::act` scans with the narrow
+aperture and ranks by `d(s,V)`; ★ a fired `Reframing` **ends the turn before
+`Π` runs** (a chosen semantic, named as one — the alternative was computing a
+`Reframing` and dropping it); the top-scoring focus becomes `Π`'s own
+`trigger_event`; and the meme runs through the real gate, which still **refuses**
+inside a turn. ★★★ And learning and reasoning are the **same object**: a meme a
+round retained is runnable by the very next `act`, with no sync step.
+
+★★ **`M_self` is derived, never stored**, and a **learned** meme's `M_self` still
+satisfies `moves_within(&Shared)` — Prop 1 → Prop 3 → variation → `M_self`,
+unbroken through the assembled agent.
+
+★★★ **`M_world` hangs on `Omega`, not on the agent** — §VII's *one per
+household*. Read by `Omega::agreement_over`, so OPV-11's keystone fires off real
+population state: `BoundedAbove` with a declared model, `Independent` without.
+
+**Limits, all six recorded in the file and asserted by the binary:** `Agent` is
+a **separate type** from `Operative`; the router still takes `&Operative` and
+there is **no `route_agents` convenience**, deliberately; attention's scan needs
+a `MonitorEngine`, which is **host state**; the focus is the **single**
+worst-ranked sustain, not a held set; `learn_from` **does not consult
+`M_world`** yet; and **no agent is ever constructed by the core**.
