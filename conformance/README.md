@@ -139,7 +139,7 @@ conformance/
     attention.json      narrow + broad, the <b,d,p> meter  (spec, R2)
     models.json         M_self, M_world, effective-N       (spec, R2)
     learning.json       vary / select / retain over memes  (spec, R2)
-    agent.json          omega assembled: the faculties on  (spec, R2)
+    agent.json          omega assembled + under a warrant   (spec, R2)
 ```
 
 `conformance_version` in each file guards the format. A stale vector set fails
@@ -2326,3 +2326,54 @@ there is **no `route_agents` convenience**, deliberately; attention's scan needs
 a `MonitorEngine`, which is **host state**; the focus is the **single**
 worst-ranked sustain, not a held set; `learn_from` **does not consult
 `M_world`** yet; and **no agent is ever constructed by the core**.
+
+---
+
+### `agent.json`, part 2 — reasoning under a warrant (follow-on wiring 2)
+**22 cases now** (14 from wiring 1, **8 added**). ★★ Internal wiring again, and
+the counterweight is threefold and specific: **OPV-4's residual predicted this
+slice and named the fix**, **IMM-7's `Capability` was built for it**, and the
+confused-deputy citation is the article's own.
+
+★★★ **The gap, confirmed in code first:** `strategy::run_with_effect` passed
+`&Authorization::Unchecked` on **every** node, so an agent reasoned outside the
+authorization conjunct. `run_under` now takes an `&Authorization`; `run` and
+`run_with_effect` delegate with `Unchecked`, so **every prior caller and every
+R1 vector is byte-for-byte unchanged** — and `Agent::act` takes the `Warrant` as
+a **required parameter**, so there is **no route to `Unchecked` through an
+`Agent`**. Both halves are asserted.
+
+★★★ **The confused deputy, in its designed place.** A strategy acts on a
+household's authority over inputs it did not choose.
+`Authorization::Capability` carries **no `&Memberships`** — the ambient set is
+*absent*, not merely unconsulted.
+
+★★★ **Least privilege by provenance — where OPV-6 meets IMM-7.**
+`authority_for` attenuates to `Rights::Only(the meme's own moves)` plus a tier
+ceiling from `MemeTrustPolicy`, keyed on `MemeProvenance`. An **imported** meme
+gets `TIER_CONTRIBUTOR` where an authored one holds `TIER_OWNER`, and `budget.*`
+needs `TIER_MEMBER` — so it is **refused on tier alone** while the authored copy
+commits. `MemeTrustPolicy` mirrors `learned::TrustPolicy`: declare all three, no
+`Default`. **Nothing was rebuilt.**
+
+★★ **Two refusals, the stronger one first.** At **attenuation**, a strategy
+naming a move the household lacks yields `Amplification::Rights` and **no
+warrant at all**. At the **gate**, a warrant cut for meme *A* running meme *B*
+(`capability_carries`) or aimed at another target (`NotDesignated`) refuses with
+**state byte-untouched** — the out-of-rights node is placed first so nothing
+commits.
+
+★★ **`EffectClass`:** `select` ran `Sandbox` and still does; `act` runs
+`Sandbox` too, **structurally** — a live effect needs a token bound to one
+`(operator, params)` pair and single-use, and a strategy is many nodes. `act`
+takes none and cannot be handed one, so **an agent cannot fire a live effect**.
+
+★ **Prop 3 and the two containments hold and nest:** `T` at **build**, the
+warrant at the **gate**.
+
+**Wiring 2's own limits:** `run`/`run_with_effect` **keep** `Unchecked` for
+parity; the warrant is cut **per meme, not per turn**, so a host must re-cut
+after a learning round; `MemeTrustPolicy` does not distinguish *which* household
+a meme came from; **the core issues no capability** (`Capability::issue` needs
+host-held `Memberships`); and `learn_from` still scores on the caller's terms,
+because making a variant's **fitness** depend on who asked is a larger claim.

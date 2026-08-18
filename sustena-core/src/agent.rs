@@ -56,6 +56,58 @@
 //! [`Agent::self_model`] calls [`SelfModel::of`] on the agent's own parts. A
 //! stored copy could drift from the library it describes; a derivation cannot.
 //!
+//! ## ★★★ A strategy runs under an ATTENUATED CAPABILITY, never `Unchecked`
+//!
+//! OPV-4 shipped with a named residual: *"authorization and effects are passed
+//! `Unchecked` ... **a strategy is exactly the deputy IMM-7's capability was
+//! built for**."* Follow-on wiring 2 closes it.
+//!
+//! A strategy acts on a household's authority, over inputs — a trigger, a meme,
+//! a correction — it did not choose. **That is Hardy's confused deputy, exactly
+//! the shape.** So [`Agent::act`] takes a [`Warrant`] and passes
+//! [`Authorization::Capability`] to every node, and that variant carries **no
+//! `&Memberships`**: a strategy cannot fall back on the issuer's wider ambient
+//! authority even by mistake. There is **no way to run a strategy `Unchecked`
+//! through an `Agent`** — the parameter is required, not defaulted.
+//!
+//! ★★★ **Least privilege by PROVENANCE.** [`Agent::authority_for`] attenuates
+//! the household's capability for **one meme**: `Rights::Only(that meme's own
+//! moves)`, and a tier ceiling from [`MemeTrustPolicy`] keyed on the meme's
+//! [`MemeProvenance`] — so a **learned or imported** strategy runs under a
+//! tighter authority than an authored one, the same discipline IMM-10 gave a
+//! learned parse rule. This is where OPV-6's provenance and IMM-7's attenuation
+//! meet, and neither was rebuilt to make it happen.
+//!
+//! Two refusals, and both are real:
+//!
+//! - **At attenuation.** A strategy naming a move the household's own
+//!   capability does not carry is an [`Amplification`] — `attenuate` refuses,
+//!   and **no authority is issued at all**. The strategy cannot run.
+//! - **At the gate.** Running meme *B* under a warrant cut for meme *A* is
+//!   `Denial::RightNotHeld`, refused mid-walk with state untouched; and using a
+//!   warrant for household *X* against target *Y* is `Denial::NotDesignated` —
+//!   the redesignation refusal, the confused deputy's own move.
+//!
+//! ★ **Two containments, unchanged in shape.** A node is still a `LegalMove` in
+//! `T` at **build** (OPV-4's Prop 3), and now also within the warrant's rights
+//! at the **gate** — the same nested pair UI-2 and IMM-10 already use.
+//!
+//! ## `EffectClass`: an agent reasons in the sandbox, and cannot fire an effect
+//!
+//! [`Agent::act`] runs [`EffectClass::Sandbox`] — the **full** §4E gate, no
+//! approval token needed, nothing external issued. That is a structural claim
+//! rather than a shortcut: a live effect is admitted only by an
+//! `ApprovalToken`, which is **bound to one `(operator, params)` pair and
+//! single-use**, and a strategy is *many* nodes. So one token cannot admit a
+//! walk, `act` takes none, and there is no way to hand it one. Making a
+//! strategy's outcome real is the human's approve-and-execute path (OPV-30/31),
+//! one act at a time — the same discipline EVT-15 keeps for replay.
+//!
+//! `select` (OPV-6) already ran `Sandbox`; it still does. The two paths now
+//! differ in **authority**, not in effect class: scoring a *candidate* is done
+//! under the caller's own terms, while an agent *reasoning for real* is
+//! answerable to a warrant.
+//!
 //! ## ★★★ `M_world` is the household's, not the agent's
 //!
 //! §VII is explicit: **one `M_world` per household**, forked per councillor. So
@@ -70,14 +122,17 @@ use std::collections::BTreeSet;
 
 use serde_json::{Map, Value};
 
+use crate::approval::EffectClass;
 use crate::attention::{broad_scan, narrow_scan, scan, Attention, Reframing, Scan, Score};
-use crate::learning::{learn, Feedback, LearningRound, LibraryError, MemeLibrary, VaryOp};
+use crate::capability::{Amplification, Attenuation, Capability, Rights};
+use crate::learning::{learn, Feedback, LearningRound, LibraryError, MemeLibrary, MemeProvenance, VaryOp};
 use crate::models::SelfModel;
 use crate::monitor::MonitorEngine;
 use crate::operative::{Operative, Shared};
-use crate::operator::{Enforcement, Registry};
+use crate::operator::{Authorization, Enforcement, Registry};
+use crate::principal::Tier;
 use crate::region::Region;
-use crate::strategy::{run, Walk};
+use crate::strategy::{run_under, Walk};
 
 /// What one attend-then-reason turn produced.
 ///
@@ -149,6 +204,96 @@ impl Considered {
     }
 }
 
+/// What each provenance is permitted to reach.
+///
+/// ★ A deliberate mirror of [`crate::learned::TrustPolicy`], which does the same
+/// job for a learned parse rule: **declared, never inferred**, and with **no
+/// `Default`** — a host that has not stated its policy does not have one, and
+/// this type will not invent it. Named separately rather than reusing
+/// `TrustPolicy` because a meme is not a rule and `RuleTrust`'s three levels
+/// answer a different question.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemeTrustPolicy {
+    authored: Tier,
+    varied: Tier,
+    imported: Tier,
+}
+
+impl MemeTrustPolicy {
+    /// Name all three. There is no partial constructor, because a policy with a
+    /// hole in it is a policy that fails open somewhere.
+    pub fn declare(authored: Tier, varied: Tier, imported: Tier) -> MemeTrustPolicy {
+        MemeTrustPolicy { authored, varied, imported }
+    }
+
+    /// The **weakest** authority a strategy of this provenance may hold.
+    ///
+    /// ★★ Lower is *more* authority, so a host declaring
+    /// `(authored, varied, imported)` in ascending order is stating exactly the
+    /// least-privilege-by-provenance rule: an imported strategy — one built
+    /// against somebody else's problem distribution, and NFL says that is what
+    /// it is worth — reaches less than one written here.
+    pub fn ceiling_for(&self, provenance: &MemeProvenance) -> Tier {
+        match provenance {
+            MemeProvenance::Authored => self.authored,
+            MemeProvenance::Varied { .. } => self.varied,
+            MemeProvenance::Imported { .. } => self.imported,
+        }
+    }
+}
+
+/// The authority one reasoning turn runs under, and the object it names.
+///
+/// ★ The pair travels together because `target` is checked **against** the
+/// capability — it is *the sustain this call names, often from untrusted
+/// input*, which is precisely why it is not trusted on its own.
+#[derive(Debug, Clone, Copy)]
+pub struct Warrant<'a> {
+    capability: &'a Capability,
+    target: &'a str,
+}
+
+impl<'a> Warrant<'a> {
+    pub fn new(capability: &'a Capability, target: &'a str) -> Warrant<'a> {
+        Warrant { capability, target }
+    }
+
+    pub fn capability(&self) -> &Capability {
+        self.capability
+    }
+
+    pub fn target(&self) -> &str {
+        self.target
+    }
+}
+
+/// Why no warrant could be cut for a meme.
+///
+/// ★ Named `WarrantError`, not `AuthorityError` — [`crate::editing::AuthorityError`]
+/// answers whether a *definition edit* was authorised, a genuinely different
+/// question. Thirty-third collision; the newcomer takes the different name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WarrantError {
+    UnknownMeme { id: String },
+    /// ★★★ The household's own capability does not carry what this strategy
+    /// names. `attenuate` **refuses to widen**, so no authority is issued at
+    /// all — the strategy simply cannot run, which is stronger than refusing it
+    /// node by node once it already has one.
+    Amplified(Amplification),
+}
+
+impl std::fmt::Display for WarrantError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WarrantError::UnknownMeme { id } => write!(f, "no meme '{id}' in this library"),
+            WarrantError::Amplified(a) => write!(
+                f,
+                "cannot cut a warrant for this strategy: {a} — a capability is                  attenuated, never widened"
+            ),
+        }
+    }
+}
+
 /// `ω` with its faculties on.
 ///
 /// ★★ **Every faculty is required.** There is no `Option`, no default and no
@@ -215,6 +360,39 @@ impl Agent {
         Considered { scan: narrow, ranked, reframing }
     }
 
+    // ── authority ────────────────────────────────────────────────────────────
+
+    /// ★★★ Cut a warrant for **one meme** from the household's capability.
+    ///
+    /// Two narrowings, and neither is optional:
+    ///
+    /// - `Rights::Only(this meme's own moves)` — least privilege even for an
+    ///   authored strategy. A strategy gets what its own nodes name, never the
+    ///   household's ambient rights, so widening it means *editing the
+    ///   strategy*, which OPV-4 already bounds by `T`.
+    /// - the tier ceiling for its [`MemeProvenance`] — so a **learned or
+    ///   imported** meme runs under tighter authority than an authored one.
+    ///
+    /// ★★ And [`Capability::attenuate`] refuses amplification, so a strategy
+    /// naming a move the household's own capability does not carry yields
+    /// [`WarrantError::Amplified`] and **no warrant at all**.
+    pub fn authority_for(
+        &self,
+        meme_id: &str,
+        household: &Capability,
+        policy: &MemeTrustPolicy,
+    ) -> Result<Capability, WarrantError> {
+        let meme = self
+            .library
+            .get(meme_id)
+            .ok_or_else(|| WarrantError::UnknownMeme { id: meme_id.to_string() })?;
+
+        let request = Attenuation::to_rights(Rights::only(meme.strategy().moves()))
+            .and_tier(policy.ceiling_for(meme.provenance()));
+
+        household.attenuate(&request).map_err(WarrantError::Amplified)
+    }
+
     // ── the reasoning turn ───────────────────────────────────────────────────
 
     /// ★★ **The one path**: attend, decide, then run `Π`.
@@ -226,6 +404,7 @@ impl Agent {
     pub fn act(
         &self,
         meme_id: &str,
+        warrant: Warrant<'_>,
         engine: &MonitorEngine,
         from: &str,
         region: &Region,
@@ -260,8 +439,21 @@ impl Agent {
             serde_json::Number::from_f64(urgency).map_or(Value::Null, Value::Number),
         );
 
-        let walk =
-            run(meme.strategy(), registry, allowed, enforcement, state, Value::Object(trigger));
+        // ★★★ Under the warrant, never `Unchecked` — and in the sandbox,
+        // because a live effect needs a token this method has no way to hold.
+        let walk = run_under(
+            meme.strategy(),
+            registry,
+            allowed,
+            enforcement,
+            state,
+            Value::Object(trigger),
+            &Authorization::Capability {
+                capability: warrant.capability,
+                target: warrant.target,
+            },
+            &EffectClass::Sandbox,
+        );
 
         Reasoning::Reasoned { focus: focus_id, urgency, walk: Box::new(walk) }
     }
@@ -324,8 +516,11 @@ mod tests {
     use crate::learning::{Fitness, LibraryScope};
     use crate::models::{EffectiveN, Fidelity, WorldModel};
     use crate::operative::{Cynefin, Objective, Omega, Sense, Utility};
+    use crate::principal::{
+        MembershipEdge, Memberships, SkinRegistry, TIER_CONTRIBUTOR, TIER_MEMBER, TIER_OWNER,
+    };
     use crate::region::Interval;
-    use crate::strategy::StrategyGraph;
+    use crate::strategy::{StrategyGraph, WalkOutcome};
     use serde_json::json;
 
     fn world() -> Shared {
@@ -398,6 +593,55 @@ mod tests {
         .unwrap()
     }
 
+
+    fn setup() -> (Memberships, SkinRegistry) {
+        let mut m = Memberships::new();
+        m.grant(MembershipEdge {
+            principal: "bonnie".into(),
+            sustain: "household".into(),
+            tier: TIER_OWNER,
+            skin: None,
+        });
+        (m, SkinRegistry::empty())
+    }
+
+    /// The household's own authority, which a warrant is cut from.
+    fn household_cap() -> Capability {
+        let (m, s) = setup();
+        Capability::issue(&m, &s, "bonnie", "household").unwrap()
+    }
+
+    /// ★ Ascending = decreasing authority. `budget.*` needs `TIER_MEMBER`, so
+    /// an IMPORTED meme's ceiling (`TIER_CONTRIBUTOR`) is genuinely too weak.
+    fn policy() -> MemeTrustPolicy {
+        MemeTrustPolicy::declare(TIER_OWNER, TIER_MEMBER, TIER_CONTRIBUTOR)
+    }
+
+    /// A strategy whose only node allocates — used to prove a refusal at the
+    /// FIRST node, so `state` is byte-untouched.
+    fn allocating_meme() -> StrategyGraph {
+        StrategyGraph::new("a", "a")
+            .with_node(&world(), "a", "budget.allocate", allocate_kwargs())
+            .unwrap()
+    }
+
+    /// One turn, under a warrant on the household.
+    fn turn(a: &Agent, meme_id: &str, cap: &Capability, e: &Enforcement) -> Reasoning {
+        a.act(
+            meme_id,
+            Warrant::new(cap, "household"),
+            &engine(),
+            "household",
+            &region(),
+            &BTreeSet::new(),
+            healthy,
+            &Registry::default(),
+            &allowed(),
+            e,
+            &state(),
+        )
+    }
+
     fn healthy(id: &str) -> Option<Value> {
         match id {
             "bonnie" => Some(json!({"finances": {"liquid": {"balance": 10.0}}})),
@@ -423,6 +667,7 @@ mod tests {
         let a = agent();
         let out = a.act(
             "m0",
+            Warrant::new(&household_cap(), "household"),
             &engine(),
             "household",
             &region(),
@@ -447,6 +692,7 @@ mod tests {
         let a = agent();
         let out = a.act(
             "m0",
+            Warrant::new(&household_cap(), "household"),
             &engine(),
             "household",
             &region(),
@@ -479,6 +725,7 @@ mod tests {
         let task: BTreeSet<&str> = ["bonnie"].into_iter().collect();
         let out = a.act(
             "m0",
+            Warrant::new(&household_cap(), "household"),
             &engine(),
             "household",
             &region(),
@@ -498,6 +745,7 @@ mod tests {
         let a = agent();
         let out = a.act(
             "nope",
+            Warrant::new(&household_cap(), "household"),
             &engine(),
             "household",
             &region(),
@@ -517,6 +765,7 @@ mod tests {
         // A leaf: the scan reaches no children at all.
         let out = a.act(
             "m0",
+            Warrant::new(&household_cap(), "household"),
             &engine(),
             "bonnie",
             &region(),
@@ -583,6 +832,7 @@ mod tests {
         let learned = round.retention.kept[0].clone();
         let out = a.act(
             &learned,
+            Warrant::new(&household_cap(), "household"),
             &engine(),
             "household",
             &region(),
@@ -668,4 +918,127 @@ mod tests {
         let unmodelled = Omega::over(world()).with(operative()).unwrap();
         assert_eq!(unmodelled.agreement_over(5), EffectiveN::Independent(5));
     }
+
+    // ── the authority conjunct, no longer Unchecked ──────────────────────────
+
+    #[test]
+    fn a_strategy_runs_under_an_attenuated_capability_not_unchecked() {
+        let a = agent();
+        let w = a.authority_for("m0", &household_cap(), &policy()).unwrap();
+        assert_eq!(w.rights(), &Rights::only(["budget.record_income"]));
+        assert_eq!(w.tier(), TIER_OWNER, "an authored meme keeps the household's tier");
+        assert!(turn(&a, "m0", &w, &Enforcement::default()).ran());
+    }
+
+    #[test]
+    fn a_node_outside_the_warrants_rights_is_refused_and_state_is_untouched() {
+        // ★★★ The confused-deputy refusal: a warrant cut for one meme cannot
+        // admit another. The out-of-rights node is FIRST, so nothing commits.
+        let mut lib = MemeLibrary::of(LibraryScope::of("household", "mentor"));
+        lib.author("m0", base()).unwrap();
+        lib.author("other", allocating_meme()).unwrap();
+        let a = Agent::assemble(operative(), attention(), lib);
+
+        let w = a.authority_for("m0", &household_cap(), &policy()).unwrap();
+        match turn(&a, "other", &w, &Enforcement::default()) {
+            Reasoning::Reasoned { ref walk, .. } => {
+                match &walk.outcome {
+                    WalkOutcome::Refused { reason, .. } => {
+                        assert!(reason.contains("budget.allocate"), "{reason}");
+                    }
+                    other => panic!("{other:?}"),
+                }
+                assert_eq!(walk.state, state(), "state is byte-untouched");
+            }
+            other => panic!("{}", other.describe()),
+        }
+    }
+
+    #[test]
+    fn a_warrant_for_another_household_is_refused_as_not_designated() {
+        // ★★★ Redesignation is the confused deputy's own move.
+        let a = agent();
+        let cap = a.authority_for("m0", &household_cap(), &policy()).unwrap();
+        let out = a.act(
+            "m0",
+            Warrant::new(&cap, "neighbour"),
+            &engine(),
+            "household",
+            &region(),
+            &BTreeSet::new(),
+            healthy,
+            &Registry::default(),
+            &allowed(),
+            &Enforcement::default(),
+            &state(),
+        );
+        match out {
+            Reasoning::Reasoned { ref walk, .. } => {
+                assert!(matches!(walk.outcome, WalkOutcome::Refused { .. }));
+                assert_eq!(walk.state, state());
+            }
+            other => panic!("{}", other.describe()),
+        }
+    }
+
+    #[test]
+    fn an_imported_meme_runs_under_a_tighter_authority_and_is_refused() {
+        // ★★★ Least privilege BY PROVENANCE — where OPV-6 and IMM-7 meet.
+        let donor = agent();
+        let m = donor.library().get("m0").unwrap().clone();
+        let mut mine = MemeLibrary::of(LibraryScope::of("neighbour", "mentor"));
+        mine.import(&m, donor.library().scope(), "borrowed").unwrap();
+        let a = Agent::assemble(operative(), attention(), mine);
+
+        let w = a.authority_for("borrowed", &household_cap(), &policy()).unwrap();
+        assert_eq!(w.tier(), TIER_CONTRIBUTOR, "tighter than an authored meme's");
+
+        match turn(&a, "borrowed", &w, &Enforcement::default()) {
+            Reasoning::Reasoned { ref walk, .. } => {
+                assert!(matches!(walk.outcome, WalkOutcome::Refused { .. }));
+                assert_eq!(walk.state, state(), "and nothing committed");
+            }
+            other => panic!("{}", other.describe()),
+        }
+    }
+
+    #[test]
+    fn a_strategy_naming_a_move_the_household_lacks_gets_no_warrant_at_all() {
+        // ★★★ Refused at ATTENUATION, which is stronger than refusing node by
+        // node once a warrant already exists.
+        let mut lib = MemeLibrary::of(LibraryScope::of("household", "mentor"));
+        lib.author("alloc", allocating_meme()).unwrap();
+        let a = Agent::assemble(operative(), attention(), lib);
+
+        let narrow = household_cap()
+            .attenuate(&Attenuation::to_rights(Rights::only(["budget.record_income"])))
+            .unwrap();
+        assert!(matches!(
+            a.authority_for("alloc", &narrow, &policy()),
+            Err(WarrantError::Amplified(Amplification::Rights))
+        ));
+    }
+
+    #[test]
+    fn an_agent_commits_with_no_approval_token_because_it_reasons_in_the_sandbox() {
+        // ★★ Structural: `act` accepts no `ApprovalToken` and there is no way to
+        // hand it one — a live effect needs a token bound to ONE (operator,
+        // params) pair, and a strategy is many nodes.
+        let a = agent();
+        let w = a.authority_for("m0", &household_cap(), &policy()).unwrap();
+        assert!(turn(&a, "m0", &w, &Enforcement::default()).ran());
+    }
+
+    #[test]
+    fn prop_3_still_holds_alongside_the_warrant() {
+        // ★ Two containments: `T` at build, the warrant at the gate.
+        let a = agent();
+        let moves = a.library().get("m0").unwrap().strategy().moves();
+        let w0 = world();
+        let t: BTreeSet<&str> = w0.moves().into_iter().collect();
+        assert!(moves.is_subset(&t), "still bounded by T");
+        let w = a.authority_for("m0", &household_cap(), &policy()).unwrap();
+        assert!(moves.iter().all(|m| w.rights().carries(m)), "and by the warrant");
+    }
+
 }

@@ -14,8 +14,9 @@ use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
 use sustena_core::{
-    agent::{Agent, Reasoning},
+    agent::{Agent, MemeTrustPolicy, Reasoning, Warrant, WarrantError},
     attention::{Aperture, Attention},
+    capability::{Amplification, Attenuation, Capability, Rights},
     detect::CusumSpec,
     ensemble::ModelTemplate,
     learning::{Feedback, Fitness, LibraryScope, MemeLibrary, VaryOp},
@@ -23,6 +24,9 @@ use sustena_core::{
     monitor::{MonitorEngine, SustainWatch},
     operative::{Cynefin, Objective, Omega, Operative, Sense, Shared, Utility},
     operator::{Enforcement, Registry},
+    principal::{
+        MembershipEdge, Memberships, SkinRegistry, TIER_CONTRIBUTOR, TIER_MEMBER, TIER_OWNER,
+    },
     region::{Interval, Region},
     strategy::{StrategyGraph, WalkOutcome},
     CONFORMANCE_VERSION,
@@ -151,10 +155,58 @@ fn extend_with_allocate() -> VaryOp {
     }
 }
 
+
+fn setup() -> (Memberships, SkinRegistry) {
+    let mut m = Memberships::new();
+    m.grant(MembershipEdge {
+        principal: "bonnie".into(),
+        sustain: "household".into(),
+        tier: TIER_OWNER,
+        skin: None,
+    });
+    (m, SkinRegistry::empty())
+}
+
+/// The household's own authority — what a warrant is cut from.
+fn household_cap() -> Capability {
+    let (m, s) = setup();
+    Capability::issue(&m, &s, "bonnie", "household").unwrap()
+}
+
+/// ★ Ascending = decreasing authority. `budget.*` needs `TIER_MEMBER`, so an
+/// IMPORTED meme's ceiling (`TIER_CONTRIBUTOR`) is genuinely too weak.
+fn policy() -> MemeTrustPolicy {
+    MemeTrustPolicy::declare(TIER_OWNER, TIER_MEMBER, TIER_CONTRIBUTOR)
+}
+
+/// A strategy whose only node allocates — so a refusal lands on the FIRST node
+/// and `state` is byte-untouched.
+fn allocating_meme() -> StrategyGraph {
+    StrategyGraph::new("a", "a")
+        .with_node(&world(), "a", "budget.allocate", allocate_kwargs())
+        .unwrap()
+}
+
+fn warrant_for(a: &Agent, meme_id: &str) -> Capability {
+    a.authority_for(meme_id, &household_cap(), &policy()).expect("a warrant can be cut")
+}
+
 /// One turn, from the root, with nothing already in the task's branch.
 fn turn(a: &Agent, meme_id: &str, enforcement: &Enforcement) -> Reasoning {
+    turn_under(a, meme_id, &warrant_for(a, meme_id), "household", enforcement)
+}
+
+/// One turn under an explicitly chosen warrant and target.
+fn turn_under(
+    a: &Agent,
+    meme_id: &str,
+    cap: &Capability,
+    target: &str,
+    enforcement: &Enforcement,
+) -> Reasoning {
     a.act(
         meme_id,
+        Warrant::new(cap, target),
         &engine(),
         "household",
         &region(),
@@ -198,8 +250,11 @@ fn a_changed_frame_stops_the_turn_before_the_strategy_runs() {
         _ => None,
     };
     let task: BTreeSet<&str> = ["bonnie"].into_iter().collect();
-    let out = agent().act(
+    let a = agent();
+    let cap = warrant_for(&a, "m0");
+    let out = a.act(
         "m0",
+        Warrant::new(&cap, "household"),
         &engine(),
         "household",
         &region(),
@@ -241,14 +296,28 @@ fn the_gate_still_refuses_inside_a_reasoning_turn() {
 
 #[test]
 fn an_unknown_meme_is_reported_not_silently_skipped() {
-    assert!(matches!(turn(&agent(), "nope", &Enforcement::default()), Reasoning::NoSuchMeme { .. }));
+    // ★ A warrant cannot even be CUT for a meme the library lacks, so the
+    // attempt carries a real one and is refused inside the turn instead.
+    let a = agent();
+    assert!(matches!(
+        a.authority_for("nope", &household_cap(), &policy()),
+        Err(WarrantError::UnknownMeme { .. })
+    ));
+    let w = warrant_for(&a, "m0");
+    assert!(matches!(
+        turn_under(&a, "nope", &w, "household", &Enforcement::default()),
+        Reasoning::NoSuchMeme { .. }
+    ));
 }
 
 #[test]
 fn nothing_in_view_is_a_distinct_answer_from_a_strategy_finding_nothing() {
     // From a leaf the scan reaches nothing, so there is no focus at all.
-    let out = agent().act(
+    let a = agent();
+    let cap = warrant_for(&a, "m0");
+    let out = a.act(
         "m0",
+        Warrant::new(&cap, "household"),
         &engine(),
         "bonnie",
         &region(),
@@ -424,6 +493,133 @@ fn several_agents_sharing_one_model_are_not_independent_confirmations() {
     assert_eq!(unmodelled.agreement_over(5), EffectiveN::Independent(5));
 }
 
+
+// ── the authority conjunct, no longer Unchecked ──────────────────────────────
+
+#[test]
+fn a_strategy_runs_under_an_attenuated_capability_not_unchecked() {
+    let a = agent();
+    let w = warrant_for(&a, "m0");
+    assert_eq!(w.rights(), &Rights::only(["budget.record_income"]), "least privilege");
+    assert_eq!(w.tier(), TIER_OWNER, "an authored meme keeps the household's tier");
+    assert_eq!(w.issued_to(), "bonnie", "and whose authority it carries is on the record");
+    assert!(turn(&a, "m0", &Enforcement::default()).ran());
+}
+
+#[test]
+fn a_node_outside_the_warrants_rights_is_refused_and_state_is_untouched() {
+    // ★★★ The confused-deputy refusal: a warrant cut for one meme cannot admit
+    // another. The out-of-rights node is FIRST, so nothing commits.
+    let mut lib = MemeLibrary::of(LibraryScope::of("household", "mentor"));
+    lib.author("m0", meme(100.0)).unwrap();
+    lib.author("other", allocating_meme()).unwrap();
+    let a = Agent::assemble(operative(), attention(), lib);
+
+    let w = warrant_for(&a, "m0");
+    match turn_under(&a, "other", &w, "household", &Enforcement::default()) {
+        Reasoning::Reasoned { ref walk, .. } => {
+            match &walk.outcome {
+                WalkOutcome::Refused { reason, .. } => {
+                    assert!(reason.contains("budget.allocate"), "{reason}");
+                }
+                other => panic!("{other:?}"),
+            }
+            assert_eq!(walk.state, state(), "state is byte-untouched");
+        }
+        other => panic!("{}", other.describe()),
+    }
+}
+
+#[test]
+fn a_warrant_for_another_household_is_refused_as_not_designated() {
+    // ★★★ Redesignation is the confused deputy's own move, and `Attenuation`
+    // carries no sustain precisely so it cannot be done by narrowing either.
+    let a = agent();
+    let w = warrant_for(&a, "m0");
+    match turn_under(&a, "m0", &w, "neighbour", &Enforcement::default()) {
+        Reasoning::Reasoned { ref walk, .. } => {
+            assert!(matches!(walk.outcome, WalkOutcome::Refused { .. }));
+            assert_eq!(walk.state, state());
+        }
+        other => panic!("{}", other.describe()),
+    }
+}
+
+#[test]
+fn an_imported_meme_runs_under_a_tighter_authority_and_is_refused() {
+    // ★★★ Least privilege BY PROVENANCE — where OPV-6 and IMM-7 meet.
+    let donor = agent();
+    let m = donor.library().get("m0").unwrap().clone();
+    let mut mine = MemeLibrary::of(LibraryScope::of("neighbour", "mentor"));
+    mine.import(&m, donor.library().scope(), "borrowed").unwrap();
+    let a = Agent::assemble(operative(), attention(), mine);
+
+    let w = warrant_for(&a, "borrowed");
+    assert_eq!(w.tier(), TIER_CONTRIBUTOR, "tighter than an authored meme's");
+    assert_eq!(warrant_for(&donor, "m0").tier(), TIER_OWNER, "and the authored one is not");
+
+    match turn_under(&a, "borrowed", &w, "household", &Enforcement::default()) {
+        Reasoning::Reasoned { ref walk, .. } => {
+            assert!(matches!(walk.outcome, WalkOutcome::Refused { .. }));
+            assert_eq!(walk.state, state(), "and nothing committed");
+        }
+        other => panic!("{}", other.describe()),
+    }
+}
+
+#[test]
+fn a_strategy_naming_a_move_the_household_lacks_gets_no_warrant_at_all() {
+    // ★★★ Refused at ATTENUATION — stronger than refusing node by node once a
+    // warrant already exists.
+    let mut lib = MemeLibrary::of(LibraryScope::of("household", "mentor"));
+    lib.author("alloc", allocating_meme()).unwrap();
+    let a = Agent::assemble(operative(), attention(), lib);
+
+    let narrow = household_cap()
+        .attenuate(&Attenuation::to_rights(Rights::only(["budget.record_income"])))
+        .unwrap();
+    assert!(matches!(
+        a.authority_for("alloc", &narrow, &policy()),
+        Err(WarrantError::Amplified(Amplification::Rights))
+    ));
+}
+
+#[test]
+fn an_agent_commits_with_no_approval_token_because_it_reasons_in_the_sandbox() {
+    // ★★ Structural: `act` accepts no `ApprovalToken`, and a live effect needs
+    // one bound to ONE (operator, params) pair — a strategy is many nodes.
+    assert!(turn(&agent(), "m0", &Enforcement::default()).ran());
+}
+
+#[test]
+fn prop_3_still_holds_alongside_the_warrant() {
+    // ★ Two containments: `T` at build, the warrant at the gate.
+    let a = agent();
+    let w0 = world();
+    let moves = a.library().get("m0").unwrap().strategy().moves();
+    let t: BTreeSet<&str> = w0.moves().into_iter().collect();
+    assert!(moves.is_subset(&t), "still bounded by T");
+    let w = warrant_for(&a, "m0");
+    assert!(moves.iter().all(|m| w.rights().carries(m)), "and by the warrant");
+}
+
+#[test]
+fn an_unwarranted_run_is_still_reachable_only_below_the_agent() {
+    // ★ `strategy::run` keeps its `Unchecked` behaviour for the R1 parity
+    // vectors, byte-for-byte — but there is NO way to reach it through `Agent`,
+    // because `act`'s warrant is a required parameter rather than a default.
+    let a = agent();
+    let walk = sustena_core::strategy::run(
+        a.library().get("m0").unwrap().strategy(),
+        &Registry::default(),
+        &allowed(),
+        &Enforcement::default(),
+        &state(),
+        Value::Object(Map::new()),
+    );
+    assert!(walk.outcome.finished(), "unchanged for every caller written before this");
+}
+
 // ── the recorded divergence ──────────────────────────────────────────────────
 
 #[test]
@@ -494,6 +690,7 @@ fn the_recorded_divergence_keeps_its_counterweight() {
         "learning_cases",
         "props_cases",
         "world_model_cases",
+        "authority_cases",
     ] {
         for c in doc[group].as_array().unwrap_or_else(|| panic!("{group} is an array")) {
             assert!(
@@ -504,5 +701,5 @@ fn the_recorded_divergence_keeps_its_counterweight() {
             assert!(seen.insert(c["name"].as_str().unwrap().to_string()), "duplicate case name");
         }
     }
-    assert_eq!(seen.len(), 14, "every declared case must be present");
+    assert_eq!(seen.len(), 22, "every declared case must be present");
 }

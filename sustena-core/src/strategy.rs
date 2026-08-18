@@ -428,6 +428,43 @@ pub fn run_with_effect(
     trigger: Value,
     effect: &EffectClass,
 ) -> Walk {
+    run_under(
+        strategy,
+        registry,
+        allowed,
+        enforcement,
+        initial,
+        trigger,
+        &Authorization::Unchecked,
+        effect,
+    )
+}
+
+/// [`run_with_effect`], with the **authority** named too.
+///
+/// ★★★ Added by follow-on wiring 2, and it closes OPV-4's own named residual:
+/// *"authorization and effects are passed `Unchecked` ... a strategy is exactly
+/// the deputy IMM-7's capability was built for."* A strategy acts on a
+/// household's authority, over inputs — triggers, memes, feedback — it did not
+/// choose. That is Hardy's confused deputy precisely, and
+/// [`Authorization::Capability`] is the variant built for it: it carries **no
+/// `&Memberships`**, so a strategy running under one cannot fall back on the
+/// issuer's wider ambient authority even by mistake.
+///
+/// [`run`] and [`run_with_effect`] both delegate here with
+/// [`Authorization::Unchecked`], so every caller written before this behaves
+/// byte-for-byte as it did — the R1 parity vectors included.
+#[allow(clippy::too_many_arguments)]
+pub fn run_under(
+    strategy: &StrategyGraph,
+    registry: &Registry,
+    allowed: &[String],
+    enforcement: &Enforcement,
+    initial: &Value,
+    trigger: Value,
+    authorization: &Authorization,
+    effect: &EffectClass,
+) -> Walk {
     let mut accumulated = Map::new();
     accumulated.insert("trigger_event".to_string(), trigger);
 
@@ -462,7 +499,7 @@ pub fn run_with_effect(
             &state,
             node.mv.name(),
             &kwargs,
-            &Authorization::Unchecked,
+            authorization,
             effect,
             &mut nonces,
         );

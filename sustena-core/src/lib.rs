@@ -290,7 +290,7 @@ pub use operator::{
     Registry,
 };
 pub use capability::{Amplification, Attenuation, Capability, Rights};
-pub use agent::{Agent, Considered, Reasoning};
+pub use agent::{Agent, Considered, MemeTrustPolicy, Reasoning, Warrant, WarrantError};
 pub use learned::{
     BoundError, FixedRule, IngressBound, LearnedRule, RuleSet, RuleTrust, Screening, TrustPolicy,
 };
