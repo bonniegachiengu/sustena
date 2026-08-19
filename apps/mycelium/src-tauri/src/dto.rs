@@ -29,6 +29,7 @@
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use tauri_specta::Event;
 use sustena_core::{
     editing::Definition,
     operator::{meta::OperatorStatus, EmittedEvent, Execution, OperatorResult},
@@ -234,4 +235,63 @@ pub struct WorldDto {
     /// unavailable state rather than summing the children in the host and
     /// passing host arithmetic off as an engine capability.
     pub rollup_available: bool,
+}
+
+// ── what the engine says about V, right now ──────────────────────────────────
+
+/// One invariant, evaluated against current state **by the engine**.
+///
+/// ★★ `holds` and `reason` come from `sustena_core::predicate::check`, the same
+/// evaluator the gate uses. The host does not judge a rule; it asks.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConstraintReading {
+    pub id: String,
+    pub expression: String,
+    pub holds: bool,
+    /// ★ Empty when it holds; otherwise the engine's own words, naming the
+    /// operand and the value that failed.
+    pub reason: String,
+}
+
+/// One line of the persisted log, as a person reads it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntryDto {
+    pub seq: u32,
+    /// The operator that caused it, or `genesis` for the opening line.
+    pub operator: String,
+    pub events: Vec<EventDto>,
+    /// ★ How many state changes it carried. The mutations themselves stay on
+    /// disk — a log view is for reading what happened, and a wall of paths is
+    /// not that.
+    pub mutations: u32,
+}
+
+// ── the push channel ─────────────────────────────────────────────────────────
+
+/// ★★★ **A committed change, pushed.** One message per real change.
+///
+/// The event *is* the message: there is no tick, no sampler and no clock,
+/// because the core has none and a sampler would manufacture events nothing
+/// caused. A **refusal emits nothing** — the fold stays the truth, and a
+/// message saying "nothing happened" would be a change that did not happen.
+///
+/// ★★ It carries the new state as well as the events, so a subscriber is
+/// correct after a single message without replaying anything. The honest cost
+/// is size: a large Sustain ships its whole state per change. That is fine for
+/// a household and is named in the README rather than discovered later.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct Committed {
+    pub sustain_id: String,
+    pub operator: String,
+    /// Its position in the append-only log — the same `seq` on disk.
+    pub seq: u32,
+    pub events: Vec<EventDto>,
+    pub mutations: u32,
+    pub state: serde_json::Value,
+    /// `V` re-evaluated after the change, by the engine.
+    pub constraints: Vec<ConstraintReading>,
+    pub liquid: Option<f64>,
 }

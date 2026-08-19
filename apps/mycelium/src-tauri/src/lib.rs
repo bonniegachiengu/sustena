@@ -12,7 +12,7 @@ pub mod templates;
 pub mod world;
 
 use tauri::Manager;
-use tauri_specta::{collect_commands, Builder};
+use tauri_specta::{collect_commands, collect_events, Builder};
 
 /// The typed command surface, defined once.
 ///
@@ -26,7 +26,13 @@ pub fn specta_builder() -> Builder {
         commands::select_sustain,
         commands::create_sustain,
         commands::run_operator,
+        commands::get_constraints,
+        commands::get_log,
     ])
+    // ★★★ The push channel, typed from the same Rust as the commands — so a
+    //   listener the UI writes for an event that does not exist will not
+    //   compile.
+    .events(collect_events![dto::Committed])
 }
 
 /// ★★★ Write `src/bindings.ts` from the Rust types.
@@ -62,7 +68,14 @@ pub fn run() {
 
     tauri::Builder::default()
         .invoke_handler(builder.invoke_handler())
-        .setup(|app| {
+        // ★ ONE setup. `tauri::Builder::setup` replaces rather than chains, so
+        //   a second call would silently discard the first — and the one it
+        //   discarded would have been the household.
+        .setup(move |app| {
+            // Registers the typed events, so `Committed::emit` reaches the
+            // webview under the name the generated TS listens for.
+            builder.mount_events(app);
+
             // ★★★ The household is opened from disk BEFORE the window can ask
             //   for it, and every log is folded on the way in. If the store is
             //   empty this is also where Bonnie's household is seeded — once,

@@ -43,8 +43,9 @@ fn call(world: &World, sustain: &str, op: &str, p: &[(&str, Value)]) {
     let x = world.call(sustain, op, &params(p)).expect("disk");
     match x {
         None => println!("   {sustain} · no such Sustain"),
-        Some(x) => {
+        Some((x, seq)) => {
             let r = GateResult::of(op, &x);
+            let _ = seq;
             println!(
                 "   {sustain} · {op} -> {:?}  mutations={} events={}{}",
                 r.verdict,
@@ -79,6 +80,18 @@ fn main() {
 
         rule("RUN 1 · after");
         household(&world);
+
+        rule("RUN 1 · homestead log (what the Monitor renders)");
+        for e in world.log("homestead").expect("log") {
+            let names: Vec<String> = e.events.iter().map(|x| x.name.clone()).collect();
+            println!("   #{}  {:<24} {} mutation(s)  {}", e.seq, e.operator, e.mutations.len(), names.join(", "));
+        }
+
+        rule("RUN 1 · V, evaluated by the engine");
+        for (id, expr, holds, reason) in world.constraints("homestead") {
+            println!("   {:<22} {}  {}{}", id, if holds { "HOLDS " } else { "BROKEN" }, expr,
+                if reason.is_empty() { String::new() } else { format!("  <- {reason}") });
+        }
     } // the World is dropped: nothing survives but the files.
 
     // ── second run ───────────────────────────────────────────────────────────

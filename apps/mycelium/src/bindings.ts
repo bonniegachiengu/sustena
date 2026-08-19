@@ -57,12 +57,37 @@ async runOperator(sustainId: string, operator: string, params: JsonValue) : Prom
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * `V` for one Sustain, evaluated now.
+ */
+async getConstraints(sustainId: string) : Promise<ConstraintReading[]> {
+    return await TAURI_INVOKE("get_constraints", { sustainId });
+},
+/**
+ * ★★ The persisted log — the event log a person can read.
+ * 
+ * Read from **disk**, not from memory: what this shows is what actually
+ * survives, which is the only version worth showing.
+ */
+async getLog(sustainId: string) : Promise<Result<LogEntryDto[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_log", { sustainId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
 /** user-defined events **/
 
 
+export const events = __makeEvents__<{
+committed: Committed
+}>({
+committed: "committed"
+})
 
 /** user-defined constants **/
 
@@ -70,6 +95,40 @@ async runOperator(sustainId: string, operator: string, params: JsonValue) : Prom
 
 /** user-defined types **/
 
+/**
+ * ★★★ **A committed change, pushed.** One message per real change.
+ * 
+ * The event *is* the message: there is no tick, no sampler and no clock,
+ * because the core has none and a sampler would manufacture events nothing
+ * caused. A **refusal emits nothing** — the fold stays the truth, and a
+ * message saying "nothing happened" would be a change that did not happen.
+ * 
+ * ★★ It carries the new state as well as the events, so a subscriber is
+ * correct after a single message without replaying anything. The honest cost
+ * is size: a large Sustain ships its whole state per change. That is fine for
+ * a household and is named in the README rather than discovered later.
+ */
+export type Committed = { sustainId: string; operator: string; 
+/**
+ * Its position in the append-only log — the same `seq` on disk.
+ */
+seq: number; events: EventDto[]; mutations: number; state: JsonValue; 
+/**
+ * `V` re-evaluated after the change, by the engine.
+ */
+constraints: ConstraintReading[]; liquid: number | null }
+/**
+ * One invariant, evaluated against current state **by the engine**.
+ * 
+ * ★★ `holds` and `reason` come from `sustena_core::predicate::check`, the same
+ * evaluator the gate uses. The host does not judge a rule; it asks.
+ */
+export type ConstraintReading = { id: string; expression: string; holds: boolean; 
+/**
+ * ★ Empty when it holds; otherwise the engine's own words, naming the
+ * operand and the value that failed.
+ */
+reason: string }
 /**
  * One event the call published.
  */
@@ -122,6 +181,20 @@ export type Holarchy =
  */
 export type InvariantDto = { id: string; expression: string }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+/**
+ * One line of the persisted log, as a person reads it.
+ */
+export type LogEntryDto = { seq: number; 
+/**
+ * The operator that caused it, or `genesis` for the opening line.
+ */
+operator: string; events: EventDto[]; 
+/**
+ * ★ How many state changes it carried. The mutations themselves stay on
+ * disk — a log view is for reading what happened, and a wall of paths is
+ * not that.
+ */
+mutations: number }
 /**
  * `Σ = ⟨B, S, V, T, ⊕⟩`, as much of it as a cockpit needs to draw.
  * 

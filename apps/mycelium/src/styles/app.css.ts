@@ -436,3 +436,99 @@ export const statusBelt = style({
   overflowX: "auto",
   whiteSpace: "nowrap",
 });
+
+/* ── monitor ───────────────────────────────────────────────────────────── */
+
+export const tabs = style({ display: "flex", gap: "2px" });
+
+export const tab = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10px",
+  fontWeight: 500,
+  letterSpacing: "0.10em",
+  textTransform: "uppercase",
+  color: vars.color.textMuted,
+  background: "transparent",
+  border: "1px solid transparent",
+  borderRadius: vars.radius.sm,
+  padding: `${vars.space.xs} ${vars.space.md}`,
+  cursor: "pointer",
+  selectors: { "&:hover": { color: vars.color.textPrimary } },
+});
+
+export const tabActive = style([
+  tab,
+  { color: vars.color.amber, borderColor: vars.color.amberBorder, background: vars.color.amberGlow },
+]);
+
+/** A pocket's fill, drawn from its own real numbers. */
+export const meter = style({
+  position: "relative",
+  height: "4px",
+  borderRadius: "2px",
+  background: vars.color.bgOverlay,
+  overflow: "hidden",
+  marginTop: vars.space.xs,
+});
+
+export const meterFill = style({
+  position: "absolute",
+  inset: 0,
+  right: "auto",
+  borderRadius: "2px",
+  transition: "width 180ms ease-out",
+});
+
+export const pocketBlock = style({
+  padding: `${vars.space.sm} 0`,
+  borderTop: `1px solid ${vars.color.border}`,
+});
+
+export const pocketHead = style({
+  display: "grid",
+  gridTemplateColumns: "1fr auto auto",
+  gap: vars.space.md,
+  alignItems: "baseline",
+});
+
+export const logRow = style({
+  display: "grid",
+  gridTemplateColumns: "34px 1fr auto",
+  gap: vars.space.sm,
+  alignItems: "baseline",
+  padding: `${vars.space.xs} 0`,
+  borderTop: `1px solid ${vars.color.border}`,
+  fontFamily: vars.font.mono,
+  fontSize: "10.5px",
+  color: vars.color.textSecondary,
+});
+
+export const seqCell = style({
+  color: vars.color.textDim,
+  fontVariantNumeric: "tabular-nums",
+});
+
+export const attentionRow = style({
+  display: "flex",
+  gap: vars.space.sm,
+  alignItems: "baseline",
+  padding: `${vars.space.sm} 0`,
+  borderTop: `1px solid ${vars.color.border}`,
+});
+
+export const attentionWhy = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10.5px",
+  color: vars.color.textMuted,
+});
+
+export const pushBadge = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10px",
+  letterSpacing: "0.08em",
+  color: vars.color.teal,
+  border: `1px solid ${vars.color.tealBorder}`,
+  background: vars.color.tealGlow,
+  borderRadius: vars.radius.sm,
+  padding: `2px ${vars.space.sm}`,
+});

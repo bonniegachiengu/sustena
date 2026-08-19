@@ -8,9 +8,11 @@
  */
 import {
   commands,
+  type ConstraintReading,
   type GateResult,
   type Holarchy,
   type JsonValue,
+  type LogEntryDto,
   type Result,
   type SustainDto,
   type SustainSummary,
@@ -18,7 +20,17 @@ import {
   type WorldDto,
 } from "../bindings";
 
-export type { GateResult, Holarchy, JsonValue, SustainDto, SustainSummary, TemplateId, WorldDto };
+export type {
+  ConstraintReading,
+  GateResult,
+  Holarchy,
+  JsonValue,
+  LogEntryDto,
+  SustainDto,
+  SustainSummary,
+  TemplateId,
+  WorldDto,
+};
 
 /**
  * ★ Unwrap a generated `Result`, turning the error half into a thrown value.
@@ -44,6 +56,8 @@ export const engine = {
     template: TemplateId,
     parent: string | null,
   ): Promise<boolean> => unwrap(await commands.createSustain(id, label, template, parent)),
+  constraints: (id: string): Promise<ConstraintReading[]> => commands.getConstraints(id),
+  log: async (id: string): Promise<LogEntryDto[]> => unwrap(await commands.getLog(id)),
   /** `null` means there is no such Sustain — a different fact from a refusal. */
   run: async (
     sustainId: string,

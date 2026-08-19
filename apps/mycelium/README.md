@@ -1,8 +1,8 @@
 # Mycelium — the Sustena cockpit
 
-**Status: V1.1 — persistent, multi-Sustain.** The household lives in an
-append-only event log on disk and is rebuilt by folding it on every launch.
-Still one screen; the rest of the cockpit is later slices.
+**Status: V1.2 — live.** The household lives in an append-only event log on
+disk, rebuilt by folding it on every launch, and every committed change is
+**pushed** to the UI. Two screens: Monitor and Console.
 
 ```bash
 npm install
@@ -81,6 +81,39 @@ cargo run --manifest-path src-tauri/Cargo.toml --bin smoke
 It opens a household, runs real operators, **drops the World**, reopens from
 disk alone, and asserts `cached state == fold(persisted log)` for every Sustain.
 
+## The push channel — the event IS the message
+
+```
+committed operator call
+        │  (a refusal emits NOTHING)
+        ▼
+  Committed { sustainId, operator, seq, events, mutations, state, constraints, liquid }
+        │  tauri-specta typed event
+        ▼
+  src/lib/live.ts   ← ONE subscription for the whole app
+        │  createStore + produce/reconcile — merges by path
+        ▼
+  every screen reads reactively; only the cells that moved repaint
+```
+
+**There is no tick and no sampler.** The core has no clock, and sampling would
+manufacture events nothing caused — so the host emits exactly once per
+committed change, carrying the new state, the events it published and `V`
+re-evaluated. A subscriber is correct after a single message without replaying
+anything.
+
+**A refusal pushes nothing**, because nothing changed. The verdict is the
+Console's business; the world's state is the channel's.
+
+**No polling anywhere.** `refreshWorld`/`hydrate` run on mount and when *you*
+change the selection — never in response to a change. `Console.execute`
+deliberately does not re-fetch after a commit: asking again would hide a broken
+channel behind a re-read.
+
+**Honest cost, named:** the message carries the whole state of the changed
+Sustain. Fine for a household; a very large Sustain would want a delta, and the
+mutations are already in the log if that day comes.
+
 ## What is real, and what is not
 
 **Real:** the Sustain's definition (`Σ`), its viable region (`V`), its
@@ -88,9 +121,23 @@ operators (`T`), current state (`S`), and every gate verdict — all from the
 engine, none of it mocked. A refusal is rendered **as a refusal**, with the
 engine's own reason text, and the state visibly unchanged behind it.
 
-**Real:** persistence (the log above), many Sustains with real `⊕` parent/child
-links, the seeded household (Homestead + Bonnie, Cira, Epha, Mum, Kui, Frankie),
-a selector that switches what the Console targets, and every gate verdict.
+**Real:** persistence (the log above), the push channel, many Sustains with real
+`⊕` parent/child links, the seeded household (Homestead + Bonnie, Cira, Epha,
+Mum, Kui, Frankie), a selector that switches what both screens target, every
+gate verdict, the **event-log view** (rendered from disk — the log V1.1
+persisted, now visible), and `V` evaluated live.
+
+★★ **`V` is evaluated by the engine, not by the app.** Each invariant goes
+through `sustena_core::predicate::check` — the same evaluator the gate uses —
+and the UI shows its verdict and its reason text. A rule whose expression will
+not parse is reported as **not holding**, because treating an unparseable rule
+as satisfied is the one failure mode a viable region must not have.
+
+★ **One threshold IS this app's, and is labelled so:** the ≥80% pocket
+attention line. The engine's real urgency notion is `d(s,V)` over a declared
+`Region`, and these templates declare invariants rather than intervals —
+inventing a Region to borrow its authority would be declaring thresholds nobody
+chose. So it is a stated policy over real numbers, shown as ours on the card.
 
 ★★ The composition tree is **validated by the engine**, not by host bookkeeping:
 `MonitorEngine::flatten_holarchy` refuses a duplicate id, an unknown parent and
@@ -102,8 +149,8 @@ a cycle, and the UI shows what it said.
   state into a parent aggregate does not exist in `sustena-core` (the Python
   engine has it; the Rust port does not). Nothing is summed. A household total
   computed in the host would be a number with no rule behind it.
-- **no event-log view.** The log is on disk and readable, but the cockpit does
-  not render it yet.
+- **no Constellation, no app shell.** One flat selector and two tabs; the
+  left nav, topbar Sustain selector and status belt of the mockup are V1.3–1.4.
 - **no simulation, economy, governance, council, ingest, or definition editor.**
   All exist in the engine. None are wired.
 - **templates are declared in Rust** (`templates.rs`), not authored in-app.

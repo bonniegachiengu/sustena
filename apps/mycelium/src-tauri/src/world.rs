@@ -21,6 +21,7 @@ use sustena_core::{
     editing::Definition,
     monitor::{MonitorEngine, SustainWatch},
     operator::{execute_admitted, Authorization, Enforcement, Execution, Registry},
+    predicate::check,
     region::Region,
     semantic::enforcement_of,
 };
@@ -196,7 +197,7 @@ impl World {
         sustain_id: &str,
         operator: &str,
         params: &Map<String, Value>,
-    ) -> StoreResult<Option<Execution>> {
+    ) -> StoreResult<Option<(Execution, u64)>> {
         let mut inner = self.inner.lock().expect("world lock");
         let Some(sustain) = inner.sustains.get(sustain_id) else {
             return Ok(None);
@@ -214,14 +215,46 @@ impl World {
             &mut NonceLedger::new(),
         );
 
+        // ★ The seq a REFUSAL would have taken is never consumed: nothing is
+        //   appended, so the next committed call takes it. A log with holes in
+        //   it would imply events that were never written.
+        let seq = sustain.next_seq;
         if x.committed() {
-            let seq = sustain.next_seq;
             self.store.append(sustain_id, &LoggedEvent::of(seq, operator, &x))?;
             let sustain = inner.sustains.get_mut(sustain_id).expect("checked above");
             sustain.state = x.state.clone();
             sustain.next_seq = seq + 1;
         }
-        Ok(Some(x))
+        Ok(Some((x, seq)))
+    }
+
+    /// ★★★ Ask the engine whether `V` holds, right now.
+    ///
+    /// Each declared invariant goes through `predicate::check` — the **same
+    /// evaluator the gate uses**. The host does not judge a rule and does not
+    /// re-implement one; it asks and reports the answer, reason text included.
+    ///
+    /// ★ A rule whose expression will not parse is reported as **not holding**,
+    /// with the syntax error as its reason. Treating an unparseable rule as
+    /// satisfied would be the one failure mode a viable region must not have.
+    pub fn constraints(&self, sustain_id: &str) -> Vec<(String, String, bool, String)> {
+        let empty = Map::new();
+        self.with(|i| {
+            let Some(s) = i.get(sustain_id) else { return Vec::new() };
+            s.definition
+                .invariants
+                .iter()
+                .map(|(id, expr)| match check(expr, &s.state, &empty) {
+                    Ok((holds, reason)) => (id.clone(), expr.clone(), holds, reason),
+                    Err(e) => (id.clone(), expr.clone(), false, format!("unparseable: {e:?}")),
+                })
+                .collect()
+        })
+    }
+
+    /// The persisted log for one Sustain, newest last.
+    pub fn log(&self, sustain_id: &str) -> StoreResult<Vec<LoggedEvent>> {
+        self.store.read_log(sustain_id)
     }
 
     // ── the composition, checked by the core ─────────────────────────────────

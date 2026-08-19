@@ -7,11 +7,24 @@
 //! wrong — the disk.
 
 use serde_json::{Map, Value};
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_specta::Event;
 
-use crate::dto::{GateResult, Holarchy, SustainDto, SustainSummary, WorldDto};
+use crate::dto::{
+    Committed, ConstraintReading, EventDto, GateResult, Holarchy, LogEntryDto, SustainDto,
+    SustainSummary, WorldDto,
+};
 use crate::templates::TemplateId;
 use crate::world::World;
+
+/// `V`, evaluated against current state by the engine.
+fn readings(world: &World, sustain_id: &str) -> Vec<ConstraintReading> {
+    world
+        .constraints(sustain_id)
+        .into_iter()
+        .map(|(id, expression, holds, reason)| ConstraintReading { id, expression, holds, reason })
+        .collect()
+}
 
 /// ★ Every command logs what it was asked and what the engine answered.
 ///
@@ -88,6 +101,32 @@ pub fn create_sustain(
     world.instantiate(&id, &label, template, parent.as_deref()).map_err(|e| e.to_string())
 }
 
+/// `V` for one Sustain, evaluated now.
+#[tauri::command]
+#[specta::specta]
+pub fn get_constraints(world: State<'_, World>, sustain_id: String) -> Vec<ConstraintReading> {
+    readings(&world, &sustain_id)
+}
+
+/// ★★ The persisted log — the event log a person can read.
+///
+/// Read from **disk**, not from memory: what this shows is what actually
+/// survives, which is the only version worth showing.
+#[tauri::command]
+#[specta::specta]
+pub fn get_log(world: State<'_, World>, sustain_id: String) -> Result<Vec<LogEntryDto>, String> {
+    let log = world.log(&sustain_id).map_err(|e| e.to_string())?;
+    Ok(log
+        .into_iter()
+        .map(|e| LogEntryDto {
+            seq: e.seq as u32,
+            operator: e.operator,
+            mutations: e.mutations.len() as u32,
+            events: e.events,
+        })
+        .collect())
+}
+
 /// ★★★ Ask the engine to do something on one Sustain, and report the verdict.
 ///
 /// Returns `GateResult` — **not** an error type. A refusal is a correct answer,
@@ -99,6 +138,7 @@ pub fn create_sustain(
 #[tauri::command]
 #[specta::specta]
 pub fn run_operator(
+    app: AppHandle,
     world: State<'_, World>,
     sustain_id: String,
     operator: String,
@@ -113,17 +153,45 @@ pub fn run_operator(
         serde_json::to_string(&params).unwrap_or_default()
     );
 
-    let x = world.call(&sustain_id, &operator, &params).map_err(|e| e.to_string())?;
-    let out = x.as_ref().map(|x| GateResult::of(&operator, x));
-    match &out {
-        Some(r) => trace!(
-            "  -> {:?}  mutations={} events={} reason={}",
-            r.verdict,
-            r.mutations,
-            r.events.len(),
-            r.reason.clone().unwrap_or_else(|| "-".into())
-        ),
-        None => trace!("  -> no such sustain"),
+    let called = world.call(&sustain_id, &operator, &params).map_err(|e| e.to_string())?;
+    let out = called.as_ref().map(|(x, _)| GateResult::of(&operator, x));
+
+    match (&called, &out) {
+        (Some((x, seq)), Some(r)) => {
+            trace!(
+                "  -> {:?}  mutations={} events={} reason={}",
+                r.verdict,
+                r.mutations,
+                r.events.len(),
+                r.reason.clone().unwrap_or_else(|| "-".into())
+            );
+            // ★★★ THE PUSH. Only on a commit — a refusal changed nothing, and a
+            //   message announcing no change would be a change that did not
+            //   happen. One message per real change, no tick, no sampler.
+            if x.committed() {
+                let msg = Committed {
+                    sustain_id: sustain_id.clone(),
+                    operator: operator.clone(),
+                    seq: *seq as u32,
+                    events: x.events.iter().map(EventDto::from).collect(),
+                    mutations: x.mutations.len() as u32,
+                    liquid: x
+                        .state
+                        .pointer("/finances/liquid/balance")
+                        .and_then(Value::as_f64),
+                    constraints: readings(&world, &sustain_id),
+                    state: x.state.clone(),
+                };
+                if let Err(e) = msg.emit(&app) {
+                    // ★ Reported, never swallowed: a push that silently failed
+                    //   would leave the UI confidently stale.
+                    trace!("  !! push failed: {e}");
+                } else {
+                    trace!("  ~> pushed Committed seq={} to the UI", seq);
+                }
+            }
+        }
+        _ => trace!("  -> no such sustain"),
     }
     Ok(out)
 }
