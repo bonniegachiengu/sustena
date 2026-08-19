@@ -18,7 +18,7 @@
 | Reference engine (Python) | live, in daily use, **2,319 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
 | Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel**, **16 tenet**, **18 ensemble**, **17 signal**, **16 pincer**, **17 ooda**, **17 monitor**, **15 holarchy**, **14 population**, **17 consensus**, **13 router**, **16 vclock**, **16 disaggregation**, **21 division**, **20 crdt**, **17 operative**, **16 goodhart+presentation**, **14 mixture**, **16 criticality**, **15 cynefin**, **15 boundary**, **14 flow**, **8 obligation**, **18 clocks**, **17 watermark**, **20 period**, **16 checkpoint**, **19 dimension**, **14 belief**, **16 harmonics**, **13 windowing**, **14 observability**, **14 damping**, **11 semantic**, **14 capability**, **11 stranding**, **14 learned**, **13 lens**, **15 preattentive**, **14 widget**, **45 curated**, **14 strategy**, **15 attention**, **20 rollup (parity)**, **11 holon (parity)**, **9 authorization (spec)**, **60 transducer (parity)** cases (divergences recorded) |
-| Rust tests | **1211 unit · 955 conformance tests** across 69 binaries, plus 3 doctests (two of them `compile_fail` proofs) — all green, and **`cargo clippy --all-targets -- -D warnings` is clean** |
+| Rust tests | **1243 unit · 955 conformance tests** across 69 binaries, plus 3 doctests (two of them `compile_fail` proofs) — all green, and **`cargo clippy --all-targets -- -D warnings` is clean** |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 

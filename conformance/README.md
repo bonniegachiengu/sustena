@@ -3053,3 +3053,34 @@ names (Android, iOS, desktop, WASM). The alternative — keeping `τ` in the hos
 divergence `parse_state_path` exists to prevent one layer down. And a
 `typecheck_rule` that could not compile the pattern it is checking would not be
 a typecheck.
+
+### effect-first capture and correction-learning — **no vectors, and why**
+
+`effect_capture` (`ε → (o, θ)`) and `parse_rule_learn` (a confirmed correction
+→ a candidate `ParseRule`) are ported and covered by **32 unit tests**, but
+there is **no vector file** for either, deliberately:
+
+★ **`infer` depends on the caller's world, not on a recordable input.** Its
+answer is a function of the Sustain's **live pocket names** and the operator
+registry's **real signatures** — neither of which is a value the reference could
+hand over. A vector would have to freeze a pretend world and would then be
+testing the freeze, not the parity. The port instead reproduces the reference's
+ordering exactly (amount → description → operator narrowing → pocket →
+last-resort amount → which-action → `θ`) and pins each step's real behaviour,
+including the ones that exist because a real person hit them: the raw-text
+currency fallback that stopped `unparsed` captures dead-ending, the
+never-ask-for-a-pocket-when-income-is-the-answer fix, and the zero-pockets case
+that used to render as a dead end.
+
+★★ **`synthesize_from_correction` mints an id**, and the reference mints a UUID.
+A vector comparing them would compare randomness. The id is the **caller's**
+here — the core has no clock and no random source, so synthesis is
+reproducible, which is asserted directly.
+
+★★★ **The asymmetry IS tested, because it is the part that could hurt.** A
+learned income rule may auto-apply; a learned spend rule carries no operator and
+no pocket at all, so a correction can never teach the system to spend on
+someone's behalf. And `verify_candidate` refuses a candidate that does not match
+its own inducing example, one that would capture a message an existing rule
+already handles, and one that is ill-typed — checked **before** it is ever run,
+because a broken pattern must not reach the fidelity check.

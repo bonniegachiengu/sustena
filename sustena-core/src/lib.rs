@@ -124,6 +124,7 @@ pub mod dimension;
 pub mod disaggregation;
 pub mod division;
 pub mod editing;
+pub mod effect_capture;
 pub mod ensemble;
 pub mod enzyme;
 pub mod error;
@@ -152,6 +153,7 @@ pub mod operative;
 pub mod operator;
 pub mod panel;
 pub mod parse_rule;
+pub mod parse_rule_learn;
 pub mod path;
 pub mod pawa;
 pub mod period;
@@ -391,6 +393,12 @@ pub use presentation::{
 pub use holon::{
     transfer as holon_transfer, Leg, Link, Linked, Moving, Party, Transfer, TransferSettlement,
 };
+pub use effect_capture::{
+    build_params, extract_amount, extract_currency_amount, infer, match_pocket_names,
+    missing_required, narrow_by_verb, required_params_satisfiable, resolve_description, Capture,
+    Choice, DeclaredParams, Inference, OperatorParams,
+};
+pub use parse_rule_learn::{synthesize_from_correction, verify_candidate, LearningRefusal};
 pub use parse_rule::{
     apply_rule, run_rules, typecheck_rule, FieldKind, FieldSpec, NoOperators, OperatorUniverse,
     ParseRule, ParseRuleTrust, RuleStatus,
