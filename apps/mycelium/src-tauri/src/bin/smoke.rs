@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use serde_json::{json, Map, Value};
 
 use mycelium_lib::dto::{Committed, ConstraintReading, GateResult, Refused, SustainSummary};
+use mycelium_lib::world::PRINCIPAL;
 use mycelium_lib::store::Store;
 use mycelium_lib::world::World;
 
@@ -148,6 +149,96 @@ fn main() {
                 if broken.is_empty() { "rules hold".to_string() } else { format!("BROKEN: {}", broken.join(", ")) }
             );
         }
+
+
+        // ── V1.4 proofs ──────────────────────────────────────────────────────
+
+        rule("V1.4 · ECONOMY -- the real ledger, in the real gate");
+        world.with_economy(|e| {
+            println!("   genesis            {} -> {:.2} juul", e.genesis.id(), e.genesis.total());
+            println!("   balance now        {:.2}", e.ledger.balance_of(PRINCIPAL));
+            println!("   circulation        {:.2}  (mints {:.2}, issued {:.2})",
+                e.ledger.total_in_circulation(), e.ledger.minted_total(), e.ledger.issued_total());
+            let audit = e.genesis.audit(&e.ledger);
+            println!("   genesis audit      {}", audit.describe());
+            let p = e.parameters();
+            println!("   governed kappa_c   {}   kappa_s {}   issuance_rate {}",
+                p.kappa_compute(), p.kappa_storage(), p.issuance_rate());
+            println!("   ledger tail:");
+            for entry in e.ledger.entries().iter().rev().take(4) {
+                println!("      {entry:?}");
+            }
+        });
+
+        rule("V1.4 · CONSOLE -- measured pawa, per operator");
+        world.with_meter(|m| {
+            for (name, st) in m.by_operator() {
+                println!("   {:<24} runs {:>2}  mean {:>7.2} pawa  compute {:>3}  storage {:>5}B",
+                    name, st.runs, st.mean_pawa(), st.total_compute, st.total_storage);
+            }
+        });
+        println!("   (an operator the meter has never seen returns None -> the UI shows");
+        println!("    \"not measured\", never a zero)");
+        println!("   budget.spend measured? {:?}",
+            world.with_meter(|m| m.stats_for("budget.spend")).map(|s| s.runs));
+        println!("   egress.* measured?     {:?}",
+            world.with_meter(|m| m.stats_for("egress.prepare_household_summary")).map(|s| s.runs));
+
+        rule("V1.4 · SIMULATE -- a fork through the real gate, writing NOTHING");
+        let before_state = world.with(|i| i.get("homestead").map(|s| s.state.clone())).unwrap();
+        let before_log = world.log("homestead").expect("log").len();
+        let before_balance = world.with_economy(|e| e.ledger.balance_of(PRINCIPAL));
+
+        let branch = world
+            .fork(
+                "homestead",
+                &[
+                    ("budget.record_income".to_string(), params(&[("amount", json!(10000.0)), ("source", json!("hypothetical"))])),
+                    ("budget.allocate".to_string(), params(&[("pocket_name", json!("food")), ("amount", json!(5000.0))])),
+                    // The one that must be refused inside the fork too.
+                    ("budget.spend".to_string(), params(&[("pocket_name", json!("food")), ("amount", json!(99999.0))])),
+                ],
+            )
+            .expect("a real sustain");
+        for (op, x) in &branch {
+            let r = GateResult::of(op, x);
+            println!("   {:<24} {:?}{}", op, r.verdict,
+                r.reason.clone().map(|s| format!("  <- {s}")).unwrap_or_default());
+        }
+        let after_state = world.with(|i| i.get("homestead").map(|s| s.state.clone())).unwrap();
+        println!();
+        println!("   live state unchanged?   {}", before_state == after_state);
+        println!("   log unchanged?          {}", before_log == world.log("homestead").expect("log").len());
+        println!("   ledger unchanged?       {}", before_balance == world.with_economy(|e| e.ledger.balance_of(PRINCIPAL)));
+        assert_eq!(before_state, after_state, "a fork must not touch live state");
+
+        rule("V1.4 · GOVERNANCE -- the only path to a parameter");
+        let ok = world.set_parameter("issuance_rate", 1.5);
+        println!("   set issuance_rate 1.5   -> {:?}", GateResult::of("governance.set_parameter", &ok).verdict);
+        println!("   read back in force      -> {}", world.with_economy(|e| e.parameters().issuance_rate()));
+        let bad = world.set_parameter("issuance_rate", 9999.0);
+        let badr = GateResult::of("governance.set_parameter", &bad);
+        println!("   set issuance_rate 9999  -> {:?}  rule={:?}", badr.verdict, badr.constraint_violated);
+        println!("   still in force          -> {}", world.with_economy(|e| e.parameters().issuance_rate()));
+        let unknown = world.set_parameter("kappa_mystery", 1.0);
+        println!("   set kappa_mystery       -> {:?}  rule={:?}",
+            GateResult::of("governance.set_parameter", &unknown).verdict,
+            GateResult::of("governance.set_parameter", &unknown).constraint_violated);
+
+        rule("V1.4 · ISSUANCE -- the seam, now that the rate is governed on");
+        let before_issued = world.with_economy(|e| e.ledger.issued_total());
+        call(&world, "habitat-cira", "budget.record_income", &[("amount", json!(2500.0)), ("source", json!("work"))]);
+        world.with_economy(|e| {
+            println!("   issued before {:.4}  ->  after {:.4}", before_issued, e.ledger.issued_total());
+            println!("   balance now   {:.4}", e.ledger.balance_of(PRINCIPAL));
+        });
+
+        rule("V1.4 · COMPOSITION -- what the core does and does not have");
+        println!("   holarchy            checked by MonitorEngine (real)");
+        println!("   roll-up rho         NOT in sustena-core -> honest unavailable");
+        println!("   holon.transfer      NOT in sustena-core -> honest unavailable");
+        println!("   (juul::transfer exists, but that is the ECONOMY's internal unit,");
+        println!("    not a conserved cross-Sustain move of household money)");
 
         rule("RUN 1 · V, evaluated by the engine");
         for (id, expr, holds, reason) in world.constraints("homestead") {

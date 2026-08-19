@@ -399,3 +399,143 @@ impl Refused {
         }
     }
 }
+
+// ── the operator catalogue (Console) ─────────────────────────────────────────
+
+/// One parameter an operator declares.
+///
+/// ★★ **Declared by the operator, not guessed by the UI.** `ParamDecl` carries
+/// the name, the kind, whether it is required, and — for a naming parameter —
+/// the state path whose KEYS are the legal values. So a picker can offer real
+/// pocket names without this app knowing what a pocket is.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ParamDto {
+    pub name: String,
+    /// `number` | `text` | `any`.
+    pub kind: String,
+    pub required: bool,
+    /// A state path whose keys are the legal values, when the operator declares one.
+    pub names_within: Option<String>,
+}
+
+/// What the meter has actually measured for an operator.
+///
+/// ★★★ `None` means **not measured**, and the UI must say so rather than
+/// showing a zero. A `0` from an unmeasured basis is silence, not cheapness.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MeasuredPawa {
+    pub runs: u32,
+    pub mean_pawa: f64,
+    pub total_pawa: f64,
+    pub total_compute: u32,
+    pub total_storage: u32,
+}
+
+/// One operator the selected Sustain may actually run.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorDto {
+    pub name: String,
+    pub description: String,
+    pub params: Vec<ParamDto>,
+    /// The author's declared estimate. ★ Kept beside the measurement precisely
+    /// so the two can be compared — the reference's estimate is usually 0.
+    pub declared_pawa: u32,
+    /// ★ `null` when the meter has never seen it run.
+    pub measured: Option<MeasuredPawa>,
+    pub side_effects: Vec<String>,
+}
+
+// ── simulation ───────────────────────────────────────────────────────────────
+
+/// One step of a hypothetical branch.
+///
+/// ★★★ **Nothing here was written.** A fork is `state.clone()` plus the same
+/// `execute_admitted` a real call uses, so a step refused here would be refused
+/// for real — with the same reason. It touches no log, no ledger and no meter.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchStep {
+    pub operator: String,
+    pub verdict: Verdict,
+    pub reason: Option<String>,
+    pub constraint_violated: Option<String>,
+    pub mutations: u32,
+    pub events: Vec<EventDto>,
+    /// The hypothetical state after this step.
+    pub state: serde_json::Value,
+}
+
+/// A whole hypothetical branch.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Branch {
+    pub sustain_id: String,
+    pub steps: Vec<BranchStep>,
+    /// ★ Always true. Carried so a surface cannot render a branch without being
+    /// handed the fact that it is one.
+    pub hypothetical: bool,
+    /// The state the branch started from, for a diff.
+    pub from: serde_json::Value,
+}
+
+// ── the economy ──────────────────────────────────────────────────────────────
+
+/// One line of the juul ledger.
+///
+/// ★★ The **kind** is the entry's own variant, not a sign on a number: a mint
+/// names the declaration that authorised it, a debit names the run it paid for,
+/// a transfer names both ends. Collapsing them would make *where did this juul
+/// come from* unanswerable.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerEntryDto {
+    /// `mint` | `debit` | `transfer`.
+    pub kind: String,
+    pub principal: String,
+    pub counterparty: Option<String>,
+    pub amount: f64,
+    /// For a mint: the declaration that authorised it. For a debit: the operator.
+    pub authority: String,
+    /// Its effect on total circulation — `+` for a mint, `-` for a debit, `0` for a transfer.
+    pub circulation_delta: f64,
+}
+
+/// One governed parameter and its declared bounds.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ParameterDto {
+    pub name: String,
+    pub value: f64,
+    pub genesis: f64,
+    pub min: f64,
+    pub max: f64,
+}
+
+/// The whole economy, as one screen reads it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EconomyDto {
+    pub principal: String,
+    pub balance: f64,
+    /// `Sigma(mints) - Sigma(debits)`, transfers at zero.
+    pub circulation: f64,
+    pub minted_total: f64,
+    pub issued_total: f64,
+    pub genesis_id: String,
+    pub genesis_total: f64,
+    /// ★ The audit is the engine's, not the host's: it names foreign mints,
+    /// mismatched allocations and undeclared principals rather than returning a
+    /// boolean.
+    pub audit_clean: bool,
+    pub audit_describes: String,
+    pub entries: Vec<LedgerEntryDto>,
+    pub parameters: Vec<ParameterDto>,
+    /// Every reading the meter has taken, by operator.
+    pub metered: Vec<(String, MeasuredPawa)>,
+    /// ★★★ The permanent boundary, carried as data so a surface cannot forget
+    /// to show it.
+    pub boundary_notice: String,
+}

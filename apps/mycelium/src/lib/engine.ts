@@ -8,11 +8,14 @@
  */
 import {
   commands,
+  type Branch,
   type ConstraintReading,
+  type EconomyDto,
   type GateResult,
   type Holarchy,
   type JsonValue,
   type LogEntryDto,
+  type OperatorDto,
   type Result,
   type SustainDto,
   type SustainSummary,
@@ -21,7 +24,10 @@ import {
 } from "../bindings";
 
 export type {
+  Branch,
   ConstraintReading,
+  EconomyDto,
+  OperatorDto,
   GateResult,
   Holarchy,
   JsonValue,
@@ -57,6 +63,13 @@ export const engine = {
     parent: string | null,
   ): Promise<boolean> => unwrap(await commands.createSustain(id, label, template, parent)),
   constraints: (id: string): Promise<ConstraintReading[]> => commands.getConstraints(id),
+  operators: (id: string): Promise<OperatorDto[]> => commands.getOperators(id),
+  economy: (): Promise<EconomyDto> => commands.getEconomy(),
+  setParameter: (name: string, value: number): Promise<GateResult> =>
+    commands.setParameter(name, value),
+  /** A hypothetical branch. Nothing is written. */
+  simulate: (id: string, steps: [string, JsonValue][]): Promise<Branch | null> =>
+    commands.simulate(id, steps),
   log: async (id: string): Promise<LogEntryDto[]> => unwrap(await commands.getLog(id)),
   /** `null` means there is no such Sustain — a different fact from a refusal. */
   run: async (
@@ -97,10 +110,13 @@ export function pockets(state: unknown): Pocket[] {
   });
 }
 
-export const fmt = (n: number | null | undefined): string =>
-  n === null || n === undefined
-    ? "—"
-    : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const fmt = (n: number | null | undefined): string => {
+  if (n === null || n === undefined) return "—";
+  // Negative zero is a real f64 value and renders as "-0.00", which reads as a
+  // number that moved. It did not.
+  const v = Object.is(n, -0) ? 0 : n;
+  return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 
 /** Children of a Sustain, from the composition links the registry holds. */
 export const childrenOf = (world: WorldDto | undefined, id: string): SustainSummary[] =>

@@ -1,5 +1,5 @@
 /**
- * MYCELIUM — V1.3. The app shell.
+ * MYCELIUM — V1.4. The app shell.
  *
  * ★★ The frame is permanent and the panel swaps inside it: left nav, topbar
  * with the Sustain selector, status belt. **One selection model** — the
@@ -18,8 +18,11 @@ import { attentionAcross, hydrate, refreshWorld, selectedSustain, subscribe, wor
 import Constellation from "./screens/Constellation";
 import Monitor from "./screens/Monitor";
 import Console from "./screens/Console";
+import Simulate from "./screens/Simulate";
+import Composition from "./screens/Composition";
+import Economy from "./screens/Economy";
 
-type Panel = "constellation" | "monitor" | "console";
+type Panel = "constellation" | "monitor" | "console" | "simulate" | "composition" | "economy";
 
 /** The roadmap's panel list. `soon` ones are shown, disabled, and labelled. */
 const NAV: { group: string; items: { id: Panel | string; label: string; soon?: boolean }[] }[] = [
@@ -35,15 +38,15 @@ const NAV: { group: string; items: { id: Panel | string; label: string; soon?: b
     group: "act",
     items: [
       { id: "console", label: "Console" },
-      { id: "simulate", label: "Simulate", soon: true },
+      { id: "simulate", label: "Simulate" },
       { id: "define", label: "Define", soon: true },
-      { id: "composition", label: "Composition", soon: true },
+      { id: "composition", label: "Composition" },
     ],
   },
   {
     group: "system",
     items: [
-      { id: "economy", label: "Economy", soon: true },
+      { id: "economy", label: "Economy" },
       { id: "ingest", label: "Ingest", soon: true },
       { id: "network", label: "Network", soon: true },
       { id: "library", label: "Library", soon: true },
@@ -106,7 +109,7 @@ export default function App() {
       {/* ── topbar ────────────────────────────────────────────────────────── */}
       <header class={s.topbar}>
         <span class={s.brand}>Mycelium</span>
-        <span class={s.brandSub}>v1.3</span>
+        <span class={s.brandSub}>v1.4</span>
 
         <select
           class={s.picker}
@@ -202,6 +205,15 @@ export default function App() {
             </Show>
             <Show when={panel() === "console"}>
               <Console />
+            </Show>
+            <Show when={panel() === "simulate"}>
+              <Simulate />
+            </Show>
+            <Show when={panel() === "composition"}>
+              <Composition />
+            </Show>
+            <Show when={panel() === "economy"}>
+              <Economy />
             </Show>
           </Show>
         </div>

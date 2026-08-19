@@ -11,8 +11,9 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::dto::{
-    Committed, ConstraintReading, GateResult, Holarchy, LogEntryDto, Refused, SustainDto,
-    SustainSummary, WorldDto,
+    Branch, BranchStep, Committed, ConstraintReading, EconomyDto, GateResult, Holarchy,
+    LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorDto, ParamDto, ParameterDto, Refused,
+    SustainDto, SustainSummary, Verdict, WorldDto,
 };
 use crate::templates::TemplateId;
 use crate::world::{World, PRINCIPAL};
@@ -200,4 +201,221 @@ pub fn run_operator(
         _ => trace!("  -> no such sustain"),
     }
     Ok(out)
+}
+
+// ── Console: the operator catalogue ──────────────────────────────────────────
+
+/// Every operator the given Sustain may actually run, with its **measured** cost.
+///
+/// ★★ The list is the Sustain's own `T`, not the whole registry — an operator a
+/// definition does not permit would be refused with `operator_allowed`, and
+/// offering it would be inviting a refusal the person could not have predicted.
+#[tauri::command]
+#[specta::specta]
+pub fn get_operators(world: State<'_, World>, sustain_id: String) -> Vec<OperatorDto> {
+    let allowed: Vec<String> =
+        world.with(|i| i.get(&sustain_id).map(|s| s.definition.operators.clone()).unwrap_or_default());
+
+    allowed
+        .iter()
+        .filter_map(|name| {
+            let meta = world.operators.get(name)?;
+            // ★★★ The measurement, or nothing. `stats_for` returns `None` for an
+            //     operator the meter has never seen — and `None` must render as
+            //     "not measured", never as a zero.
+            let measured = world.with_meter(|m| m.stats_for(name)).map(|st| MeasuredPawa {
+                runs: st.runs as u32,
+                mean_pawa: st.mean_pawa(),
+                total_pawa: st.total_pawa,
+                total_compute: st.total_compute as u32,
+                total_storage: st.total_storage as u32,
+            });
+            Some(OperatorDto {
+                name: meta.name.to_string(),
+                description: meta.description.to_string(),
+                params: meta
+                    .params
+                    .iter()
+                    .map(|p| ParamDto {
+                        name: p.name.to_string(),
+                        kind: format!("{:?}", p.kind).to_lowercase(),
+                        required: p.required,
+                        names_within: p.names_within.map(str::to_string),
+                    })
+                    .collect(),
+                declared_pawa: meta.pawa_cost,
+                measured,
+                side_effects: meta.side_effects.iter().map(|s| s.to_string()).collect(),
+            })
+        })
+        .collect()
+}
+
+// ── Simulate: a fork through the real gate ───────────────────────────────────
+
+/// ★★★ Run a hypothetical branch. **Nothing is written.**
+///
+/// The fork is `state.clone()` plus the same `execute_admitted` a real call
+/// uses, so a step refused here is refused for the same reason it would be for
+/// real. It touches no log, no ledger and no meter.
+#[tauri::command]
+#[specta::specta]
+pub fn simulate(
+    world: State<'_, World>,
+    sustain_id: String,
+    steps: Vec<(String, Value)>,
+) -> Option<Branch> {
+    let from = world.with(|i| i.get(&sustain_id).map(|s| s.state.clone()))?;
+    let prepared: Vec<(String, Map<String, Value>)> = steps
+        .into_iter()
+        .map(|(op, p)| {
+            let m = match p {
+                Value::Object(m) => m,
+                _ => Map::new(),
+            };
+            (op, m)
+        })
+        .collect();
+
+    trace!("simulate  {sustain_id}  {} step(s)  (nothing will be written)", prepared.len());
+    let run = world.fork(&sustain_id, &prepared)?;
+
+    Some(Branch {
+        sustain_id,
+        hypothetical: true,
+        from,
+        steps: run
+            .into_iter()
+            .map(|(operator, x)| BranchStep {
+                verdict: Verdict::from(x.result.status),
+                operator,
+                reason: x.result.reason.clone(),
+                constraint_violated: x.result.constraint_violated.clone(),
+                mutations: x.mutations.len() as u32,
+                events: x.events.iter().map(crate::dto::EventDto::from).collect(),
+                state: x.state.clone(),
+            })
+            .collect(),
+    })
+}
+
+// ── Economy ──────────────────────────────────────────────────────────────────
+
+/// The whole economy, read from the engine's own ledger and parameters.
+#[tauri::command]
+#[specta::specta]
+pub fn get_economy(world: State<'_, World>) -> EconomyDto {
+    use sustena_core::governance::declared_parameters;
+    use sustena_core::juul::{Entry, MintAuthority};
+
+    world.with_economy(|e| {
+        let audit = e.genesis.audit(&e.ledger);
+        let p = e.parameters();
+
+        let entries = e
+            .ledger
+            .entries()
+            .iter()
+            .rev()
+            .take(80)
+            .map(|entry| match entry {
+                Entry::Mint { principal, amount, authority } => LedgerEntryDto {
+                    kind: "mint".into(),
+                    principal: principal.clone(),
+                    counterparty: None,
+                    amount: *amount,
+                    authority: match authority {
+                        MintAuthority::Genesis(g) => format!("genesis {}", g.as_str()),
+                        MintAuthority::Issued(i) => format!("issued {}", i.as_str()),
+                    },
+                    circulation_delta: entry.circulation_delta(),
+                },
+                Entry::Debit { principal, amount, operator, .. } => LedgerEntryDto {
+                    kind: "debit".into(),
+                    principal: principal.clone(),
+                    counterparty: None,
+                    amount: *amount,
+                    authority: operator.clone(),
+                    circulation_delta: entry.circulation_delta(),
+                },
+                Entry::Transfer { from, to, amount, reason } => LedgerEntryDto {
+                    kind: "transfer".into(),
+                    principal: from.clone(),
+                    counterparty: Some(to.clone()),
+                    amount: *amount,
+                    authority: reason.clone(),
+                    circulation_delta: entry.circulation_delta(),
+                },
+            })
+            .collect();
+
+        let parameters = declared_parameters()
+            .into_iter()
+            .map(|spec| ParameterDto {
+                value: match spec.name {
+                    "kappa_compute" => p.kappa_compute(),
+                    "kappa_storage" => p.kappa_storage(),
+                    "issuance_rate" => p.issuance_rate(),
+                    "attention_kappa" => p.attention_kappa(),
+                    _ => spec.genesis,
+                },
+                name: spec.name.to_string(),
+                genesis: spec.genesis,
+                min: spec.min,
+                max: spec.max,
+            })
+            .collect();
+
+        let metered = world.with_meter(|m| {
+            m.by_operator()
+                .into_iter()
+                .map(|(name, st)| {
+                    (
+                        name.to_string(),
+                        MeasuredPawa {
+                            runs: st.runs as u32,
+                            mean_pawa: st.mean_pawa(),
+                            total_pawa: st.total_pawa,
+                            total_compute: st.total_compute as u32,
+                            total_storage: st.total_storage as u32,
+                        },
+                    )
+                })
+                .collect()
+        });
+
+        EconomyDto {
+            principal: PRINCIPAL.to_string(),
+            balance: e.ledger.balance_of(PRINCIPAL),
+            circulation: e.ledger.total_in_circulation(),
+            minted_total: e.ledger.minted_total(),
+            issued_total: e.ledger.issued_total(),
+            genesis_id: e.genesis.id().as_str().to_string(),
+            genesis_total: e.genesis.total(),
+            audit_clean: audit.clean(),
+            audit_describes: audit.describe(),
+            entries,
+            parameters,
+            metered,
+            boundary_notice:
+                "Internal points only. Juul is an accounting unit on this machine \
+                 -- never real money, never transferable, never a payment rail. \
+                 Nothing in this app can move real value (ADR-0001 D5)."
+                    .into(),
+        }
+    })
+}
+
+/// ★★★ Change a governed parameter — through the gate, like anything else.
+///
+/// Returns the gate's verdict: an out-of-range value is refused with
+/// `enforcement_gate`, the same reason a household breach gives.
+#[tauri::command]
+#[specta::specta]
+pub fn set_parameter(world: State<'_, World>, name: String, value: f64) -> GateResult {
+    trace!("set_parameter {name} = {value}");
+    let x = world.set_parameter(&name, value);
+    let out = GateResult::of("governance.set_parameter", &x);
+    trace!("  -> {:?} {}", out.verdict, out.reason.clone().unwrap_or_default());
+    out
 }

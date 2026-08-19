@@ -19,13 +19,16 @@ use sustena_core::{
     approval::{EffectClass, NonceLedger},
     detect::CusumSpec,
     editing::Definition,
+    juul::Affordability,
     monitor::{MonitorEngine, SustainWatch},
-    operator::{execute_admitted, Authorization, Enforcement, Execution, Registry},
+    operator::{execute_admitted, execute_afforded, Authorization, Enforcement, Execution, Registry},
+    pawa::{meter, Meter},
     predicate::check,
     region::Region,
     semantic::enforcement_of,
 };
 
+use crate::economy::Economy;
 use crate::store::{LoggedEvent, Registry as Records, Store, StoreError, StoreResult, SustainRecord};
 use crate::templates::{self, TemplateId};
 
@@ -51,6 +54,12 @@ pub struct World {
     pub operators: Registry,
     inner: Mutex<Inner>,
     store: Store,
+    /// ★★ The economy, live. Every committed call is metered against it and
+    /// charged to it, and the serving seam issues for the work done.
+    economy: Mutex<Economy>,
+    /// ★★ Every `PawaReading` this host has taken. This is what makes the
+    /// Console's *measured pawa* a measurement rather than an author's guess.
+    meter: Mutex<Meter>,
 }
 
 pub struct Inner {
@@ -83,7 +92,17 @@ impl World {
             operators: Registry::default(),
             inner: Mutex::new(Inner { sustains, order, selected }),
             store,
+            economy: Mutex::new(Economy::open(PRINCIPAL)),
+            meter: Mutex::new(Meter::new()),
         })
+    }
+
+    pub fn with_economy<T>(&self, f: impl FnOnce(&Economy) -> T) -> T {
+        f(&self.economy.lock().expect("economy lock"))
+    }
+
+    pub fn with_meter<T>(&self, f: impl FnOnce(&Meter) -> T) -> T {
+        f(&self.meter.lock().expect("meter lock"))
     }
 
     pub fn store(&self) -> &Store {
@@ -211,17 +230,50 @@ impl World {
             return Ok(None);
         };
 
-        let x = execute_admitted(
-            &self.operators,
-            &sustain.definition.operators,
-            &sustain.enforcement,
-            &sustain.state,
-            operator,
-            params,
-            &Authorization::Unchecked,
-            &EffectClass::Unchecked,
-            &mut NonceLedger::new(),
-        );
+        // ★★★ THE REAL ECONOMY, in the real gate.
+        //
+        // `Affordability::Metered` puts `balance >= pawa` into `admit` itself,
+        // priced against the CANDIDATE's real cost — so an unaffordable run is
+        // refused before it costs anything. `serving` opts into PAWA-8's
+        // issuance seam, so this host earns `rate x pawa_served` for the work
+        // it did, at the GOVERNED rate.
+        let mut economy = self.economy.lock().expect("economy lock");
+        let parameters = economy.parameters();
+        let issuance = economy.issuance.clone();
+        let x = {
+            let mut afford = Affordability::Metered {
+                ledger: &mut economy.ledger,
+                parameters: &parameters,
+                principal: PRINCIPAL,
+                sustain: sustain_id,
+                at: 0,
+                serving: Some((&issuance, PRINCIPAL)),
+            };
+            execute_afforded(
+                &self.operators,
+                &sustain.definition.operators,
+                &sustain.enforcement,
+                &sustain.state,
+                operator,
+                params,
+                &Authorization::Unchecked,
+                &EffectClass::Unchecked,
+                &mut NonceLedger::new(),
+                &mut afford,
+            )
+        };
+        drop(economy);
+
+        // ★★ The meter reading, recorded. `meter` returns `None` for anything
+        //    uncommitted, so a refused run can never contribute a measurement —
+        //    which is why the Console's figures are honest.
+        if let Some(m) = self.operators.get(operator) {
+            if let Some(reading) =
+                meter(&x, m, &sustain.enforcement, &parameters, sustain_id, PRINCIPAL, 0)
+            {
+                self.meter.lock().expect("meter lock").record(reading);
+            }
+        }
 
         // ★ The seq a REFUSAL would have taken is never consumed: nothing is
         //   appended, so the next committed call takes it. A log with holes in
@@ -263,6 +315,108 @@ impl World {
     /// The persisted log for one Sustain, newest last.
     pub fn log(&self, sustain_id: &str) -> StoreResult<Vec<LoggedEvent>> {
         self.store.read_log(sustain_id)
+    }
+
+    // ── simulation: a fork through the REAL gate ─────────────────────────────
+
+    /// ★★★ Run a sequence of operators against a **copy** of live state.
+    ///
+    /// STEP-0 found no scenario-fork API in `sustena-core` — `ensemble::Scenario`
+    /// is about model ensembles (`M_world`), not Sustain simulation. So a fork
+    /// here is exactly two things and nothing more: **`state.clone()`** and the
+    /// **same `execute_admitted`** every real call goes through.
+    ///
+    /// ★★ That makes it the engine's own gate on a copy rather than a simulator
+    /// this app invented — a step that would be refused for real is refused
+    /// here, with the same reason text.
+    ///
+    /// ★★ Nothing is written. It does not touch the log, the ledger, the meter
+    /// or the cached state, and it takes `&self` with no mutation path to any of
+    /// them. A branch is a value, not an effect.
+    ///
+    /// ★ It is deliberately **unmetered**: charging juul for a hypothetical
+    /// would make thinking cost money, and the reading would be a measurement
+    /// of work that never happened.
+    pub fn fork(
+        &self,
+        sustain_id: &str,
+        steps: &[(String, Map<String, Value>)],
+    ) -> Option<Vec<(String, Execution)>> {
+        let (definition, enforcement, mut state) = self.with(|i| {
+            let s = i.get(sustain_id)?;
+            Some((s.definition.clone(), s.enforcement.clone(), s.state.clone()))
+        })?;
+
+        let mut out = Vec::new();
+        for (operator, params) in steps {
+            let x = execute_admitted(
+                &self.operators,
+                &definition.operators,
+                &enforcement,
+                &state,
+                operator,
+                params,
+                &Authorization::Unchecked,
+                &EffectClass::Unchecked,
+                &mut NonceLedger::new(),
+            );
+            // ★ A refused step does not advance the fork, exactly as it would
+            //   not advance reality. The branch stops being useful past it, and
+            //   the caller can see why.
+            if x.committed() {
+                state = x.state.clone();
+            }
+            let stop = !x.committed();
+            out.push((operator.clone(), x));
+            if stop {
+                break;
+            }
+        }
+        Some(out)
+    }
+
+    // ── governance: the only path to a parameter ─────────────────────────────
+
+    /// ★★★ Change a governed parameter — **through the gate**, like anything else.
+    ///
+    /// `governance.set_parameter` is an ordinary Enzyme on an ordinary
+    /// `Definition`, so the bounds are ordinary invariants and an out-of-range
+    /// change is refused with `enforcement_gate`. There is no setter anywhere
+    /// that bypasses this.
+    ///
+    /// ★ It runs `Unchecked`/`Unchecked` like every other call in this host, so
+    /// the approval-token clause is vacuous here. Said plainly: the *bounds* are
+    /// enforced, the *authority* is not yet.
+    pub fn set_parameter(&self, name: &str, value: f64) -> Execution {
+        use sustena_core::governance;
+
+        let d = governance::definition(&governance::declared_parameters());
+        let mut reg = Registry::default();
+        governance::register(&mut reg);
+
+        let mut params = Map::new();
+        params.insert("name".into(), Value::String(name.to_string()));
+        params.insert(
+            "value".into(),
+            serde_json::Number::from_f64(value).map(Value::Number).unwrap_or(Value::Null),
+        );
+
+        let mut economy = self.economy.lock().expect("economy lock");
+        let x = execute_admitted(
+            &reg,
+            &d.operators,
+            &governance::enforcement(&d),
+            &economy.governance_state,
+            "governance.set_parameter",
+            &params,
+            &Authorization::Unchecked,
+            &EffectClass::Unchecked,
+            &mut NonceLedger::new(),
+        );
+        if x.committed() {
+            economy.governance_state = x.state.clone();
+        }
+        x
     }
 
     // ── the composition, checked by the core ─────────────────────────────────

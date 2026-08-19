@@ -1,9 +1,9 @@
 # Mycelium — the Sustena cockpit
 
-**Status: V1.3 — the cockpit.** A persistent app shell (left nav · topbar with
-the Sustain selector · status belt) with the **Constellation** home, Monitor
-and Console swapping inside it. Every gate decision is pushed to a live gate
-stream.
+**Status: V1.4 — the action screens.** Six panels in the shell: Constellation,
+Monitor, Console (full), Simulate, Composition and Economy. The economy is
+**really wired** — every committed call is metered and charged through the
+gate.
 
 ```bash
 npm install
@@ -135,6 +135,40 @@ The topbar selector, the left nav and the Constellation all read and write
 `world.selected`. Clicking a node selects that Sustain **and** opens Monitor on
 it. Nothing can disagree about what you are looking at.
 
+## The economy is real, and bounded
+
+Every committed call now runs through `execute_afforded` with
+`Affordability::Metered`, so **`balance ≥ pawa` is a clause of the real gate**
+— priced against the candidate's actual cost, which the gate's effect-on-a-copy
+makes free. The `serving` seam is opted in, so this host earns
+`rate × pawa_served` for the work it did, at the **governed** rate.
+
+- `pawa::meter` produces every reading; a `PawaReading` has no public
+  constructor, so a debit cannot be invented.
+- `JuulLedger::charge` takes that reading, **not a number**.
+- `Parameters` are read from a governance Sustain's state — never a constant.
+  `governance.set_parameter` is the only way to change one, and its bounds are
+  ordinary invariants.
+
+★★★ **Internal points only.** Juul is an accounting unit on this machine —
+never real money, never transferable, never a payment rail (ADR-0001 D5). The
+notice is carried from the host as data so a surface cannot forget to show it.
+
+★ **Genesis is declared, not calibrated** — `1_000_000` juul to the local
+principal, chosen so a household never trips the affordability clause by
+accident, in exactly the way `κ` is a declared number.
+
+## Simulate — a fork, not a simulator
+
+STEP-0 found **no scenario-fork API in `sustena-core`** (`ensemble::Scenario` is
+model ensembles, not Sustain simulation). So a branch is exactly `state.clone()`
+plus the **same `execute_admitted`** a real call uses. It is the engine's gate on
+a copy — a step refused in a branch is refused for real, with the same reason.
+
+Nothing is written: no log, no ledger, no meter, no cached state. Promote
+replays through the real `run_operator` and **does not trust the simulation** —
+a step can honestly refuse if live state moved.
+
 ## What is real, and what is not
 
 **Real:** the Sustain's definition (`Σ`), its viable region (`V`), its
@@ -166,6 +200,14 @@ a cycle, and the UI shows what it said.
 
 **Not built yet — named rather than stubbed:**
 
+- ★★★ **`holon.transfer` — NOT AVAILABLE, and deliberately not approximated.**
+  An atomic conserved move between two Sustains is in the Python engine and not
+  in `sustena-core`. The obvious host workaround — spend here, record income
+  there — is two separate gated calls: if the second refuses, money has left one
+  household and arrived nowhere. That is not a transfer, it is a way to lose
+  money that looks like a feature. (`juul::transfer` exists, but that moves the
+  *economy's internal unit* between principals, not a household's money between
+  Sustains.)
 - ★★★ **roll-up `ρ` — NOT AVAILABLE, and the UI says so.** Folding children's
   state into a parent aggregate does not exist in `sustena-core` (the Python
   engine has it; the Rust port does not). Nothing is summed. A household total

@@ -7,6 +7,7 @@
 
 pub mod commands;
 pub mod dto;
+pub mod economy;
 pub mod store;
 pub mod templates;
 pub mod world;
@@ -28,6 +29,10 @@ pub fn specta_builder() -> Builder {
         commands::run_operator,
         commands::get_constraints,
         commands::get_log,
+        commands::get_operators,
+        commands::simulate,
+        commands::get_economy,
+        commands::set_parameter,
     ])
     // ★★★ The push channel, typed from the same Rust as the commands — so a
     //   listener the UI writes for an event that does not exist will not

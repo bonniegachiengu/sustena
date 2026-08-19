@@ -762,3 +762,94 @@ export const attentionButton = style({
   cursor: "pointer",
   selectors: { "&:hover": { background: vars.color.bgRaised } },
 });
+
+/* -- V1.4 ---------------------------------------------------------------- */
+
+/** A hypothetical is never allowed to look like a fact. */
+export const hypothetical = style({
+  border: `1px dashed ${vars.color.amberBorder}`,
+  background: vars.color.amberGlow,
+  borderRadius: vars.radius.md,
+  padding: vars.space.md,
+  fontFamily: vars.font.mono,
+  fontSize: "10.5px",
+  lineHeight: 1.55,
+  color: vars.color.textSecondary,
+});
+
+export const hypotheticalBadge = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10px",
+  letterSpacing: "0.08em",
+  color: vars.color.amber,
+  border: `1px solid ${vars.color.amberBorder}`,
+  background: vars.color.amberGlow,
+  borderRadius: vars.radius.sm,
+  padding: `2px ${vars.space.sm}`,
+});
+
+/** The permanent economy boundary. */
+export const boundary = style({
+  border: `1px solid ${vars.color.borderMid}`,
+  background: vars.color.bgRaised,
+  borderRadius: vars.radius.md,
+  padding: vars.space.md,
+  fontFamily: vars.font.mono,
+  fontSize: "10.5px",
+  lineHeight: 1.6,
+  color: vars.color.textSecondary,
+});
+
+export const diffRow = style({
+  display: "grid",
+  gridTemplateColumns: "1fr auto auto",
+  gap: vars.space.sm,
+  alignItems: "baseline",
+  padding: `${vars.space.xs} 0`,
+  borderTop: `1px solid ${vars.color.border}`,
+});
+
+export const paramRow = style({
+  display: "grid",
+  gridTemplateColumns: "1fr 92px auto",
+  gap: vars.space.sm,
+  alignItems: "center",
+  padding: `${vars.space.sm} 0`,
+  borderTop: `1px solid ${vars.color.border}`,
+});
+
+/** One operator in the Console picker. */
+export const opRow = style({
+  display: "grid",
+  gridTemplateColumns: "1fr auto",
+  gap: vars.space.sm,
+  alignItems: "baseline",
+  padding: `${vars.space.sm}`,
+  borderTop: `1px solid ${vars.color.border}`,
+  background: "transparent",
+  border: "none",
+  borderTopWidth: "1px",
+  borderTopStyle: "solid",
+  borderTopColor: vars.color.border,
+  color: "inherit",
+  font: "inherit",
+  textAlign: "left",
+  width: "100%",
+  cursor: "pointer",
+  selectors: { "&:hover": { background: vars.color.bgRaised } },
+});
+
+export const opRowActive = style([opRow, { background: vars.color.amberGlow }]);
+
+export const pawaMeasured = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10.5px",
+  color: vars.color.teal,
+  fontVariantNumeric: "tabular-nums",
+});
+
+export const pawaUnmeasured = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10.5px",
+  color: vars.color.textDim,
+});

@@ -77,6 +77,41 @@ async getLog(sustainId: string) : Promise<Result<LogEntryDto[], string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Every operator the given Sustain may actually run, with its **measured** cost.
+ * 
+ * ★★ The list is the Sustain's own `T`, not the whole registry — an operator a
+ * definition does not permit would be refused with `operator_allowed`, and
+ * offering it would be inviting a refusal the person could not have predicted.
+ */
+async getOperators(sustainId: string) : Promise<OperatorDto[]> {
+    return await TAURI_INVOKE("get_operators", { sustainId });
+},
+/**
+ * ★★★ Run a hypothetical branch. **Nothing is written.**
+ * 
+ * The fork is `state.clone()` plus the same `execute_admitted` a real call
+ * uses, so a step refused here is refused for the same reason it would be for
+ * real. It touches no log, no ledger and no meter.
+ */
+async simulate(sustainId: string, steps: ([string, JsonValue])[]) : Promise<Branch | null> {
+    return await TAURI_INVOKE("simulate", { sustainId, steps });
+},
+/**
+ * The whole economy, read from the engine's own ledger and parameters.
+ */
+async getEconomy() : Promise<EconomyDto> {
+    return await TAURI_INVOKE("get_economy");
+},
+/**
+ * ★★★ Change a governed parameter — through the gate, like anything else.
+ * 
+ * Returns the gate's verdict: an out-of-range value is refused with
+ * `enforcement_gate`, the same reason a household breach gives.
+ */
+async setParameter(name: string, value: number) : Promise<GateResult> {
+    return await TAURI_INVOKE("set_parameter", { name, value });
 }
 }
 
@@ -97,6 +132,31 @@ refused: "refused"
 
 /** user-defined types **/
 
+/**
+ * A whole hypothetical branch.
+ */
+export type Branch = { sustainId: string; steps: BranchStep[]; 
+/**
+ * ★ Always true. Carried so a surface cannot render a branch without being
+ * handed the fact that it is one.
+ */
+hypothetical: boolean; 
+/**
+ * The state the branch started from, for a diff.
+ */
+from: JsonValue }
+/**
+ * One step of a hypothetical branch.
+ * 
+ * ★★★ **Nothing here was written.** A fork is `state.clone()` plus the same
+ * `execute_admitted` a real call uses, so a step refused here would be refused
+ * for real — with the same reason. It touches no log, no ledger and no meter.
+ */
+export type BranchStep = { operator: string; verdict: Verdict; reason: string | null; constraintViolated: string | null; mutations: number; events: EventDto[]; 
+/**
+ * The hypothetical state after this step.
+ */
+state: JsonValue }
 /**
  * ★★★ **A committed change, pushed.** One message per real change.
  * 
@@ -131,6 +191,29 @@ export type ConstraintReading = { id: string; expression: string; holds: boolean
  * operand and the value that failed.
  */
 reason: string }
+/**
+ * The whole economy, as one screen reads it.
+ */
+export type EconomyDto = { principal: string; balance: number; 
+/**
+ * `Sigma(mints) - Sigma(debits)`, transfers at zero.
+ */
+circulation: number; mintedTotal: number; issuedTotal: number; genesisId: string; genesisTotal: number; 
+/**
+ * ★ The audit is the engine's, not the host's: it names foreign mints,
+ * mismatched allocations and undeclared principals rather than returning a
+ * boolean.
+ */
+auditClean: boolean; auditDescribes: string; entries: LedgerEntryDto[]; parameters: ParameterDto[]; 
+/**
+ * Every reading the meter has taken, by operator.
+ */
+metered: ([string, MeasuredPawa])[]; 
+/**
+ * ★★★ The permanent boundary, carried as data so a surface cannot forget
+ * to show it.
+ */
+boundaryNotice: string }
 /**
  * One event the call published.
  */
@@ -184,6 +267,27 @@ export type Holarchy =
 export type InvariantDto = { id: string; expression: string }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 /**
+ * One line of the juul ledger.
+ * 
+ * ★★ The **kind** is the entry's own variant, not a sign on a number: a mint
+ * names the declaration that authorised it, a debit names the run it paid for,
+ * a transfer names both ends. Collapsing them would make *where did this juul
+ * come from* unanswerable.
+ */
+export type LedgerEntryDto = { 
+/**
+ * `mint` | `debit` | `transfer`.
+ */
+kind: string; principal: string; counterparty: string | null; amount: number; 
+/**
+ * For a mint: the declaration that authorised it. For a debit: the operator.
+ */
+authority: string; 
+/**
+ * Its effect on total circulation — `+` for a mint, `-` for a debit, `0` for a transfer.
+ */
+circulationDelta: number }
+/**
  * One line of the persisted log, as a person reads it.
  */
 export type LogEntryDto = { seq: number; 
@@ -197,6 +301,47 @@ operator: string; events: EventDto[];
  * not that.
  */
 mutations: number }
+/**
+ * What the meter has actually measured for an operator.
+ * 
+ * ★★★ `None` means **not measured**, and the UI must say so rather than
+ * showing a zero. A `0` from an unmeasured basis is silence, not cheapness.
+ */
+export type MeasuredPawa = { runs: number; meanPawa: number; totalPawa: number; totalCompute: number; totalStorage: number }
+/**
+ * One operator the selected Sustain may actually run.
+ */
+export type OperatorDto = { name: string; description: string; params: ParamDto[]; 
+/**
+ * The author's declared estimate. ★ Kept beside the measurement precisely
+ * so the two can be compared — the reference's estimate is usually 0.
+ */
+declaredPawa: number; 
+/**
+ * ★ `null` when the meter has never seen it run.
+ */
+measured: MeasuredPawa | null; sideEffects: string[] }
+/**
+ * One parameter an operator declares.
+ * 
+ * ★★ **Declared by the operator, not guessed by the UI.** `ParamDecl` carries
+ * the name, the kind, whether it is required, and — for a naming parameter —
+ * the state path whose KEYS are the legal values. So a picker can offer real
+ * pocket names without this app knowing what a pocket is.
+ */
+export type ParamDto = { name: string; 
+/**
+ * `number` | `text` | `any`.
+ */
+kind: string; required: boolean; 
+/**
+ * A state path whose keys are the legal values, when the operator declares one.
+ */
+namesWithin: string | null }
+/**
+ * One governed parameter and its declared bounds.
+ */
+export type ParameterDto = { name: string; value: number; genesis: number; min: number; max: number }
 /**
  * A pocket, at summary scale.
  * 
