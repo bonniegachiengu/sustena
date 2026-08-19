@@ -11,8 +11,24 @@
  * this screen asked.
  */
 import { createMemo, For, Show } from "solid-js";
-import * as s from "../styles/app.css";
-import { vars } from "../styles/tokens.css";
+import {
+  Badge,
+  Caption,
+  Card,
+  Column,
+  Empty,
+  Fill,
+  Meta,
+  Note,
+  NoteRow,
+  Row,
+  Split,
+  TelemetryCell,
+  TelemetryStrip,
+  Value,
+  vars,
+  sx as S,
+} from "../ui";
 import { fmt } from "../lib/engine";
 import { ATTENTION_AT, attentionAcross, attentionFor, world } from "../lib/live";
 
@@ -50,288 +66,238 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
     const all = world.order.map((k) => world.sustains[k]!).filter(Boolean);
     const events = all.reduce((n, x) => n + x.summary.events, 0);
     const rules = all.reduce((n, x) => n + x.summary.constraints.length, 0);
-    const broken = all.reduce(
-      (n, x) => n + x.summary.constraints.filter((c) => !c.holds).length,
-      0,
-    );
+    const broken = all.reduce((n, x) => n + x.summary.constraints.filter((c) => !c.holds).length, 0);
     return { sustains: all.length, events, rules, broken };
   });
 
   const attention = createMemo(attentionAcross);
-
   const nodeAt = (id: string) => world.sustains[id];
 
   return (
-    <div class={s.constellationGrid}>
-      {/* ── the graph ─────────────────────────────────────────────────────── */}
-      <section class={s.card} style={{ "min-height": 0, display: "flex", "flex-direction": "column" }}>
-        <header class={s.cardHead}>
-          <span class={s.cardTitle}>constellation</span>
-          <span class={s.spacer} />
-          <span class={s.sustainMeta}>
+    <Split variant="wideLeft">
+      {/* ── the graph ────────────────────────────────────────────────────── */}
+      <Card
+        title="constellation"
+        scroll
+        right={
+          <Meta>
             {telemetry().sustains} sustains · ⊕ {world.holds ? `${world.linked} linked` : "broken"}
-          </span>
-        </header>
-        <div class={s.cardBody} style={{ "overflow-y": "auto", "min-height": 0 }}>
-          <Show
-            when={layout().root}
-            fallback={<div class={s.empty}>no sustains yet · the store is empty</div>}
-          >
-            {(root) => (
-              <svg viewBox="0 0 380 336" class={s.constellationSvg} role="img">
-                {/* composition edges — one per real ⊕ link */}
-                <For each={layout().kids}>
-                  {(k) => (
-                    <line
-                      x1={CENTER.x}
-                      y1={CENTER.y}
-                      x2={k.x}
-                      y2={k.y}
-                      stroke={vars.color.border}
-                      stroke-width="1"
-                    />
-                  )}
-                </For>
-
-                {/* the children */}
-                <For each={layout().kids}>
-                  {(k) => {
-                    const n = () => nodeAt(k.id);
-                    const tone = () => toneOf(attentionFor(k.id));
-                    return (
-                      <g
-                        class={s.node}
-                        onClick={() => props.onOpen(k.id)}
-                        role="button"
-                        tabindex="0"
-                      >
-                        <circle
-                          cx={k.x}
-                          cy={k.y}
-                          r="26"
-                          fill={world.selected === k.id ? vars.color.amberGlow : vars.color.bgRaised}
-                          stroke={world.selected === k.id ? vars.color.amber : vars.color.borderMid}
-                          stroke-width="1"
-                        />
-                        <circle cx={k.x + 18} cy={k.y - 18} r="3.5" fill={tone()} />
-                        <text
-                          x={k.x}
-                          y={k.y - 2}
-                          text-anchor="middle"
-                          class={s.nodeLabel}
-                          fill={vars.color.textPrimary}
-                        >
-                          {n()?.summary.label ?? k.id}
-                        </text>
-                        <text
-                          x={k.x}
-                          y={k.y + 11}
-                          text-anchor="middle"
-                          class={s.nodeFigure}
-                          fill={vars.color.textSecondary}
-                        >
-                          {fmt(n()?.summary.liquid)}
-                        </text>
-                      </g>
-                    );
-                  }}
-                </For>
-
-                {/* the root */}
-                <g
-                  class={s.node}
-                  onClick={() => props.onOpen(root().summary.id)}
-                  role="button"
-                  tabindex="0"
-                >
-                  <circle
-                    cx={CENTER.x}
-                    cy={CENTER.y}
-                    r="40"
-                    fill={
-                      world.selected === root().summary.id
-                        ? vars.color.amberGlow
-                        : vars.color.bgOverlay
-                    }
-                    stroke={
-                      world.selected === root().summary.id
-                        ? vars.color.amber
-                        : vars.color.borderLight
-                    }
+          </Meta>
+        }
+      >
+        <Show
+          when={layout().root}
+          fallback={<Empty>no sustains yet · the store is empty</Empty>}
+        >
+          {(root) => (
+            <svg viewBox="0 0 380 336" class={S.constellationSvg} role="img">
+              {/* composition edges — one per real ⊕ link */}
+              <For each={layout().kids}>
+                {(k) => (
+                  <line
+                    x1={CENTER.x}
+                    y1={CENTER.y}
+                    x2={k.x}
+                    y2={k.y}
+                    stroke={vars.color.border}
                     stroke-width="1"
                   />
-                  <circle
-                    cx={CENTER.x + 28}
-                    cy={CENTER.y - 28}
-                    r="4"
-                    fill={toneOf(attentionFor(root().summary.id))}
-                  />
-                  <text
-                    x={CENTER.x}
-                    y={CENTER.y - 4}
-                    text-anchor="middle"
-                    class={s.nodeLabel}
-                    fill={vars.color.textPrimary}
-                  >
-                    {root().summary.label}
-                  </text>
-                  <text
-                    x={CENTER.x}
-                    y={CENTER.y + 12}
-                    text-anchor="middle"
-                    class={s.nodeFigure}
-                    fill={vars.color.textSecondary}
-                  >
-                    {fmt(root().summary.liquid)}
-                  </text>
-                </g>
-              </svg>
-            )}
-          </Show>
-
-          {/* ── telemetry strip ─────────────────────────────────────────── */}
-          <div class={s.telemetry}>
-            <div class={s.telemetryCell}>
-              <span class={s.label}>sustains</span>
-              <span class={s.value}>{telemetry().sustains}</span>
-            </div>
-            <div class={s.telemetryCell}>
-              <span class={s.label}>logged events</span>
-              <span class={s.value}>{telemetry().events}</span>
-            </div>
-            <div class={s.telemetryCell}>
-              <span class={s.label}>rules watched</span>
-              <span class={s.value}>{telemetry().rules}</span>
-            </div>
-            <div class={s.telemetryCell}>
-              <span class={s.label}>rules broken</span>
-              <span
-                class={s.value}
-                style={{ color: telemetry().broken > 0 ? vars.color.danger : vars.color.teal }}
-              >
-                {telemetry().broken}
-              </span>
-            </div>
-            <div class={s.telemetryCell}>
-              <span class={s.label}>household liquid</span>
-              {/* ★★★ NOT summed. Roll-up ρ is not in the core, and adding six
-                  numbers here would be host arithmetic wearing an engine's
-                  name. The honest figure is no figure. */}
-              <span class={s.value} style={{ color: vars.color.textDim }}>
-                —
-              </span>
-            </div>
-          </div>
-          <div class={s.attentionWhy}>
-            <strong>household liquid is not summed.</strong> Roll-up ρ — folding children into a
-            parent aggregate — does not exist in <code>sustena-core</code>. Every other figure
-            above is a real count over the persisted world.
-          </div>
-        </div>
-      </section>
-
-      {/* ── right column ──────────────────────────────────────────────────── */}
-      <div class={s.column}>
-        {/* the live gate stream */}
-        <section class={s.card} style={{ "min-height": 0, display: "flex", "flex-direction": "column" }}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>gate stream · live</span>
-            <span class={s.spacer} />
-            <span class={s.pushBadge}>{world.pushes} committed</span>
-            <Show when={world.refusals > 0}>
-              <span class={s.refusedBadge}>{world.refusals} refused</span>
-            </Show>
-          </header>
-          <div class={s.cardBody} style={{ "overflow-y": "auto", "min-height": 0 }}>
-            <Show
-              when={world.stream.length > 0}
-              fallback={
-                <div class={s.empty}>
-                  the gate is quiet · nothing has been asked of it since this window opened
-                </div>
-              }
-            >
-              <For each={world.stream}>
-                {(e) => (
-                  <div class={e.kind === "refused" ? s.streamRowRefused : s.streamRow}>
-                    <span
-                      class={s.streamVerdict}
-                      style={{
-                        color: e.kind === "refused" ? vars.color.danger : vars.color.teal,
-                      }}
-                    >
-                      {e.kind === "refused" ? "REFUSED" : "ADMITTED"}
-                    </span>
-                    <span>
-                      <span style={{ color: vars.color.textPrimary }}>{e.operator}</span>{" "}
-                      <span class={s.sustainMeta}>
-                        {world.sustains[e.sustainId]?.summary.label ?? e.sustainId}
-                      </span>
-                      <Show when={e.kind === "admitted"}>
-                        <br />
-                        <span class={s.attentionWhy}>
-                          #{(e as { seq: number }).seq} ·{" "}
-                          {(e as { events: string[] }).events.join(", ") || "no events"}
-                        </span>
-                      </Show>
-                      <Show when={e.kind === "refused"}>
-                        <br />
-                        <span class={s.attentionWhy} style={{ color: vars.color.danger }}>
-                          {(e as { reason: string }).reason || (e as { rule: string }).rule}
-                        </span>
-                        <br />
-                        <span class={s.attentionWhy}>nothing changed · nothing logged</span>
-                      </Show>
-                    </span>
-                  </div>
                 )}
               </For>
-            </Show>
-          </div>
-        </section>
+
+              {/* the children */}
+              <For each={layout().kids}>
+                {(k) => {
+                  const n = () => nodeAt(k.id);
+                  const tone = () => toneOf(attentionFor(k.id));
+                  return (
+                    <g class={S.node} onClick={() => props.onOpen(k.id)} role="button" tabindex="0">
+                      <circle
+                        cx={k.x}
+                        cy={k.y}
+                        r="26"
+                        fill={world.selected === k.id ? vars.color.amberGlow : vars.color.bgRaised}
+                        stroke={world.selected === k.id ? vars.color.amber : vars.color.borderMid}
+                        stroke-width="1"
+                      />
+                      <circle cx={k.x + 18} cy={k.y - 18} r="3.5" fill={tone()} />
+                      <text
+                        x={k.x}
+                        y={k.y - 2}
+                        text-anchor="middle"
+                        class={S.nodeLabel}
+                        fill={vars.color.textPrimary}
+                      >
+                        {n()?.summary.label ?? k.id}
+                      </text>
+                      <text
+                        x={k.x}
+                        y={k.y + 11}
+                        text-anchor="middle"
+                        class={S.nodeFigure}
+                        fill={vars.color.textSecondary}
+                      >
+                        {fmt(n()?.summary.liquid)}
+                      </text>
+                    </g>
+                  );
+                }}
+              </For>
+
+              {/* the root */}
+              <g
+                class={S.node}
+                onClick={() => props.onOpen(root().summary.id)}
+                role="button"
+                tabindex="0"
+              >
+                <circle
+                  cx={CENTER.x}
+                  cy={CENTER.y}
+                  r="40"
+                  fill={
+                    world.selected === root().summary.id
+                      ? vars.color.amberGlow
+                      : vars.color.bgOverlay
+                  }
+                  stroke={
+                    world.selected === root().summary.id ? vars.color.amber : vars.color.borderLight
+                  }
+                  stroke-width="1"
+                />
+                <circle
+                  cx={CENTER.x + 28}
+                  cy={CENTER.y - 28}
+                  r="4"
+                  fill={toneOf(attentionFor(root().summary.id))}
+                />
+                <text
+                  x={CENTER.x}
+                  y={CENTER.y - 4}
+                  text-anchor="middle"
+                  class={S.nodeLabel}
+                  fill={vars.color.textPrimary}
+                >
+                  {root().summary.label}
+                </text>
+                <text
+                  x={CENTER.x}
+                  y={CENTER.y + 12}
+                  text-anchor="middle"
+                  class={S.nodeFigure}
+                  fill={vars.color.textSecondary}
+                >
+                  {fmt(root().summary.liquid)}
+                </text>
+              </g>
+            </svg>
+          )}
+        </Show>
+
+        {/* ── telemetry strip ────────────────────────────────────────────── */}
+        <TelemetryStrip>
+          <TelemetryCell label="sustains">{telemetry().sustains}</TelemetryCell>
+          <TelemetryCell label="logged events">{telemetry().events}</TelemetryCell>
+          <TelemetryCell label="rules watched">{telemetry().rules}</TelemetryCell>
+          <TelemetryCell label="rules broken" tone={telemetry().broken > 0 ? "danger" : "ok"}>
+            {telemetry().broken}
+          </TelemetryCell>
+          {/* ★★★ NOT summed. Roll-up ρ is not in the core, and adding six
+              numbers here would be host arithmetic wearing an engine's name.
+              The honest figure is no figure. */}
+          <TelemetryCell label="household liquid" tone="idle">
+            —
+          </TelemetryCell>
+        </TelemetryStrip>
+        <Caption>
+          <strong>household liquid is not summed.</strong> Roll-up ρ — folding children into a
+          parent aggregate — does not exist in <code>sustena-core</code>. Every other figure above
+          is a real count over the persisted world.
+        </Caption>
+      </Card>
+
+      {/* ── right column ─────────────────────────────────────────────────── */}
+      <Column>
+        {/* the live gate stream */}
+        <Card
+          title="gate stream · live"
+          scroll
+          right={
+            <>
+              <Badge tone="ok">{world.pushes} committed</Badge>
+              <Show when={world.refusals > 0}>
+                <Badge tone="danger">{world.refusals} refused</Badge>
+              </Show>
+            </>
+          }
+        >
+          <Show
+            when={world.stream.length > 0}
+            fallback={
+              <Empty>the gate is quiet · nothing has been asked of it since this window opened</Empty>
+            }
+          >
+            <For each={world.stream}>
+              {(e) => (
+                <div class={e.kind === "refused" ? S.streamRowRefused : S.streamRow}>
+                  <span
+                    class={S.streamVerdict}
+                    style={{ color: e.kind === "refused" ? vars.color.danger : vars.color.teal }}
+                  >
+                    {e.kind === "refused" ? "REFUSED" : "ADMITTED"}
+                  </span>
+                  <Fill>
+                    <Value>{e.operator}</Value>{" "}
+                    <Meta>{world.sustains[e.sustainId]?.summary.label ?? e.sustainId}</Meta>
+                    <Show when={e.kind === "admitted"}>
+                      <Caption>
+                        #{(e as { seq: number }).seq} ·{" "}
+                        {(e as { events: string[] }).events.join(", ") || "no events"}
+                      </Caption>
+                    </Show>
+                    <Show when={e.kind === "refused"}>
+                      <div class={S.caption} style={{ color: vars.color.danger }}>
+                        {(e as { reason: string }).reason || (e as { rule: string }).rule}
+                      </div>
+                      <Caption>nothing changed · nothing logged</Caption>
+                    </Show>
+                  </Fill>
+                </div>
+              )}
+            </For>
+          </Show>
+        </Card>
 
         {/* needs attention, across the household */}
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>needs attention · household</span>
-            <span class={s.spacer} />
-            <span class={s.sustainMeta}>{attention().length}</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show
-              when={attention().length > 0}
-              fallback={<div class={s.empty}>nothing needs you · every rule holds</div>}
-            >
-              <For each={attention()}>
-                {(a) => (
-                  <button class={s.attentionButton} onClick={() => props.onOpen(a.sustainId)}>
-                    <span
-                      class={s.dot}
-                      style={{
-                        background:
-                          a.severity === "danger" ? vars.color.danger : vars.color.warn,
-                        "margin-top": "5px",
-                      }}
-                    />
-                    <span>
-                      <span class={s.value}>{a.what}</span>{" "}
-                      <span class={s.sustainMeta}>
+        <Card title="needs attention · household" right={<Meta>{attention().length}</Meta>}>
+          <Show
+            when={attention().length > 0}
+            fallback={<Empty>nothing needs you · every rule holds</Empty>}
+          >
+            <For each={attention()}>
+              {(a) => (
+                <Row onClick={() => props.onOpen(a.sustainId)}>
+                  <NoteRow tone={a.severity === "danger" ? "danger" : "warn"}>
+                    <Fill>
+                      <Value>{a.what}</Value>{" "}
+                      <Meta>
                         {a.kind} · {a.label}
-                      </span>
-                      <br />
-                      <span class={s.attentionWhy}>{a.why}</span>
-                    </span>
-                  </button>
-                )}
-              </For>
-            </Show>
-            <div class={s.attentionWhy} style={{ "margin-top": vars.space.md }}>
+                      </Meta>
+                      <Caption>{a.why}</Caption>
+                    </Fill>
+                  </NoteRow>
+                </Row>
+              )}
+            </For>
+          </Show>
+          <Note>
+            <Caption>
               A broken rule is the engine's verdict. The {Math.round(ATTENTION_AT * 100)}% pocket
               line is this app's declared policy over real numbers.
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
+            </Caption>
+          </Note>
+        </Card>
+      </Column>
+    </Split>
   );
 }

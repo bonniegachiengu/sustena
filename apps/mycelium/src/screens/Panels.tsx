@@ -1,16 +1,35 @@
 /**
- * The three panels whose subsystem is not in `sustena-core`, plus Council and
- * Profile, which are.
+ * The three panels whose subsystem is not in `sustena-core`, plus Council,
+ * which is.
  *
  * ★★ Each absence is authored: what exists, what does not, where it lives. The
  * wording is the report, not a placeholder.
+ *
+ * ★★★ All three render through the ONE `Unavailable` in `src/ui` — the same
+ * component the rest of the cockpit reaches for. A designed absence that looked
+ * different on each screen would read as three different kinds of missing.
  */
-import { createResource, createSignal, For, Show } from "solid-js";
-import * as s from "../styles/app.css";
-import { vars } from "../styles/tokens.css";
+import { createSignal, For, Show } from "solid-js";
+import {
+  Absent,
+  Button,
+  Caption,
+  Card,
+  Chip,
+  Column,
+  Empty,
+  Meta,
+  Note,
+  Readout,
+  Row,
+  Spacer,
+  Split,
+  Unavailable,
+  Value,
+  vars,
+  sx as S,
+} from "../ui";
 import { engine, type CouncilOutcomeDto } from "../lib/engine";
-import { world } from "../lib/live";
-import Unavailable from "./Unavailable";
 
 /* ── Ingest ─────────────────────────────────────────────────────────────── */
 
@@ -93,12 +112,12 @@ export function Library() {
 
 /* ── Council — real ─────────────────────────────────────────────────────── */
 
-type Row = { operative: string; choice: string; confidence: number };
+type Vote = { operative: string; choice: string; confidence: number };
 
 const COUNCILLORS = ["Mentor", "Protégé", "Attaché", "Curator", "Navigator"];
 
 export function Council() {
-  const [rows, setRows] = createSignal<Row[]>(
+  const [rows, setRows] = createSignal<Vote[]>(
     COUNCILLORS.map((c, i) => ({
       operative: c,
       choice: i === 0 ? "yes" : i === 1 ? "yes" : "abstain",
@@ -126,127 +145,108 @@ export function Council() {
   };
 
   return (
-    <div class={s.main}>
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>council · deliberation</span>
-            <span class={s.spacer} />
-            <span class={s.sustainMeta}>{rows().length} councillors</span>
-          </header>
-          <div class={s.cardBody}>
-            <For each={rows()}>
-              {(r, i) => (
-                <div class={s.paramRow}>
-                  <span class={s.value}>{r.operative}</span>
-                  <select
-                    class={s.picker}
-                    value={r.choice}
-                    onChange={(e) =>
-                      setRows((v) =>
-                        v.map((x, j) => (j === i() ? { ...x, choice: e.currentTarget.value } : x)),
-                      )
-                    }
-                  >
-                    <option value="yes">yes</option>
-                    <option value="no">no</option>
-                    <option value="abstain">abstain</option>
-                  </select>
-                  <input
-                    class={s.input}
-                    style={{ width: "68px" }}
-                    value={String(r.confidence)}
-                    onInput={(e) =>
-                      setRows((v) =>
-                        v.map((x, j) =>
-                          j === i() ? { ...x, confidence: Number(e.currentTarget.value) || 0 } : x,
-                        ),
-                      )
-                    }
-                  />
-                </div>
-              )}
-            </For>
+    <Split>
+      <Column>
+        <Card title="council · deliberation" right={<Meta>{rows().length} councillors</Meta>}>
+          <For each={rows()}>
+            {(r, i) => (
+              <Row>
+                <Value>{r.operative}</Value>
+                <Spacer />
+                <select
+                  class={S.select}
+                  style={{ width: "auto" }}
+                  value={r.choice}
+                  onChange={(e) =>
+                    setRows((v) =>
+                      v.map((x, j) => (j === i() ? { ...x, choice: e.currentTarget.value } : x)),
+                    )
+                  }
+                >
+                  <option value="yes">yes</option>
+                  <option value="no">no</option>
+                  <option value="abstain">abstain</option>
+                </select>
+                <input
+                  class={S.input}
+                  style={{ width: "68px" }}
+                  value={String(r.confidence)}
+                  onInput={(e) =>
+                    setRows((v) =>
+                      v.map((x, j) =>
+                        j === i() ? { ...x, confidence: Number(e.currentTarget.value) || 0 } : x,
+                      ),
+                    )
+                  }
+                />
+              </Row>
+            )}
+          </For>
 
-            <div class={s.paramRow}>
-              <span class={s.value}>the person</span>
-              <select
-                class={s.picker}
-                value={userVote()}
-                onChange={(e) => setUserVote(e.currentTarget.value)}
-              >
-                <option value="none">has not decided</option>
-                <option value="yes">yes</option>
-                <option value="no">no</option>
-                <option value="abstain">abstain</option>
-              </select>
-              <button class={s.chip} onClick={() => setCollected((c) => !c)}>
-                {collected() ? "collected" : "not collected"}
-              </button>
-            </div>
-
-            <div style={{ "margin-top": vars.space.lg }}>
-              <button class={s.button} onClick={run} disabled={busy()}>
-                {busy() ? "resolving…" : "resolve"}
-              </button>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>the engine's resolution</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show
-              when={outcome()}
-              fallback={<div class={s.empty}>nothing resolved yet</div>}
+          <Row>
+            <Value>the person</Value>
+            <Spacer />
+            <select
+              class={S.select}
+              style={{ width: "auto" }}
+              value={userVote()}
+              onChange={(e) => setUserVote(e.currentTarget.value)}
             >
-              {(o) => (
-                <>
-                  <div class={s.row}>
-                    <span class={s.label}>status</span>
-                    <span class={s.valueBig}>{o().status}</span>
-                  </div>
-                  <div class={s.row}>
-                    <span class={s.label}>aggregated vote</span>
-                    <span class={s.value}>{o().aggregated}</span>
-                  </div>
-                  <div class={s.row}>
-                    <span class={s.label}>utility</span>
-                    <span class={s.value}>{o().utility.toFixed(2)}</span>
-                  </div>
-                  <Show when={o().reasoning.trim()}>
-                    <p class={s.reason}>{o().reasoning}</p>
-                  </Show>
-                </>
-              )}
-            </Show>
+              <option value="none">has not decided</option>
+              <option value="yes">yes</option>
+              <option value="no">no</option>
+              <option value="abstain">abstain</option>
+            </select>
+            <Chip active={collected()} onClick={() => setCollected((c) => !c)}>
+              {collected() ? "collected" : "not collected"}
+            </Chip>
+          </Row>
 
-            <div class={s.attentionWhy} style={{ "margin-top": vars.space.md }}>
-              `council::resolve` and `aggregate_delegated_votes` are the engine's own. The rules
-              they encode — a person's vote overrides the council, an <em>abstaining</em> person
-              leaves it <strong>in voting</strong> rather than deciding, and collected votes with
-              nobody in favour fail — are not re-implemented here.
-            </div>
-          </div>
-        </section>
+          <Note gap="lg">
+            <Button onClick={run} disabled={busy()}>
+              {busy() ? "resolving…" : "resolve"}
+            </Button>
+          </Note>
+        </Card>
+      </Column>
 
-        <section class={s.card}>
-          <div class={s.cardBody}>
-            <div class={s.unavailable}>
-              <span class={s.unavailableTitle}>what is not here</span>
-              Resolution is real; the <strong>proposal lifecycle</strong> is not. There is no
-              persisted proposal, no deadline (the core compares nothing it cannot replay, so
-              `expired` is the host's question and this app has none), and no operative actually
-              deliberating — the votes above are yours to set, so this is the engine's rule engine
-              exercised by hand rather than a council that met.
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
+      <Column>
+        <Card title="the engine's resolution">
+          <Show when={outcome()} fallback={<Empty>nothing resolved yet</Empty>}>
+            {(o) => (
+              <>
+                <Readout label="status" big>
+                  {o().status}
+                </Readout>
+                <Readout label="aggregated vote">{o().aggregated}</Readout>
+                <Readout label="utility">{o().utility.toFixed(2)}</Readout>
+                <Show when={o().reasoning.trim()}>
+                  <p class={S.reason}>{o().reasoning}</p>
+                </Show>
+              </>
+            )}
+          </Show>
+
+          <Note>
+            <Caption>
+              <code>council::resolve</code> and <code>aggregate_delegated_votes</code> are the
+              engine's own. The rules they encode — a person's vote overrides the council, an{" "}
+              <em>abstaining</em> person leaves it <strong>in voting</strong> rather than deciding,
+              and collected votes with nobody in favour fail — are not re-implemented here.
+            </Caption>
+          </Note>
+        </Card>
+
+        <Card title="council · what is not here">
+          <Absent title="the proposal lifecycle">
+            Resolution is real; the <strong>proposal lifecycle</strong> is not. There is no
+            persisted proposal, no deadline (the core compares nothing it cannot replay, so{" "}
+            <code>expired</code> is the host's question and this app has none), and no operative
+            actually deliberating — the votes above are yours to set, so this is the engine's rule
+            engine exercised by hand rather than a council that met.
+          </Absent>
+        </Card>
+      </Column>
+    </Split>
   );
 }

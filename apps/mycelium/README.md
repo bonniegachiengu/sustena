@@ -1,9 +1,11 @@
 # Mycelium — the Sustena cockpit
 
-**Status: V1.5 — every panel navigable, and every one truthful.** Twelve
-panels. Nine are wired to real engine capability; three describe a subsystem
+**Status: v1 complete (V1.6).** Twelve panels, built from one shared component
+system. Nine are wired to real engine capability; three describe a subsystem
 `sustena-core` does not have, in the cockpit's own layout, naming what exists
-and where the capability lives.
+and where the capability lives. The look holds from a wide desktop down to a
+375px phone with no horizontal scroll, from responsive *primitives* rather than
+per-screen media queries.
 
 ```bash
 npm install
@@ -231,7 +233,7 @@ chose. So it is a stated policy over real numbers, shown as ours on the card.
 `MonitorEngine::flatten_holarchy` refuses a duplicate id, an unknown parent and
 a cycle, and the UI shows what it said.
 
-**Not built yet — named rather than stubbed:**
+**Not built — named rather than stubbed:**
 
 - ★★★ **`holon.transfer` — NOT AVAILABLE, and deliberately not approximated.**
   An atomic conserved move between two Sustains is in the Python engine and not
@@ -243,29 +245,90 @@ a cycle, and the UI shows what it said.
   Sustains.)
 - ★★★ **roll-up `ρ` — NOT AVAILABLE, and the UI says so.** Folding children's
   state into a parent aggregate does not exist in `sustena-core` (the Python
-  engine has it; the Rust port does not). Nothing is summed. A household total
+  engine has it; the Rust port does not). Nothing is summed — not on the
+  Constellation strip, not on the Monitor, not in a fork. A household total
   computed in the host would be a number with no rule behind it.
-- **the nav lists panels that do not exist yet**, disabled and marked `soon`
-  (Council, Simulate, Define, Composition, Economy, Ingest, Network, Library,
-  Profile). Hiding them would misrepresent the product; pretending they worked
-  would be worse.
-- **the identity `bg.myc` is declared, not authenticated.** Every call still
-  runs under `Authorization::Unchecked`; it is a name the cockpit displays, not
-  one the gate enforces.
+- ★★ **ingest / the transducer.** No parser turns an SMS or a bank alert into a
+  proposed call. Not written here on purpose: the Python transducer's own
+  history is speculative patterns that matched no real message until real
+  samples arrived, and a wrong parse of a financial message is a wrong ledger
+  entry.
+- ★★ **peer transport.** The distributed primitives are real and tested in the
+  core (CRDTs with convergence laws, vector clocks, Paxos-style consensus, the
+  router). There is no socket, no discovery and no gossip — so this is a single
+  node, and the panel says `— single node` rather than `0 peers`, which would
+  imply a network that found nobody.
+- ★★ **the arena / library.** No package registry, and it depends on the
+  transport that does not exist.
+- **the council's proposal lifecycle.** `council::resolve` is real and wired;
+  persisted proposals, deadlines and operatives that actually deliberate are
+  not — the votes are yours to set, so it is the engine's rule engine exercised
+  by hand.
+- **authority is displayed, not enforced.** `effective_privilege` and
+  `permitted` are the engine's, but every call still runs
+  `Authorization::Unchecked`. The identity `bg.myc` is declared, not
+  authenticated.
 - **the topbar clock is the UI's**, not the engine's. The core has no clock and
   nothing on screen attributes a timestamp to it.
-- **status-belt cells that cannot be honest are dashes**: household liquid
-  (`— needs ρ`), peers (`— single node`), pawa (`— not metered here`).
-- **no simulation, economy, governance, council, ingest, or definition editor.**
-  All exist in the engine. None are wired.
-- **templates are declared in Rust** (`templates.rs`), not authored in-app.
-  Authoring is the Define screen.
-- **no live telemetry stream.** Every read is request/response; the IPC event
-  channel is the next slice.
 - **no undo, no delete.** The log is append-only and nothing removes a Sustain.
-- **no Orchie.** Mobile is a later face on the same codebase.
+- **no log compaction.** A long-lived Sustain's log only grows.
+- **no Orchie.** The phone face is a later product on this same codebase — the
+  responsive primitives above are its groundwork.
 - **desktop only.** `[lib] crate-type` is `["lib"]`; the mobile crate-types
   (`staticlib`, `cdylib`) go back when the mobile target lands.
+
+## The design system — `src/ui`
+
+```
+  src/ui/tokens.css.ts    colours, type scale, spacing, radii — and the breakpoints
+  src/ui/layout.css.ts    arrangement: frame, Split, Column, Stack, Cluster, the nav rail
+  src/ui/ui.css.ts        the instruments: card, verdict, absence, row, meter, badge, dot
+  src/ui/index.tsx        the components every screen imports
+```
+
+**One definition each, consumed everywhere.** Before V1.6, `app.css.ts` held 98
+ad-hoc exports grown a section per slice, and the same card / verdict /
+empty-state was re-spelled on each screen. The pieces that were duplicated are
+now single components:
+
+| | why it has to be one thing |
+|---|---|
+| `Card` | the instrument frame; every panel is made of them |
+| `Verdict` | a gate refusal that rendered differently in two places is one a person learns to read twice |
+| `Unavailable` / `Absent` | the designed absence — the most load-bearing component in the product, because it is how the app tells the truth about itself |
+| `Empty` / `ErrorState` | the honest-state vocabulary, in one voice |
+| `Hypothetical` | amber and dashed, so a fork can never be misread as a fact |
+| `Boundary` | solid, not dashed — the economy boundary is a standing fact, not a gap |
+| `Row` / `Readout` / `NoteRow` / `Meter` / `TelemetryCell` | the reading families |
+| `Badge` / `Dot` | status with fixed semantics: teal ok, amber warn, red danger, dashed absent |
+
+### Responsive, as primitives
+
+★★★ **No screen file contains a media query.** Breakpoints are tokens (`bp.md`
+900px, `bp.sm` 560px) and only `src/ui` consumes them — `layout.css.ts` for how
+instruments sit next to each other, `ui.css.ts` for the three places an
+instrument adjusts its own density (a big figure, a card's padding, a
+three-column control row). A screen composes `Split`/`Column`/`Stack`/`Cluster`
+and inherits narrow-width behaviour it never had to think about.
+
+Every primitive sets `min-width: 0`. Without it a grid or flex child refuses to
+shrink below its content and pushes the page sideways — the single most common
+cause of the horizontal scroll this arrangement exists to prevent. `Fill` is
+that fix as a component, for the one-off spans inside a row.
+
+The two places that *do* scroll sideways do it **inside themselves**: the nav
+rail (which becomes a horizontal strip below `md`) and the status belt. The page
+never does.
+
+★★ This is also the groundwork for **Orchie**. A phone-first face on this same
+codebase needs primitives that already collapse correctly, not a second set of
+screens.
+
+### One symbol rule
+
+`text-transform: uppercase` turns `ρ` into `Ρ` — a different letter. The
+cockpit's labels are full of Greek that carries meaning, so `Sym` holds a symbol
+out of the transform and a title can be uppercase and still say `ρ`.
 
 ## Local notes
 

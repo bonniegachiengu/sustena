@@ -1,22 +1,22 @@
 /**
- * MYCELIUM — V1.5. Every panel navigable, and every one truthful.
+ * MYCELIUM — v1. The app shell.
  *
- * ★★ The frame is permanent and the panel swaps inside it: left nav, topbar
- * with the Sustain selector, status belt. **One selection model** — the
+ * ★★ The frame is permanent and the panel swaps inside it: a nav rail, a topbar
+ * with the Sustain selector, and a status belt. **One selection model** — the
  * selector, the nav and the constellation all read and write `world.selected`,
  * so they cannot disagree about what you are looking at.
  *
- * ★★ **Every panel is now navigable.** Three of them (Ingest, Network, Library)
- * describe a subsystem `sustena-core` does not have — and they say what exists,
- * what does not, and where the capability lives, in the cockpit's own layout. A
- * disabled item told a person nothing; a designed absence tells them the truth
- * about the system they are running.
+ * ★★★ Every panel is navigable. Three of them describe a subsystem
+ * `sustena-core` does not have, and say what exists, what does not, and where
+ * the capability lives — in the cockpit's own layout, at the cockpit's own
+ * fidelity. A disabled item told a person nothing.
  */
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import * as s from "./styles/app.css";
-import { vars } from "./styles/tokens.css";
-import { engine, fmt } from "./lib/engine";
-import { attentionAcross, hydrate, refreshWorld, selectedSustain, subscribe, world } from "./lib/live";
+import * as L from "./ui/layout.css";
+import * as S from "./ui/ui.css";
+import { Badge, Caption, Empty, ErrorState, NoteRow } from "./ui";
+import { engine } from "./lib/engine";
+import { attentionAcross, hydrate, refreshWorld, subscribe, world } from "./lib/live";
 import Constellation from "./screens/Constellation";
 import Monitor from "./screens/Monitor";
 import Console from "./screens/Console";
@@ -28,21 +28,11 @@ import Profile from "./screens/Profile";
 import { Council, Ingest, Library, Network } from "./screens/Panels";
 
 type Panel =
-  | "constellation"
-  | "monitor"
-  | "console"
-  | "simulate"
-  | "composition"
-  | "economy"
-  | "define"
-  | "council"
-  | "ingest"
-  | "network"
-  | "library"
-  | "profile";
+  | "constellation" | "monitor" | "council"
+  | "console" | "simulate" | "define" | "composition"
+  | "economy" | "ingest" | "network" | "library" | "profile";
 
-/** The roadmap's panel list. `soon` ones are shown, disabled, and labelled. */
-const NAV: { group: string; items: { id: Panel | string; label: string; soon?: boolean }[] }[] = [
+const NAV: { group: string; items: { id: Panel; label: string }[] }[] = [
   {
     group: "watch",
     items: [
@@ -75,15 +65,11 @@ const NAV: { group: string; items: { id: Panel | string; label: string; soon?: b
 function Clock() {
   const [now, setNow] = createSignal(new Date());
   // ★ The UI's own clock, for the person reading the screen. The ENGINE has
-  //   none, and nothing here feeds it — no timestamp on this screen is ever
+  //   none, and nothing here feeds it — no timestamp in this app is ever
   //   attributed to the engine.
   const t = setInterval(() => setNow(new Date()), 1000);
   onCleanup(() => clearInterval(t));
-  return (
-    <span class={s.brandSub}>
-      {now().toLocaleTimeString(undefined, { hour12: false })} local
-    </span>
-  );
+  return <span class={S.caption}>{now().toLocaleTimeString(undefined, { hour12: false })} local</span>;
 }
 
 export default function App() {
@@ -95,7 +81,6 @@ export default function App() {
     //   fills; none of them listens on its own, and none of them polls.
     const stop = await subscribe();
     onCleanup(stop);
-
     await refreshWorld();
     await Promise.all(world.order.map((id) => hydrate(id)));
   });
@@ -122,14 +107,14 @@ export default function App() {
   const attentionCount = () => attentionAcross().length;
 
   return (
-    <div class={s.frame}>
-      {/* ── topbar ────────────────────────────────────────────────────────── */}
-      <header class={s.topbar}>
-        <span class={s.brand}>Mycelium</span>
-        <span class={s.brandSub}>v1.5</span>
+    <div class={L.frame}>
+      <header class={L.topbar}>
+        <span class={S.brand}>MYCELIUM</span>
+        <span class={`${S.caption} ${L.hideNarrow}`}>v1</span>
 
         <select
-          class={s.picker}
+          class={S.select}
+          style={{ "max-width": "200px", width: "auto" }}
           value={world.selected ?? ""}
           disabled={busy() || world.order.length === 0}
           onChange={(e) => void select(e.currentTarget.value)}
@@ -147,40 +132,37 @@ export default function App() {
           </For>
         </select>
 
-        <span class={s.spacer} />
+        <span class={S.spacer} />
 
-        <span class={s.pushBadge}>{world.pushes} pushed</span>
+        <Badge tone="ok">{world.pushes} pushed</Badge>
         <Show when={world.refusals > 0}>
-          <span class={s.refusedBadge}>{world.refusals} refused</span>
+          <Badge tone="danger">{world.refusals} refused</Badge>
         </Show>
 
-        <span class={s.avatar}>bg</span>
-        <span class={s.identity}>{world.principal || "—"}</span>
-        <Clock />
+        <span class={S.avatar}>bg</span>
+        <span class={`${S.meta} ${L.hideNarrow}`}>{world.principal || "—"}</span>
+        <span class={L.hideNarrow}>
+          <Clock />
+        </span>
       </header>
 
-      {/* ── body ──────────────────────────────────────────────────────────── */}
-      <div class={s.body}>
-        <nav class={s.nav}>
+      <div class={L.body}>
+        <nav class={L.nav}>
           <For each={NAV}>
             {(g) => (
-              <div class={s.navGroup}>
-                <span class={s.navGroupTitle}>{g.group}</span>
+              <div class={L.navGroup}>
+                <span class={L.navGroupTitle}>{g.group}</span>
                 <For each={g.items}>
                   {(item) => (
                     <button
-                      class={panel() === item.id ? s.navItemActive : s.navItem}
-                      disabled={item.soon}
-                      onClick={() => !item.soon && setPanel(item.id as Panel)}
+                      class={panel() === item.id ? L.navItem.active : L.navItem.idle}
+                      onClick={() => setPanel(item.id)}
                     >
                       {item.label}
                       <Show when={item.id === "constellation" && attentionCount() > 0}>
-                        <span class={s.navSoon} style={{ color: vars.color.warn }}>
+                        <span class={L.navCountLive}>
                           {attentionCount()}
                         </span>
-                      </Show>
-                      <Show when={item.soon}>
-                        <span class={s.navSoon}>soon</span>
                       </Show>
                     </button>
                   )}
@@ -189,102 +171,83 @@ export default function App() {
             )}
           </For>
 
-          <div class={s.invariantRow} style={{ "margin-top": "auto" }}>
-            <span
-              class={s.dot}
-              style={{
-                background: world.holds ? vars.color.teal : vars.color.danger,
-                "margin-top": "5px",
-              }}
-            />
-            <span>
-              <Show
-                when={world.holds}
-                fallback={<span style={{ color: vars.color.danger }}>{world.holarchyReason}</span>}
-              >
-                ⊕ holds · {world.linked} linked
-                <br />
-                <span class={s.attentionWhy}>checked by the engine</span>
+          <div class={L.navFooter}>
+            <NoteRow tone={world.holds ? "ok" : "danger"}>
+              <Show when={world.holds} fallback={<Caption>{world.holarchyReason}</Caption>}>
+                <Caption>
+                  ⊕ holds · {world.linked} linked
+                  <br />
+                  checked by the engine
+                </Caption>
               </Show>
-            </span>
+            </NoteRow>
           </div>
         </nav>
 
-        <div style={{ "min-width": 0, "min-height": 0, overflow: "hidden", display: "grid" }}>
-          <Show when={world.loaded} fallback={<div class={s.empty} style={{ padding: vars.space.xl }}>
-            {world.error ? `engine unreachable — ${world.error}` : "opening the household…"}
-          </div>}>
-            <Show when={panel() === "constellation"}>
-              <Constellation onOpen={(id) => void open(id)} />
-            </Show>
-            <Show when={panel() === "monitor"}>
-              <Monitor />
-            </Show>
-            <Show when={panel() === "console"}>
-              <Console />
-            </Show>
-            <Show when={panel() === "simulate"}>
-              <Simulate />
-            </Show>
-            <Show when={panel() === "composition"}>
-              <Composition />
-            </Show>
-            <Show when={panel() === "economy"}>
-              <Economy />
-            </Show>
-            <Show when={panel() === "define"}>
-              <Define />
-            </Show>
-            <Show when={panel() === "council"}>
-              <Council />
-            </Show>
-            <Show when={panel() === "ingest"}>
-              <Ingest />
-            </Show>
-            <Show when={panel() === "network"}>
-              <Network />
-            </Show>
-            <Show when={panel() === "library"}>
-              <Library />
-            </Show>
-            <Show when={panel() === "profile"}>
-              <Profile />
-            </Show>
+        <div class={L.panelSlot}>
+          <Show
+            when={world.loaded}
+            fallback={
+              <div class={L.panelPad}>
+                <Show
+                  when={world.error}
+                  fallback={<Empty>opening the household · folding every log</Empty>}
+                >
+                  {(e) => (
+                    <ErrorState>
+                      the engine is unreachable — {e()}
+                      <br />
+                      nothing is shown rather than something stale.
+                    </ErrorState>
+                  )}
+                </Show>
+              </div>
+            }
+          >
+            <Show when={panel() === "constellation"}><Constellation onOpen={(id) => void open(id)} /></Show>
+            <Show when={panel() === "monitor"}><Monitor /></Show>
+            <Show when={panel() === "council"}><Council /></Show>
+            <Show when={panel() === "console"}><Console /></Show>
+            <Show when={panel() === "simulate"}><Simulate /></Show>
+            <Show when={panel() === "define"}><Define /></Show>
+            <Show when={panel() === "composition"}><Composition /></Show>
+            <Show when={panel() === "economy"}><Economy /></Show>
+            <Show when={panel() === "ingest"}><Ingest /></Show>
+            <Show when={panel() === "network"}><Network /></Show>
+            <Show when={panel() === "library"}><Library /></Show>
+            <Show when={panel() === "profile"}><Profile /></Show>
           </Show>
         </div>
       </div>
 
-      {/* ── status belt ───────────────────────────────────────────────────── */}
-      <footer class={s.statusBelt}>
-        <span class={s.beltCell}>
+      <footer class={L.statusBelt}>
+        <span class={L.beltCell}>
           <span>engine</span>
-          <span class={s.beltValue}>sustena-core · embedded</span>
+          <span class={L.beltValue}>sustena-core · embedded</span>
         </span>
-        <span class={s.beltCell}>
+        <span class={`${L.beltCell} ${L.hideNarrow}`}>
           <span>host</span>
-          <span class={s.beltValue}>{world.storePath || "—"}</span>
+          <span class={L.beltValue}>{world.storePath || "—"}</span>
         </span>
-        <span class={s.beltCell}>
+        <span class={L.beltCell}>
           <span>sustains</span>
-          <span class={s.beltValue}>{world.order.length}</span>
+          <span class={L.beltValue}>{world.order.length}</span>
         </span>
-        <span class={s.beltCell}>
-          <span>liquid (household)</span>
-          {/* ★ Not summed — roll-up ρ is not in the core. */}
-          <span class={s.beltAbsent}>— needs ρ</span>
+        {/* ★ Cells that cannot be honest are dashes, and each says why. */}
+        <span class={L.beltCell}>
+          <span>household liquid</span>
+          <span class={L.beltAbsent}>— needs ρ</span>
         </span>
-        <span class={s.beltCell}>
+        <span class={L.beltCell}>
           <span>peers</span>
-          {/* ★ No multi-node host exists. An honest dash, not a zero. */}
-          <span class={s.beltAbsent}>— single node</span>
+          <span class={L.beltAbsent}>— single node</span>
         </span>
-        <span class={s.beltCell}>
+        <span class={L.beltCell}>
           <span>pawa</span>
-          {/* ★ The economy is built in the engine and not wired into this host. */}
-          <span class={s.beltAbsent}>— not metered here</span>
+          <span class={L.beltValue}>metered · charged</span>
         </span>
-        <span class={s.spacer} />
-        <span>push channel · one message per gate decision · no polling</span>
+        <span class={S.spacer} />
+        <span class={L.hideNarrow}>push channel · one message per gate decision · no polling</span>
       </footer>
     </div>
   );

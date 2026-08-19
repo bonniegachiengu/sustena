@@ -11,11 +11,33 @@
  * not cheapness — so the two never render the same.
  *
  * ★ The one screen where a refusal belongs. The live store carries refusals only
- * as activity; the verdict for *this* request is held here.
+ * as activity; the verdict for *this* request is held here — and it renders
+ * through the SHARED `Verdict`, so a refusal reads identically wherever the
+ * cockpit shows one.
  */
 import { createEffect, createResource, createSignal, For, Show } from "solid-js";
-import * as s from "../styles/app.css";
-import { vars } from "../styles/tokens.css";
+import {
+  Badge,
+  Button,
+  Caption,
+  Card,
+  Code,
+  Column,
+  Empty,
+  ErrorState,
+  Field,
+  Fill,
+  Label,
+  Meta,
+  Note,
+  Readout,
+  Row,
+  Split,
+  Value,
+  Verdict,
+  vars,
+  sx as S,
+} from "../ui";
 import {
   engine,
   fmt,
@@ -47,33 +69,6 @@ function draftParams(op: OperatorDto, state: unknown): string {
     }
   }
   return JSON.stringify(out);
-}
-
-function Verdict(props: { result: GateResult }) {
-  const v = () => props.result.verdict;
-  const box = () =>
-    v() === "admitted" ? s.verdictAdmitted : v() === "refused" ? s.verdictRefused : s.verdictDeferred;
-  const badge = () =>
-    v() === "admitted" ? s.badgeAdmitted : v() === "refused" ? s.badgeRefused : s.badgeDeferred;
-
-  return (
-    <div class={box()}>
-      <div style={{ display: "flex", "align-items": "baseline", gap: vars.space.md }}>
-        <span class={badge()}>{v().toUpperCase()}</span>
-        <span class={s.mono}>{props.result.operator}</span>
-      </div>
-      <Show when={props.result.reason}>{(r) => <p class={s.reason}>{r()}</p>}</Show>
-      <Show when={props.result.constraintViolated}>
-        {(c) => <div class={s.reasonCode}>rule · {c()}</div>}
-      </Show>
-      <div class={s.reasonCode}>
-        {props.result.mutations} mutation{props.result.mutations === 1 ? "" : "s"} ·{" "}
-        {props.result.events.length} event{props.result.events.length === 1 ? "" : "s"}
-        <Show when={v() === "refused"}> · state unchanged · nothing logged · nothing charged</Show>
-        <Show when={v() === "admitted"}> · logged · metered · pushed to every live screen</Show>
-      </div>
-    </div>
-  );
 }
 
 export default function Console() {
@@ -134,158 +129,141 @@ export default function Console() {
   };
 
   return (
-    <div class={s.main}>
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>T · operators on this Sustain</span>
-            <span class={s.spacer} />
-            <span class={s.sustainMeta}>{ops()?.length ?? 0}</span>
-          </header>
-          <div class={s.cardBody} style={{ padding: 0 }}>
-            <Show
-              when={(ops() ?? []).length > 0}
-              fallback={<div class={s.empty} style={{ padding: vars.space.md }}>no operators declared</div>}
-            >
-              <For each={ops()}>
-                {(op) => (
-                  <button
-                    class={chosen() === op.name ? s.opRowActive : s.opRow}
-                    onClick={() => pick(op)}
+    <Split>
+      <Column>
+        <Card title="T · operators on this Sustain" right={<Meta>{ops()?.length ?? 0}</Meta>}>
+          <Show when={(ops() ?? []).length > 0} fallback={<Empty>no operators declared</Empty>}>
+            <For each={ops()}>
+              {(op) => (
+                <button
+                  class={chosen() === op.name ? S.opRowActive : S.opRow}
+                  onClick={() => pick(op)}
+                >
+                  <Fill>
+                    <Value>{op.name}</Value>
+                    <Caption>{op.description}</Caption>
+                    <Caption>
+                      {op.params
+                        .map((p) => `${p.name}${p.required ? "" : "?"}:${p.kind}`)
+                        .join(" · ") || "no params"}
+                    </Caption>
+                  </Fill>
+                  {/* ★★★ Measured, or honestly not. */}
+                  <Show
+                    when={op.measured}
+                    fallback={<span class={S.pawaUnmeasured}>not measured</span>}
                   >
-                    <span>
-                      <span class={s.value}>{op.name}</span>
-                      <br />
-                      <span class={s.attentionWhy}>{op.description}</span>
-                      <br />
-                      <span class={s.attentionWhy}>
-                        {op.params.map((p) => `${p.name}${p.required ? "" : "?"}:${p.kind}`).join(" · ") ||
-                          "no params"}
-                      </span>
-                    </span>
-                    {/* ★★★ Measured, or honestly not. */}
-                    <Show
-                      when={op.measured}
-                      fallback={<span class={s.pawaUnmeasured}>not measured</span>}
-                    >
-                      {(m) => (
-                        <span class={s.pawaMeasured}>
-                          ~{m().meanPawa.toFixed(2)} pwa
-                          <br />
-                          <span class={s.attentionWhy}>{m().runs} run{m().runs === 1 ? "" : "s"}</span>
+                    {(m) => (
+                      <span class={S.pawaMeasured}>
+                        ~{m().meanPawa.toFixed(2)} pwa
+                        <br />
+                        <span class={S.caption}>
+                          {m().runs} run{m().runs === 1 ? "" : "s"}
                         </span>
-                      )}
-                    </Show>
-                  </button>
-                )}
-              </For>
-            </Show>
-            <div class={s.attentionWhy} style={{ padding: vars.space.md }}>
+                      </span>
+                    )}
+                  </Show>
+                </button>
+              )}
+            </For>
+          </Show>
+          <Note>
+            <Caption>
               "not measured" means the meter has never seen it run — not that it is free. The
               author's declared estimate is usually <code>0</code>; the meter is the truth.
-            </div>
-          </div>
-        </section>
+            </Caption>
+          </Note>
+        </Card>
 
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>Σ · the selected Sustain</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show when={live()} fallback={<div class={s.empty}>nothing selected</div>}>
-              {(l) => (
-                <>
-                  <div class={s.row}>
-                    <span class={s.label}>liquid balance</span>
-                    <span class={s.valueBig}>{fmt(liquidBalance(l().state))}</span>
-                  </div>
-                  <For each={pockets(l().state)}>
-                    {(p) => (
-                      <div class={s.pocketRow}>
-                        <span class={s.value}>{p.name}</span>
-                        <span class={s.mono}>alloc {fmt(p.allocated)}</span>
-                        <span class={s.mono}>spent {fmt(p.spent)}</span>
-                        <span class={s.value}>left {fmt(p.left)}</span>
-                      </div>
-                    )}
-                  </For>
-                </>
-              )}
-            </Show>
-          </div>
-        </section>
-      </div>
+        <Card title="Σ · the selected Sustain">
+          <Show when={live()} fallback={<Empty>nothing selected</Empty>}>
+            {(l) => (
+              <>
+                <Readout label="liquid balance" big>
+                  {fmt(liquidBalance(l().state))}
+                </Readout>
+                <For each={pockets(l().state)} fallback={<Empty>no pockets yet</Empty>}>
+                  {(p) => (
+                    <Row>
+                      <Value>{p.name}</Value>
+                      <Meta>alloc {fmt(p.allocated)}</Meta>
+                      <Meta>spent {fmt(p.spent)}</Meta>
+                      <Value>left {fmt(p.left)}</Value>
+                    </Row>
+                  )}
+                </For>
+              </>
+            )}
+          </Show>
+        </Card>
+      </Column>
 
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>console · ask the gate</span>
-            <span class={s.spacer} />
-            <span class={s.sustainMeta}>targets {live()?.summary.label ?? "nothing"}</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show
-              when={chosen()}
-              fallback={<div class={s.empty}>pick an operator on the left</div>}
-            >
-              {(op) => (
-                <>
-                  <div class={s.field}>
-                    <label class={s.label} for="op">operator</label>
-                    <input id="op" class={s.input} value={op()} readOnly />
-                  </div>
-                  <div class={s.field} style={{ "margin-top": vars.space.md }}>
-                    <label class={s.label} for="params">
-                      params (json · objects and arrays supported)
-                    </label>
+      <Column>
+        <Card
+          title="console · ask the gate"
+          right={<Meta>targets {live()?.summary.label ?? "nothing"}</Meta>}
+        >
+          <Show when={chosen()} fallback={<Empty>pick an operator on the left</Empty>}>
+            {(op) => (
+              <>
+                <Field label="operator">
+                  <input class={S.input} value={op()} readOnly />
+                </Field>
+                <Note>
+                  <Field label="params (json · objects and arrays supported)">
                     <input
-                      id="params"
-                      class={s.input}
+                      class={S.input}
                       value={paramsText()}
                       onInput={(e) => setParamsText(e.currentTarget.value)}
                     />
-                  </div>
-                  <div style={{ "margin-top": vars.space.lg }}>
-                    <button class={s.button} onClick={execute} disabled={busy()}>
-                      {busy() ? "asking…" : "execute"}
-                    </button>
-                  </div>
-                </>
-              )}
-            </Show>
-          </div>
-        </section>
+                  </Field>
+                </Note>
+                <Note gap="lg">
+                  <Button onClick={execute} disabled={busy()}>
+                    {busy() ? "asking…" : "execute"}
+                  </Button>
+                </Note>
+              </>
+            )}
+          </Show>
+        </Card>
 
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>the gate's verdict</span>
-            <span class={s.spacer} />
-            <span class={s.pushBadge}>{world.pushes} pushed</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show
-              when={last()}
-              fallback={<div class={s.empty}>nothing asked yet · the gate is quiet</div>}
-            >
-              {(r) => <Verdict result={r()} />}
-            </Show>
-            <Show when={failure()}>
-              {(f) => <div class={s.errorBox} style={{ "margin-top": vars.space.md }}>{f()}</div>}
-            </Show>
-          </div>
-        </section>
+        <Card title="the gate's verdict" right={<Badge tone="ok">{world.pushes} pushed</Badge>}>
+          <Show when={last()} fallback={<Empty>nothing asked yet · the gate is quiet</Empty>}>
+            {(r) => (
+              <Verdict
+                verdict={r().verdict}
+                operator={r().operator}
+                reason={r().reason}
+                rule={r().constraintViolated}
+                mutations={r().mutations}
+                events={r().events.length}
+                consequence={
+                  r().verdict === "refused"
+                    ? "state unchanged · nothing logged · nothing charged"
+                    : r().verdict === "admitted"
+                      ? "logged · metered · pushed to every live screen"
+                      : undefined
+                }
+              />
+            )}
+          </Show>
+          <Show when={failure()}>
+            {(f) => (
+              <Note>
+                <ErrorState>{f()}</ErrorState>
+              </Note>
+            )}
+          </Show>
+        </Card>
 
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>S · state, as the engine holds it</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show when={live()?.state} fallback={<div class={s.empty}>—</div>}>
-              <pre class={s.codeBlock}>{JSON.stringify(live()!.state, null, 2)}</pre>
-            </Show>
-          </div>
-        </section>
-      </div>
-    </div>
+        <Card title="S · state, as the engine holds it">
+          <Show when={live()?.state} fallback={<Empty>nothing selected</Empty>}>
+            <Code>{JSON.stringify(live()!.state, null, 2)}</Code>
+            <Label>this document is the fold of the log, not a second source</Label>
+          </Show>
+        </Card>
+      </Column>
+    </Split>
   );
 }

@@ -9,11 +9,35 @@
  * the same reason.
  *
  * ★★ **Nothing is written.** No log, no ledger, no meter, no cached state. A
- * branch is a value.
+ * branch is a value — and every hypothetical on this screen renders through the
+ * shared `Hypothetical`, which is amber and dashed so it can never be misread
+ * as something that happened.
  */
 import { createSignal, For, Show } from "solid-js";
-import * as s from "../styles/app.css";
-import { vars } from "../styles/tokens.css";
+import {
+  Absent,
+  Badge,
+  Button,
+  Card,
+  Chip,
+  Cluster,
+  Column,
+  Empty,
+  ErrorState,
+  Field,
+  Hypothetical,
+  Label,
+  Meta,
+  Note,
+  Readout,
+  Row,
+  Split,
+  Sym,
+  Value,
+  Verdict,
+  vars,
+  sx as S,
+} from "../ui";
 import { engine, fmt, liquidBalance, pockets, type Branch, type JsonValue } from "../lib/engine";
 import { selectedSustain, world } from "../lib/live";
 
@@ -119,183 +143,180 @@ export default function Simulate() {
   };
 
   return (
-    <div class={s.main}>
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>branch · from live state</span>
-            <span class={s.spacer} />
-            <span class={s.sustainMeta}>{live()?.summary.label ?? "—"}</span>
-          </header>
-          <div class={s.cardBody}>
-            <div class={s.hypothetical} style={{ "margin-bottom": vars.space.md }}>
-              <span class={s.unavailableTitle}>◆ hypothetical</span>
-              A branch runs against a <strong>copy</strong> of live state, through the same gate a
-              real call uses. Nothing is written — no log, no ledger, no meter. Promoting replays
-              it for real, and can still be refused if the world moved.
-            </div>
+    <Split>
+      <Column>
+        <Card title="branch · from live state" right={<Meta>{live()?.summary.label ?? "—"}</Meta>}>
+          <Hypothetical title="◆ hypothetical">
+            A branch runs against a <strong>copy</strong> of live state, through the same gate a
+            real call uses. Nothing is written — no log, no ledger, no meter. Promoting replays it
+            for real, and can still be refused if the world moved.
+          </Hypothetical>
 
+          <Note>
             <For each={steps()}>
               {(st, i) => (
-                <div class={s.field} style={{ "margin-bottom": vars.space.md }}>
-                  <label class={s.label}>step {i() + 1}</label>
-                  <input
-                    class={s.input}
-                    value={st.operator}
-                    onInput={(e) =>
-                      setSteps((v) =>
-                        v.map((x, j) => (j === i() ? { ...x, operator: e.currentTarget.value } : x)),
-                      )
-                    }
-                  />
-                  <input
-                    class={s.input}
-                    value={st.params}
-                    onInput={(e) =>
-                      setSteps((v) =>
-                        v.map((x, j) => (j === i() ? { ...x, params: e.currentTarget.value } : x)),
-                      )
-                    }
-                  />
+                <div style={{ "margin-bottom": vars.space.md }}>
+                  <Field label={`step ${i() + 1}`}>
+                    <input
+                      class={S.input}
+                      value={st.operator}
+                      onInput={(e) =>
+                        setSteps((v) =>
+                          v.map((x, j) =>
+                            j === i() ? { ...x, operator: e.currentTarget.value } : x,
+                          ),
+                        )
+                      }
+                    />
+                    <input
+                      class={S.input}
+                      value={st.params}
+                      onInput={(e) =>
+                        setSteps((v) =>
+                          v.map((x, j) => (j === i() ? { ...x, params: e.currentTarget.value } : x)),
+                        )
+                      }
+                    />
+                  </Field>
                 </div>
               )}
             </For>
+          </Note>
 
-            <div class={s.presetRow}>
-              <button
-                class={s.chip}
-                onClick={() => setSteps((v) => [...v, { operator: "budget.allocate", params: '{"pocket_name":"food","amount":500}' }])}
-              >
-                + step
-              </button>
-              <Show when={steps().length > 1}>
-                <button class={s.chip} onClick={() => setSteps((v) => v.slice(0, -1))}>
-                  − step
-                </button>
-              </Show>
-            </div>
-
-            <div style={{ "margin-top": vars.space.lg, display: "flex", gap: vars.space.sm }}>
-              <button class={s.button} onClick={run} disabled={busy() || !world.selected}>
-                {busy() ? "forking…" : "run branch"}
-              </button>
-              <Show when={branch()}>
-                <button class={s.buttonGhost} onClick={promote} disabled={busy()}>
-                  promote to reality
-                </button>
-              </Show>
-            </div>
-
-            <Show when={failure()}>
-              {(f) => <div class={s.errorBox} style={{ "margin-top": vars.space.md }}>{f()}</div>}
-            </Show>
-            <Show when={promoted()}>
-              {(p) => (
-                <div class={s.verdictAdmitted} style={{ "margin-top": vars.space.md }}>
-                  <span class={s.badgeAdmitted}>PROMOTED</span>
-                  <p class={s.reason}>{p()}</p>
-                </div>
-              )}
-            </Show>
-          </div>
-        </section>
-
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>⊕ · roll-up, hypothetical</span>
-          </header>
-          <div class={s.cardBody}>
-            {/* ★ Same honest state as everywhere else. A hypothetical roll-up
-                would need ρ just as much as a real one does. */}
-            <div class={s.unavailable}>
-              <span class={s.unavailableTitle}>roll-up ρ · not available</span>
-              A branch cannot show a hypothetical household aggregate for the same reason the
-              Monitor cannot show a real one: ρ is not in <code>sustena-core</code>. Nothing is
-              summed, in reality or in a fork.
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>the branch</span>
-            <span class={s.spacer} />
-            <Show when={branch()}>
-              <span class={s.hypotheticalBadge}>◆ nothing written</span>
-            </Show>
-          </header>
-          <div class={s.cardBody}>
-            <Show
-              when={branch()}
-              fallback={<div class={s.empty}>no branch yet · run one to see what would happen</div>}
+          <Cluster>
+            <Chip
+              onClick={() =>
+                setSteps((v) => [
+                  ...v,
+                  { operator: "budget.allocate", params: '{"pocket_name":"food","amount":500}' },
+                ])
+              }
             >
-              {(b) => (
-                <>
-                  <For each={b().steps}>
-                    {(st, i) => (
-                      <div class={st.verdict === "refused" ? s.verdictRefused : s.verdictAdmitted} style={{ "margin-bottom": vars.space.sm }}>
-                        <div style={{ display: "flex", gap: vars.space.md, "align-items": "baseline" }}>
-                          <span class={st.verdict === "refused" ? s.badgeRefused : s.badgeAdmitted}>
-                            {st.verdict.toUpperCase()}
-                          </span>
-                          <span class={s.mono}>
-                            {i() + 1}. {st.operator}
-                          </span>
-                        </div>
-                        <Show when={st.reason}>{(r) => <p class={s.reason}>{r()}</p>}</Show>
-                        <div class={s.reasonCode}>
-                          {st.mutations} mutation{st.mutations === 1 ? "" : "s"} ·{" "}
-                          {st.events.length} event{st.events.length === 1 ? "" : "s"}
-                          <Show when={st.verdict === "refused"}> · the branch stops here</Show>
-                        </div>
-                      </div>
-                    )}
-                  </For>
-
-                  <Show when={finalState()}>
-                    {(fin) => (
-                      <>
-                        <div class={s.label} style={{ "margin-top": vars.space.lg }}>
-                          state diff · live → hypothetical
-                        </div>
-                        <For
-                          each={diff(b().from, fin())}
-                          fallback={<div class={s.empty}>nothing moved</div>}
-                        >
-                          {(d) => (
-                            <div class={s.diffRow}>
-                              <span class={s.mono}>{d.path}</span>
-                              <span class={s.seqCell}>{d.from}</span>
-                              <span class={s.value}>→ {d.to}</span>
-                            </div>
-                          )}
-                        </For>
-
-                        <div class={s.row} style={{ "margin-top": vars.space.md }}>
-                          <span class={s.label}>liquid · hypothetical</span>
-                          <span class={s.valueBig}>{fmt(liquidBalance(fin()))}</span>
-                        </div>
-                        <For each={pockets(fin())}>
-                          {(p) => (
-                            <div class={s.pocketRow}>
-                              <span class={s.value}>{p.name}</span>
-                              <span class={s.mono}>alloc {fmt(p.allocated)}</span>
-                              <span class={s.mono}>spent {fmt(p.spent)}</span>
-                              <span class={s.value}>left {fmt(p.left)}</span>
-                            </div>
-                          )}
-                        </For>
-                      </>
-                    )}
-                  </Show>
-                </>
-              )}
+              + step
+            </Chip>
+            <Show when={steps().length > 1}>
+              <Chip onClick={() => setSteps((v) => v.slice(0, -1))}>− step</Chip>
             </Show>
-          </div>
-        </section>
-      </div>
-    </div>
+          </Cluster>
+
+          <Note gap="lg">
+            <Cluster>
+              <Button onClick={run} disabled={busy() || !world.selected}>
+                {busy() ? "forking…" : "run branch"}
+              </Button>
+              <Show when={branch()}>
+                <Button variant="ghost" onClick={promote} disabled={busy()}>
+                  promote to reality
+                </Button>
+              </Show>
+            </Cluster>
+          </Note>
+
+          <Show when={failure()}>
+            {(f) => (
+              <Note>
+                <ErrorState>{f()}</ErrorState>
+              </Note>
+            )}
+          </Show>
+          <Show when={promoted()}>
+            {(p) => (
+              <Note>
+                <Verdict
+                  verdict="admitted"
+                  operator="promote"
+                  reason={p()}
+                  mutations={0}
+                  events={0}
+                  consequence="each step was re-decided against live state, not replayed from the fork"
+                />
+              </Note>
+            )}
+          </Show>
+        </Card>
+
+        <Card title="⊕ · roll-up, hypothetical">
+          {/* ★ Same honest state as everywhere else. A hypothetical roll-up
+              would need ρ just as much as a real one does. */}
+          <Absent title={<>roll-up <Sym>ρ</Sym> · not available</>}>
+            A branch cannot show a hypothetical household aggregate for the same reason the Monitor
+            cannot show a real one: ρ is not in <code>sustena-core</code>. Nothing is summed, in
+            reality or in a fork.
+          </Absent>
+        </Card>
+      </Column>
+
+      <Column>
+        <Card
+          title="the branch"
+          right={
+            <Show when={branch()}>
+              <Badge tone="warn">◆ nothing written</Badge>
+            </Show>
+          }
+        >
+          <Show
+            when={branch()}
+            fallback={<Empty>no branch yet · run one to see what would happen</Empty>}
+          >
+            {(b) => (
+              <>
+                <For each={b().steps}>
+                  {(st, i) => (
+                    <div style={{ "margin-bottom": vars.space.sm }}>
+                      <Verdict
+                        verdict={st.verdict}
+                        operator={`${i() + 1}. ${st.operator}`}
+                        reason={st.reason}
+                        mutations={st.mutations}
+                        events={st.events.length}
+                        consequence={
+                          st.verdict === "refused" ? "the branch stops here" : "in the fork only"
+                        }
+                      />
+                    </div>
+                  )}
+                </For>
+
+                <Show when={finalState()}>
+                  {(fin) => (
+                    <>
+                      <Note gap="lg">
+                        <Label>state diff · live → hypothetical</Label>
+                      </Note>
+                      <For each={diff(b().from, fin())} fallback={<Empty>nothing moved</Empty>}>
+                        {(d) => (
+                          <div class={S.diffRow}>
+                            <span class={S.meta}>{d.path}</span>
+                            <span class={S.seqCell}>{d.from}</span>
+                            <Value>→ {d.to}</Value>
+                          </div>
+                        )}
+                      </For>
+
+                      <Note>
+                        <Readout label="liquid · hypothetical" big tone="warn">
+                          {fmt(liquidBalance(fin()))}
+                        </Readout>
+                      </Note>
+                      <For each={pockets(fin())}>
+                        {(p) => (
+                          <Row>
+                            <Value>{p.name}</Value>
+                            <Meta>alloc {fmt(p.allocated)}</Meta>
+                            <Meta>spent {fmt(p.spent)}</Meta>
+                            <Value>left {fmt(p.left)}</Value>
+                          </Row>
+                        )}
+                      </For>
+                    </>
+                  )}
+                </Show>
+              </>
+            )}
+          </Show>
+        </Card>
+      </Column>
+    </Split>
   );
 }

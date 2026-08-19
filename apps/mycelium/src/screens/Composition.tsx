@@ -13,8 +13,23 @@
  * The second is the more dangerous one to fake, and the screen says why.
  */
 import { createMemo, For, Show } from "solid-js";
-import * as s from "../styles/app.css";
-import { vars } from "../styles/tokens.css";
+import {
+  Absent,
+  Caption,
+  Card,
+  Column,
+  Empty,
+  Label,
+  Meta,
+  Note,
+  NoteRow,
+  Row,
+  Spacer,
+  Split,
+  Sym,
+  Value,
+  vars,
+} from "../ui";
 import { fmt } from "../lib/engine";
 import { childrenOf, selectedSustain, world } from "../lib/live";
 
@@ -27,118 +42,90 @@ export default function Composition() {
   });
 
   return (
-    <div class={s.main}>
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>⊕ · the tree</span>
-            <span class={s.spacer} />
-            <span class={s.sustainMeta}>{live()?.summary.label ?? "—"}</span>
-          </header>
-          <div class={s.cardBody}>
-            <div class={s.invariantRow}>
-              <span
-                class={s.dot}
-                style={{
-                  background: world.holds ? vars.color.teal : vars.color.danger,
-                  "margin-top": "5px",
-                }}
-              />
-              <span>
-                <Show
-                  when={world.holds}
-                  fallback={<span style={{ color: vars.color.danger }}>{world.holarchyReason}</span>}
-                >
-                  <strong style={{ color: vars.color.textPrimary }}>tree holds</strong> ·{" "}
-                  {world.linked} linked
-                  <br />
-                  <span class={s.attentionWhy}>
-                    validated by <code>MonitorEngine::flatten_holarchy</code> — no duplicate id, no
-                    unknown parent, no cycle
-                  </span>
-                </Show>
-              </span>
-            </div>
+    <Split>
+      <Column>
+        <Card title="⊕ · the tree" right={<Meta>{live()?.summary.label ?? "—"}</Meta>}>
+          <NoteRow tone={world.holds ? "ok" : "danger"}>
+            <Show when={world.holds} fallback={<Caption>{world.holarchyReason}</Caption>}>
+              <Value>tree holds</Value> <Meta>· {world.linked} linked</Meta>
+              <Caption>
+                validated by <code>MonitorEngine::flatten_holarchy</code> — no duplicate id, no
+                unknown parent, no cycle
+              </Caption>
+            </Show>
+          </NoteRow>
 
-            <div class={s.label} style={{ "margin-top": vars.space.lg }}>parent</div>
-            <Show when={parent()} fallback={<div class={s.empty}>none · this is a root Sustain</div>}>
-              {(p) => (
-                <div class={s.pocketRow}>
-                  <span class={s.value}>{p().label}</span>
-                  <span class={s.mono}>{p().template}</span>
-                  <span class={s.mono}>{p().events} events</span>
-                  <span class={s.value}>{fmt(p().liquid)}</span>
-                </div>
+          <Note gap="lg">
+            <Label>parent</Label>
+          </Note>
+          <Show when={parent()} fallback={<Empty>none · this is a root Sustain</Empty>}>
+            {(p) => (
+              <Row>
+                <Value>{p().label}</Value>
+                <Meta>{p().template}</Meta>
+                <Spacer />
+                <Meta>{p().events} events</Meta>
+                <Value>{fmt(p().liquid)}</Value>
+              </Row>
+            )}
+          </Show>
+
+          <Note gap="lg">
+            <Label>children · {kids().length}</Label>
+          </Note>
+          <Show when={kids().length > 0} fallback={<Empty>no children linked</Empty>}>
+            <For each={kids()}>
+              {(k) => (
+                <Row>
+                  <Value>{k.label}</Value>
+                  <Meta>{k.template}</Meta>
+                  <Spacer />
+                  <Meta>{k.events} events</Meta>
+                  <Value>{fmt(k.liquid)}</Value>
+                </Row>
               )}
-            </Show>
+            </For>
+          </Show>
+        </Card>
+      </Column>
 
-            <div class={s.label} style={{ "margin-top": vars.space.lg }}>
-              children · {kids().length}
-            </div>
-            <Show when={kids().length > 0} fallback={<div class={s.empty}>no children linked</div>}>
-              <For each={kids()}>
-                {(k) => (
-                  <div class={s.pocketRow}>
-                    <span class={s.value}>{k.label}</span>
-                    <span class={s.mono}>{k.template}</span>
-                    <span class={s.mono}>{k.events} events</span>
-                    <span class={s.value}>{fmt(k.liquid)}</span>
-                  </div>
-                )}
-              </For>
-            </Show>
-          </div>
-        </section>
-      </div>
+      <Column>
+        <Card title={<>roll-up <Sym>ρ</Sym></>}>
+          <Absent title="not available">
+            The engine holds and checks this tree, but it cannot yet fold a child's state into a
+            parent aggregate. ρ exists in the Python engine and has not been ported to{" "}
+            <code>sustena-core</code>.
+            <br />
+            <br />
+            Nothing is summed. A household total computed by this app rather than by the engine
+            would be a number with no rule behind it — and no way to tell you when it stopped being
+            true.
+          </Absent>
+        </Card>
 
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>roll-up ρ</span>
-          </header>
-          <div class={s.cardBody}>
-            <div class={s.unavailable}>
-              <span class={s.unavailableTitle}>not available</span>
-              The engine holds and checks this tree, but it cannot yet fold a child's state into a
-              parent aggregate. ρ exists in the Python engine and has not been ported to{" "}
-              <code>sustena-core</code>.
-              <br />
-              <br />
-              Nothing is summed. A household total computed by this app rather than by the engine
-              would be a number with no rule behind it — and no way to tell you when it stopped
-              being true.
-            </div>
-          </div>
-        </section>
-
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>transfer between Sustains</span>
-          </header>
-          <div class={s.cardBody}>
-            <div class={s.unavailable}>
-              <span class={s.unavailableTitle}>not available</span>
-              <code>holon.transfer</code> — an <strong>atomic, conserved</strong> move that debits
-              one Sustain's pocket and credits another's, both committed together or neither — is
-              in the Python engine and <strong>not in <code>sustena-core</code></strong>.
-              <br />
-              <br />
-              ★★★ <strong>This one is deliberately not approximated.</strong> The obvious host
-              workaround — spend from one Sustain, then record income on the other — is two
-              separate gated calls. If the second refuses, the money has left one household and
-              arrived nowhere. That is not a transfer; it is a way to lose money that looks like a
-              feature.
-              <br />
-              <br />
-              <span class={s.attentionWhy}>
-                <code>juul::transfer</code> does exist in the core — but that moves the{" "}
-                <em>economy's internal unit</em> between principals, not a household's own money
-                between Sustains. Using it here would be answering a different question.
-              </span>
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
+        <Card title="transfer between Sustains">
+          <Absent title="not available">
+            <code>holon.transfer</code> — an <strong>atomic, conserved</strong> move that debits one
+            Sustain's pocket and credits another's, both committed together or neither — is in the
+            Python engine and{" "}
+            <strong>
+              not in <code>sustena-core</code>
+            </strong>
+            .
+            <br />
+            <br />
+            ★★★ <strong>This one is deliberately not approximated.</strong> The obvious host
+            workaround — spend from one Sustain, then record income on the other — is two separate
+            gated calls. If the second refuses, the money has left one household and arrived
+            nowhere. That is not a transfer; it is a way to lose money that looks like a feature.
+            <br />
+            <br />
+            <code>juul::transfer</code> does exist in the core — but that moves the{" "}
+            <em>economy's internal unit</em> between principals, not a household's own money
+            between Sustains. Using it here would be answering a different question.
+          </Absent>
+        </Card>
+      </Column>
+    </Split>
   );
 }

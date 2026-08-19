@@ -9,10 +9,33 @@
  * ★★★ **Internal points only.** Juul is an accounting unit on this machine. It
  * is never real money, never transferable, never a payment rail — and the
  * notice below is carried as data from the host so a surface cannot forget it.
+ * It renders through `Boundary`, which is solid rather than dashed: this is a
+ * standing fact, not a gap waiting to be filled.
  */
 import { createResource, createSignal, For, Show } from "solid-js";
-import * as s from "../styles/app.css";
-import { vars } from "../styles/tokens.css";
+import {
+  Boundary,
+  Caption,
+  Card,
+  Chip,
+  Column,
+  Empty,
+  Fill,
+  Label,
+  Meta,
+  Note,
+  NoteRow,
+  Readout,
+  Row,
+  Spacer,
+  Split,
+  TelemetryCell,
+  TelemetryStrip,
+  Value,
+  Verdict,
+  vars,
+  sx as S,
+} from "../ui";
 import { engine, fmt, type GateResult } from "../lib/engine";
 
 export default function Economy() {
@@ -39,217 +62,168 @@ export default function Economy() {
   };
 
   return (
-    <div class={s.main}>
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>juul · internal accounting</span>
-            <span class={s.spacer} />
-            <span class={s.sustainMeta}>{eco()?.principal ?? "—"}</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show when={eco()} fallback={<div class={s.empty}>reading the ledger…</div>}>
-              {(e) => (
-                <>
-                  <div class={s.row}>
-                    <span class={s.label}>balance</span>
-                    <span class={s.valueBig}>{fmt(e().balance)}</span>
-                  </div>
-                  <div class={s.telemetry}>
-                    <div class={s.telemetryCell}>
-                      <span class={s.label}>circulation</span>
-                      <span class={s.value}>{fmt(e().circulation)}</span>
-                    </div>
-                    <div class={s.telemetryCell}>
-                      <span class={s.label}>minted</span>
-                      <span class={s.value}>{fmt(e().mintedTotal)}</span>
-                    </div>
-                    <div class={s.telemetryCell}>
-                      <span class={s.label}>issued</span>
-                      <span class={s.value}>{fmt(e().issuedTotal)}</span>
-                    </div>
-                    <div class={s.telemetryCell}>
-                      <span class={s.label}>genesis</span>
-                      <span class={s.value}>{fmt(e().genesisTotal)}</span>
-                    </div>
-                  </div>
-                  <div class={s.invariantRow}>
-                    <span
-                      class={s.dot}
-                      style={{
-                        background: e().auditClean ? vars.color.teal : vars.color.danger,
-                        "margin-top": "5px",
-                      }}
-                    />
-                    <span>
-                      <strong style={{ color: vars.color.textPrimary }}>genesis audit</strong>
-                      <br />
-                      {e().auditDescribes}
-                      <br />
-                      <span class={s.attentionWhy}>
-                        `circulation = Σ(mints) − Σ(costs)`, transfers at zero
-                      </span>
-                    </span>
-                  </div>
-                </>
-              )}
-            </Show>
-          </div>
-        </section>
+    <Split>
+      <Column>
+        <Card title="juul · internal accounting" right={<Meta>{eco()?.principal ?? "—"}</Meta>}>
+          <Show when={eco()} fallback={<Empty>reading the ledger…</Empty>}>
+            {(e) => (
+              <>
+                <Readout label="balance" big>
+                  {fmt(e().balance)}
+                </Readout>
+                <TelemetryStrip>
+                  <TelemetryCell label="circulation">{fmt(e().circulation)}</TelemetryCell>
+                  <TelemetryCell label="minted">{fmt(e().mintedTotal)}</TelemetryCell>
+                  <TelemetryCell label="issued">{fmt(e().issuedTotal)}</TelemetryCell>
+                  <TelemetryCell label="genesis">{fmt(e().genesisTotal)}</TelemetryCell>
+                </TelemetryStrip>
+                <NoteRow tone={e().auditClean ? "ok" : "danger"}>
+                  <Value>genesis audit</Value>
+                  <Caption>{e().auditDescribes}</Caption>
+                  <Caption>
+                    <code>circulation = Σ(mints) − Σ(costs)</code>, transfers at zero
+                  </Caption>
+                </NoteRow>
+              </>
+            )}
+          </Show>
+        </Card>
 
         {/* ★★★ The permanent boundary. Carried from the host as data. */}
-        <section class={s.card}>
-          <div class={s.cardBody}>
-            <div class={s.boundary}>
-              <span class={s.unavailableTitle}>the hard boundary</span>
-              {eco()?.boundaryNotice ??
-                "Internal points only. Juul is an accounting unit on this machine."}
-            </div>
-          </div>
-        </section>
+        <Card title="the hard boundary">
+          <Boundary title="internal points only">
+            {eco()?.boundaryNotice ??
+              "Internal points only. Juul is an accounting unit on this machine."}
+          </Boundary>
+        </Card>
 
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>governed parameters</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show when={eco()} fallback={<div class={s.empty}>—</div>}>
-              {(e) => (
-                <For each={e().parameters}>
-                  {(p) => (
-                    <div class={s.paramRow}>
-                      <span>
-                        <span class={s.value}>{p.name}</span>
-                        <br />
-                        <span class={s.attentionWhy}>
-                          in force {p.value} · genesis {p.genesis} · bounds {p.min}…{p.max}
-                        </span>
-                      </span>
-                      <input
-                        class={s.input}
-                        style={{ width: "88px" }}
-                        placeholder={String(p.value)}
-                        value={draft()[p.name] ?? ""}
-                        onInput={(ev) =>
-                          setDraft((d) => ({ ...d, [p.name]: ev.currentTarget.value }))
-                        }
-                      />
-                      <button class={s.chip} disabled={busy()} onClick={() => void change(p.name)}>
-                        set
-                      </button>
-                    </div>
-                  )}
-                </For>
-              )}
-            </Show>
+        <Card title="governed parameters">
+          <Show when={eco()} fallback={<Empty>reading governance…</Empty>}>
+            {(e) => (
+              <For each={e().parameters} fallback={<Empty>no parameters declared</Empty>}>
+                {(p) => (
+                  <Row>
+                    <Fill>
+                      <Value>{p.name}</Value>
+                      <Caption>
+                        in force {p.value} · genesis {p.genesis} · bounds {p.min}…{p.max}
+                      </Caption>
+                    </Fill>
+                    <Spacer />
+                    <input
+                      class={S.input}
+                      style={{ width: "88px" }}
+                      placeholder={String(p.value)}
+                      value={draft()[p.name] ?? ""}
+                      onInput={(ev) => setDraft((d) => ({ ...d, [p.name]: ev.currentTarget.value }))}
+                    />
+                    <Chip disabled={busy()} onClick={() => void change(p.name)}>
+                      set
+                    </Chip>
+                  </Row>
+                )}
+              </For>
+            )}
+          </Show>
 
-            <Show when={verdict()}>
-              {(v) => (
-                <div
-                  class={v().verdict === "admitted" ? s.verdictAdmitted : s.verdictRefused}
-                  style={{ "margin-top": vars.space.md }}
-                >
-                  <span class={v().verdict === "admitted" ? s.badgeAdmitted : s.badgeRefused}>
-                    {v().verdict.toUpperCase()}
-                  </span>
-                  <Show when={v().reason}>{(r) => <p class={s.reason}>{r()}</p>}</Show>
-                  <Show when={v().constraintViolated}>
-                    {(c) => <div class={s.reasonCode}>rule · {c()}</div>}
-                  </Show>
-                </div>
-              )}
-            </Show>
+          <Show when={verdict()}>
+            {(v) => (
+              <Note>
+                <Verdict
+                  verdict={v().verdict}
+                  operator={v().operator}
+                  reason={v().reason}
+                  rule={v().constraintViolated}
+                  mutations={v().mutations}
+                  events={v().events.length}
+                  consequence={
+                    v().verdict === "refused" ? "the parameter in force is unchanged" : "in force now"
+                  }
+                />
+              </Note>
+            )}
+          </Show>
 
-            <div class={s.attentionWhy} style={{ "margin-top": vars.space.md }}>
+          <Note>
+            <Caption>
               A parameter changes only through <code>governance.set_parameter</code> — an ordinary
               Enzyme whose bounds are ordinary invariants. There is no setter that bypasses the
               gate. ★ The <em>bounds</em> are enforced here; the <em>authority</em> is not yet —
               every call in this host still runs <code>Authorization::Unchecked</code>.
-            </div>
-          </div>
-        </section>
-      </div>
+            </Caption>
+          </Note>
+        </Card>
+      </Column>
 
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>the meter · measured, not declared</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show
-              when={(eco()?.metered ?? []).length > 0}
-              fallback={
-                <div class={s.empty}>
-                  nothing measured yet · run an operator and its real cost appears here
+      <Column>
+        <Card title="the meter · measured, not declared">
+          <Show
+            when={(eco()?.metered ?? []).length > 0}
+            fallback={
+              <Empty>nothing measured yet · run an operator and its real cost appears here</Empty>
+            }
+          >
+            <For each={eco()!.metered}>
+              {([name, m]) => (
+                <div class={S.pocketBlock}>
+                  <div class={S.pocketHead}>
+                    <Value>{name}</Value>
+                    <Meta>
+                      {m.runs} run{m.runs === 1 ? "" : "s"}
+                    </Meta>
+                    <Value>{m.meanPawa.toFixed(2)} pawa</Value>
+                  </div>
+                  <Caption>
+                    compute {m.totalCompute} · storage {m.totalStorage}B · total{" "}
+                    {m.totalPawa.toFixed(2)}
+                  </Caption>
                 </div>
-              }
-            >
-              <For each={eco()!.metered}>
-                {([name, m]) => (
-                  <div class={s.pocketBlock}>
-                    <div class={s.pocketHead}>
-                      <span class={s.value}>{name}</span>
-                      <span class={s.mono}>{m.runs} run{m.runs === 1 ? "" : "s"}</span>
-                      <span class={s.value}>{m.meanPawa.toFixed(2)} pawa</span>
-                    </div>
-                    <div class={s.attentionWhy}>
-                      compute {m.totalCompute} · storage {m.totalStorage}B · total{" "}
-                      {m.totalPawa.toFixed(2)}
-                    </div>
-                  </div>
-                )}
-              </For>
-            </Show>
-          </div>
-        </section>
+              )}
+            </For>
+          </Show>
+        </Card>
 
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>ledger · newest first</span>
-            <span class={s.spacer} />
-            <span class={s.sustainMeta}>{eco()?.entries.length ?? 0} shown</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show
-              when={(eco()?.entries ?? []).length > 0}
-              fallback={<div class={s.empty}>no entries</div>}
-            >
-              <For each={eco()!.entries}>
-                {(x) => (
-                  <div class={s.logRow}>
-                    <span
-                      class={s.seqCell}
-                      style={{
-                        color:
-                          x.kind === "mint"
-                            ? vars.color.teal
-                            : x.kind === "debit"
-                              ? vars.color.warn
-                              : vars.color.info,
-                      }}
-                    >
-                      {x.kind}
-                    </span>
-                    <span>
-                      <span style={{ color: vars.color.textPrimary }}>{fmt(x.amount)}</span>{" "}
-                      <span class={s.sustainMeta}>
-                        {x.principal}
-                        {x.counterparty ? ` → ${x.counterparty}` : ""}
-                      </span>
-                      <br />
-                      <span class={s.attentionWhy}>{x.authority}</span>
-                    </span>
-                    <span class={s.seqCell}>
-                      {x.circulationDelta > 0 ? "+" : x.circulationDelta < 0 ? "−" : "±"}
-                      {fmt(Math.abs(x.circulationDelta))}
-                    </span>
-                  </div>
-                )}
-              </For>
-            </Show>
-          </div>
-        </section>
-      </div>
-    </div>
+        <Card title="ledger · newest first" right={<Meta>{eco()?.entries.length ?? 0} shown</Meta>}>
+          <Show when={(eco()?.entries ?? []).length > 0} fallback={<Empty>no entries</Empty>}>
+            <For each={eco()!.entries}>
+              {(x) => (
+                <div class={S.logRow}>
+                  <span
+                    class={S.seqCell}
+                    style={{
+                      color:
+                        x.kind === "mint"
+                          ? vars.color.teal
+                          : x.kind === "debit"
+                            ? vars.color.warn
+                            : vars.color.info,
+                    }}
+                  >
+                    {x.kind}
+                  </span>
+                  <Fill>
+                    <Value>{fmt(x.amount)}</Value>{" "}
+                    <Meta>
+                      {x.principal}
+                      {x.counterparty ? ` → ${x.counterparty}` : ""}
+                    </Meta>
+                    <Caption>{x.authority}</Caption>
+                  </Fill>
+                  <span class={S.seqCell}>
+                    {x.circulationDelta > 0 ? "+" : x.circulationDelta < 0 ? "−" : "±"}
+                    {fmt(Math.abs(x.circulationDelta))}
+                  </span>
+                </div>
+              )}
+            </For>
+          </Show>
+          <Show when={(eco()?.entries ?? []).length > 0}>
+            <Note>
+              <Label>every line is an entry the ledger holds, not a total this app kept</Label>
+            </Note>
+          </Show>
+        </Card>
+      </Column>
+    </Split>
   );
 }

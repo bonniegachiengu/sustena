@@ -7,12 +7,33 @@
  * **never persisted** — so the store cannot hold a `Σ` that was broken when it
  * was written.
  *
- * ★ The verdict shows the engine's own words. A refusal that cannot say which
- * rule and which instance is an alarm, not a diagnosis.
+ * ★ The verdict shows the engine's own words, through the same `Verdict` the
+ * Console uses. A refusal that cannot say which rule and which instance is an
+ * alarm, not a diagnosis.
  */
 import { createResource, createSignal, For, Show } from "solid-js";
-import * as s from "../styles/app.css";
-import { vars } from "../styles/tokens.css";
+import {
+  Button,
+  Caption,
+  Card,
+  Chip,
+  Cluster,
+  Column,
+  Empty,
+  ErrorState,
+  Field,
+  Fill,
+  Label,
+  Meta,
+  Note,
+  Row,
+  Spacer,
+  Split,
+  Value,
+  Verdict,
+  vars,
+  sx as S,
+} from "../ui";
 import { engine, type DefinitionVerdict, type DimDecl, type InvariantDecl } from "../lib/engine";
 import { refreshWorld, world } from "../lib/live";
 
@@ -51,7 +72,10 @@ export default function Define() {
           id: id(),
           label: label(),
           dimensions: dims(),
-          operators: ops().split(",").map((x) => x.trim()).filter(Boolean),
+          operators: ops()
+            .split(",")
+            .map((x) => x.trim())
+            .filter(Boolean),
           invariants: invs(),
           openingState: openingState as never,
         }),
@@ -68,7 +92,12 @@ export default function Define() {
     setBusy(true);
     try {
       const n = world.order.filter((k) => k.startsWith(definitionId)).length + 1;
-      await engine.createFromDefinition(`${definitionId}-${n}`, `${definitionId} ${n}`, definitionId, null);
+      await engine.createFromDefinition(
+        `${definitionId}-${n}`,
+        `${definitionId} ${n}`,
+        definitionId,
+        null,
+      );
       await refreshWorld();
     } catch (e) {
       setFailure(String(e));
@@ -78,201 +107,212 @@ export default function Define() {
   };
 
   return (
-    <div class={s.main}>
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>author Σ</span>
-          </header>
-          <div class={s.cardBody}>
-            <div class={s.paramRow}>
-              <input class={s.input} value={id()} onInput={(e) => setId(e.currentTarget.value)} />
-              <input class={s.input} value={label()} onInput={(e) => setLabel(e.currentTarget.value)} />
-              <span class={s.attentionWhy}>id · label</span>
-            </div>
+    <Split>
+      <Column>
+        <Card title="author Σ">
+          <Row>
+            <input class={S.input} value={id()} onInput={(e) => setId(e.currentTarget.value)} />
+            <input
+              class={S.input}
+              value={label()}
+              onInput={(e) => setLabel(e.currentTarget.value)}
+            />
+            <Meta>id · label</Meta>
+          </Row>
 
-            <div class={s.label} style={{ "margin-top": vars.space.lg }}>dim(S) · declared dimensions</div>
-            <For each={dims()}>
-              {(d, i) => (
-                <div class={s.paramRow}>
-                  <input
-                    class={s.input}
-                    value={d.path}
-                    onInput={(e) =>
-                      setDims((v) => v.map((x, j) => (j === i() ? { ...x, path: e.currentTarget.value } : x)))
-                    }
-                  />
-                  <select
-                    class={s.picker}
-                    value={d.kind}
-                    onChange={(e) =>
-                      setDims((v) => v.map((x, j) => (j === i() ? { ...x, kind: e.currentTarget.value } : x)))
-                    }
-                  >
-                    <For each={KINDS}>{(k) => <option value={k}>{k}</option>}</For>
-                  </select>
-                  <button
-                    class={s.chip}
-                    onClick={() => setDims((v) => v.filter((_, j) => j !== i()))}
-                  >
-                    −
-                  </button>
-                </div>
-              )}
-            </For>
-            <button
-              class={s.chip}
-              onClick={() => setDims((v) => [...v, { path: "", kind: "number", lo: null, hi: null }])}
-            >
-              + dimension
-            </button>
-
-            <div class={s.label} style={{ "margin-top": vars.space.lg }}>V · invariants</div>
-            <For each={invs()}>
-              {(inv, i) => (
-                <div class={s.paramRow}>
-                  <input
-                    class={s.input}
-                    value={inv.id}
-                    onInput={(e) =>
-                      setInvs((v) => v.map((x, j) => (j === i() ? { ...x, id: e.currentTarget.value } : x)))
-                    }
-                  />
-                  <input
-                    class={s.input}
-                    value={inv.expression}
-                    onInput={(e) =>
-                      setInvs((v) =>
-                        v.map((x, j) => (j === i() ? { ...x, expression: e.currentTarget.value } : x)),
-                      )
-                    }
-                  />
-                  <button class={s.chip} onClick={() => setInvs((v) => v.filter((_, j) => j !== i()))}>
-                    −
-                  </button>
-                </div>
-              )}
-            </For>
-            <button
-              class={s.chip}
-              onClick={() => setInvs((v) => [...v, { id: "", expression: "" }])}
-            >
-              + invariant
-            </button>
-
-            <div class={s.field} style={{ "margin-top": vars.space.lg }}>
-              <label class={s.label}>T · operators (comma separated)</label>
-              <input class={s.input} value={ops()} onInput={(e) => setOps(e.currentTarget.value)} />
-            </div>
-            <div class={s.field} style={{ "margin-top": vars.space.md }}>
-              <label class={s.label}>opening state (json)</label>
-              <input class={s.input} value={opening()} onInput={(e) => setOpening(e.currentTarget.value)} />
-            </div>
-
-            <div style={{ "margin-top": vars.space.lg }}>
-              <button class={s.button} onClick={author} disabled={busy()}>
-                {busy() ? "checking…" : "author · the engine decides"}
-              </button>
-            </div>
-
-            <Show when={failure()}>
-              {(f) => <div class={s.errorBox} style={{ "margin-top": vars.space.md }}>{f()}</div>}
-            </Show>
-          </div>
-        </section>
-      </div>
-
-      <div class={s.column}>
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>the engine's verdict</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show
-              when={verdict()}
-              fallback={<div class={s.empty}>nothing authored yet</div>}
-            >
-              {(v) => (
-                <Show
-                  when={v().kind !== "accepted"}
-                  fallback={
-                    <div class={s.verdictAdmitted}>
-                      <span class={s.badgeAdmitted}>ACCEPTED</span>
-                      <p class={s.reason}>
-                        `typecheck` bound every invariant against the schema and no live instance
-                        would be stranded. Persisted.
-                      </p>
-                    </div>
+          <Note gap="lg">
+            <Label>dim(S) · declared dimensions</Label>
+          </Note>
+          <For each={dims()}>
+            {(d, i) => (
+              <Row>
+                <input
+                  class={S.input}
+                  value={d.path}
+                  onInput={(e) =>
+                    setDims((v) =>
+                      v.map((x, j) => (j === i() ? { ...x, path: e.currentTarget.value } : x)),
+                    )
+                  }
+                />
+                <select
+                  class={S.select}
+                  style={{ width: "auto" }}
+                  value={d.kind}
+                  onChange={(e) =>
+                    setDims((v) =>
+                      v.map((x, j) => (j === i() ? { ...x, kind: e.currentTarget.value } : x)),
+                    )
                   }
                 >
-                  <div class={s.verdictRefused}>
-                    <span class={s.badgeRefused}>
-                      {v().kind === "notWellTyped" ? "NOT WELL-TYPED" : "WOULD STRAND"}
-                    </span>
-                    <p class={s.reason}>
-                      {v().kind === "notWellTyped"
-                        ? "The engine refused it. Nothing was written."
-                        : "Live Sustains would be pushed outside their own viable region. Nothing was written."}
-                    </p>
-                    <For
-                      each={
-                        v().kind === "notWellTyped"
-                          ? (v() as { errors: string[] }).errors
-                          : (v() as { instances: string[] }).instances
-                      }
-                    >
-                      {(line) => <div class={s.reasonCode}>{line}</div>}
-                    </For>
-                  </div>
-                </Show>
-              )}
-            </Show>
+                  <For each={KINDS}>{(k) => <option value={k}>{k}</option>}</For>
+                </select>
+                <Spacer />
+                <Chip onClick={() => setDims((v) => v.filter((_, j) => j !== i()))}>−</Chip>
+              </Row>
+            )}
+          </For>
+          <Cluster>
+            <Chip
+              onClick={() =>
+                setDims((v) => [...v, { path: "", kind: "number", lo: null, hi: null }])
+              }
+            >
+              + dimension
+            </Chip>
+          </Cluster>
 
-            <div class={s.attentionWhy} style={{ "margin-top": vars.space.md }}>
+          <Note gap="lg">
+            <Label>V · invariants</Label>
+          </Note>
+          <For each={invs()}>
+            {(inv, i) => (
+              <Row>
+                <input
+                  class={S.input}
+                  value={inv.id}
+                  onInput={(e) =>
+                    setInvs((v) =>
+                      v.map((x, j) => (j === i() ? { ...x, id: e.currentTarget.value } : x)),
+                    )
+                  }
+                />
+                <input
+                  class={S.input}
+                  value={inv.expression}
+                  onInput={(e) =>
+                    setInvs((v) =>
+                      v.map((x, j) => (j === i() ? { ...x, expression: e.currentTarget.value } : x)),
+                    )
+                  }
+                />
+                <Spacer />
+                <Chip onClick={() => setInvs((v) => v.filter((_, j) => j !== i()))}>−</Chip>
+              </Row>
+            )}
+          </For>
+          <Cluster>
+            <Chip onClick={() => setInvs((v) => [...v, { id: "", expression: "" }])}>
+              + invariant
+            </Chip>
+          </Cluster>
+
+          <Note gap="lg">
+            <Field label="T · operators (comma separated)">
+              <input class={S.input} value={ops()} onInput={(e) => setOps(e.currentTarget.value)} />
+            </Field>
+          </Note>
+          <Note>
+            <Field label="opening state (json)">
+              <input
+                class={S.input}
+                value={opening()}
+                onInput={(e) => setOpening(e.currentTarget.value)}
+              />
+            </Field>
+          </Note>
+
+          <Note gap="lg">
+            <Button onClick={author} disabled={busy()}>
+              {busy() ? "checking…" : "author · the engine decides"}
+            </Button>
+          </Note>
+
+          <Show when={failure()}>
+            {(f) => (
+              <Note>
+                <ErrorState>{f()}</ErrorState>
+              </Note>
+            )}
+          </Show>
+        </Card>
+      </Column>
+
+      <Column>
+        <Card title="the engine's verdict">
+          <Show when={verdict()} fallback={<Empty>nothing authored yet</Empty>}>
+            {(v) => (
+              <Show
+                when={v().kind !== "accepted"}
+                fallback={
+                  <Verdict
+                    verdict="admitted"
+                    operator="definitions::check"
+                    reason="typecheck bound every invariant against the schema and no live instance would be stranded. Persisted."
+                    mutations={0}
+                    events={0}
+                    consequence="written to the definition store"
+                  />
+                }
+              >
+                <>
+                  <Verdict
+                    verdict="refused"
+                    operator="definitions::check"
+                    rule={v().kind === "notWellTyped" ? "typecheck" : "editing::safe"}
+                    reason={
+                      v().kind === "notWellTyped"
+                        ? "The engine refused it. Nothing was written."
+                        : "Live Sustains would be pushed outside their own viable region. Nothing was written."
+                    }
+                    mutations={0}
+                    events={0}
+                    consequence="nothing persisted"
+                  />
+                  <For
+                    each={
+                      v().kind === "notWellTyped"
+                        ? (v() as { errors: string[] }).errors
+                        : (v() as { instances: string[] }).instances
+                    }
+                  >
+                    {(line) => <div class={S.reasonCode}>{line}</div>}
+                  </For>
+                </>
+              </Show>
+            )}
+          </Show>
+
+          <Note>
+            <Caption>
               A definition that fails either check is <strong>never persisted</strong>, so loading
               one can never surface a rule that was broken when it was authored.
-            </div>
-          </div>
-        </section>
+            </Caption>
+          </Note>
+        </Card>
 
-        <section class={s.card}>
-          <header class={s.cardHead}>
-            <span class={s.cardTitle}>authored definitions</span>
-            <span class={s.spacer} />
-            <span class={s.sustainMeta}>{defs()?.length ?? 0}</span>
-          </header>
-          <div class={s.cardBody}>
-            <Show
-              when={(defs() ?? []).length > 0}
-              fallback={<div class={s.empty}>none yet · the store holds only built-ins</div>}
-            >
-              <For each={defs()}>
-                {(d) => (
-                  <div class={s.paramRow}>
-                    <span>
-                      <span class={s.value}>{d.label}</span>
-                      <br />
-                      <span class={s.attentionWhy}>
-                        {d.id} · {d.dimensions.length} dim · {d.invariants.length} rule
-                        {d.invariants.length === 1 ? "" : "s"}
-                      </span>
-                    </span>
-                    <span />
-                    <button class={s.chip} disabled={busy()} onClick={() => void instantiate(d.id)}>
-                      instantiate
-                    </button>
-                  </div>
-                )}
-              </For>
-            </Show>
-            <div class={s.attentionWhy} style={{ "margin-top": vars.space.md }}>
+        <Card title="authored definitions" right={<Meta>{defs()?.length ?? 0}</Meta>}>
+          <Show
+            when={(defs() ?? []).length > 0}
+            fallback={<Empty>none yet · the store holds only built-ins</Empty>}
+          >
+            <For each={defs()}>
+              {(d) => (
+                <Row>
+                  <Fill>
+                    <Value>{d.label}</Value>
+                    <Caption>
+                      {d.id} · {d.dimensions.length} dim · {d.invariants.length} rule
+                      {d.invariants.length === 1 ? "" : "s"}
+                    </Caption>
+                  </Fill>
+                  <Spacer />
+                  <Chip disabled={busy()} onClick={() => void instantiate(d.id)}>
+                    instantiate
+                  </Chip>
+                </Row>
+              )}
+            </For>
+          </Show>
+          <Note>
+            <Caption>
               An authored definition is instantiated, gated and logged through{" "}
               <strong>exactly</strong> the path a built-in template uses. Nothing about being
               user-written makes it a second-class Sustain.
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
+            </Caption>
+          </Note>
+        </Card>
+      </Column>
+    </Split>
   );
 }
