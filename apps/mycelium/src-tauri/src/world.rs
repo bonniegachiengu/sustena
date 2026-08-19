@@ -30,6 +30,7 @@ use sustena_core::{
     holon::transfer as holon_transfer,
     holon::{Leg, Link, Linked, Moving, Party, Transfer},
     operator::OperatorResult,
+    ParseRule,
 };
 
 use sustena_core::principal::{
@@ -41,6 +42,7 @@ use crate::definitions::{check as check_definition, AuthoredDefinition, Definiti
 use crate::dto::{EventDto, RollupDto};
 use crate::economy::Economy;
 use crate::identity::{IdentityError, IdentityStore, Unlocked};
+use crate::ingest::{Capture, Ingested};
 use crate::store::{LoggedEvent, Registry as Records, Store, StoreError, StoreResult, SustainRecord};
 use crate::templates::{self, TemplateId};
 
@@ -90,6 +92,10 @@ pub struct World {
     identity: Mutex<Option<Unlocked>>,
     /// Where the keypair lives on disk.
     identities: IdentityStore,
+    /// The capture queue. ★ Its own store, beside the logs — a message is not
+    /// state, it is a thing that MIGHT become state once a person or a rule
+    /// says what it means.
+    ingest: Ingested,
 }
 
 pub struct Inner {
@@ -147,7 +153,8 @@ impl World {
             meter: Mutex::new(Meter::new()),
             definitions: Mutex::new(definitions),
             identity: Mutex::new(None),
-            identities: IdentityStore::at(store_root),
+            identities: IdentityStore::at(&store_root),
+            ingest: Ingested::at(&store_root)?,
         })
     }
 
@@ -585,6 +592,75 @@ impl World {
         MonitorEngine::flatten_holarchy(watches)
             .map(|e| e.sustains().len())
             .map_err(|e| format!("{e:?}"))
+    }
+
+    // ── ingest ──────────────────────────────────────────────
+
+    pub fn ingest(&self) -> &Ingested {
+        &self.ingest
+    }
+
+    /// **Capture one message**, and apply it if `τ` mapped it unambiguously.
+    ///
+    /// ★★★ A mapped operator goes through `World::call` — the SAME path the
+    /// Console uses. It is authorised as the unlocked principal, priced, gated,
+    /// logged and pushed. There is no ingest-specific write path, so a captured
+    /// message cannot reach state by a route a person could not have taken.
+    ///
+    /// ★★ A rejection never reaches the store. See [`Ingested::capture`].
+    pub fn capture(
+        &self,
+        sustain_id: &str,
+        source_id: &str,
+        raw: &str,
+    ) -> StoreResult<Capture> {
+        let rules = self.ingest.effective_rules()?;
+        let captured = self.ingest.capture(sustain_id, source_id, raw, &rules)?;
+
+        // Only a freshly-stored, unambiguously-mapped message applies. A
+        // duplicate has already had its chance; anything else is a person's.
+        let Capture::Stored(m) = &captured else { return Ok(captured) };
+        let (Some(operator), true) = (m.operator.clone(), m.status == "mapped") else {
+            return Ok(captured);
+        };
+
+        let params: Map<String, Value> = m.params.clone().into_iter().collect();
+        match self.call(sustain_id, &operator, &params)? {
+            Some((x, _)) => {
+                let reason = x.result.reason.clone();
+                self.ingest.record_outcome(&m.id, x.committed(), reason)?;
+            }
+            None => {
+                self.ingest.record_outcome(
+                    &m.id,
+                    false,
+                    Some(format!("no Sustain called '{sustain_id}'")),
+                )?;
+            }
+        }
+        // Re-read, so the caller sees what the gate decided.
+        let updated = self
+            .ingest
+            .current()?
+            .into_iter()
+            .find(|x| x.id == m.id)
+            .map(Box::new)
+            .unwrap_or_else(|| m.clone());
+        Ok(Capture::Stored(updated))
+    }
+
+    /// The rules in force for a source: the shipped set plus this household's
+    /// own corrections. ★ A correction is tried FIRST — a person's answer wins
+    /// over the shape it corrects.
+    pub fn rules_for(&self, source: &str) -> StoreResult<Vec<ParseRule>> {
+        let mut out: Vec<ParseRule> = self
+            .ingest
+            .effective_rules()?
+            .into_iter()
+            .filter(|r| r.source.eq_ignore_ascii_case(source))
+            .collect();
+        out.extend(sustena_core::seed_rules(source).iter().cloned());
+        Ok(out)
     }
 
     // ── identity ─────────────────────────────────────────

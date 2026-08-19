@@ -281,11 +281,6 @@ a cycle, and the UI shows what it said.
 
 **Not built — named rather than stubbed:**
 
-- ★★ **ingest / the transducer.** No parser turns an SMS or a bank alert into a
-  proposed call. Not written here on purpose: the Python transducer's own
-  history is speculative patterns that matched no real message until real
-  samples arrived, and a wrong parse of a financial message is a wrong ledger
-  entry.
 - ★★ **peer transport.** The distributed primitives are real and tested in the
   core (CRDTs with convergence laws, vector clocks, Paxos-style consensus, the
   router). There is no socket, no discovery and no gossip — so this is a single
@@ -417,6 +412,80 @@ commit moves its household's total, and folding that into `Committed` would mean
 a message about Bonnie's habitat carrying the homestead's numbers under a field
 name that did not say so. A refusal emits none of the three's state: ρ is a
 function of state, and a refused call changed none.
+
+## Ingest — `τ`, and the one thing that must never be stored
+
+A message arrives from a phone. `sustena_core::parse_message` decides what it
+means, deterministically — an ordered set of **declared `ParseRule` data**, no
+LLM, no `eval`, no callable anywhere in a rule.
+
+| tier | means | what happens |
+|---|---|---|
+| `rejected` | it carries a **secret** | **nothing is stored** |
+| `mapped` | understood and routed | the operator applies |
+| `parsed_unmapped` | understood; operator not guessed | a person decides |
+| `informational` | recognised, nothing moved | recorded |
+| `unparsed` | no rule knew the shape | queued, visible |
+
+★★★ **The secret gate is first, fixed, and not a rule.** It runs before any
+rule sees the text and **before the host opens a file** — no row, no payload,
+not even a dedup hash, because a hash of an OTP is still a record that the OTP
+existed. `Transduction::Rejected` has no payload field and `RuleStatus` has no
+`Rejected` variant, so no rule can be authored, corrected or learned to weaken
+it, and no caller can store one by forgetting to branch. The only trace a
+rejection leaves is a **count**, and the screen says so rather than showing the
+thing it refused.
+
+★★ **Source-strict.** A message tagged `kcb` is parsed only by KCB's rules.
+Several real KCB messages say *M-PESA* in their own wording, and the body must
+never promote a message out of the set its **sender** established.
+
+★★ **Money-safety asymmetry.** Every shipped mapped rule routes to
+`budget.record_income`; every shape carrying `direction: sent` has no operator
+at all. Which pocket a payment belongs to is a person's decision, and a
+heuristic for it would be inventing a spending decision on their behalf. A
+**learned** rule inherits the same asymmetry.
+
+★ **A mapped message applies through `World::call`** — the same path the Console
+uses, as the unlocked principal, gated, priced, logged and pushed. There is no
+ingest-specific write path.
+
+### Effect-first capture
+
+```
+"spent 500 on WiFi"  →  budget.spend(pocket_name=WiFi, amount=500)
+```
+
+The person speaks in effects; the engine supplies the coordinates. A pocket is
+recovered by matching what was said against **that Sustain's own live pocket
+names**, and `θ` is built from the operator's own declared parameters — nobody
+types a dot-path. Amount recovery falls back to a currency-prefixed figure in
+the raw body, which is what stops an *unparsed* capture dead-ending; if nothing
+is recoverable it asks, with `options: null`, meaning render an input rather
+than buttons.
+
+### Correction-learning
+
+A confirmed correction becomes a candidate rule by **template synthesis**: the
+amount is parameterised, a leading reference is parameterised, and everything
+else stays a literal anchor. Conservative on purpose — the cost of being too
+narrow is one more correction; the cost of being too broad is silent and
+financial. It is verified before anyone sees it: well-typed, matches its own
+inducing example, and does not capture a message an existing rule already
+handles.
+
+Prove it without the GUI:
+
+```bash
+cargo run --manifest-path src-tauri/Cargo.toml --bin smoke
+```
+
+The ingest section captures a real M-Pesa message and watches the balance move
+through the gate, replays it and watches nothing move, **refuses an OTP and
+asserts the queue row count is unchanged and the code appears in no file under
+the store**, shows the same text tagged with the wrong sender falling to
+`unparsed`, resolves a narrated effect, and teaches a rule from a correction
+that then matches the same shape with a different amount.
 
 ## The design system — `src/ui`
 

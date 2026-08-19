@@ -17,6 +17,7 @@ use mycelium_lib::dto::{Committed, ConstraintReading, GateResult, Refused, Susta
 use mycelium_lib::definitions::{AuthoredDefinition, DimDecl, InvariantDecl};
 use mycelium_lib::world::DEFAULT_HANDLE;
 use mycelium_lib::store::{LoggedEvent, Store};
+use mycelium_lib::ingest::Capture;
 use mycelium_lib::templates::TemplateId;
 use mycelium_lib::world::World;
 use sustena_core::{
@@ -607,6 +608,10 @@ fn main() {
         // Recovery is idempotent: opening again changes nothing.
         drop(healed);
         let again = World::open(Store::at(&dir).expect("store")).expect("reopen");
+        // ★ Every reopened world starts locked, and ingest is no exception: a
+        //   captured message applies through the same gated path a person's own
+        //   call takes, so it needs the same authenticated principal.
+        again.unlock(PASSPHRASE).expect("unlock");
         println!(
             "   reopening again           ->  {src} {:>10.2}   {dst} {:>10.2}   (unchanged)",
             bal(&again, src),
@@ -622,6 +627,144 @@ fn main() {
             println!("   fold check {id:<18} {}", if cached == folded { "match" } else { "DIVERGED" });
             assert_eq!(cached, folded, "state must still be fold(log) after a recovered transfer");
         }
+
+        // -- INGEST ----------------------------------------------------------
+        rule("INGEST - a real message, through the real gate");
+        let target = "homestead";
+        let income = sustena_core::seed_rules("mpesa")
+            .iter()
+            .find(|r| r.id == "mpesa_received")
+            .and_then(|r| r.examples.first().cloned())
+            .expect("the shipped rule carries its own real example");
+        let before_liquid = again
+            .with(|i| i.get(target).map(|s| s.state.clone()))
+            .and_then(|st| st.pointer("/finances/liquid/balance").and_then(Value::as_f64))
+            .unwrap_or(f64::NAN);
+
+        match again.capture(target, "mpesa", &income).expect("capture") {
+            Capture::Stored(m) => {
+                println!("   tier           {}   via {}", m.status, m.parser_name);
+                println!("   amount         {:?}", m.params.get("amount"));
+                println!("   applied        {}", m.applied);
+                assert_eq!(m.status, "mapped");
+                assert!(m.applied, "a mapped income must apply through the gate");
+            }
+            other => panic!("expected stored, got {other:?}"),
+        }
+        let after_liquid = again
+            .with(|i| i.get(target).map(|s| s.state.clone()))
+            .and_then(|st| st.pointer("/finances/liquid/balance").and_then(Value::as_f64))
+            .unwrap_or(f64::NAN);
+        println!("   liquid         {before_liquid:.2} -> {after_liquid:.2}   (through World::call, gated and logged)");
+        assert!(after_liquid > before_liquid, "the operator really ran");
+
+        // A replay applies nothing twice.
+        match again.capture(target, "mpesa", &income).expect("capture") {
+            Capture::Duplicate(_) => println!("   replay         duplicate, nothing applied twice"),
+            other => panic!("expected duplicate, got {other:?}"),
+        }
+        let after_replay = again
+            .with(|i| i.get(target).map(|s| s.state.clone()))
+            .and_then(|st| st.pointer("/finances/liquid/balance").and_then(Value::as_f64))
+            .unwrap_or(f64::NAN);
+        assert_eq!(after_replay, after_liquid, "a replay must move nothing");
+
+        // -- THE ONE THAT MUST NOT REGRESS -----------------------------------
+        rule("INGEST - an OTP is refused, and NOTHING is stored");
+        let rows_before = again.ingest().current().expect("queue").len();
+        let otp = "Your OTP is 483920. Do not share it with anyone.";
+        match again.capture(target, "mpesa", otp).expect("capture") {
+            Capture::Rejected { reason } => println!("   REJECTED       {reason}"),
+            other => panic!("an OTP must be rejected, got {other:?}"),
+        }
+        let rows_after = again.ingest().current().expect("queue").len();
+        println!("   queue rows     {rows_before} -> {rows_after}   (unchanged)");
+        assert_eq!(rows_after, rows_before, "a rejection must leave no row");
+
+        // And the code appears NOWHERE under the store root.
+        let mut leaked = Vec::new();
+        for entry in std::fs::read_dir(dir.join("ingest")).expect("ingest dir") {
+            let path = entry.expect("entry").path();
+            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            if content.contains("483920") || content.contains("OTP") {
+                leaked.push(path.display().to_string());
+            }
+        }
+        println!("   files holding the code or the word OTP: {leaked:?}");
+        assert!(leaked.is_empty(), "the secret leaked into {leaked:?}");
+        println!("   the only trace is a count: {}", again.ingest().rejected_count());
+
+        // -- source-strict ---------------------------------------------------
+        rule("INGEST - the sender decides the rules, never the body");
+        match again.capture(target, "kcb", &income).expect("capture") {
+            Capture::Stored(m) => {
+                println!("   the same M-Pesa text, tagged kcb -> {}", m.status);
+                assert_eq!(m.status, "unparsed", "a body must not cross senders");
+                assert!(m.needs_attention(), "and it queues for a person");
+            }
+            other => panic!("expected stored, got {other:?}"),
+        }
+
+        // -- effect-first capture --------------------------------------------
+        rule("INGEST - effect-first capture recovers what a person did not type");
+        let pockets: Vec<String> = again
+            .with(|i| i.get(target).map(|s| s.state.clone()))
+            .and_then(|st| {
+                st.pointer("/finances/pockets")
+                    .and_then(|p| p.as_object().map(|o| o.keys().cloned().collect()))
+            })
+            .unwrap_or_default();
+        let candidates: Vec<String> =
+            vec!["budget.spend".to_string(), "budget.allocate".to_string()];
+        let narration = format!("spent 500 on {}", pockets.first().cloned().unwrap_or_default());
+        let capture = sustena_core::Capture {
+            candidates: &candidates,
+            pockets: &pockets,
+            effect_text: Some(&narration),
+            ..Default::default()
+        };
+        match sustena_core::infer(&again.operators, &capture) {
+            sustena_core::Inference::Ready { operator, params, why, .. } => {
+                println!("   \"{narration}\"");
+                println!("   -> {operator}  {params:?}");
+                println!("   why: {why}");
+            }
+            other => println!("   -> {other:?}"),
+        }
+
+        // -- correction-learning ---------------------------------------------
+        rule("INGEST - a correction becomes a rule that then matches");
+        let unseen = "ZZ99XYZ123 Confirmed. Ksh2,500.00 has been moved to your wallet by CHAMA on 1/8/26.";
+        let Capture::Stored(m) = again.capture(target, "kcb", unseen).expect("capture") else {
+            panic!("expected stored")
+        };
+        println!("   before learning  {} via {:?}", m.status, m.parser_name);
+        assert_eq!(m.status, "unparsed");
+
+        let mut params: std::collections::BTreeMap<String, Value> = Default::default();
+        params.insert("amount".into(), json!(2500.0));
+        params.insert("source".into(), json!("Chama"));
+        let candidate = sustena_core::synthesize_from_correction(
+            "kcb", unseen, "budget.record_income", &params, "learned_smoke",
+        )
+        .expect("synthesised");
+        let existing = again.rules_for("kcb").expect("rules");
+        sustena_core::verify_candidate(&candidate, unseen, &existing, &again.operators)
+            .expect("verified");
+        again.ingest().add_rule(&candidate).expect("stored");
+        println!("   learned          {} (status {:?}, trust {:?})",
+            candidate.id, candidate.status, candidate.trust);
+
+        // The SAME shape next month, with a different amount and reference.
+        let next = unseen.replace("2,500.00", "4,100.00").replace("ZZ99XYZ123", "AB12CD34EF");
+        let Capture::Stored(m2) = again.capture(target, "kcb", &next).expect("capture") else {
+            panic!("expected stored")
+        };
+        println!("   after learning   {} via {}  amount {:?}",
+            m2.status, m2.parser_name, m2.params.get("amount"));
+        assert_eq!(m2.status, "mapped", "the learned rule now recognises the shape");
+        assert_eq!(m2.parser_name, "learned_smoke");
+        assert!(m2.applied, "and it applied through the gate");
     }
 }
 

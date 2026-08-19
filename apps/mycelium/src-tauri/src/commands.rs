@@ -14,11 +14,14 @@ use crate::dto::{
     AccessDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
-    IdentityDto, TransferLegDto, TransferResult, Verdict, WorldDto,
+    CaptureResult, IdentityDto, IngestDto, MessageDto, RuleDto, SourceDto,
+    TransferLegDto, TransferResult, Verdict, WorldDto,
 };
 use crate::definitions::{AuthoredDefinition, DefinitionVerdict};
 use crate::templates::TemplateId;
 use sustena_core::holon::Transfer as HolonTransfer;
+use crate::ingest::Capture;
+use std::collections::BTreeMap;
 use crate::world::{World, DEFAULT_HANDLE};
 
 /// `V`, evaluated against current state by the engine.
@@ -778,4 +781,174 @@ pub fn lock_identity(world: State<'_, World>) -> IdentityDto {
     trace!("lock_identity");
     world.lock();
     get_identity(world)
+}
+
+// ── ingest ──────────────────────────────────────────────────
+
+/// The capture queue, the declared sources, and the rules in force.
+#[tauri::command]
+#[specta::specta]
+pub fn get_ingest(world: State<'_, World>, sustain_id: String) -> Result<IngestDto, String> {
+    let ing = world.ingest();
+    let messages: Vec<MessageDto> = ing
+        .current()
+        .map_err(|e| e.to_string())?
+        .iter()
+        .filter(|m| m.sustain_id == sustain_id)
+        .map(MessageDto::of)
+        .collect();
+
+    let sources: Vec<SourceDto> = ing
+        .sources()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|s| SourceDto {
+            id: s.id,
+            label: s.label,
+            captures: s.captures as u32,
+            expected_interval_minutes: s.expected_interval_minutes,
+            ever_seen: s.last_seen_seq.is_some(),
+        })
+        .collect();
+
+    // ★ The shipped rules AND this household's corrections, in one library
+    //   view — a person should be able to see what the engine knows, not only
+    //   what they taught it.
+    let mut rules: Vec<RuleDto> = Vec::new();
+    for r in sustena_core::all_seed_rules().iter().chain(
+        ing.effective_rules().map_err(|e| e.to_string())?.iter(),
+    ) {
+        rules.push(RuleDto {
+            id: r.id.clone(),
+            source: r.source.clone(),
+            version: r.version,
+            status: match r.status {
+                sustena_core::RuleStatus::Mapped => "mapped",
+                sustena_core::RuleStatus::ParsedUnmapped => "parsed_unmapped",
+                sustena_core::RuleStatus::Informational => "informational",
+            }
+            .to_string(),
+            operator: r.operator.clone(),
+            trust: match r.trust {
+                sustena_core::ParseRuleTrust::Shipped => "shipped",
+                sustena_core::ParseRuleTrust::UserCorrected => "user_corrected",
+                sustena_core::ParseRuleTrust::ProposedConfirmed => "proposed_confirmed",
+            }
+            .to_string(),
+            examples: r.examples.len() as u32,
+        });
+    }
+
+    let needs_attention = messages.iter().filter(|m| m.needs_attention).count() as u32;
+    Ok(IngestDto {
+        messages,
+        sources,
+        rules,
+        rejected: ing.rejected_count() as u32,
+        needs_attention,
+    })
+}
+
+/// **Capture one message.**
+///
+/// ★★★ A message carrying a secret is refused **before anything is written**
+/// — the result has no message field at all, because there is nothing to show.
+/// A mapped message applies through the same gated path the Console uses, as
+/// the unlocked principal.
+#[tauri::command]
+#[specta::specta]
+pub fn capture_message(
+    world: State<'_, World>,
+    sustain_id: String,
+    source_id: String,
+    raw: String,
+) -> Result<CaptureResult, String> {
+    trace!("capture  {sustain_id} / {source_id}  ({} bytes)", raw.len());
+    // ★ The text is NEVER traced. A log line is a store too.
+    let captured = world.capture(&sustain_id, &source_id, &raw).map_err(|e| e.to_string())?;
+    Ok(match captured {
+        Capture::Rejected { reason } => {
+            trace!("  -> REJECTED (nothing stored)");
+            CaptureResult::Rejected { reason }
+        }
+        Capture::Duplicate(m) => {
+            trace!("  -> duplicate of {}", m.id);
+            CaptureResult::Duplicate { message: MessageDto::of(&m) }
+        }
+        Capture::Stored(m) => {
+            trace!("  -> {} via {} (applied={})", m.status, m.parser_name, m.applied);
+            CaptureResult::Stored { message: MessageDto::of(&m) }
+        }
+    })
+}
+
+/// Declare a capture source, optionally with the cadence it should keep.
+#[tauri::command]
+#[specta::specta]
+pub fn declare_source(
+    world: State<'_, World>,
+    id: String,
+    label: String,
+    expected_interval_minutes: Option<u32>,
+) -> Result<(), String> {
+    world
+        .ingest()
+        .declare_source(&id, &label, expected_interval_minutes)
+        .map_err(|e| e.to_string())
+}
+
+/// Mark a queued message as handled by a person.
+#[tauri::command]
+#[specta::specta]
+pub fn resolve_message(world: State<'_, World>, id: String) -> Result<bool, String> {
+    world.ingest().resolve(&id).map_err(|e| e.to_string())
+}
+
+/// **Remember this format** — synthesise a rule from a confirmed correction.
+///
+/// ★★ Verified before it is ever added: it must be well-typed, must match the
+/// message that taught it, and must not capture a message an existing rule
+/// already handles. ★★★ A learned SPEND rule carries no operator, so a
+/// correction can never teach the system to spend on someone's behalf.
+#[tauri::command]
+#[specta::specta]
+pub fn learn_rule(
+    world: State<'_, World>,
+    message_id: String,
+    operator: String,
+    params: Value,
+) -> Result<String, String> {
+    let Some(m) = world
+        .ingest()
+        .current()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|m| m.id == message_id)
+    else {
+        return Err("no such captured message".into());
+    };
+
+    let params: BTreeMap<String, Value> = match params {
+        Value::Object(o) => o.into_iter().collect(),
+        _ => BTreeMap::new(),
+    };
+    let id = format!("learned_{}_{}", m.source_id, &m.dedup_key[..12]);
+    let Some(candidate) = sustena_core::synthesize_from_correction(
+        &m.source_id,
+        &m.raw_payload,
+        &operator,
+        &params,
+        &id,
+    ) else {
+        return Err(
+            "nothing to learn from: the confirmed amount does not appear in the message text"
+                .into(),
+        );
+    };
+
+    let existing = world.rules_for(&m.source_id).map_err(|e| e.to_string())?;
+    sustena_core::verify_candidate(&candidate, &m.raw_payload, &existing, &world.operators)
+        .map_err(|e| e.to_string())?;
+    world.ingest().add_rule(&candidate).map_err(|e| e.to_string())?;
+    Ok(candidate.id)
 }

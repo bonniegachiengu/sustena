@@ -797,3 +797,114 @@ pub struct IdentityDto {
     pub kdf: Option<String>,
     pub iterations: Option<u32>,
 }
+
+// ── ingest ──────────────────────────────────────────────────
+
+/// One captured message.
+///
+/// ★★★ A REJECTED message never appears here, because it never reached the
+/// store. The queue counts them and holds none of them.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageDto {
+    pub id: String,
+    pub source_id: String,
+    /// `mapped` | `parsed_unmapped` | `informational` | `unparsed`.
+    pub status: String,
+    /// Which declared rule handled it — empty when none did.
+    pub parser_name: String,
+    /// The engine's own words about why this is what it is.
+    pub reason: String,
+    /// The raw text. Retained deliberately: a person correcting a
+    /// classification needs to see what actually arrived.
+    pub raw_payload: String,
+    pub amount: Option<f64>,
+    pub counterparty: Option<String>,
+    pub direction: Option<String>,
+    pub external_ref: Option<String>,
+    pub operator: Option<String>,
+    pub applied: bool,
+    /// What the gate said, when a mapped message was refused.
+    pub gate_reason: Option<String>,
+    pub resolved: bool,
+    pub needs_attention: bool,
+}
+
+/// A declared capture source.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceDto {
+    pub id: String,
+    pub label: String,
+    pub captures: u32,
+    /// ★ `null` when this source declared no cadence — and then `stale` is
+    /// `false`, never a guess.
+    pub expected_interval_minutes: Option<u32>,
+    pub ever_seen: bool,
+}
+
+/// One declared parse rule, for the library view.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleDto {
+    pub id: String,
+    pub source: String,
+    pub version: u32,
+    /// `mapped` | `parsed_unmapped` | `informational`.
+    pub status: String,
+    pub operator: Option<String>,
+    /// `shipped` | `user_corrected` | `proposed_confirmed`.
+    pub trust: String,
+    pub examples: u32,
+}
+
+/// The whole ingest picture for one Sustain.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IngestDto {
+    pub messages: Vec<MessageDto>,
+    pub sources: Vec<SourceDto>,
+    pub rules: Vec<RuleDto>,
+    /// ★★★ How many messages were refused for carrying a secret. A COUNT,
+    /// and nothing else — the messages themselves were never written.
+    pub rejected: u32,
+    pub needs_attention: u32,
+}
+
+/// What one capture did, on the wire.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum CaptureResult {
+    /// ★★★ No message field at all: there is nothing to render, because
+    /// there was nothing to store.
+    #[serde(rename_all = "camelCase")]
+    Rejected { reason: String },
+    #[serde(rename_all = "camelCase")]
+    Duplicate { message: MessageDto },
+    #[serde(rename_all = "camelCase")]
+    Stored { message: MessageDto },
+}
+
+impl MessageDto {
+    pub fn of(m: &crate::ingest::IngestedMessage) -> Self {
+        let field = |k: &str| m.parsed_fields.get(k).cloned();
+        MessageDto {
+            id: m.id.clone(),
+            source_id: m.source_id.clone(),
+            status: m.status.clone(),
+            parser_name: m.parser_name.clone(),
+            reason: m.reason.clone(),
+            raw_payload: m.raw_payload.clone(),
+            amount: field("amount").and_then(|v| v.as_f64()),
+            counterparty: field("counterparty")
+                .and_then(|v| v.as_str().map(str::to_string)),
+            direction: field("direction").and_then(|v| v.as_str().map(str::to_string)),
+            external_ref: m.external_ref.clone(),
+            operator: m.operator.clone(),
+            applied: m.applied,
+            gate_reason: m.gate_reason.clone(),
+            resolved: m.resolved,
+            needs_attention: m.needs_attention(),
+        }
+    }
+}

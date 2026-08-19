@@ -234,6 +234,71 @@ async lockIdentity() : Promise<IdentityDto> {
     return await TAURI_INVOKE("lock_identity");
 },
 /**
+ * The capture queue, the declared sources, and the rules in force.
+ */
+async getIngest(sustainId: string) : Promise<Result<IngestDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_ingest", { sustainId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **Capture one message.**
+ * 
+ * ★★★ A message carrying a secret is refused **before anything is written**
+ * — the result has no message field at all, because there is nothing to show.
+ * A mapped message applies through the same gated path the Console uses, as
+ * the unlocked principal.
+ */
+async captureMessage(sustainId: string, sourceId: string, raw: string) : Promise<Result<CaptureResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("capture_message", { sustainId, sourceId, raw }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Declare a capture source, optionally with the cadence it should keep.
+ */
+async declareSource(id: string, label: string, expectedIntervalMinutes: number | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("declare_source", { id, label, expectedIntervalMinutes }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Mark a queued message as handled by a person.
+ */
+async resolveMessage(id: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resolve_message", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **Remember this format** — synthesise a rule from a confirmed correction.
+ * 
+ * ★★ Verified before it is ever added: it must be well-typed, must match the
+ * message that taught it, and must not capture a message an existing rule
+ * already handles. ★★★ A learned SPEND rule carries no operator, so a
+ * correction can never teach the system to spend on someone's behalf.
+ */
+async learnRule(messageId: string, operator: string, params: JsonValue) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("learn_rule", { messageId, operator, params }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * ★★★ Resolve a proposal with the engine's own `council::resolve`.
  * 
  * Real: the rule that a person's vote overrides the council, that an abstaining
@@ -329,6 +394,15 @@ export type BranchStep = { operator: string; verdict: Verdict; reason: string | 
  * The hypothetical state after this step.
  */
 state: JsonValue }
+/**
+ * What one capture did, on the wire.
+ */
+export type CaptureResult = 
+/**
+ * ★★★ No message field at all: there is nothing to render, because
+ * there was nothing to store.
+ */
+{ kind: "rejected"; reason: string } | { kind: "duplicate"; message: MessageDto } | { kind: "stored"; message: MessageDto }
 export type ChildStatusDto = { sustainId: string; label: string; readable: boolean }
 /**
  * ★★★ **A committed change, pushed.** One message per real change.
@@ -532,6 +606,15 @@ publicKey: string | null;
  */
 kdf: string | null; iterations: number | null }
 /**
+ * The whole ingest picture for one Sustain.
+ */
+export type IngestDto = { messages: MessageDto[]; sources: SourceDto[]; rules: RuleDto[]; 
+/**
+ * ★★★ How many messages were refused for carrying a secret. A COUNT,
+ * and nothing else — the messages themselves were never written.
+ */
+rejected: number; needsAttention: number }
+/**
  * One rule a person declared.
  */
 export type InvariantDecl = { id: string; expression: string }
@@ -582,6 +665,34 @@ mutations: number }
  * showing a zero. A `0` from an unmeasured basis is silence, not cheapness.
  */
 export type MeasuredPawa = { runs: number; meanPawa: number; totalPawa: number; totalCompute: number; totalStorage: number }
+/**
+ * One captured message.
+ * 
+ * ★★★ A REJECTED message never appears here, because it never reached the
+ * store. The queue counts them and holds none of them.
+ */
+export type MessageDto = { id: string; sourceId: string; 
+/**
+ * `mapped` | `parsed_unmapped` | `informational` | `unparsed`.
+ */
+status: string; 
+/**
+ * Which declared rule handled it — empty when none did.
+ */
+parserName: string; 
+/**
+ * The engine's own words about why this is what it is.
+ */
+reason: string; 
+/**
+ * The raw text. Retained deliberately: a person correcting a
+ * classification needs to see what actually arrived.
+ */
+rawPayload: string; amount: number | null; counterparty: string | null; direction: string | null; externalRef: string | null; operator: string | null; applied: boolean; 
+/**
+ * What the gate said, when a mapped message was refused.
+ */
+gateReason: string | null; resolved: boolean; needsAttention: boolean }
 /**
  * Whether the principal may run one operator, as the engine judges it.
  */
@@ -687,6 +798,27 @@ export type RollupDto = { sustainId: string; aggregates: AggregateDto[];
  * Linked children, and whether each was readable at all.
  */
 children: ChildStatusDto[] }
+/**
+ * One declared parse rule, for the library view.
+ */
+export type RuleDto = { id: string; source: string; version: number; 
+/**
+ * `mapped` | `parsed_unmapped` | `informational`.
+ */
+status: string; operator: string | null; 
+/**
+ * `shipped` | `user_corrected` | `proposed_confirmed`.
+ */
+trust: string; examples: number }
+/**
+ * A declared capture source.
+ */
+export type SourceDto = { id: string; label: string; captures: number; 
+/**
+ * ★ `null` when this source declared no cadence — and then `stale` is
+ * `false`, never a guess.
+ */
+expectedIntervalMinutes: number | null; everSeen: boolean }
 /**
  * `Σ = ⟨B, S, V, T, ⊕⟩`, as much of it as a cockpit needs to draw.
  * 

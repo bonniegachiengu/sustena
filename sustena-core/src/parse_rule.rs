@@ -236,6 +236,27 @@ impl OperatorUniverse for NoOperators {
     }
 }
 
+/// ★★ The registry IS an operator universe. Declared here rather than left to
+/// each host, so a typecheck asks the same thing the gate will.
+impl OperatorUniverse for crate::operator::Registry {
+    fn has(&self, operator: &str) -> bool {
+        self.get(operator).is_some()
+    }
+    fn params_of(&self, operator: &str) -> Option<Vec<String>> {
+        Some(self.get(operator)?.params.iter().map(|p| p.name.to_string()).collect())
+    }
+}
+
+/// ★ And an operator's declared params are its capture universe too — the same
+/// one source of truth, read for a different question.
+impl crate::effect_capture::OperatorParams for crate::operator::Registry {
+    fn params(&self, operator: &str) -> Vec<(String, bool)> {
+        self.get(operator)
+            .map(|m| m.params.iter().map(|p| (p.name.to_string(), p.required)).collect())
+            .unwrap_or_default()
+    }
+}
+
 /// `Γ ⊢ r`. Every error, not the first — a rule with three problems should be
 /// fixed once.
 pub fn typecheck_rule<U: OperatorUniverse>(rule: &ParseRule, universe: &U) -> Vec<String> {

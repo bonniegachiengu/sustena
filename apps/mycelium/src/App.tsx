@@ -33,7 +33,8 @@ import Economy from "./screens/Economy";
 import Define from "./screens/Define";
 import Profile from "./screens/Profile";
 import Lock from "./screens/Lock";
-import { Council, Ingest, Library, Network } from "./screens/Panels";
+import { Council, Library, Network } from "./screens/Panels";
+import Ingest from "./screens/Ingest";
 
 type Panel =
   | "constellation" | "monitor" | "council"

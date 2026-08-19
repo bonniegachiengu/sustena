@@ -26,6 +26,9 @@ import {
   type RollupDto,
   type TransferResult,
   type IdentityDto,
+  type IngestDto,
+  type CaptureResult,
+  type MessageDto,
   type AggregateDto,
   type SustainDto,
   type SustainSummary,
@@ -52,6 +55,9 @@ export type {
   AggregateDto,
   TransferResult,
   IdentityDto,
+  IngestDto,
+  CaptureResult,
+  MessageDto,
   SustainDto,
   SustainSummary,
   TemplateId,
@@ -86,6 +92,24 @@ export const engine = {
   enrol: async (handle: string, passphrase: string): Promise<IdentityDto> =>
     unwrap(await commands.enrolIdentity(handle, passphrase)),
   lockIdentity: (): Promise<IdentityDto> => commands.lockIdentity(),
+
+  /** The capture queue, the declared sources, and the rules in force. */
+  ingest: async (sustainId: string): Promise<IngestDto> =>
+    unwrap(await commands.getIngest(sustainId)),
+  /**
+   * ★★★ Capture one message. A message carrying a secret comes back
+   * `{kind: "rejected"}` with **no message field at all** — there is nothing to
+   * render, because there was nothing to store.
+   */
+  capture: async (sustainId: string, sourceId: string, raw: string): Promise<CaptureResult> =>
+    unwrap(await commands.captureMessage(sustainId, sourceId, raw)),
+  declareSource: async (id: string, label: string, minutes: number | null): Promise<null> =>
+    unwrap(await commands.declareSource(id, label, minutes)),
+  resolveMessage: async (id: string): Promise<boolean> =>
+    unwrap(await commands.resolveMessage(id)),
+  /** "remember this format" — synthesise a rule from a confirmed correction. */
+  learnRule: async (messageId: string, operator: string, params: JsonValue): Promise<string> =>
+    unwrap(await commands.learnRule(messageId, operator, params)),
   sustain: (id: string | null = null): Promise<SustainDto | null> => commands.getSustain(id),
   select: async (id: string): Promise<boolean> => unwrap(await commands.selectSustain(id)),
   create: async (

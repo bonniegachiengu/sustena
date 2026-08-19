@@ -31,33 +31,6 @@ import {
 } from "../ui";
 import { engine, type CouncilOutcomeDto } from "../lib/engine";
 
-/* ── Ingest ─────────────────────────────────────────────────────────────── */
-
-export function Ingest() {
-  return (
-    <Unavailable
-      absence={{
-        title: "ingest · capture",
-        headline:
-          "There is no transducer in this engine. Nothing on this machine can turn an SMS, a bank alert or a narrated effect into a proposed operator call.",
-        present: [
-          "The gate, the fold and the log — anything ingest produced would land through exactly the path the Console already uses.",
-          "Clock discipline: `clocks::skew_of` distinguishes an observed ingest time from an inferred one, and reports `Unknown` rather than guessing.",
-        ],
-        missing: [
-          "The transducer — the deterministic parsers that read a real M-Pesa or KCB message into an amount, a counterparty and a direction.",
-          "Declared `ParseRule` data, the correction-learning path, and the secret/OTP rejection filter that must run before anything is stored.",
-          "Effect-first capture — inferring `(operator, θ)` from a plain-language effect.",
-        ],
-        where:
-          "All of it is in the Python engine (`transducer.py`, `parse_rule.py`, `effect_capture.py`) and none of it is ported to `sustena-core`. A grep of the core for transducer/parse-rule/capture returns nothing; the single `ingest` hit is `clocks.rs`'s `t_ingest`, an unrelated sense of the word.",
-        refusal:
-          "A host-side parser is not built here on purpose. The Python transducer's own history is a sequence of speculative patterns that matched no real message until real samples arrived — writing a fresh guess in this app would repeat exactly that mistake, and a wrong parse of a financial message is a wrong entry in a ledger.",
-      }}
-    />
-  );
-}
-
 /* ── Network ────────────────────────────────────────────────────────────── */
 
 export function Network() {
