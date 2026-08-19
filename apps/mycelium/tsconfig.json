@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "types": ["vite/client"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    // Off only because `src/bindings.ts` is GENERATED and carries helpers this
+    // skeleton does not use yet (channels, the event proxy). Every other strict
+    // flag stays on; lint will cover unused code in our own source.
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "exactOptionalPropertyTypes": false,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src"]
+}

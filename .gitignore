@@ -158,3 +158,8 @@ desktop.ini
 .obsidian/app.json
 .obsidian/appearance.json
 .obsidian/core-plugins.json
+
+# Mycelium — the new cockpit (apps/mycelium)
+apps/mycelium/node_modules/
+apps/mycelium/dist/
+apps/mycelium/src-tauri/gen/

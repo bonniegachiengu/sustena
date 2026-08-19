@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Mycelium",
+  "version": "0.1.0",
+  "identifier": "online.vyybandasky.sustena.mycelium",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1421",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Mycelium — Sustena",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 900,
+        "minHeight": 600,
+        "theme": "Dark",
+        "backgroundColor": "#0d0d0e"
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png"]
+  }
+}

@@ -1,0 +1,160 @@
+//! The wire contract — Rust types the TypeScript is **generated from**.
+//!
+//! ## ★★★ Why these live here and not in `sustena-core`
+//!
+//! The obvious move is to derive `specta::Type` directly on the engine's own
+//! `Execution` / `OperatorResult` and export those. **ADR-0001 forbids it**:
+//! the core's dependencies are fixed at `serde`, `serde_json` and `thiserror`
+//! so it compiles unchanged to WASM, Android, iOS and desktop. Adding a
+//! codegen crate to the engine to make a *desktop UI* convenient would be the
+//! host's problem leaking into the portable core.
+//!
+//! ★★ And on inspection that constraint is pointing at the right design
+//! anyway. The core has **no I/O and no opinion about a wire format** — which
+//! is exactly what a DTO is. Putting the boundary here means:
+//!
+//! - the engine's internal types stay free to change without breaking a
+//!   published wire shape, and a change that *should* break the UI does so at
+//!   **this file**, in Rust, where it is one visible conversion rather than a
+//!   silent drift;
+//! - the conversion is ordinary Rust the compiler checks end to end, so the
+//!   typed-boundary property the stack doc asks for is genuinely held — just
+//!   held one layer out;
+//! - nothing accidentally publishes an engine internal as public API by
+//!   forgetting to think about it.
+//!
+//! ★ The cost, stated: these are hand-written and could drift from the core
+//! types they mirror. That is real, and it is bounded by `From` impls — a core
+//! field that vanishes fails to compile here.
+
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use sustena_core::{
+    editing::Definition,
+    operator::{meta::OperatorStatus, EmittedEvent, Execution, OperatorResult},
+};
+
+/// What the gate decided about one call.
+///
+/// ★★ `Refused` is a **first-class variant, not an error**. A refusal is a
+/// normal, correct outcome of asking the engine to do something the household's
+/// rules forbid, and modelling it as an `Err` would push it into the UI's error
+/// path — where it would render as *something went wrong* rather than *the
+/// system did its job*.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum Verdict {
+    /// Committed. The state moved.
+    Admitted,
+    /// The gate said no. **Nothing changed.**
+    Refused,
+    /// Awaiting a Council vote — not a failure, a decision not yet made.
+    Deferred,
+}
+
+impl From<OperatorStatus> for Verdict {
+    fn from(s: OperatorStatus) -> Self {
+        match s {
+            OperatorStatus::Ok => Verdict::Admitted,
+            OperatorStatus::Failed => Verdict::Refused,
+            OperatorStatus::Deferred => Verdict::Deferred,
+        }
+    }
+}
+
+/// One event the call published.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EventDto {
+    pub name: String,
+    pub payload: serde_json::Value,
+}
+
+impl From<&EmittedEvent> for EventDto {
+    fn from(e: &EmittedEvent) -> Self {
+        EventDto { name: e.name.clone(), payload: e.payload.clone() }
+    }
+}
+
+/// The gate's own words about one call.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GateResult {
+    pub verdict: Verdict,
+    /// The operator that was asked for.
+    pub operator: String,
+    /// ★ The refusal reason, **as the engine wrote it**. Never re-phrased here:
+    /// the engine names the rule and the numbers, and a host that softened that
+    /// into "could not complete" would be hiding the only useful part.
+    pub reason: Option<String>,
+    /// Which rule refused it — a guard expression, or `enforcement_gate`.
+    pub constraint_violated: Option<String>,
+    /// Empty on a refusal, always — a refusal changes nothing.
+    pub mutations: u32,
+    pub events: Vec<EventDto>,
+    /// The resulting state, or the **untouched original** if refused.
+    pub state: serde_json::Value,
+}
+
+impl GateResult {
+    pub fn of(operator: &str, x: &Execution) -> Self {
+        let OperatorResult { status, reason, constraint_violated, .. } = &x.result;
+        GateResult {
+            verdict: Verdict::from(*status),
+            operator: operator.to_string(),
+            reason: reason.clone(),
+            constraint_violated: constraint_violated.clone(),
+            mutations: x.mutations.len() as u32,
+            events: x.events.iter().map(EventDto::from).collect(),
+            state: x.state.clone(),
+        }
+    }
+}
+
+/// A rule the household declared it must stay within.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct InvariantDto {
+    pub id: String,
+    pub expression: String,
+}
+
+/// `Σ = ⟨B, S, V, T, ⊕⟩`, as much of it as a cockpit needs to draw.
+///
+/// ★ Deliberately not the whole `Definition`: a walking skeleton should carry
+/// what it actually renders, and inventing fields the UI does not use yet would
+/// be publishing a contract nobody has tested.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SustainDto {
+    pub id: String,
+    pub label: String,
+    /// `T` — the moves this Sustain may make.
+    pub operators: Vec<String>,
+    /// `V` — the viable region.
+    pub invariants: Vec<InvariantDto>,
+    /// Whether the gate is armed for it.
+    pub gate_armed: bool,
+    /// `S` — current state.
+    pub state: serde_json::Value,
+}
+
+impl SustainDto {
+    pub fn of(id: &str, label: &str, d: &Definition, gate_armed: bool, state: &serde_json::Value) -> Self {
+        SustainDto {
+            id: id.to_string(),
+            label: label.to_string(),
+            operators: d.operators.clone(),
+            invariants: d
+                .invariants
+                .iter()
+                .map(|(id, expression)| InvariantDto {
+                    id: id.clone(),
+                    expression: expression.clone(),
+                })
+                .collect(),
+            gate_armed,
+            state: state.clone(),
+        }
+    }
+}
