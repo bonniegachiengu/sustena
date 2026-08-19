@@ -14,10 +14,11 @@ use crate::dto::{
     AccessDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
-    Verdict, WorldDto,
+    TransferLegDto, TransferResult, Verdict, WorldDto,
 };
 use crate::definitions::{AuthoredDefinition, DefinitionVerdict};
 use crate::templates::TemplateId;
+use sustena_core::holon::Transfer as HolonTransfer;
 use crate::world::{memberships, World, PRINCIPAL};
 
 /// `V`, evaluated against current state by the engine.
@@ -598,4 +599,117 @@ pub fn resolve_proposal(
 #[specta::specta]
 pub fn get_rollup(world: State<'_, World>, sustain_id: String) -> Option<RollupDto> {
     world.rollup(&sustain_id)
+}
+
+/// ★★★ **The atomic, conserved cross-Sustain transfer.**
+///
+/// Both legs commit or neither does — the core makes half a transfer
+/// unrepresentable, and the store's write-ahead journal makes it unwritable.
+///
+/// A refusal comes back as a **value**, not an error: the gate declining is an
+/// expected outcome, and turning it into a thrown error would put it in the
+/// same bucket as a disk failure.
+#[tauri::command]
+#[specta::specta]
+pub fn transfer(
+    app: AppHandle,
+    world: State<'_, World>,
+    from_sustain_id: String,
+    to_sustain_id: String,
+    path: String,
+    amount: f64,
+) -> Result<TransferResult, String> {
+    trace!("transfer  {from_sustain_id} -> {to_sustain_id}  {amount} along {path}");
+
+    // Read both balances BEFORE, so the result can show the move rather than
+    // only its endpoint.
+    let before = |id: &str| -> f64 {
+        world
+            .with(|i| i.get(id).map(|s| s.state.clone()))
+            .and_then(|st| dot(&st, &path))
+            .unwrap_or(0.0)
+    };
+    let from_before = before(&from_sustain_id);
+    let to_before = before(&to_sustain_id);
+
+    let settled = world
+        .transfer(&from_sustain_id, &to_sustain_id, &path, amount)
+        .map_err(|e| e.to_string())?;
+
+    let out = match &settled {
+        HolonTransfer::Refused { rule, reason } => {
+            trace!("  -> REFUSED  {rule}: {reason}");
+            TransferResult::Refused { rule: rule.clone(), reason: reason.clone() }
+        }
+        HolonTransfer::Committed(s) => {
+            let (debit, credit) = s.legs();
+            trace!(
+                "  -> COMMITTED  {} -> {}   total {} == {}",
+                debit.balance_after(),
+                credit.balance_after(),
+                s.total_before(),
+                s.total_after()
+            );
+
+            // ★★★ BOTH Sustains changed, so BOTH get a push. A transfer that
+            //   announced only one side would leave every screen watching the
+            //   other confidently stale — the exact asymmetry a conserved move
+            //   must not have.
+            for leg in [debit, credit] {
+                let id = leg.sustain_id();
+                let msg = Committed {
+                    sustain_id: id.to_string(),
+                    operator: "holon.transfer".to_string(),
+                    seq: world.with(|i| i.get(id).map(|s| s.next_seq).unwrap_or(1)) as u32 - 1,
+                    events: vec![crate::dto::EventDto::from(leg.event())],
+                    mutations: leg.mutations().len() as u32,
+                    liquid: leg
+                        .state_after()
+                        .pointer("/finances/liquid/balance")
+                        .and_then(serde_json::Value::as_f64),
+                    constraints: readings(&world, id),
+                    state: leg.state_after().clone(),
+                };
+                if let Err(e) = msg.emit(&app) {
+                    trace!("  !! push failed: {e}");
+                }
+                // And ρ for whoever's total moved.
+                if let Some(subject) = world.rollup_subject(id) {
+                    if let Some(r) = world.rollup(&subject) {
+                        let rolled = RolledUp { rollup: r };
+                        if let Err(e) = rolled.emit(&app) {
+                            trace!("  !! rollup push failed: {e}");
+                        }
+                    }
+                }
+            }
+
+            TransferResult::Committed {
+                path: s.path().to_string(),
+                amount: s.amount(),
+                from: TransferLegDto {
+                    sustain_id: debit.sustain_id().to_string(),
+                    balance_before: from_before,
+                    balance_after: debit.balance_after(),
+                },
+                to: TransferLegDto {
+                    sustain_id: credit.sustain_id().to_string(),
+                    balance_before: to_before,
+                    balance_after: credit.balance_after(),
+                },
+                total_before: s.total_before(),
+                total_after: s.total_after(),
+            }
+        }
+    };
+    Ok(out)
+}
+
+/// Resolve a dot-path to a number, for the before-reading above.
+fn dot(state: &Value, path: &str) -> Option<f64> {
+    let mut node = state;
+    for seg in path.split('.') {
+        node = node.get(seg)?;
+    }
+    node.as_f64()
 }

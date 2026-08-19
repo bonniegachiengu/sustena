@@ -39,6 +39,7 @@ pub fn specta_builder() -> Builder {
         commands::create_from_definition,
         commands::get_access,
         commands::get_rollup,
+        commands::transfer,
         commands::resolve_proposal,
     ])
     // ★★★ The push channel, typed from the same Rust as the commands — so a

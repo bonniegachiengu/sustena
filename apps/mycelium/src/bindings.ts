@@ -174,6 +174,24 @@ async getRollup(sustainId: string) : Promise<RollupDto | null> {
     return await TAURI_INVOKE("get_rollup", { sustainId });
 },
 /**
+ * ★★★ **The atomic, conserved cross-Sustain transfer.**
+ * 
+ * Both legs commit or neither does — the core makes half a transfer
+ * unrepresentable, and the store's write-ahead journal makes it unwritable.
+ * 
+ * A refusal comes back as a **value**, not an error: the gate declining is an
+ * expected outcome, and turning it into a thrown error would put it in the
+ * same bucket as a disk failure.
+ */
+async transfer(fromSustainId: string, toSustainId: string, path: string, amount: number) : Promise<Result<TransferResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("transfer", { fromSustainId, toSustainId, path, amount }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * ★★★ Resolve a proposal with the engine's own `council::resolve`.
  * 
  * Real: the rule that a person's vote overrides the council, that an abstaining
@@ -673,6 +691,28 @@ export type TemplateId =
  * A person — the smallest Sustain that still holds its own money.
  */
 "habitat"
+/**
+ * One side of a settled transfer, as the cockpit shows it.
+ */
+export type TransferLegDto = { sustainId: string; balanceBefore: number; balanceAfter: number }
+/**
+ * What the gate decided about a transfer.
+ * 
+ * ★★★ The two variants carry different shapes on purpose, exactly as
+ * `Committed`/`Refused` do: a refusal has **no legs field at all**, so a
+ * surface cannot render half a transfer by forgetting to branch.
+ */
+export type TransferResult = 
+/**
+ * ★★ `totalBefore == totalAfter` is carried, not computed by the UI —
+ * conservation is the engine's claim and the screen quotes it.
+ * 
+ * ★ The per-variant `rename_all` is not decoration: an enum-level one
+ * renames the VARIANTS and leaves struct-variant fields alone, which the
+ * generated boundary caught the first time the UI read `totalBefore` and
+ * got `total_before`. Exactly what the typed seam is for.
+ */
+{ kind: "committed"; path: string; amount: number; from: TransferLegDto; to: TransferLegDto; totalBefore: number; totalAfter: number } | { kind: "refused"; rule: string; reason: string }
 /**
  * What the gate decided about one call.
  * 

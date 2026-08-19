@@ -1,0 +1,217 @@
+{
+  "conformance_version": 1,
+  "slice": "holon",
+  "generated_from": "sustena/operators/holon.py::_execute_holon_transfer",
+  "note": "Recorded from the reference engine. See conformance/README.md.",
+  "cases": [
+    {
+      "name": "conserved_child_to_parent",
+      "from_balance": 1000.0,
+      "to_balance": 250.0,
+      "amount": 400.0,
+      "direction": "up",
+      "linked": true,
+      "expect": {
+        "status": "ok",
+        "constraint_violated": null,
+        "from_before": 1000.0,
+        "to_before": 250.0,
+        "from_after": 600.0,
+        "to_after": 650.0,
+        "total_before": 1250.0,
+        "total_after": 1250.0,
+        "conserved": true
+      }
+    },
+    {
+      "name": "conserved_parent_to_child",
+      "from_balance": 1000.0,
+      "to_balance": 250.0,
+      "amount": 400.0,
+      "direction": "down",
+      "linked": true,
+      "expect": {
+        "status": "ok",
+        "constraint_violated": null,
+        "from_before": 1000.0,
+        "to_before": 250.0,
+        "from_after": 600.0,
+        "to_after": 650.0,
+        "total_before": 1250.0,
+        "total_after": 1250.0,
+        "conserved": true
+      }
+    },
+    {
+      "name": "moving_the_whole_balance_conserves",
+      "from_balance": 700.0,
+      "to_balance": 0.0,
+      "amount": 700.0,
+      "direction": "up",
+      "linked": true,
+      "expect": {
+        "status": "ok",
+        "constraint_violated": null,
+        "from_before": 700.0,
+        "to_before": 0.0,
+        "from_after": 0.0,
+        "to_after": 700.0,
+        "total_before": 700.0,
+        "total_after": 700.0,
+        "conserved": true
+      }
+    },
+    {
+      "name": "insufficient_balance_moves_nothing",
+      "from_balance": 10.0,
+      "to_balance": 5.0,
+      "amount": 999.0,
+      "direction": "up",
+      "linked": true,
+      "expect": {
+        "status": "failed",
+        "constraint_violated": "from_balance_sufficient",
+        "from_before": 10.0,
+        "to_before": 5.0,
+        "from_after": 10.0,
+        "to_after": 5.0,
+        "total_before": 15.0,
+        "total_after": 15.0,
+        "conserved": true
+      }
+    },
+    {
+      "name": "exactly_the_balance_is_allowed",
+      "from_balance": 300.0,
+      "to_balance": 0.0,
+      "amount": 300.0,
+      "direction": "up",
+      "linked": true,
+      "expect": {
+        "status": "ok",
+        "constraint_violated": null,
+        "from_before": 300.0,
+        "to_before": 0.0,
+        "from_after": 0.0,
+        "to_after": 300.0,
+        "total_before": 300.0,
+        "total_after": 300.0,
+        "conserved": true
+      }
+    },
+    {
+      "name": "one_minor_unit_over_is_refused",
+      "from_balance": 300.0,
+      "to_balance": 0.0,
+      "amount": 301.0,
+      "direction": "up",
+      "linked": true,
+      "expect": {
+        "status": "failed",
+        "constraint_violated": "from_balance_sufficient",
+        "from_before": 300.0,
+        "to_before": 0.0,
+        "from_after": 300.0,
+        "to_after": 0.0,
+        "total_before": 300.0,
+        "total_after": 300.0,
+        "conserved": true
+      }
+    },
+    {
+      "name": "zero_amount_refused",
+      "from_balance": 100.0,
+      "to_balance": 0.0,
+      "amount": 0.0,
+      "direction": "up",
+      "linked": true,
+      "expect": {
+        "status": "failed",
+        "constraint_violated": "amount_positive",
+        "from_before": 100.0,
+        "to_before": 0.0,
+        "from_after": 100.0,
+        "to_after": 0.0,
+        "total_before": 100.0,
+        "total_after": 100.0,
+        "conserved": true
+      }
+    },
+    {
+      "name": "negative_amount_refused",
+      "from_balance": 100.0,
+      "to_balance": 0.0,
+      "amount": -50.0,
+      "direction": "up",
+      "linked": true,
+      "expect": {
+        "status": "failed",
+        "constraint_violated": "amount_positive",
+        "from_before": 100.0,
+        "to_before": 0.0,
+        "from_after": 100.0,
+        "to_after": 0.0,
+        "total_before": 100.0,
+        "total_after": 100.0,
+        "conserved": true
+      }
+    },
+    {
+      "name": "self_transfer_refused",
+      "from_balance": 100.0,
+      "to_balance": 0.0,
+      "amount": 10.0,
+      "direction": "self",
+      "linked": true,
+      "expect": {
+        "status": "failed",
+        "constraint_violated": "distinct_holons",
+        "from_before": 100.0,
+        "to_before": 100.0,
+        "from_after": 100.0,
+        "to_after": 100.0,
+        "total_before": 100.0,
+        "total_after": 100.0,
+        "conserved": true
+      }
+    },
+    {
+      "name": "unlinked_pair_refused",
+      "from_balance": 100.0,
+      "to_balance": 0.0,
+      "amount": 10.0,
+      "direction": "up",
+      "linked": false,
+      "expect": {
+        "status": "failed",
+        "constraint_violated": "holon_link_exists",
+        "from_before": 100.0,
+        "to_before": 0.0,
+        "from_after": 100.0,
+        "to_after": 0.0,
+        "total_before": 100.0,
+        "total_after": 100.0,
+        "conserved": true
+      }
+    },
+    {
+      "name": "fractional_amount",
+      "from_balance": 100.0,
+      "to_balance": 0.0,
+      "amount": 0.5,
+      "direction": "up",
+      "linked": true,
+      "expect": {
+        "status": "ok",
+        "constraint_violated": null,
+        "from_before": 100.0,
+        "to_before": 0.0,
+        "from_after": 99.5,
+        "to_after": 0.5,
+        "total_before": 100.0,
+        "total_after": 100.0,
+        "conserved": true
+      }
+    }
+  ]
+}

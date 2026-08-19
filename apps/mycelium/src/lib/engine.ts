@@ -24,6 +24,7 @@ import {
   type OperatorDto,
   type Result,
   type RollupDto,
+  type TransferResult,
   type AggregateDto,
   type SustainDto,
   type SustainSummary,
@@ -48,6 +49,7 @@ export type {
   LogEntryDto,
   RollupDto,
   AggregateDto,
+  TransferResult,
   SustainDto,
   SustainSummary,
   TemplateId,
@@ -102,6 +104,21 @@ export const engine = {
    * and must not render the same.
    */
   rollup: (sustainId: string): Promise<RollupDto | null> => commands.getRollup(sustainId),
+  /**
+   * The atomic, conserved cross-Sustain transfer.
+   *
+   * ★ A refusal comes back as a VALUE (`kind: "refused"`), not a thrown error.
+   * `unwrap` only surfaces a disk failure — the gate declining is an outcome,
+   * and putting it in the same bucket as a broken store would make a normal
+   * "no" look like a crash.
+   */
+  transfer: async (
+    fromSustainId: string,
+    toSustainId: string,
+    path: string,
+    amount: number,
+  ): Promise<TransferResult> =>
+    unwrap(await commands.transfer(fromSustainId, toSustainId, path, amount)),
   resolveProposal: (
     votes: [string, string, number][],
     userVote: string | null,

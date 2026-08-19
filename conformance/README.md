@@ -2888,3 +2888,61 @@ override arm (one child's not-yet-committed state substituted for a disk read,
 serving the binding gate and the simulator). This crate has no disk, so the arm
 collapses — a caller wanting the hypothetical passes the candidate state as that
 child's state. One function, no mode flag, nothing to diverge.
+
+
+### `holon.json` — the atomic, conserved transfer (Composition §4E.6)
+
+**PARITY vectors (R1).** `_execute_holon_transfer` is real in the reference, so
+these 11 cases are *recorded from it* — driven against a live in-memory
+`SustainEngine` with two genuinely linked habitats.
+
+★★★ **Each case asserts three things, and the second is the one that matters:**
+the verdict, **both sides' state afterwards**, and conservation. A transfer that
+got the verdict right while leaving one side moved would pass a verdict-only
+check and be exactly the failure this slice exists to rule out — money that left
+one household and arrived nowhere. So the recorded after-balances are part of
+the contract, not context.
+
+★★ **Conservation is not a bespoke check.** The port evaluates
+`TransitionRule::Conservation` over the **combined pair** — the two states
+wrapped as `{"from": …, "to": …}`, the quantity summed across both paths. That is
+the same `D(s,s')` machinery a single Sustain's own conservation rules run
+through, so there is no second conservation implementation to drift. The
+reference asserts its own arithmetic with `round(total, 6)`.
+
+★★ **The link check moved from a branch to a type.** `Linked::between` returns
+an `Option` and `transfer` takes the token — so a transfer between unrelated
+Sustains is *unspellable* rather than politely refused. The vectors for
+`unlinked_pair_refused` and `self_transfer_refused` are asserted as *there was
+no token, and the reference agrees nothing moved*.
+
+**Two divergences, both recorded:**
+
+1. ★★ **Exact conservation, in integer minor units.** The reference conserves to
+   six decimal places; this core uses `Tolerance::Exact`, so a **fractional
+   amount is refused** rather than moved. `fractional_amount` records the
+   reference's `ok`, and the Rust test asserts the refusal **explicitly** rather
+   than matching the vector — a divergence that passed silently would be hidden,
+   not recorded. The same move is legal here under `Moving::real(path, tol)`:
+   the strictness is about *undeclared* precision, not about forbidding
+   continuous quantities.
+
+2. ★ **The moving dimension is a parameter, not `finances.liquid.balance`.** The
+   reference hardcodes money. This core has no money concept outside doc
+   examples, and baking one in would be the universality claim failing at the
+   first place it was tested — so the caller names the path. Passing
+   `finances.liquid.balance` reproduces the reference exactly, which is what
+   every vector above does.
+
+**Not in the vectors, and why:** the **both-sides-gate** case — a transfer whose
+*credit* breaks the receiver's own invariant. No shipped reference template has a
+rule a credit can break, so there is nothing to record. It is proven directly in
+`conformance_holon.rs::a_refused_second_leg_leaves_the_first_untouched` and in
+the module's own tests, because it is the exact scenario the two-call workaround
+loses money on.
+
+**Also not in the vectors:** the reference's `idempotency_key` replay and its
+`holon_transfers` audit table. Both are **store** questions — the core cannot
+know what was committed before, and inventing a memory for it would give this
+module state it has no business holding. The host answers the same need with its
+write-ahead journal instead (see the Mycelium README).

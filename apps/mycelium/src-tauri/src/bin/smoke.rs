@@ -16,10 +16,12 @@ use serde_json::{json, Map, Value};
 use mycelium_lib::dto::{Committed, ConstraintReading, GateResult, Refused, SustainSummary};
 use mycelium_lib::definitions::{AuthoredDefinition, DimDecl, InvariantDecl};
 use mycelium_lib::world::{memberships, PRINCIPAL};
-use mycelium_lib::store::Store;
+use mycelium_lib::store::{LoggedEvent, Store};
 use mycelium_lib::templates::TemplateId;
 use mycelium_lib::world::World;
-use sustena_core::{compute_rollup, ChildState};
+use sustena_core::{
+    compute_rollup, holon_transfer, ChildState, Leg, Link, Linked, Moving, Party, Transfer,
+};
 
 fn params(pairs: &[(&str, Value)]) -> Map<String, Value> {
     pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
@@ -428,5 +430,141 @@ fn main() {
         assert_eq!(a.included().len(), counted_before + 1, "the household plus every readable member");
         assert_eq!(a.excluded().len(), 1, "exactly the unreadable one");
         assert!(unchanged, "an excluded member must not contribute a zero");
+
+        // -- holon.transfer -------------------------------------------------
+        //
+        // The keystone: an atomic, conserved move between two linked Sustains.
+        rule("RUN 2 - holon.transfer - conserved, and both legs or neither");
+        let bal = |w: &World, id: &str| -> f64 {
+            w.with(|i| i.get(id).map(|s| s.state.clone()))
+                .and_then(|st| st.pointer("/finances/liquid/balance").and_then(Value::as_f64))
+                .unwrap_or(f64::NAN)
+        };
+        let (src, dst) = ("habitat-bonnie", "homestead");
+        let b0 = bal(&world, src);
+        let h0 = bal(&world, dst);
+        let total0 = b0 + h0;
+        println!("   before   {src} {b0:>10.2}   {dst} {h0:>10.2}   total {total0:>10.2}");
+
+        let moved = 250.0;
+        let t = world.transfer(src, dst, LIQUID, moved).expect("store");
+        let b1 = bal(&world, src);
+        let h1 = bal(&world, dst);
+        let total1 = b1 + h1;
+        println!("   after    {src} {b1:>10.2}   {dst} {h1:>10.2}   total {total1:>10.2}");
+        println!("   moved {moved:.2}   committed={}", t.committed());
+        println!("   CONSERVED  total_before == total_after  ->  {}", total0 == total1);
+        assert!(t.committed(), "a funded, linked transfer must commit");
+        assert_eq!(b1, b0 - moved, "the sender is debited exactly");
+        assert_eq!(h1, h0 + moved, "the receiver is credited exactly");
+        assert_eq!(total0, total1, "a transfer is a move, never a mint or a burn");
+
+        // The refused case: nothing moves, on either side.
+        rule("RUN 2 - a refused transfer moves NOTHING on either side");
+        let over = bal(&world, src) + 1.0;
+        let r = world.transfer(src, dst, LIQUID, over).expect("store");
+        let b2 = bal(&world, src);
+        let h2 = bal(&world, dst);
+        match &r {
+            Transfer::Refused { rule: why, reason } => println!("   REFUSED  {why}: {reason}"),
+            Transfer::Committed(_) => panic!("an over-balance transfer must be refused"),
+        }
+        println!("   {src} {b2:>10.2} (was {b1:>10.2})   {dst} {h2:>10.2} (was {h1:>10.2})");
+        assert_eq!((b2, h2), (b1, h1), "a refusal leaves both sides byte-identical");
+        assert_eq!(b2 + h2, total1, "and the total is exactly what it was");
+
+        // -- CRASH SAFETY -----------------------------------------------------
+        //
+        // Two .jsonl files cannot be appended atomically, so the store writes a
+        // write-ahead journal first. Here the crash is PRODUCED, not imagined:
+        // the journal lands, the first leg is appended, and then nothing else
+        // happens -- exactly the state a power cut between the two appends
+        // leaves behind.
+        rule("RUN 2 - a crash between the two appends, produced and recovered");
+        let st = Store::at(&dir).expect("store");
+        let before_src = st.read_log(src).expect("log").len();
+        let before_dst = st.read_log(dst).expect("log").len();
+        let seq_a = world.with(|i| i.get(src).map(|s| s.next_seq)).expect("open");
+        let seq_b = world.with(|i| i.get(dst).map(|s| s.next_seq)).expect("open");
+
+        let crash_amount = 100.0;
+        let links = vec![Link::new(src, dst)];
+        let link = Linked::between(src, dst, &links).expect("linked");
+        let party = |id: &str| {
+            let (state, enforcement) = world
+                .with(|i| i.get(id).map(|s| (s.state.clone(), s.enforcement.clone())))
+                .expect("open");
+            Party::new(id, state, enforcement)
+        };
+        let settled = holon_transfer(
+            &link, &party(src), &party(dst), &Moving::money(LIQUID), crash_amount,
+        );
+        let Transfer::Committed(settlement) = &settled else { panic!("should commit") };
+        let (leg_a, leg_b) = settlement.legs();
+        st.crash_after_first_leg(
+            "smoke-crash",
+            [
+                (leg_a.sustain_id().to_string(), line(seq_a, leg_a)),
+                (leg_b.sustain_id().to_string(), line(seq_b, leg_b)),
+            ],
+        )
+        .expect("the interrupted write");
+
+        let mid_src = st.read_log(src).expect("log").len();
+        let mid_dst = st.read_log(dst).expect("log").len();
+        println!("   mid-crash  {src} log {before_src} -> {mid_src}   {dst} log {before_dst} -> {mid_dst}");
+        println!("   (one leg on disk, one missing -- a half transfer, on purpose)");
+        assert_eq!(mid_src, before_src + 1, "the first leg landed");
+        assert_eq!(mid_dst, before_dst, "the second did not");
+
+        // Now reopen. Recovery runs BEFORE any state is folded.
+        drop(world);
+        let healed = World::open(Store::at(&dir).expect("store")).expect("reopen");
+        let st = Store::at(&dir).expect("store");
+        let after_src = st.read_log(src).expect("log").len();
+        let after_dst = st.read_log(dst).expect("log").len();
+        let b3 = bal(&healed, src);
+        let h3 = bal(&healed, dst);
+        println!("   recovered  {src} log {after_src}   {dst} log {after_dst}");
+        println!("   {src} {b3:>10.2}   {dst} {h3:>10.2}   total {:>10.2}", b3 + h3);
+        println!("   CONSERVED after recovery  ->  {}", (b3 + h3) == total1);
+        assert_eq!(after_src, before_src + 1, "the first leg is not duplicated");
+        assert_eq!(after_dst, before_dst + 1, "the second leg was finished");
+        assert_eq!(b3, b1 - crash_amount, "the sender ended debited exactly once");
+        assert_eq!(h3, h1 + crash_amount, "the receiver ended credited exactly once");
+        assert_eq!(b3 + h3, total1, "conservation survived the crash");
+
+        // Recovery is idempotent: opening again changes nothing.
+        drop(healed);
+        let again = World::open(Store::at(&dir).expect("store")).expect("reopen");
+        println!(
+            "   reopening again           ->  {src} {:>10.2}   {dst} {:>10.2}   (unchanged)",
+            bal(&again, src),
+            bal(&again, dst)
+        );
+        assert_eq!((bal(&again, src), bal(&again, dst)), (b3, h3), "recovery is idempotent");
+
+        // And the fold still reproduces both sides from their logs alone.
+        let st = Store::at(&dir).expect("store");
+        for id in [src, dst] {
+            let cached = again.with(|i| i.get(id).map(|s| s.state.clone())).expect("open");
+            let (folded, _) = st.load_state(id).expect("fold");
+            println!("   fold check {id:<18} {}", if cached == folded { "match" } else { "DIVERGED" });
+            assert_eq!(cached, folded, "state must still be fold(log) after a recovered transfer");
+        }
+    }
+}
+
+/// Where the household money lives. The core has no money concept and takes
+/// the dimension as a parameter, so naming it is the HOST job.
+const LIQUID: &str = "finances.liquid.balance";
+
+/// One leg as a log line, matching what `World::transfer` writes.
+fn line(seq: u64, leg: &Leg) -> LoggedEvent {
+    LoggedEvent {
+        seq,
+        operator: "holon.transfer".to_string(),
+        events: vec![mycelium_lib::dto::EventDto::from(leg.event())],
+        mutations: leg.mutations().to_vec(),
     }
 }

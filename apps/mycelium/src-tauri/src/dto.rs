@@ -733,3 +733,45 @@ impl RolledUp {
         }
     }
 }
+
+// ── the cross-holon transfer ─────────────────────────────────────────────────
+
+/// One side of a settled transfer, as the cockpit shows it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferLegDto {
+    pub sustain_id: String,
+    pub balance_before: f64,
+    pub balance_after: f64,
+}
+
+/// What the gate decided about a transfer.
+///
+/// ★★★ The two variants carry different shapes on purpose, exactly as
+/// `Committed`/`Refused` do: a refusal has **no legs field at all**, so a
+/// surface cannot render half a transfer by forgetting to branch.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum TransferResult {
+    /// ★★ `totalBefore == totalAfter` is carried, not computed by the UI —
+    /// conservation is the engine's claim and the screen quotes it.
+    ///
+    /// ★ The per-variant `rename_all` is not decoration: an enum-level one
+    /// renames the VARIANTS and leaves struct-variant fields alone, which the
+    /// generated boundary caught the first time the UI read `totalBefore` and
+    /// got `total_before`. Exactly what the typed seam is for.
+    #[serde(rename_all = "camelCase")]
+    Committed {
+        path: String,
+        amount: f64,
+        from: TransferLegDto,
+        to: TransferLegDto,
+        total_before: f64,
+        total_after: f64,
+    },
+    #[serde(rename_all = "camelCase")]
+    Refused {
+        rule: String,
+        reason: String,
+    },
+}

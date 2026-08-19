@@ -222,14 +222,6 @@ a cycle, and the UI shows what it said.
 
 **Not built — named rather than stubbed:**
 
-- ★★★ **`holon.transfer` — NOT AVAILABLE, and deliberately not approximated.**
-  An atomic conserved move between two Sustains is in the Python engine and not
-  in `sustena-core`. The obvious host workaround — spend here, record income
-  there — is two separate gated calls: if the second refuses, money has left one
-  household and arrived nowhere. That is not a transfer, it is a way to lose
-  money that looks like a feature. (`juul::transfer` exists, but that moves the
-  *economy's internal unit* between principals, not a household's money between
-  Sustains.)
 - ★★ **ingest / the transducer.** No parser turns an SMS or a bank alert into a
   proposed call. Not written here on purpose: the Python transducer's own
   history is speculative patterns that matched no real message until real
@@ -300,6 +292,62 @@ cargo run --manifest-path src-tauri/Cargo.toml --bin smoke
 The last section computes ρ over the real seeded household and checks it against
 a **hand sum taken from the same states**, then adds one unreadable member and
 confirms it is named and that the total **does not move**.
+
+## `holon.transfer` — atomic, conserved, and crash-safe
+
+The one operation that is not an operator on a Sustain, because it is a
+transition on a **pair**. `sustena_core::holon::transfer` decides both legs
+together; nothing is written until both have passed every gate.
+
+**Atomicity is structural.** A `Leg` comes only from a `TransferSettlement`, and
+a settlement always holds both — there is no constructor and no function that
+returns one leg, so *apply the debit, then decide about the credit* is not a
+sequence anyone can write. A refusal carries no leg field at all.
+
+**Conservation is checked, by the core's own `D(s,s')` law** — over the combined
+pair, in **integer minor units**. A fractional amount is refused rather than
+rounded away; it is legal only under an explicitly named tolerance
+(`Moving::real(path, tol)`). The screen quotes the engine's conservation line
+rather than adding the two balances up itself.
+
+**The link is a token.** `Linked::between` returns an `Option` and `transfer`
+takes it, so a transfer between unrelated Sustains cannot be expressed. The
+picker offers only the parent and the children for the same reason: offering a
+sibling would invite a refusal a person could not have predicted.
+
+### Crash-safety — the write-ahead journal
+
+Two `.jsonl` files cannot be appended atomically by any filesystem call, so:
+
+```
+transfers/<id>.json   ① write the journal — BOTH legs, fully materialised
+events/<a>.jsonl      ② append leg A · fsync
+events/<b>.jsonl      ③ append leg B · fsync
+                      ④ delete the journal
+```
+
+A crash anywhere in ②–③ leaves the journal, and `recover_transfers` finishes the
+job on the next open — **before any state is folded**, because the fold would
+otherwise be perfectly correct about a household that was briefly wrong.
+Recovery re-reads each log first and skips a leg already present, so replaying a
+journal twice cannot double-apply money. A crash in ① leaves a temp file and
+nothing appended: a transfer that never started.
+
+★ The recovery prints to stderr rather than healing silently. A half-transfer
+that fixed itself without telling anyone is still a household that was wrong.
+
+Prove it without the GUI:
+
+```bash
+cargo run --manifest-path src-tauri/Cargo.toml --bin smoke
+```
+
+The transfer section moves money between two real habitats and checks the total
+is identical; refuses an over-balance move and checks **both** sides are
+byte-identical; then uses a `crash_after_first_leg` seam to produce a genuinely
+half-written transfer, reopens, and confirms the second leg was finished exactly
+once, conservation survived, reopening again changes nothing, and
+`state == fold(log)` still holds on both sides.
 
 ## The push channel carries three events
 

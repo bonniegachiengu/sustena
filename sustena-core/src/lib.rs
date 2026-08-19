@@ -134,6 +134,7 @@ pub mod goodhart;
 pub mod governance;
 pub mod harmonics;
 pub mod holarchy;
+pub mod holon;
 pub mod inverse;
 pub mod issuance;
 pub mod juul;
@@ -384,6 +385,9 @@ pub use goodhart::{coverage, referenced_dimensions, Coverage, GoodhartGuard, Gua
 pub use presentation::{
     discharged_by_this_build, present, present_joint, CollapseRule, Collapsed, Discharge, Duty,
     PresentationError, Presented,
+};
+pub use holon::{
+    transfer as holon_transfer, Leg, Link, Linked, Moving, Party, Transfer, TransferSettlement,
 };
 pub use rollup::{
     compute as compute_rollup, AggregateDecl, AggregateReading, ChildState, ChildStatus,

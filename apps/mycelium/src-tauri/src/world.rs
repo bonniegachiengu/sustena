@@ -27,12 +27,14 @@ use sustena_core::{
     region::Region,
     semantic::enforcement_of,
     compute_rollup, ChildState,
+    holon::transfer as holon_transfer,
+    holon::{Leg, Link, Linked, Moving, Party, Transfer},
 };
 
 use sustena_core::principal::{MembershipEdge, Memberships, TIER_OWNER};
 
 use crate::definitions::{check as check_definition, AuthoredDefinition, DefinitionVerdict};
-use crate::dto::RollupDto;
+use crate::dto::{EventDto, RollupDto};
 use crate::economy::Economy;
 use crate::store::{LoggedEvent, Registry as Records, Store, StoreError, StoreResult, SustainRecord};
 use crate::templates::{self, TemplateId};
@@ -78,6 +80,17 @@ pub struct Inner {
 impl World {
     /// Open the household from disk, folding every log.
     pub fn open(store: Store) -> StoreResult<World> {
+        // ★★★ BEFORE anything is folded. A transfer a crash interrupted is
+        //   finished here, so no state is ever computed from a log that is
+        //   missing a leg its counterpart already has. Recovery runs first
+        //   precisely because the fold would otherwise be correct about a
+        //   household that was briefly wrong.
+        // ★ Reported on stderr, never silently: a half-transfer that healed
+        //   itself without telling anyone is still a household that was wrong.
+        for id in store.recover_transfers()? {
+            eprintln!("[mycelium] recovered an interrupted transfer: {id}");
+        }
+
         let records = store.load_registry()?;
         let mut sustains = BTreeMap::new();
         let mut order = Vec::new();
@@ -498,6 +511,92 @@ impl World {
             .map_err(|e| format!("{e:?}"))
     }
 
+    /// Every declared parent/child edge, as `holon::Linked` needs them.
+    fn links(&self) -> Vec<Link> {
+        self.with(|i| {
+            i.order()
+                .iter()
+                .filter_map(|id| i.get(id))
+                .filter_map(|s| s.record.parent.as_ref().map(|p| Link::new(&s.record.id, p)))
+                .collect()
+        })
+    }
+
+    /// ★★★ **The atomic, conserved cross-Sustain transfer.**
+    ///
+    /// The engine decides; this writes. Both legs land in both logs or neither
+    /// does — see [`Store::commit_transfer`] for how, and why a write-ahead
+    /// journal is the only honest mechanism when two files must move together.
+    ///
+    /// ★★ The `transfer_id` is minted HERE, not in the core: the core has no
+    /// clock and no random source on purpose, so that its answers are
+    /// reproducible. Identity is a host concern.
+    ///
+    /// Returns the refusal as a value, never an error — a refused transfer is
+    /// an expected outcome the gate produced, not a failure of the machinery.
+    pub fn transfer(
+        &self,
+        from_id: &str,
+        to_id: &str,
+        path: &str,
+        amount: f64,
+    ) -> StoreResult<Transfer> {
+        let links = self.links();
+        let Some(link) = Linked::between(from_id, to_id, &links) else {
+            return Ok(Transfer::Refused {
+                rule: "holon_link_exists".into(),
+                reason: format!(
+                    "'{to_id}' is not a directly linked parent or child of '{from_id}'."
+                ),
+            });
+        };
+
+        let parties = self.with(|i| {
+            let a = i.get(from_id)?;
+            let b = i.get(to_id)?;
+            Some((
+                Party::new(from_id, a.state.clone(), a.enforcement.clone()),
+                Party::new(to_id, b.state.clone(), b.enforcement.clone()),
+                a.next_seq,
+                b.next_seq,
+            ))
+        });
+        let Some((from, to, from_seq, to_seq)) = parties else {
+            return Ok(Transfer::Refused {
+                rule: "holon_known".into(),
+                reason: "one of the two Sustains is not open in this world.".into(),
+            });
+        };
+
+        let settled = holon_transfer(&link, &from, &to, &Moving::money(path), amount);
+        let Transfer::Committed(s) = &settled else {
+            // ★ Nothing was produced, so there is nothing to unwind.
+            return Ok(settled);
+        };
+
+        let (debit, credit) = s.legs();
+        let transfer_id = format!("t-{from_id}-{to_id}-{from_seq}-{to_seq}");
+        self.store.commit_transfer(
+            &transfer_id,
+            [
+                (debit.sustain_id().to_string(), leg_line(from_seq, debit)),
+                (credit.sustain_id().to_string(), leg_line(to_seq, credit)),
+            ],
+        )?;
+
+        // Only after both lines are durable.
+        {
+            let mut inner = self.inner.lock().expect("world lock");
+            for (leg, seq) in [(debit, from_seq), (credit, to_seq)] {
+                if let Some(su) = inner.sustains.get_mut(leg.sustain_id()) {
+                    su.state = leg.state_after().clone();
+                    su.next_seq = seq + 1;
+                }
+            }
+        }
+        Ok(settled)
+    }
+
     /// **ρ** — the declared totals for one Sustain, folded from its own state
     /// and every linked child's.
     ///
@@ -652,6 +751,17 @@ impl World {
 /// runs `Authorization::Unchecked`, so this is the authority a person HAS,
 /// displayed — not an authority that is currently being enforced. Saying that
 /// plainly is the difference between a security model and a security theatre.
+/// One leg as a log line. ★ Both carry the same `operator`, so a reader
+/// scanning either log sees the same event by the same name.
+fn leg_line(seq: u64, leg: &Leg) -> LoggedEvent {
+    LoggedEvent {
+        seq,
+        operator: "holon.transfer".to_string(),
+        events: vec![EventDto::from(leg.event())],
+        mutations: leg.mutations().to_vec(),
+    }
+}
+
 pub fn memberships() -> Memberships {
     // The declared membership graph. One Owner edge per Sustain, because this
     // is a single-person household today -- a real household with several

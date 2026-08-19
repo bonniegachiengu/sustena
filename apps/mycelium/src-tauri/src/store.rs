@@ -85,6 +85,25 @@ impl LoggedEvent {
     }
 }
 
+/// One side of a transfer, as the write-ahead journal holds it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalLeg {
+    pub sustain_id: String,
+    pub event: LoggedEvent,
+}
+
+/// A transfer that has been decided and is being written.
+///
+/// ★★ It holds BOTH legs fully materialised, so recovery needs nothing but this
+/// file — not the core, not the two states, not the decision that produced it.
+/// A journal that only recorded intent would need the transfer re-decided
+/// against states that have since moved.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransferJournal {
+    pub transfer_id: String,
+    pub legs: Vec<JournalLeg>,
+}
+
 /// What the registry remembers about one Sustain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SustainRecord {
@@ -149,6 +168,7 @@ impl Store {
     pub fn at(root: impl Into<PathBuf>) -> StoreResult<Store> {
         let root = root.into();
         fs::create_dir_all(root.join("events"))?;
+        fs::create_dir_all(root.join("transfers"))?;
         Ok(Store { root })
     }
 
@@ -283,6 +303,142 @@ impl Store {
         f.write_all(line.as_bytes())?;
         f.write_all(b"\n")?;
         f.sync_all()?;
+        Ok(())
+    }
+
+    // ── the two-log transfer, crash-safe ─────────────────────────────────────
+
+    fn transfers_dir(&self) -> PathBuf {
+        self.root.join("transfers")
+    }
+
+    fn journal_path(&self, transfer_id: &str) -> PathBuf {
+        let safe: String = transfer_id
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .collect();
+        self.transfers_dir().join(format!("{safe}.json"))
+    }
+
+    /// ★★★ **Both logs get their leg, or neither does.**
+    ///
+    /// The core makes half a transfer *unrepresentable*; this makes half a
+    /// transfer *unwritable*. Two `.jsonl` files cannot be appended atomically
+    /// by any filesystem call, so the only honest mechanism is a **write-ahead
+    /// intent journal**:
+    ///
+    /// ```text
+    ///   1. write transfers/<id>.json  (both legs, materialised)  — temp+rename
+    ///   2. append leg A                                          — fsync
+    ///   3. append leg B                                          — fsync
+    ///   4. delete the journal
+    /// ```
+    ///
+    /// A crash anywhere in 2–3 leaves the journal on disk, and
+    /// [`recover_transfers`](Store::recover_transfers) finishes the job on the
+    /// next open. A crash in 1 leaves a temp file and **nothing appended**,
+    /// which is a transfer that never started.
+    ///
+    /// ★★ Recovery is idempotent because it re-reads each log first: a leg
+    /// already present is skipped by its `seq`, so replaying a journal twice
+    /// cannot double-apply money. That is what makes "finish it later" safe
+    /// rather than a second way to lose track.
+    pub fn commit_transfer(
+        &self,
+        transfer_id: &str,
+        legs: [(String, LoggedEvent); 2],
+    ) -> StoreResult<()> {
+        let journal = TransferJournal {
+            transfer_id: transfer_id.to_string(),
+            legs: legs
+                .iter()
+                .map(|(id, e)| JournalLeg { sustain_id: id.clone(), event: e.clone() })
+                .collect(),
+        };
+        self.write_journal(&journal)?;
+        self.apply_journal(&journal)?;
+        // ★ Only now. A journal removed before both appends landed would be a
+        //   promise withdrawn before it was kept.
+        let _ = fs::remove_file(self.journal_path(transfer_id));
+        Ok(())
+    }
+
+    fn write_journal(&self, j: &TransferJournal) -> StoreResult<()> {
+        let text = serde_json::to_string_pretty(j).map_err(|e| StoreError::Io(e.to_string()))?;
+        let path = self.journal_path(&j.transfer_id);
+        let tmp = path.with_extension("json.tmp");
+        {
+            let mut f = File::create(&tmp)?;
+            f.write_all(text.as_bytes())?;
+            f.sync_all()?;
+        }
+        fs::rename(&tmp, &path)?;
+        Ok(())
+    }
+
+    /// Append whichever legs are not already on disk. Idempotent by `seq`.
+    fn apply_journal(&self, j: &TransferJournal) -> StoreResult<()> {
+        for leg in &j.legs {
+            let already = self
+                .read_log(&leg.sustain_id)?
+                .iter()
+                .any(|e| e.seq == leg.event.seq);
+            if !already {
+                self.append(&leg.sustain_id, &leg.event)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// ★★★ Finish any transfer a crash interrupted. Called on every open.
+    ///
+    /// Returns the ids it completed, so a caller can say so rather than
+    /// recovering silently — a half-transfer that healed itself without telling
+    /// anyone is still a household that was briefly wrong.
+    pub fn recover_transfers(&self) -> StoreResult<Vec<String>> {
+        let dir = self.transfers_dir();
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut done = Vec::new();
+        for entry in fs::read_dir(&dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                // A leftover `.json.tmp` is a journal that never landed, which
+                // means nothing was appended. Removing it is safe and correct.
+                let _ = fs::remove_file(&path);
+                continue;
+            }
+            let text = fs::read_to_string(&path)?;
+            let j: TransferJournal = serde_json::from_str(&text).map_err(|e| {
+                StoreError::Io(format!("transfer journal {}: {e}", path.display()))
+            })?;
+            self.apply_journal(&j)?;
+            let _ = fs::remove_file(&path);
+            done.push(j.transfer_id);
+        }
+        done.sort();
+        Ok(done)
+    }
+
+    /// ★ Test-only seam: write the journal and apply ONLY the first leg, then
+    /// stop — a crash between the two appends, produced rather than imagined.
+    #[doc(hidden)]
+    pub fn crash_after_first_leg(
+        &self,
+        transfer_id: &str,
+        legs: [(String, LoggedEvent); 2],
+    ) -> StoreResult<()> {
+        let journal = TransferJournal {
+            transfer_id: transfer_id.to_string(),
+            legs: legs
+                .iter()
+                .map(|(id, e)| JournalLeg { sustain_id: id.clone(), event: e.clone() })
+                .collect(),
+        };
+        self.write_journal(&journal)?;
+        let first = &journal.legs[0];
+        self.append(&first.sustain_id, &first.event)?;
         Ok(())
     }
 

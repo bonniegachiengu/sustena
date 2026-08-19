@@ -32,6 +32,7 @@ from sustena.core.state import StateAccessor, StatePathError, StateValueError  #
 from gen_council import (AGGREGATION_CASES, RESOLUTION_CASES,  # noqa: E402
                          run_aggregation_case, run_resolution_case)
 from gen_operators import OPERATOR_CASES, run_operator_case  # noqa: E402
+from gen_holon import TRANSFER_CASES, run_transfer_case  # noqa: E402
 from gen_rollup import ROLLUP_CASES, run_rollup_case  # noqa: E402
 
 CONFORMANCE_VERSION = 1
@@ -346,6 +347,19 @@ def main() -> int:
         ],
     }
 
+    holon_doc = {
+        "conformance_version": CONFORMANCE_VERSION,
+        "slice": "holon",
+        "generated_from": "sustena/operators/holon.py::_execute_holon_transfer",
+        "note": "Recorded from the reference engine. See conformance/README.md.",
+        "cases": [
+            {"name": name, "from_balance": fb, "to_balance": tb, "amount": amt,
+             "direction": direction, "linked": linked,
+             "expect": run_transfer_case(fb, tb, amt, direction, linked)}
+            for name, fb, tb, amt, direction, linked in TRANSFER_CASES
+        ],
+    }
+
     operators_doc = {
         "conformance_version": CONFORMANCE_VERSION,
         "slice": "operators",
@@ -379,7 +393,7 @@ def main() -> int:
 
     for filename, doc in (("state.json", state_doc), ("fold.json", fold_doc),
                           ("rules.json", rules_doc), ("operators.json", operators_doc),
-                          ("council.json", council_doc), ("rollup.json", rollup_doc)):
+                          ("council.json", council_doc), ("rollup.json", rollup_doc), ("holon.json", holon_doc)):
         path = out_dir / filename
         path.write_text(json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8")
         count = (len(doc.get("cases", [])) + len(doc.get("fold_cases", []))
