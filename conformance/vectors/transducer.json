@@ -1,0 +1,947 @@
+{
+  "conformance_version": 1,
+  "slice": "transducer",
+  "generated_from": "sustena/core/transducer.py::parse_message + parse_rules_seed.py",
+  "note": "Recorded from the reference engine. See conformance/README.md.",
+  "cases": [
+    {
+      "name": "mpesa_received#0",
+      "source": "mpesa",
+      "text": "QGH7XJ4P2Q Confirmed. You have received Ksh1,500.00 from JOHN KAMAU 254712345678 on 2/8/26 at 10:15 AM. New M-PESA balance is Ksh12,050.00",
+      "expect": {
+        "status": "mapped",
+        "operator": "budget.record_income",
+        "params": {
+          "amount": 1500.0,
+          "source": "M-Pesa: JOHN KAMAU",
+          "frequency": "once"
+        },
+        "parsed_fields": {
+          "ref": "QGH7XJ4P2Q",
+          "amount": 1500.0,
+          "balance_after": 12050.0,
+          "counterparty": "JOHN KAMAU",
+          "phone": "254712345678",
+          "direction": "received"
+        },
+        "external_ref": "QGH7XJ4P2Q",
+        "parser_name": "mpesa_received"
+      }
+    },
+    {
+      "name": "mpesa_paybill#0",
+      "source": "mpesa",
+      "text": "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIROBI WATER for account 998877 on 2/8/26 at 4:30 PM. New M-PESA balance is Ksh12,050.00",
+      "expect": {
+        "status": "parsed_unmapped",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "ref": "QGH7XJ4P2Q",
+          "amount": 450.0,
+          "balance_after": 12050.0,
+          "counterparty": "NAIROBI WATER",
+          "account": "998877",
+          "direction": "sent"
+        },
+        "external_ref": "QGH7XJ4P2Q",
+        "parser_name": "mpesa_paybill"
+      }
+    },
+    {
+      "name": "mpesa_buygoods#0",
+      "source": "mpesa",
+      "text": "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIVAS SUPERMARKET on 20/7/26 at 4:30 PM. New M-PESA balance is Ksh12,050.00",
+      "expect": {
+        "status": "parsed_unmapped",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "ref": "QGH7XJ4P2Q",
+          "amount": 450.0,
+          "balance_after": 12050.0,
+          "counterparty": "NAIVAS SUPERMARKET",
+          "direction": "sent"
+        },
+        "external_ref": "QGH7XJ4P2Q",
+        "parser_name": "mpesa_buygoods"
+      }
+    },
+    {
+      "name": "mpesa_sent#0",
+      "source": "mpesa",
+      "text": "QGH7XJ4P2Q Confirmed. Ksh1,000.00 sent to MARY WANJIRU 254798765432 on 2/8/26 at 9:00 AM. New M-PESA balance is Ksh12,050.00",
+      "expect": {
+        "status": "parsed_unmapped",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "ref": "QGH7XJ4P2Q",
+          "amount": 1000.0,
+          "balance_after": 12050.0,
+          "counterparty": "MARY WANJIRU",
+          "phone": "254798765432",
+          "direction": "sent"
+        },
+        "external_ref": "QGH7XJ4P2Q",
+        "parser_name": "mpesa_sent"
+      }
+    },
+    {
+      "name": "mpesa_withdraw#0",
+      "source": "mpesa",
+      "text": "QGH7XJ4P2Q Confirmed. Ksh2,000.00 withdrawn from Agent 123456 - TOWN SHOP on 2/8/26 at 1:00 PM. New M-PESA balance is Ksh10,050.00",
+      "expect": {
+        "status": "parsed_unmapped",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "ref": "QGH7XJ4P2Q",
+          "amount": 2000.0,
+          "balance_after": 10050.0,
+          "counterparty": "Agent 123456 - TOWN SHOP",
+          "direction": "sent"
+        },
+        "external_ref": "QGH7XJ4P2Q",
+        "parser_name": "mpesa_withdraw"
+      }
+    },
+    {
+      "name": "mpesa_paybill_sent#0",
+      "source": "mpesa",
+      "text": "QGH7XJ4P2Q Confirmed. Ksh1,500.00 sent to SAFARICOMHOME for account 11619547 on 1/8/26 at 3:22 PM. New M-PESA balance is Ksh12,154.47. Transaction cost, Ksh0.00.",
+      "expect": {
+        "status": "parsed_unmapped",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "ref": "QGH7XJ4P2Q",
+          "amount": 1500.0,
+          "balance_after": 12154.47,
+          "transaction_cost": 0.0,
+          "counterparty": "SAFARICOMHOME",
+          "account": "11619547",
+          "direction": "sent"
+        },
+        "external_ref": "QGH7XJ4P2Q",
+        "parser_name": "mpesa_paybill_sent"
+      }
+    },
+    {
+      "name": "mpesa_airtime#0",
+      "source": "mpesa",
+      "text": "QGH7XJ4P2Q confirmed. You bought Ksh50.00 of airtime on 1/8/26 at 11:15 PM. New M-PESA balance is Ksh13,654.47. Transaction cost, Ksh0.00.",
+      "expect": {
+        "status": "parsed_unmapped",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "ref": "QGH7XJ4P2Q",
+          "amount": 50.0,
+          "balance_after": 13654.47,
+          "transaction_cost": 0.0,
+          "counterparty": "Safaricom airtime",
+          "direction": "sent"
+        },
+        "external_ref": "QGH7XJ4P2Q",
+        "parser_name": "mpesa_airtime"
+      }
+    },
+    {
+      "name": "kcb_receive#0",
+      "source": "kcb",
+      "text": "ABCD1234 Confirmed! You have received KES 5,000.00 from JOHN KAMAU - 1234 at 02-08-26 10:15 AM via KCB",
+      "expect": {
+        "status": "mapped",
+        "operator": "budget.record_income",
+        "params": {
+          "amount": 5000.0,
+          "source": "KCB: JOHN KAMAU",
+          "frequency": "once"
+        },
+        "parsed_fields": {
+          "ref": "ABCD1234",
+          "amount": 5000.0,
+          "counterparty": "JOHN KAMAU",
+          "account": "1234",
+          "datetime": "02-08-26 10:15 AM",
+          "direction": "received"
+        },
+        "external_ref": "ABCD1234",
+        "parser_name": "kcb_receive"
+      }
+    },
+    {
+      "name": "kcb_card#0",
+      "source": "kcb",
+      "text": "KES 429.00 transaction made on KCB card 1234XXXXXXXX5678 at GOOGLE *Spotify Music on 1/8/26 12:25pm, Avail balance KES 59,055.00",
+      "expect": {
+        "status": "parsed_unmapped",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "amount": 429.0,
+          "currency": "KES",
+          "counterparty": "GOOGLE *Spotify Music",
+          "card": "1234XXXXXXXX5678",
+          "balance_after": 59055.0,
+          "direction": "sent"
+        },
+        "external_ref": null,
+        "parser_name": "kcb_card"
+      }
+    },
+    {
+      "name": "kcb_loan_disbursed#0",
+      "source": "kcb",
+      "text": "KCB Mobile Loan of KES 10,000.00 has been approved and credited to your account. A facility fee of KES 250.00 has been charged. Your new loan balance is KES 10,250.00",
+      "expect": {
+        "status": "mapped",
+        "operator": "budget.record_income",
+        "params": {
+          "amount": 10000.0,
+          "source": "KCB Mobile Loan",
+          "frequency": "once"
+        },
+        "parsed_fields": {
+          "amount": 10000.0,
+          "fee": 250.0,
+          "loan_balance": 10250.0,
+          "counterparty": "KCB Mobile Loan",
+          "direction": "received"
+        },
+        "external_ref": null,
+        "parser_name": "kcb_loan_disbursed"
+      }
+    },
+    {
+      "name": "kcb_loan_repay#0",
+      "source": "kcb",
+      "text": "KES 2,000.00 was debited from your KCB account to repay your KCB Mobile Loan 998877. Your new loan balance is KES 8,250.00",
+      "expect": {
+        "status": "parsed_unmapped",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "amount": 2000.0,
+          "loan_number": "998877",
+          "loan_balance": 8250.0,
+          "counterparty": "KCB Mobile Loan 998877 repayment",
+          "direction": "sent"
+        },
+        "external_ref": null,
+        "parser_name": "kcb_loan_repay"
+      }
+    },
+    {
+      "name": "kcb_vooma_loan_repay#0",
+      "source": "kcb",
+      "text": "KES 1,500.00 was debited from your Vooma wallet to repay your Vooma Loan 445566. Your new loan balance of KES 3,000.00",
+      "expect": {
+        "status": "parsed_unmapped",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "amount": 1500.0,
+          "loan_number": "445566",
+          "loan_balance": 3000.0,
+          "counterparty": "Vooma Loan 445566 repayment",
+          "sub_source": "vooma",
+          "direction": "sent"
+        },
+        "external_ref": null,
+        "parser_name": "kcb_vooma_loan_repay"
+      }
+    },
+    {
+      "name": "kcb_mpesa_paybill#0",
+      "source": "kcb",
+      "text": "Ksh40000.00 sent to KCB Pay Bill 522522 for account 135***5140 BONVENTURE NGUGI MAINA has been received on 01/08/2026 at 12:21 PM. M-PESA ref UH1B91GYNW",
+      "expect": {
+        "status": "mapped",
+        "operator": "budget.record_income",
+        "params": {
+          "amount": 40000.0,
+          "source": "M-Pesa via KCB Pay Bill: BONVENTURE NGUGI MAINA",
+          "frequency": "once"
+        },
+        "parsed_fields": {
+          "amount": 40000.0,
+          "name": "BONVENTURE NGUGI MAINA",
+          "account": "135***5140",
+          "paybill": "522522",
+          "ref": "UH1B91GYNW",
+          "counterparty": "KCB Pay Bill 522522 - BONVENTURE NGUGI MAINA",
+          "direction": "received"
+        },
+        "external_ref": "UH1B91GYNW",
+        "parser_name": "kcb_mpesa_paybill"
+      }
+    },
+    {
+      "name": "kcb_mpesa_account#0",
+      "source": "kcb",
+      "text": "Ksh5000.00 sent to KCB account JOHN KAMAU 112233 has been received on 01/08/2026. M-PESA Ref UH1B91GYNX",
+      "expect": {
+        "status": "mapped",
+        "operator": "budget.record_income",
+        "params": {
+          "amount": 5000.0,
+          "source": "M-Pesa via KCB account: JOHN KAMAU",
+          "frequency": "once"
+        },
+        "parsed_fields": {
+          "amount": 5000.0,
+          "counterparty": "JOHN KAMAU",
+          "account": "112233",
+          "ref": "UH1B91GYNX",
+          "direction": "received"
+        },
+        "external_ref": "UH1B91GYNX",
+        "parser_name": "kcb_mpesa_account"
+      }
+    },
+    {
+      "name": "kcb_mpesa_received#0",
+      "source": "kcb",
+      "text": "You have received KES 750.00 from MARY WANJIRU. M-PESA Ref UH1B91GYNY",
+      "expect": {
+        "status": "mapped",
+        "operator": "budget.record_income",
+        "params": {
+          "amount": 750.0,
+          "source": "M-Pesa via KCB: MARY WANJIRU",
+          "frequency": "once"
+        },
+        "parsed_fields": {
+          "amount": 750.0,
+          "counterparty": "MARY WANJIRU",
+          "ref": "UH1B91GYNY",
+          "direction": "received"
+        },
+        "external_ref": "UH1B91GYNY",
+        "parser_name": "kcb_mpesa_received"
+      }
+    },
+    {
+      "name": "kcb_mpesa_sent#0",
+      "source": "kcb",
+      "text": "ABCD5678 completed. KES 1,200.00 sent to M-PESA 254712345678 on 2/8/26 at 3:00 PM. Transaction cost KES 22.00",
+      "expect": {
+        "status": "parsed_unmapped",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "ref": "ABCD5678",
+          "amount": 1200.0,
+          "transaction_cost": 22.0,
+          "phone": "254712345678",
+          "counterparty": "M-PESA 254712345678",
+          "direction": "sent"
+        },
+        "external_ref": "ABCD5678",
+        "parser_name": "kcb_mpesa_sent"
+      }
+    },
+    {
+      "name": "kcb_mpesa_transferred#0",
+      "source": "kcb",
+      "text": "you have successfully transferred KES 900.00 to 254***5678-JOHN KAMAU on 2/8/26. M-PESA Ref UH1B91GYNZ",
+      "expect": {
+        "status": "parsed_unmapped",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "ref": "UH1B91GYNZ",
+          "amount": 900.0,
+          "counterparty": "JOHN KAMAU",
+          "phone": "254***5678",
+          "direction": "sent"
+        },
+        "external_ref": "UH1B91GYNZ",
+        "parser_name": "kcb_mpesa_transferred"
+      }
+    },
+    {
+      "name": "kcb_balance#0",
+      "source": "kcb",
+      "text": "Actual balance KES 12,500.00. Available balance KES 12,500.00. Transaction reference number UH1B91GYP0",
+      "expect": {
+        "status": "informational",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "actual_balance": 12500.0,
+          "balance_after": 12500.0,
+          "ref": "UH1B91GYP0",
+          "direction": "none"
+        },
+        "external_ref": "UH1B91GYP0",
+        "parser_name": "kcb_balance"
+      }
+    },
+    {
+      "name": "kcb_loan_overdue#0",
+      "source": "kcb",
+      "text": "KCB Mobile Loan repayment of KES 1,000.00 is overdue since 20/7/26",
+      "expect": {
+        "status": "informational",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "amount_owed": 1000.0,
+          "loan_status": "overdue",
+          "direction": "none"
+        },
+        "external_ref": null,
+        "parser_name": "kcb_loan_overdue"
+      }
+    },
+    {
+      "name": "kcb_loan_arrears#0",
+      "source": "kcb",
+      "text": "KCB Mobile Loan is in arrears of KES 3,500.00",
+      "expect": {
+        "status": "informational",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "amount_owed": 3500.0,
+          "loan_status": "arrears",
+          "direction": "none"
+        },
+        "external_ref": null,
+        "parser_name": "kcb_loan_arrears"
+      }
+    },
+    {
+      "name": "kcb_loan_default#0",
+      "source": "kcb",
+      "text": "loan number 998877 has a balance of KES 5,000.00 which is in DEFAULT",
+      "expect": {
+        "status": "informational",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "loan_number": "998877",
+          "amount_owed": 5000.0,
+          "loan_status": "default",
+          "direction": "none"
+        },
+        "external_ref": null,
+        "parser_name": "kcb_loan_default"
+      }
+    },
+    {
+      "name": "kcb_loan_due_today#0",
+      "source": "kcb",
+      "text": "KCB Mobile Loan balance of KES 2,000.00 is due today",
+      "expect": {
+        "status": "informational",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {
+          "amount_owed": 2000.0,
+          "loan_status": "due_today",
+          "direction": "none"
+        },
+        "external_ref": null,
+        "parser_name": "kcb_loan_due_today"
+      }
+    },
+    {
+      "name": "strict:mpesa_received-as-kcb",
+      "source": "kcb",
+      "text": "QGH7XJ4P2Q Confirmed. You have received Ksh1,500.00 from JOHN KAMAU 254712345678 on 2/8/26 at 10:15 AM. New M-PESA balance is Ksh12,050.00",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:mpesa_paybill-as-kcb",
+      "source": "kcb",
+      "text": "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIROBI WATER for account 998877 on 2/8/26 at 4:30 PM. New M-PESA balance is Ksh12,050.00",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:mpesa_buygoods-as-kcb",
+      "source": "kcb",
+      "text": "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIVAS SUPERMARKET on 20/7/26 at 4:30 PM. New M-PESA balance is Ksh12,050.00",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:mpesa_sent-as-kcb",
+      "source": "kcb",
+      "text": "QGH7XJ4P2Q Confirmed. Ksh1,000.00 sent to MARY WANJIRU 254798765432 on 2/8/26 at 9:00 AM. New M-PESA balance is Ksh12,050.00",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:mpesa_withdraw-as-kcb",
+      "source": "kcb",
+      "text": "QGH7XJ4P2Q Confirmed. Ksh2,000.00 withdrawn from Agent 123456 - TOWN SHOP on 2/8/26 at 1:00 PM. New M-PESA balance is Ksh10,050.00",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:mpesa_paybill_sent-as-kcb",
+      "source": "kcb",
+      "text": "QGH7XJ4P2Q Confirmed. Ksh1,500.00 sent to SAFARICOMHOME for account 11619547 on 1/8/26 at 3:22 PM. New M-PESA balance is Ksh12,154.47. Transaction cost, Ksh0.00.",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:mpesa_airtime-as-kcb",
+      "source": "kcb",
+      "text": "QGH7XJ4P2Q confirmed. You bought Ksh50.00 of airtime on 1/8/26 at 11:15 PM. New M-PESA balance is Ksh13,654.47. Transaction cost, Ksh0.00.",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_receive-as-mpesa",
+      "source": "mpesa",
+      "text": "ABCD1234 Confirmed! You have received KES 5,000.00 from JOHN KAMAU - 1234 at 02-08-26 10:15 AM via KCB",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_card-as-mpesa",
+      "source": "mpesa",
+      "text": "KES 429.00 transaction made on KCB card 1234XXXXXXXX5678 at GOOGLE *Spotify Music on 1/8/26 12:25pm, Avail balance KES 59,055.00",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_loan_disbursed-as-mpesa",
+      "source": "mpesa",
+      "text": "KCB Mobile Loan of KES 10,000.00 has been approved and credited to your account. A facility fee of KES 250.00 has been charged. Your new loan balance is KES 10,250.00",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_loan_repay-as-mpesa",
+      "source": "mpesa",
+      "text": "KES 2,000.00 was debited from your KCB account to repay your KCB Mobile Loan 998877. Your new loan balance is KES 8,250.00",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_vooma_loan_repay-as-mpesa",
+      "source": "mpesa",
+      "text": "KES 1,500.00 was debited from your Vooma wallet to repay your Vooma Loan 445566. Your new loan balance of KES 3,000.00",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_mpesa_paybill-as-mpesa",
+      "source": "mpesa",
+      "text": "Ksh40000.00 sent to KCB Pay Bill 522522 for account 135***5140 BONVENTURE NGUGI MAINA has been received on 01/08/2026 at 12:21 PM. M-PESA ref UH1B91GYNW",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_mpesa_account-as-mpesa",
+      "source": "mpesa",
+      "text": "Ksh5000.00 sent to KCB account JOHN KAMAU 112233 has been received on 01/08/2026. M-PESA Ref UH1B91GYNX",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_mpesa_received-as-mpesa",
+      "source": "mpesa",
+      "text": "You have received KES 750.00 from MARY WANJIRU. M-PESA Ref UH1B91GYNY",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_mpesa_sent-as-mpesa",
+      "source": "mpesa",
+      "text": "ABCD5678 completed. KES 1,200.00 sent to M-PESA 254712345678 on 2/8/26 at 3:00 PM. Transaction cost KES 22.00",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_mpesa_transferred-as-mpesa",
+      "source": "mpesa",
+      "text": "you have successfully transferred KES 900.00 to 254***5678-JOHN KAMAU on 2/8/26. M-PESA Ref UH1B91GYNZ",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_balance-as-mpesa",
+      "source": "mpesa",
+      "text": "Actual balance KES 12,500.00. Available balance KES 12,500.00. Transaction reference number UH1B91GYP0",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_loan_overdue-as-mpesa",
+      "source": "mpesa",
+      "text": "KCB Mobile Loan repayment of KES 1,000.00 is overdue since 20/7/26",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_loan_arrears-as-mpesa",
+      "source": "mpesa",
+      "text": "KCB Mobile Loan is in arrears of KES 3,500.00",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_loan_default-as-mpesa",
+      "source": "mpesa",
+      "text": "loan number 998877 has a balance of KES 5,000.00 which is in DEFAULT",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "strict:kcb_loan_due_today-as-mpesa",
+      "source": "mpesa",
+      "text": "KCB Mobile Loan balance of KES 2,000.00 is due today",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:0-mpesa",
+      "source": "mpesa",
+      "text": "Your OTP is 483920. Do not share it with anyone.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:0-kcb",
+      "source": "kcb",
+      "text": "Your OTP is 483920. Do not share it with anyone.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:1-mpesa",
+      "source": "mpesa",
+      "text": "483920 is your verification code for KCB.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:1-kcb",
+      "source": "kcb",
+      "text": "483920 is your verification code for KCB.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:2-mpesa",
+      "source": "mpesa",
+      "text": "Use one-time pin 112233 to authorise this transaction.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:2-kcb",
+      "source": "kcb",
+      "text": "Use one-time pin 112233 to authorise this transaction.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:3-mpesa",
+      "source": "mpesa",
+      "text": "Your TAN code is 55123.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:3-kcb",
+      "source": "kcb",
+      "text": "Your TAN code is 55123.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:4-mpesa",
+      "source": "mpesa",
+      "text": "Activation code: 9931. This code is valid for only 90s.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:4-kcb",
+      "source": "kcb",
+      "text": "Activation code: 9931. This code is valid for only 90s.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:5-mpesa",
+      "source": "mpesa",
+      "text": "Your KCB card secret PIN is 4417.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:5-kcb",
+      "source": "kcb",
+      "text": "Your KCB card secret PIN is 4417.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:6-mpesa",
+      "source": "mpesa",
+      "text": "Security code 8821 for your transaction.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "secret:6-kcb",
+      "source": "kcb",
+      "text": "Security code 8821 for your transaction.",
+      "expect": {
+        "status": "rejected",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "empty",
+      "source": "mpesa",
+      "text": "   ",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    },
+    {
+      "name": "gibberish",
+      "source": "mpesa",
+      "text": "hello there, nothing financial here",
+      "expect": {
+        "status": "unparsed",
+        "operator": null,
+        "params": {},
+        "parsed_fields": {},
+        "external_ref": null,
+        "parser_name": ""
+      }
+    }
+  ]
+}

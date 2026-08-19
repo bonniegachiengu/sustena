@@ -3000,3 +3000,56 @@ network. There is no vector for it because it is host-side and has no core
 surface — it is proven by the host's own tests (`identity.rs`, 9 cases including
 wrong-passphrase, tampered-ciphertext and swapped-public-key, all failing closed
 with the **same** message).
+
+
+### `transducer.json` — `τ` over Bonnie's real messages (Parser primitive-lift)
+
+**PARITY vectors (R1).** The transducer is real in the reference and was tuned
+against Bonnie's own redacted M-Pesa and KCB samples over several passes, so
+these 60 cases are *recorded from it*: **every shipped rule against its own
+declared examples**, the same texts under the **wrong** source, real OTP shapes
+under **both** sources, and the empty/gibberish edges.
+
+★★★ **Each case asserts the whole decision**, not the tier: the operator and
+its bound params if it mapped, every parsed field, the external ref, and which
+rule handled it. A transducer that got the tier right while extracting a
+different amount would pass a tier-only check and be a wrong entry in a ledger.
+
+★★★ **The security cases are asserted as an ABSENCE.** A rejection is checked
+for carrying nothing — no fields, no operator, no ref, `storable() == false` —
+because the property that matters is not *we said no*, it is *there is nothing
+here to store*. `Transduction::Rejected` has no payload field at all, so a
+caller cannot store one by forgetting to branch.
+
+★★ **All 22 shipped rules ported as DATA, not transcription.** The seed set is
+the reference's own exported JSON, embedded with `include_str!` — so the two
+engines' rules cannot drift by a typo in a regex. The port checked first that
+every pattern is expressible: **no lookaround and no backreferences** anywhere,
+which is what makes Rust's `regex` crate sufficient. (An earlier grep suggested
+backreferences in all 22; that was a false positive on `\d`, and the precise
+check found none. Named here because a re-grepper would hit the same thing.)
+
+**Divergences, both cosmetic and both recorded:**
+
+1. ★ **Field ORDER differs.** The reference preserves dict insertion order; this
+   crate uses a `BTreeMap`, which sorts. The comparison is by **set membership
+   and value**, because every consumer looks a field up by name — asserting on
+   order would fail on rendering and say nothing about behaviour.
+
+2. ★ **One shape is not ported.** `kcb_system_notice` — a loose catch-all over
+   ~20 sub-patterns — is the only rule still on the reference's hand-wired
+   fallback tier, and it is **not** in the exported declared set. In this core a
+   message it would have caught falls to `unparsed`, which is honest and safe:
+   it queues visibly for a person rather than being silently classified. Porting
+   a 20-branch guess for a shape that only ever produces `informational` would
+   add risk for no decision.
+
+**A new dependency, and why it is consistent with ADR-0001.** The core now
+depends on `regex`. Decision 1 names *the transducer* as part of the portable
+core, and the constraint it sets is **portability**, not a fixed dependency
+list: `regex` is pure Rust with no I/O and compiles to every target the ADR
+names (Android, iOS, desktop, WASM). The alternative — keeping `τ` in the host
+— would put a second matching grammar outside the engine, which is exactly the
+divergence `parse_state_path` exists to prevent one layer down. And a
+`typecheck_rule` that could not compile the pattern it is checking would not be
+a typecheck.

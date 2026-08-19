@@ -151,6 +151,7 @@ pub mod obligation;
 pub mod operative;
 pub mod operator;
 pub mod panel;
+pub mod parse_rule;
 pub mod path;
 pub mod pawa;
 pub mod period;
@@ -173,6 +174,7 @@ pub mod signal;
 pub mod state;
 pub mod strategy;
 pub mod tenet;
+pub mod transducer;
 pub mod transition;
 pub mod treasury;
 pub mod vclock;
@@ -388,6 +390,14 @@ pub use presentation::{
 };
 pub use holon::{
     transfer as holon_transfer, Leg, Link, Linked, Moving, Party, Transfer, TransferSettlement,
+};
+pub use parse_rule::{
+    apply_rule, run_rules, typecheck_rule, FieldKind, FieldSpec, NoOperators, OperatorUniverse,
+    ParseRule, ParseRuleTrust, RuleStatus,
+};
+pub use transducer::{
+    all_seed_rules, contains_sensitive_secret, parse_message, seed_rules, seed_sources,
+    Transduction,
 };
 pub use rollup::{
     compute as compute_rollup, AggregateDecl, AggregateReading, ChildState, ChildStatus,

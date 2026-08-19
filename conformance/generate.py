@@ -33,6 +33,7 @@ from gen_council import (AGGREGATION_CASES, RESOLUTION_CASES,  # noqa: E402
                          run_aggregation_case, run_resolution_case)
 from gen_operators import OPERATOR_CASES, run_operator_case  # noqa: E402
 from gen_holon import TRANSFER_CASES, run_transfer_case  # noqa: E402
+from gen_transducer import build_cases as build_transducer_cases  # noqa: E402
 from gen_rollup import ROLLUP_CASES, run_rollup_case  # noqa: E402
 
 CONFORMANCE_VERSION = 1
@@ -347,6 +348,14 @@ def main() -> int:
         ],
     }
 
+    transducer_doc = {
+        "conformance_version": CONFORMANCE_VERSION,
+        "slice": "transducer",
+        "generated_from": "sustena/core/transducer.py::parse_message + parse_rules_seed.py",
+        "note": "Recorded from the reference engine. See conformance/README.md.",
+        "cases": build_transducer_cases(),
+    }
+
     holon_doc = {
         "conformance_version": CONFORMANCE_VERSION,
         "slice": "holon",
@@ -393,7 +402,7 @@ def main() -> int:
 
     for filename, doc in (("state.json", state_doc), ("fold.json", fold_doc),
                           ("rules.json", rules_doc), ("operators.json", operators_doc),
-                          ("council.json", council_doc), ("rollup.json", rollup_doc), ("holon.json", holon_doc)):
+                          ("council.json", council_doc), ("rollup.json", rollup_doc), ("holon.json", holon_doc), ("transducer.json", transducer_doc)):
         path = out_dir / filename
         path.write_text(json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8")
         count = (len(doc.get("cases", [])) + len(doc.get("fold_cases", []))
