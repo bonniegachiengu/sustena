@@ -557,3 +557,55 @@ out of the transform and a title can be uppercase and still say `ρ`.
 
 `apps/web` is the **previous** UI (React, on the Python engine). It is frozen
 reference and is not touched by anything here.
+
+
+## Packaging
+
+```bash
+npm run tauri build          # -> MSI + NSIS under src-tauri/target/release/bundle/
+```
+
+Produces two Windows installers for **Mycelium — Sustena**, with the engine
+compiled in. There is no server component and nothing to point at: the app
+carries `sustena-core` and keeps its own append-only log under the user's
+app-data directory.
+
+★★★ **The developer binaries are gated behind `dev-bins`, and that is not
+tidiness.** `src/bin/` is auto-discovered by cargo and Tauri bundles whatever it
+finds in `target/release` — so before this gate the NSIS package genuinely
+installed `export_bindings.exe` next to the app. The helpers are one flag away
+for the two workflows that need them:
+
+```bash
+npm run bindings             # regenerate src/bindings.ts from the Rust types
+npm run smoke                # the engine walkthrough, against a scratch store
+```
+
+Run clippy **with the feature on**, so gating the helpers does not drop them
+from the lint sweep:
+
+```bash
+cargo clippy --all-targets --features dev-bins -- -D warnings
+```
+
+The installers are **unsigned**. That is fine for sideloading; a code-signing
+certificate is a separate step and is not pretended at here.
+
+### Android
+
+Not shipped. Orchie is a face of this same app and Tauri v2 supports mobile,
+but `tauri android init` refuses at its own environment check on this machine,
+and the reason is specific rather than general:
+
+- the **SDK is present and usable** (`cmdline-tools/latest`, build-tools, platforms)
+- the **NDK is absent** — there is no `sdk/ndk` directory at all
+- **no Android Rust targets are installed** (all six are available; none added)
+
+So the remaining increment is three steps, not a code gap:
+
+```bash
+sdkmanager "ndk;<version>"                       # ~1 GB
+export NDK_HOME=<sdk>/ndk/<version>
+rustup target add aarch64-linux-android armv7-linux-androideabi \
+                  i686-linux-android x86_64-linux-android
+```

@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "bindings": "cargo test --manifest-path src-tauri/Cargo.toml --test bindings"
+    "bindings": "cargo run --manifest-path src-tauri/Cargo.toml --features dev-bins --bin export_bindings",
+    "smoke": "cargo run --manifest-path src-tauri/Cargo.toml --features dev-bins --bin smoke"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
