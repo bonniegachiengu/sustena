@@ -7,8 +7,11 @@
 
 pub mod commands;
 pub mod dto;
-pub mod engine;
+pub mod store;
+pub mod templates;
+pub mod world;
 
+use tauri::Manager;
 use tauri_specta::{collect_commands, Builder};
 
 /// The typed command surface, defined once.
@@ -18,9 +21,11 @@ use tauri_specta::{collect_commands, Builder};
 /// that can happen.
 pub fn specta_builder() -> Builder {
     Builder::<tauri::Wry>::new().commands(collect_commands![
+        commands::get_world,
         commands::get_sustain,
+        commands::select_sustain,
+        commands::create_sustain,
         commands::run_operator,
-        commands::reset_sustain,
     ])
 }
 
@@ -56,8 +61,25 @@ pub fn run() {
     export_bindings(&builder);
 
     tauri::Builder::default()
-        .manage(engine::Engine::default())
         .invoke_handler(builder.invoke_handler())
+        .setup(|app| {
+            // ★★★ The household is opened from disk BEFORE the window can ask
+            //   for it, and every log is folded on the way in. If the store is
+            //   empty this is also where Bonnie's household is seeded — once,
+            //   and only into emptiness.
+            let dir = app.path().app_data_dir().map_err(|e| format!("no app data dir: {e}"))?;
+            let store = store::Store::at(&dir).map_err(|e| e.to_string())?;
+            let world = world::World::open(store).map_err(|e| e.to_string())?;
+            let seeded = world.seed_if_empty().map_err(|e| e.to_string())?;
+            println!(
+                "[store] {} · {} sustain(s){}",
+                dir.display(),
+                world.with(|i| i.order().len()),
+                if seeded { " · seeded" } else { " · loaded from log" }
+            );
+            app.manage(world);
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running mycelium");
 }

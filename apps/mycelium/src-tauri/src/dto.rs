@@ -34,6 +34,9 @@ use sustena_core::{
     operator::{meta::OperatorStatus, EmittedEvent, Execution, OperatorResult},
 };
 
+use crate::templates::TemplateId;
+use crate::world::Sustain;
+
 /// What the gate decided about one call.
 ///
 /// ★★ `Refused` is a **first-class variant, not an error**. A refusal is a
@@ -157,4 +160,78 @@ impl SustainDto {
             state: state.clone(),
         }
     }
+}
+
+// ── the household ────────────────────────────────────────────────────────────
+
+/// One Sustain, as a selector row needs it.
+///
+/// ★ Deliberately not the full `SustainDto`: a list of six should not carry six
+/// full state documents, and a shape that made it easy to would invite it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SustainSummary {
+    pub id: String,
+    pub label: String,
+    pub template: TemplateId,
+    /// `⊕` — its parent, if it has one.
+    pub parent: Option<String>,
+    /// How many events its log holds. ★ The real number, folded from disk —
+    /// this is what makes persistence visible rather than claimed.
+    pub events: u32,
+    /// Its liquid balance, or `null` when the Sustain declares no such
+    /// dimension. **Never 0 for absent** — a missing figure renders as "—".
+    pub liquid: Option<f64>,
+}
+
+impl SustainSummary {
+    pub fn of(s: &Sustain) -> Self {
+        SustainSummary {
+            id: s.record.id.clone(),
+            label: s.record.label.clone(),
+            template: s.record.template,
+            parent: s.record.parent.clone(),
+            events: s.next_seq as u32,
+            liquid: s
+                .state
+                .pointer("/finances/liquid/balance")
+                .and_then(serde_json::Value::as_f64),
+        }
+    }
+}
+
+/// Whether the composition tree holds, **as the engine judges it**.
+///
+/// ★ A sum type rather than a bool: a tree that does not hold should say which
+/// link broke it, and a `false` with the reason thrown away is an alarm rather
+/// than a diagnosis.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum Holarchy {
+    /// `MonitorEngine::flatten_holarchy` accepted it — no duplicate id, no
+    /// unknown parent, no cycle.
+    Holds { linked: u32 },
+    /// It refused, and here is what it said.
+    Broken { reason: String },
+}
+
+/// What the cockpit knows about the whole household.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WorldDto {
+    pub sustains: Vec<SustainSummary>,
+    pub selected: Option<String>,
+    /// Where the log actually lives, shown so persistence is inspectable
+    /// rather than a promise.
+    pub store_path: String,
+    /// ★★ `⊕` validated by the engine (`MonitorEngine::flatten_holarchy`).
+    pub holarchy: Holarchy,
+    /// ★★★ **NOT AVAILABLE, and said so.** Roll-up `ρ` — folding children's
+    /// state into a parent aggregate — does **not exist in `sustena-core`**
+    /// (the Python engine has it; the Rust port does not, per the UX spec's
+    /// §9.2 gap list). The composition tree here is real and engine-checked;
+    /// the *aggregate over it* is not computed, and the UI renders an honest
+    /// unavailable state rather than summing the children in the host and
+    /// passing host arithmetic off as an engine capability.
+    pub rollup_available: bool,
 }

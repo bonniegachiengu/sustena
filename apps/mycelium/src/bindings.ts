@@ -7,26 +7,56 @@
 
 export const commands = {
 /**
- * `Σ` and its current state.
+ * The household: every Sustain, the selection, and where the log lives.
  */
-async getSustain() : Promise<SustainDto> {
-    return await TAURI_INVOKE("get_sustain");
+async getWorld() : Promise<WorldDto> {
+    return await TAURI_INVOKE("get_world");
 },
 /**
- * ★★★ Ask the engine to do something, and report what the gate decided.
+ * `Σ` and current state for one Sustain — the selected one when `id` is absent.
+ */
+async getSustain(id: string | null) : Promise<SustainDto | null> {
+    return await TAURI_INVOKE("get_sustain", { id });
+},
+/**
+ * Point the cockpit at a different Sustain. `false` when there is no such id.
+ */
+async selectSustain(id: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("select_sustain", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Instantiate a new Sustain. `false` when the id is already taken.
+ */
+async createSustain(id: string, label: string, template: TemplateId, parent: string | null) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_sustain", { id, label, template, parent }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * ★★★ Ask the engine to do something on one Sustain, and report the verdict.
  * 
- * Returns `GateResult` — **not** `Result<_, String>`. A refusal is a correct
- * answer, and typing it as an error would make the UI render the system
- * working as the system failing.
+ * Returns `GateResult` — **not** an error type. A refusal is a correct answer,
+ * and typing it as an error would make the UI render the system working as the
+ * system failing.
+ * 
+ * `None` means there is no such Sustain, which is a different fact from a
+ * refusal and is kept a different shape. The outer `Result` is for the disk.
  */
-async runOperator(operator: string, params: JsonValue) : Promise<GateResult> {
-    return await TAURI_INVOKE("run_operator", { operator, params });
-},
-/**
- * Start over from the opening state.
- */
-async resetSustain() : Promise<SustainDto> {
-    return await TAURI_INVOKE("reset_sustain");
+async runOperator(sustainId: string, operator: string, params: JsonValue) : Promise<Result<GateResult | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("run_operator", { sustainId, operator, params }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -71,6 +101,23 @@ mutations: number; events: EventDto[];
  */
 state: JsonValue }
 /**
+ * Whether the composition tree holds, **as the engine judges it**.
+ * 
+ * ★ A sum type rather than a bool: a tree that does not hold should say which
+ * link broke it, and a `false` with the reason thrown away is an alarm rather
+ * than a diagnosis.
+ */
+export type Holarchy = 
+/**
+ * `MonitorEngine::flatten_holarchy` accepted it — no duplicate id, no
+ * unknown parent, no cycle.
+ */
+{ kind: "holds"; linked: number } | 
+/**
+ * It refused, and here is what it said.
+ */
+{ kind: "broken"; reason: string }
+/**
  * A rule the household declared it must stay within.
  */
 export type InvariantDto = { id: string; expression: string }
@@ -100,6 +147,43 @@ gateArmed: boolean;
  */
 state: JsonValue }
 /**
+ * One Sustain, as a selector row needs it.
+ * 
+ * ★ Deliberately not the full `SustainDto`: a list of six should not carry six
+ * full state documents, and a shape that made it easy to would invite it.
+ */
+export type SustainSummary = { id: string; label: string; template: TemplateId; 
+/**
+ * `⊕` — its parent, if it has one.
+ */
+parent: string | null; 
+/**
+ * How many events its log holds. ★ The real number, folded from disk —
+ * this is what makes persistence visible rather than claimed.
+ */
+events: number; 
+/**
+ * Its liquid balance, or `null` when the Sustain declares no such
+ * dimension. **Never 0 for absent** — a missing figure renders as "—".
+ */
+liquid: number | null }
+/**
+ * Which kind of Sustain to instantiate.
+ * 
+ * ★ A closed enum rather than a string: a template the app cannot build is
+ * unrepresentable, so `instantiate` has no "unknown template" failure to
+ * invent a message for.
+ */
+export type TemplateId = 
+/**
+ * The household — a parent Sustain, composed of habitats.
+ */
+"homestead" | 
+/**
+ * A person — the smallest Sustain that still holds its own money.
+ */
+"habitat"
+/**
  * What the gate decided about one call.
  * 
  * ★★ `Refused` is a **first-class variant, not an error**. A refusal is a
@@ -121,6 +205,29 @@ export type Verdict =
  * Awaiting a Council vote — not a failure, a decision not yet made.
  */
 "deferred"
+/**
+ * What the cockpit knows about the whole household.
+ */
+export type WorldDto = { sustains: SustainSummary[]; selected: string | null; 
+/**
+ * Where the log actually lives, shown so persistence is inspectable
+ * rather than a promise.
+ */
+storePath: string; 
+/**
+ * ★★ `⊕` validated by the engine (`MonitorEngine::flatten_holarchy`).
+ */
+holarchy: Holarchy; 
+/**
+ * ★★★ **NOT AVAILABLE, and said so.** Roll-up `ρ` — folding children's
+ * state into a parent aggregate — does **not exist in `sustena-core`**
+ * (the Python engine has it; the Rust port does not, per the UX spec's
+ * §9.2 gap list). The composition tree here is real and engine-checked;
+ * the *aggregate over it* is not computed, and the UI renders an honest
+ * unavailable state rather than summing the children in the host and
+ * passing host arithmetic off as an engine capability.
+ */
+rollupAvailable: boolean }
 
 /** tauri-specta globals **/
 

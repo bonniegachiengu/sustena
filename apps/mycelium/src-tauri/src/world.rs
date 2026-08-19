@@ -1,0 +1,289 @@
+//! The household, as the host holds it — **many Sustains, one engine**.
+//!
+//! ★★★ Every operator call still goes down the same path
+//! `sustena-core/examples/household_run.rs` walks: `Registry::default()`, a
+//! `Definition`, `enforcement_of`, `execute_admitted`. What changed from the
+//! skeleton is only *which* Sustain is on the other end and that the result is
+//! written to a durable log before it is reported.
+//!
+//! ★★ **State lives only in the log.** A `Sustain` here caches the folded
+//! state so the UI does not re-read the disk on every keystroke, but that cache
+//! is only ever written from a committed `Execution` — the same value the fold
+//! would produce — and a relaunch rebuilds it from the log alone.
+
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+
+use serde_json::{Map, Value};
+use sustena_core::{
+    approval::{EffectClass, NonceLedger},
+    detect::CusumSpec,
+    editing::Definition,
+    monitor::{MonitorEngine, SustainWatch},
+    operator::{execute_admitted, Authorization, Enforcement, Execution, Registry},
+    region::Region,
+    semantic::enforcement_of,
+};
+
+use crate::store::{LoggedEvent, Registry as Records, Store, StoreError, StoreResult, SustainRecord};
+use crate::templates::{self, TemplateId};
+
+/// One live Sustain.
+pub struct Sustain {
+    pub record: SustainRecord,
+    pub definition: Definition,
+    pub enforcement: Enforcement,
+    pub state: Value,
+    pub next_seq: u64,
+}
+
+/// Everything the cockpit can look at.
+pub struct World {
+    pub operators: Registry,
+    inner: Mutex<Inner>,
+    store: Store,
+}
+
+pub struct Inner {
+    sustains: BTreeMap<String, Sustain>,
+    order: Vec<String>,
+    selected: Option<String>,
+}
+
+impl World {
+    /// Open the household from disk, folding every log.
+    pub fn open(store: Store) -> StoreResult<World> {
+        let records = store.load_registry()?;
+        let mut sustains = BTreeMap::new();
+        let mut order = Vec::new();
+
+        for record in &records.sustains {
+            let definition = templates::definition(record.template);
+            let enforcement = enforcement_of(&definition);
+            let (state, next_seq) = store.load_state(&record.id)?;
+            order.push(record.id.clone());
+            sustains.insert(
+                record.id.clone(),
+                Sustain { record: record.clone(), definition, enforcement, state, next_seq },
+            );
+        }
+
+        let selected = records.selected.filter(|id| sustains.contains_key(id)).or(order.first().cloned());
+
+        Ok(World {
+            operators: Registry::default(),
+            inner: Mutex::new(Inner { sustains, order, selected }),
+            store,
+        })
+    }
+
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
+    fn persist_registry(&self, inner: &Inner) -> StoreResult<()> {
+        self.store.save_registry(&Records {
+            sustains: inner.order.iter().filter_map(|id| inner.sustains.get(id)).map(|s| s.record.clone()).collect(),
+            selected: inner.selected.clone(),
+        })
+    }
+
+    // ── reading ──────────────────────────────────────────────────────────────
+
+    pub fn with<T>(&self, f: impl FnOnce(&Inner) -> T) -> T {
+        f(&self.inner.lock().expect("world lock"))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.with(|i| i.sustains.is_empty())
+    }
+
+    pub fn selected_id(&self) -> Option<String> {
+        self.with(|i| i.selected.clone())
+    }
+
+    pub fn select(&self, id: &str) -> StoreResult<bool> {
+        let mut inner = self.inner.lock().expect("world lock");
+        if !inner.sustains.contains_key(id) {
+            return Ok(false);
+        }
+        inner.selected = Some(id.to_string());
+        self.persist_registry(&inner)?;
+        Ok(true)
+    }
+
+    // ── creating ─────────────────────────────────────────────────────────────
+
+    /// Instantiate a Sustain and write its **genesis** line.
+    ///
+    /// ★ The opening state is not stored as a state; it is the first entry of
+    /// the log, so a Sustain's whole history — including how it began — folds
+    /// from one place.
+    pub fn instantiate(
+        &self,
+        id: &str,
+        label: &str,
+        template: TemplateId,
+        parent: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut inner = self.inner.lock().expect("world lock");
+        if inner.sustains.contains_key(id) {
+            return Ok(false);
+        }
+        if let Some(p) = parent {
+            if !inner.sustains.contains_key(p) {
+                return Err(StoreError::Io(format!("no such parent Sustain: {p}")));
+            }
+        }
+
+        let state = templates::opening_state(template);
+        let genesis = LoggedEvent::genesis(&state);
+        self.store.append(id, &genesis)?;
+
+        let record = SustainRecord {
+            id: id.to_string(),
+            label: label.to_string(),
+            template,
+            parent: parent.map(str::to_string),
+        };
+        let definition = templates::definition(template);
+        let enforcement = enforcement_of(&definition);
+
+        inner.order.push(id.to_string());
+        inner.sustains.insert(
+            id.to_string(),
+            Sustain { record, definition, enforcement, state, next_seq: 1 },
+        );
+        if inner.selected.is_none() {
+            inner.selected = Some(id.to_string());
+        }
+        self.persist_registry(&inner)?;
+        Ok(true)
+    }
+
+    /// ★★ Bonnie's household, once.
+    ///
+    /// Idempotent by the only check that means anything here: it does nothing
+    /// at all if the world already holds a Sustain. A seed that ran on a
+    /// populated store would either duplicate the household or silently edit
+    /// it, and neither is something a person asked for.
+    pub fn seed_if_empty(&self) -> StoreResult<bool> {
+        if !self.is_empty() {
+            return Ok(false);
+        }
+        self.instantiate("homestead", "Homestead", TemplateId::Homestead, None)?;
+        for member in ["Bonnie", "Cira", "Epha", "Mum", "Kui", "Frankie"] {
+            let id = format!("habitat-{}", member.to_lowercase());
+            self.instantiate(&id, member, TemplateId::Habitat, Some("homestead"))?;
+        }
+        let mut inner = self.inner.lock().expect("world lock");
+        inner.selected = Some("homestead".to_string());
+        self.persist_registry(&inner)?;
+        Ok(true)
+    }
+
+    // ── acting ───────────────────────────────────────────────────────────────
+
+    /// ★★★ One real call, through the real gate, **durably**.
+    ///
+    /// The order is the whole point: the engine decides, and only a committed
+    /// decision is appended to the log and reflected in the cache. A refusal
+    /// writes nothing — which is the same thing the engine already guarantees,
+    /// said twice, because the disk is the one place a mistake would outlive
+    /// the process.
+    pub fn call(
+        &self,
+        sustain_id: &str,
+        operator: &str,
+        params: &Map<String, Value>,
+    ) -> StoreResult<Option<Execution>> {
+        let mut inner = self.inner.lock().expect("world lock");
+        let Some(sustain) = inner.sustains.get(sustain_id) else {
+            return Ok(None);
+        };
+
+        let x = execute_admitted(
+            &self.operators,
+            &sustain.definition.operators,
+            &sustain.enforcement,
+            &sustain.state,
+            operator,
+            params,
+            &Authorization::Unchecked,
+            &EffectClass::Unchecked,
+            &mut NonceLedger::new(),
+        );
+
+        if x.committed() {
+            let seq = sustain.next_seq;
+            self.store.append(sustain_id, &LoggedEvent::of(seq, operator, &x))?;
+            let sustain = inner.sustains.get_mut(sustain_id).expect("checked above");
+            sustain.state = x.state.clone();
+            sustain.next_seq = seq + 1;
+        }
+        Ok(Some(x))
+    }
+
+    // ── the composition, checked by the core ─────────────────────────────────
+
+    /// ★★★ Validate `⊕` with the engine, not with host bookkeeping.
+    ///
+    /// `MonitorEngine::flatten_holarchy` refuses a duplicate id, a parent that
+    /// was never declared, and a **cycle** — so the parent/child links the
+    /// registry holds are checked by the same code the attention scan walks,
+    /// rather than trusted because the host wrote them.
+    ///
+    /// ★ Returns the error text rather than a bool: a tree that does not hold
+    /// should say which link broke it.
+    pub fn check_holarchy(&self) -> Result<usize, String> {
+        let watches: Vec<SustainWatch> = self.with(|i| {
+            i.order
+                .iter()
+                .filter_map(|id| i.sustains.get(id))
+                .map(|s| {
+                    // ★ An empty `Region` and a nominal detector: this call is
+                    //   asked ONLY about the shape of the tree. Real monitoring
+                    //   thresholds belong to the Monitor screen (V1.3), and
+                    //   inventing them here to make a structural check compile
+                    //   would be declaring rules nobody chose.
+                    let w = SustainWatch::new(
+                        &s.record.id,
+                        Region::new(),
+                        0.3,
+                        CusumSpec::new(0.0, 1.0, 5.0),
+                    );
+                    match &s.record.parent {
+                        Some(p) => w.under(p),
+                        None => w,
+                    }
+                })
+                .collect()
+        });
+
+        if watches.is_empty() {
+            return Ok(0);
+        }
+        MonitorEngine::flatten_holarchy(watches)
+            .map(|e| e.sustains().len())
+            .map_err(|e| format!("{e:?}"))
+    }
+}
+
+impl Inner {
+    pub fn order(&self) -> &[String] {
+        &self.order
+    }
+    pub fn get(&self, id: &str) -> Option<&Sustain> {
+        self.sustains.get(id)
+    }
+    pub fn selected(&self) -> Option<&Sustain> {
+        self.selected.as_ref().and_then(|id| self.sustains.get(id))
+    }
+    pub fn children_of<'a>(&'a self, id: &str) -> Vec<&'a Sustain> {
+        self.order
+            .iter()
+            .filter_map(|k| self.sustains.get(k))
+            .filter(|s| s.record.parent.as_deref() == Some(id))
+            .collect()
+    }
+}

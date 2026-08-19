@@ -21,7 +21,7 @@ globalStyle("::-webkit-scrollbar-thumb", {
 
 export const shell = style({
   display: "grid",
-  gridTemplateRows: "auto 1fr",
+  gridTemplateRows: "auto 1fr auto",
   height: "100%",
   minWidth: 0,
 });
@@ -338,4 +338,101 @@ export const errorBox = style({
   fontFamily: vars.font.mono,
   fontSize: "11px",
   color: vars.color.textPrimary,
+});
+
+/* ── the household selector ────────────────────────────────────────────── */
+
+export const selector = style({
+  display: "flex",
+  flexDirection: "column",
+  gap: "2px",
+});
+
+export const sustainRow = style({
+  display: "grid",
+  gridTemplateColumns: "auto 1fr auto",
+  alignItems: "baseline",
+  gap: vars.space.sm,
+  padding: `${vars.space.sm} ${vars.space.sm}`,
+  border: "1px solid transparent",
+  borderRadius: vars.radius.sm,
+  cursor: "pointer",
+  textAlign: "left",
+  background: "transparent",
+  color: "inherit",
+  font: "inherit",
+  width: "100%",
+  selectors: {
+    "&:hover": { background: vars.color.bgRaised },
+  },
+});
+
+export const sustainRowActive = style([
+  sustainRow,
+  {
+    borderColor: vars.color.amberBorder,
+    background: vars.color.amberGlow,
+  },
+]);
+
+/** A child is indented to show `⊕` without drawing a tree nobody asked for. */
+export const childIndent = style({ paddingLeft: vars.space.xl });
+
+export const sustainName = style({
+  fontFamily: vars.font.ui,
+  fontSize: "13px",
+  fontWeight: 500,
+  color: vars.color.textPrimary,
+});
+
+export const sustainMeta = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10px",
+  letterSpacing: "0.06em",
+  color: vars.color.textMuted,
+});
+
+export const sustainFigure = style({
+  fontFamily: vars.font.mono,
+  fontSize: "12px",
+  color: vars.color.textSecondary,
+  fontVariantNumeric: "tabular-nums",
+});
+
+/* ── honest unavailable ────────────────────────────────────────────────── */
+
+export const unavailable = style({
+  border: `1px dashed ${vars.color.borderMid}`,
+  borderRadius: vars.radius.md,
+  padding: vars.space.md,
+  fontFamily: vars.font.mono,
+  fontSize: "11px",
+  lineHeight: 1.55,
+  color: vars.color.textMuted,
+});
+
+export const unavailableTitle = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10px",
+  fontWeight: 500,
+  letterSpacing: "0.10em",
+  textTransform: "uppercase",
+  color: vars.color.textSecondary,
+  display: "block",
+  marginBottom: vars.space.xs,
+});
+
+export const statusBelt = style({
+  display: "flex",
+  alignItems: "center",
+  gap: vars.space.md,
+  padding: `${vars.space.xs} ${vars.space.lg}`,
+  borderTop: `1px solid ${vars.color.border}`,
+  background: vars.color.bgSurface,
+  fontFamily: vars.font.mono,
+  fontSize: "10px",
+  letterSpacing: "0.06em",
+  color: vars.color.textMuted,
+  overflowX: "auto",
+  whiteSpace: "nowrap",
 });

@@ -1,59 +1,107 @@
-//! `cargo run --bin smoke` — drive the host's engine exactly as the Tauri
-//! commands do, and print the real JSON that crosses the IPC boundary.
+//! `cargo run --bin smoke -- <dir>` — the persistence proof, as text.
 //!
-//! ★★ This is **not** a substitute for running the app; it is the leg of the
-//! chain that can be evidenced as text. It calls the same `Engine` the commands
-//! call and builds the same `GateResult` DTO they return, so what it prints is
-//! byte-for-byte what the webview receives — the UI's job is then only to
-//! render it.
+//! ★★★ It runs the household **twice against the same directory**, in two
+//! separate processes' worth of `World`, and prints both. The second open has
+//! no memory of the first beyond what is on disk: every state it shows was
+//! rebuilt by folding the log.
 //!
-//! ★ What it deliberately does NOT prove: the click, the IPC hop, and the
-//! rendering. Those need the window, and are shown there.
+//! ★ Run it with no argument and it uses a scratch directory under the system
+//! temp dir, so it never touches the real app data. Point it at the app's own
+//! store to inspect the real household.
+
+use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
 
-use mycelium_lib::dto::{GateResult, SustainDto};
-use mycelium_lib::engine::{Engine, SUSTAIN_ID, SUSTAIN_LABEL};
+use mycelium_lib::dto::{GateResult, SustainSummary};
+use mycelium_lib::store::Store;
+use mycelium_lib::world::World;
 
 fn params(pairs: &[(&str, Value)]) -> Map<String, Value> {
     pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
 }
 
-fn show(label: &str, v: &impl serde::Serialize) {
-    println!("\n── {label} {}", "─".repeat(60usize.saturating_sub(label.len())));
-    println!("{}", serde_json::to_string_pretty(v).expect("serializable"));
+fn rule(title: &str) {
+    println!("\n── {title} {}", "─".repeat(58usize.saturating_sub(title.len())));
+}
+
+fn household(world: &World) {
+    let rows: Vec<SustainSummary> =
+        world.with(|i| i.order().iter().filter_map(|id| i.get(id)).map(SustainSummary::of).collect());
+    for r in &rows {
+        let liquid = r.liquid.map(|v| format!("{v:>10.2}")).unwrap_or_else(|| "         —".into());
+        let under = r.parent.clone().map(|p| format!("  ⊕ under {p}")).unwrap_or_default();
+        println!("   {:<18} {:<10} liquid {liquid}   log {:>2} events{under}", r.id, r.label, r.events);
+    }
+    match world.check_holarchy() {
+        Ok(n) => println!("   holarchy: HOLDS · {n} linked (checked by MonitorEngine)"),
+        Err(e) => println!("   holarchy: BROKEN · {e}"),
+    }
+}
+
+fn call(world: &World, sustain: &str, op: &str, p: &[(&str, Value)]) {
+    let x = world.call(sustain, op, &params(p)).expect("disk");
+    match x {
+        None => println!("   {sustain} · no such Sustain"),
+        Some(x) => {
+            let r = GateResult::of(op, &x);
+            println!(
+                "   {sustain} · {op} -> {:?}  mutations={} events={}{}",
+                r.verdict,
+                r.mutations,
+                r.events.len(),
+                r.reason.map(|s| format!("\n      reason: {s}")).unwrap_or_default()
+            );
+        }
+    }
 }
 
 fn main() {
-    let engine = Engine::default();
+    let dir: PathBuf = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("mycelium-smoke"));
+    println!("store: {}", dir.display());
 
-    let sustain = SustainDto::of(
-        SUSTAIN_ID,
-        SUSTAIN_LABEL,
-        &engine.definition,
-        engine.enforcement.enabled,
-        &engine.snapshot(),
-    );
-    show("get_sustain  (opening)", &sustain);
+    // ── first run ────────────────────────────────────────────────────────────
+    {
+        let world = World::open(Store::at(&dir).expect("store")).expect("open");
+        let seeded = world.seed_if_empty().expect("seed");
+        rule(&format!("RUN 1 · {}", if seeded { "seeded" } else { "loaded from log" }));
+        household(&world);
 
-    for (op, p) in [
-        ("budget.record_income", params(&[("amount", json!(4500.0)), ("source", json!("salary"))])),
-        ("budget.allocate", params(&[("pocket_name", json!("food")), ("amount", json!(1200.0))])),
-        ("budget.spend", params(&[("pocket_name", json!("food")), ("amount", json!(340.0))])),
-        // ★ The one that must come back REFUSED, with the engine's own words.
-        ("budget.spend", params(&[("pocket_name", json!("food")), ("amount", json!(9000.0))])),
-    ] {
-        let x = engine.call(op, &p);
-        let result = GateResult::of(op, &x);
-        show(&format!("run_operator  {op}"), &result);
+        rule("RUN 1 · real operator calls");
+        call(&world, "homestead", "budget.record_income", &[("amount", json!(4500.0)), ("source", json!("salary"))]);
+        call(&world, "homestead", "budget.allocate", &[("pocket_name", json!("food")), ("amount", json!(1200.0))]);
+        call(&world, "habitat-bonnie", "budget.record_income", &[("amount", json!(900.0)), ("source", json!("side work"))]);
+        // ★ The one that must be REFUSED — and must therefore write nothing.
+        call(&world, "homestead", "budget.spend", &[("pocket_name", json!("food")), ("amount", json!(9000.0))]);
+
+        rule("RUN 1 · after");
+        household(&world);
+    } // the World is dropped: nothing survives but the files.
+
+    // ── second run ───────────────────────────────────────────────────────────
+    {
+        let world = World::open(Store::at(&dir).expect("store")).expect("reopen");
+        let seeded = world.seed_if_empty().expect("seed");
+        rule(&format!("RUN 2 · reopened · {}", if seeded { "SEEDED AGAIN (BUG)" } else { "loaded from log" }));
+        household(&world);
+
+        // ★★★ The property, checked rather than asserted: the cached state and
+        //     a fresh fold of the persisted log must be the same value.
+        rule("RUN 2 · state == fold(persisted log)");
+        let store = Store::at(&dir).expect("store");
+        let ids: Vec<String> = world.with(|i| i.order().to_vec());
+        let mut all = true;
+        for id in ids {
+            let cached: Value = world.with(|i| i.get(&id).map(|s| s.state.clone())).expect("present");
+            let (folded, _) = store.load_state(&id).expect("fold");
+            let same = cached == folded;
+            all &= same;
+            println!("   {:<18} {}", id, if same { "match" } else { "DIVERGED" });
+        }
+        println!("\n   rebuild == fold(persisted log)  ->  {all}");
+        assert!(all, "the fold must reproduce every Sustain's state");
     }
-
-    let after = SustainDto::of(
-        SUSTAIN_ID,
-        SUSTAIN_LABEL,
-        &engine.definition,
-        engine.enforcement.enabled,
-        &engine.snapshot(),
-    );
-    show("get_sustain  (after)", &after.state);
 }
