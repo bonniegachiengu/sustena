@@ -11,12 +11,13 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::dto::{
-    Branch, BranchStep, Committed, ConstraintReading, EconomyDto, GateResult, Holarchy,
-    LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorDto, ParamDto, ParameterDto, Refused,
-    SustainDto, SustainSummary, Verdict, WorldDto,
+    AccessDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
+    GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
+    OperatorDto, ParamDto, ParameterDto, Refused, SustainDto, SustainSummary, Verdict, WorldDto,
 };
+use crate::definitions::{AuthoredDefinition, DefinitionVerdict};
 use crate::templates::TemplateId;
-use crate::world::{World, PRINCIPAL};
+use crate::world::{memberships, World, PRINCIPAL};
 
 /// `V`, evaluated against current state by the engine.
 fn readings(world: &World, sustain_id: &str) -> Vec<ConstraintReading> {
@@ -418,4 +419,152 @@ pub fn set_parameter(world: State<'_, World>, name: String, value: f64) -> GateR
     let out = GateResult::of("governance.set_parameter", &x);
     trace!("  -> {:?} {}", out.verdict, out.reason.clone().unwrap_or_default());
     out
+}
+
+// ── Define ───────────────────────────────────────────────────────────────────
+
+/// Every definition a person has authored on this host.
+#[tauri::command]
+#[specta::specta]
+pub fn get_definitions(world: State<'_, World>) -> Vec<AuthoredDefinition> {
+    world.definitions()
+}
+
+/// ★★★ Author a definition — **the engine decides whether it lands**.
+///
+/// `editing::typecheck` parses every invariant and binds it against the schema;
+/// `editing::safe` checks it against every live instance. A definition that
+/// fails either is never written, and the verdict carries the engine's own
+/// words rather than a summary of them.
+#[tauri::command]
+#[specta::specta]
+pub fn author_definition(
+    world: State<'_, World>,
+    definition: AuthoredDefinition,
+) -> Result<DefinitionVerdict, String> {
+    trace!("author_definition {} ({} invariants)", definition.id, definition.invariants.len());
+    let v = world.author_definition(&definition).map_err(|e| e.to_string())?;
+    trace!("  -> {v:?}");
+    Ok(v)
+}
+
+/// Instantiate a Sustain from an authored definition — the same path a
+/// built-in uses.
+#[tauri::command]
+#[specta::specta]
+pub fn create_from_definition(
+    world: State<'_, World>,
+    id: String,
+    label: String,
+    definition_id: String,
+    parent: Option<String>,
+) -> Result<bool, String> {
+    trace!("create_from_definition {id} <- {definition_id}");
+    world
+        .instantiate_from(&id, &label, TemplateId::Habitat, Some(&definition_id), parent.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+// ── Profile: the real capability model ───────────────────────────────────────
+
+/// What the local principal may do on one Sustain, **as the engine judges it**.
+///
+/// ★★ `permitted` walks the membership path with the weakest-link rule and
+/// compares against each operator's declared `min_privilege`. This is the real
+/// model, not a display of intentions.
+///
+/// ★★★ **And it is not what the gate currently checks.** Every call in this
+/// host runs `Authorization::Unchecked`, so this is the authority a person
+/// HOLDS, shown — not one being enforced. The screen says so, because a
+/// permission matrix that implied enforcement would be security theatre.
+#[tauri::command]
+#[specta::specta]
+pub fn get_access(world: State<'_, World>, sustain_id: String) -> AccessDto {
+    use sustena_core::principal::{effective_privilege, permitted};
+
+    let m = memberships();
+    let path = vec![sustain_id.clone()];
+    let tier = effective_privilege(&m, PRINCIPAL, &path).ok();
+
+    let allowed: Vec<String> =
+        world.with(|i| i.get(&sustain_id).map(|s| s.definition.operators.clone()).unwrap_or_default());
+
+    let operators = allowed
+        .iter()
+        .filter_map(|name| {
+            let meta = world.operators.get(name)?;
+            let verdict = permitted(&m, PRINCIPAL, &path, meta.min_privilege);
+            Some(OperatorAccessDto {
+                operator: name.clone(),
+                required_tier: meta.min_privilege,
+                permitted: verdict.is_ok(),
+                denial: verdict.err().map(|d| format!("{d}")),
+            })
+        })
+        .collect();
+
+    AccessDto {
+        principal: PRINCIPAL.to_string(),
+        sustain_id,
+        tier,
+        memberships: m.len() as u32,
+        operators,
+        enforced: false,
+        note: "This is the authority the principal HOLDS. It is not yet what the gate \
+               checks: every call in this host runs `Authorization::Unchecked`, so the \
+               capability model is displayed, not enforced."
+            .into(),
+    }
+}
+
+// ── Council: real resolution ─────────────────────────────────────────────────
+
+/// ★★★ Resolve a proposal with the engine's own `council::resolve`.
+///
+/// Real: the rule that a person's vote overrides the council, that an abstaining
+/// person leaves it **in voting** rather than deciding, and that collected votes
+/// with nobody in favour fail. None of it is re-implemented here.
+#[tauri::command]
+#[specta::specta]
+pub fn resolve_proposal(
+    votes: Vec<(String, String, f64)>,
+    user_vote: Option<String>,
+    votes_collected: bool,
+) -> CouncilOutcomeDto {
+    use sustena_core::council::{aggregate_delegated_votes, resolve, DelegatedVote, ResolutionInput, VoteChoice};
+
+    let parse = |v: &str| match v {
+        "yes" => VoteChoice::Yes,
+        "no" => VoteChoice::No,
+        _ => VoteChoice::Abstain,
+    };
+
+    let delegated: Vec<DelegatedVote> = votes
+        .iter()
+        .map(|(_, choice, confidence)| DelegatedVote {
+            position: parse(choice),
+            confidence: *confidence,
+            reasoning: String::new(),
+        })
+        .collect();
+
+    let aggregated = aggregate_delegated_votes(&delegated);
+    let cast: Vec<VoteChoice> = delegated.iter().map(|d| d.position).collect();
+    let status = resolve(&ResolutionInput {
+        votes: &cast,
+        votes_collected,
+        user_vote: user_vote.as_deref().map(parse),
+        // The core compares nothing it cannot replay, so a deadline is the
+        // HOST'S question. This app has no proposal deadlines, so it is never
+        // expired -- said rather than defaulted into silently.
+        expired: false,
+    });
+
+    CouncilOutcomeDto {
+        status: format!("{status:?}"),
+        aggregated: format!("{:?}", aggregated.vote),
+        reasoning: aggregated.reasoning,
+        utility: aggregated.utility,
+        counted: votes.len() as u32,
+    }
 }

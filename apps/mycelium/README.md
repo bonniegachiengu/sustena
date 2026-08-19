@@ -1,9 +1,9 @@
 # Mycelium — the Sustena cockpit
 
-**Status: V1.4 — the action screens.** Six panels in the shell: Constellation,
-Monitor, Console (full), Simulate, Composition and Economy. The economy is
-**really wired** — every committed call is metered and charged through the
-gate.
+**Status: V1.5 — every panel navigable, and every one truthful.** Twelve
+panels. Nine are wired to real engine capability; three describe a subsystem
+`sustena-core` does not have, in the cockpit's own layout, naming what exists
+and where the capability lives.
 
 ```bash
 npm install
@@ -168,6 +168,39 @@ a copy — a step refused in a branch is refused for real, with the same reason.
 Nothing is written: no log, no ledger, no meter, no cached state. Promote
 replays through the real `run_operator` and **does not trust the simulation** —
 a step can honestly refuse if live state moved.
+
+## Define — the engine decides what lands
+
+`editing::typecheck` parses every invariant and **binds it against the schema**;
+`editing::safe` checks the candidate against every live instance. A definition
+that fails either is **never persisted**, so loading one can never surface a
+rule that was broken when it was authored.
+
+```
+well-typed        -> Accepted
+undeclared dim    -> NotWellTyped ["rainfall: invariant 'rain_ok': undeclared dimension"]
+persisted         -> ["garden"]        (only the well-typed one landed)
+edit that strands -> WouldStrand ["garden-1 · soil_rich (soil (40.0) >= 90 (90) failed)"]
+```
+
+An authored definition is instantiated, gated and logged through **exactly** the
+path a built-in uses.
+
+★ **A finding, reported rather than smoothed over:** an unparseable expression
+(`soil >>= ??`) comes back as *"undeclared dimension >="* rather than a syntax
+error — the engine's predicate parser partially consumes it. Still a refusal,
+still nothing written, but the message misleads. The UI shows the engine's words
+verbatim rather than inventing a friendlier lie.
+
+## Profile — the real capability model, honestly unenforced
+
+`effective_privilege` walks the membership path with the **weakest-link** rule;
+`permitted` compares it against each operator's declared `min_privilege`.
+
+★★★ **And the gate is not checking any of it.** Every call runs
+`Authorization::Unchecked`. The screen shows the authority the principal
+*holds*, not one being enforced — a permission matrix implying enforcement would
+be security theatre.
 
 ## What is real, and what is not
 

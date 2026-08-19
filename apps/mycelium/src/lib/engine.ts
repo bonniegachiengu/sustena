@@ -8,7 +8,13 @@
  */
 import {
   commands,
+  type AccessDto,
+  type AuthoredDefinition,
   type Branch,
+  type CouncilOutcomeDto,
+  type DefinitionVerdict,
+  type DimDecl,
+  type InvariantDecl,
   type ConstraintReading,
   type EconomyDto,
   type GateResult,
@@ -24,7 +30,13 @@ import {
 } from "../bindings";
 
 export type {
+  AccessDto,
+  AuthoredDefinition,
   Branch,
+  CouncilOutcomeDto,
+  DefinitionVerdict,
+  DimDecl,
+  InvariantDecl,
   ConstraintReading,
   EconomyDto,
   OperatorDto,
@@ -67,6 +79,22 @@ export const engine = {
   economy: (): Promise<EconomyDto> => commands.getEconomy(),
   setParameter: (name: string, value: number): Promise<GateResult> =>
     commands.setParameter(name, value),
+  definitions: (): Promise<AuthoredDefinition[]> => commands.getDefinitions(),
+  authorDefinition: async (d: AuthoredDefinition): Promise<DefinitionVerdict> =>
+    unwrap(await commands.authorDefinition(d)),
+  createFromDefinition: async (
+    id: string,
+    label: string,
+    definitionId: string,
+    parent: string | null,
+  ): Promise<boolean> =>
+    unwrap(await commands.createFromDefinition(id, label, definitionId, parent)),
+  access: (sustainId: string): Promise<AccessDto> => commands.getAccess(sustainId),
+  resolveProposal: (
+    votes: [string, string, number][],
+    userVote: string | null,
+    collected: boolean,
+  ): Promise<CouncilOutcomeDto> => commands.resolveProposal(votes, userVote, collected),
   /** A hypothetical branch. Nothing is written. */
   simulate: (id: string, steps: [string, JsonValue][]): Promise<Branch | null> =>
     commands.simulate(id, steps),

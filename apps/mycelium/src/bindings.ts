@@ -112,6 +112,65 @@ async getEconomy() : Promise<EconomyDto> {
  */
 async setParameter(name: string, value: number) : Promise<GateResult> {
     return await TAURI_INVOKE("set_parameter", { name, value });
+},
+/**
+ * Every definition a person has authored on this host.
+ */
+async getDefinitions() : Promise<AuthoredDefinition[]> {
+    return await TAURI_INVOKE("get_definitions");
+},
+/**
+ * ★★★ Author a definition — **the engine decides whether it lands**.
+ * 
+ * `editing::typecheck` parses every invariant and binds it against the schema;
+ * `editing::safe` checks it against every live instance. A definition that
+ * fails either is never written, and the verdict carries the engine's own
+ * words rather than a summary of them.
+ */
+async authorDefinition(definition: AuthoredDefinition) : Promise<Result<DefinitionVerdict, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("author_definition", { definition }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Instantiate a Sustain from an authored definition — the same path a
+ * built-in uses.
+ */
+async createFromDefinition(id: string, label: string, definitionId: string, parent: string | null) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_from_definition", { id, label, definitionId, parent }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * What the local principal may do on one Sustain, **as the engine judges it**.
+ * 
+ * ★★ `permitted` walks the membership path with the weakest-link rule and
+ * compares against each operator's declared `min_privilege`. This is the real
+ * model, not a display of intentions.
+ * 
+ * ★★★ **And it is not what the gate currently checks.** Every call in this
+ * host runs `Authorization::Unchecked`, so this is the authority a person
+ * HOLDS, shown — not one being enforced. The screen says so, because a
+ * permission matrix that implied enforcement would be security theatre.
+ */
+async getAccess(sustainId: string) : Promise<AccessDto> {
+    return await TAURI_INVOKE("get_access", { sustainId });
+},
+/**
+ * ★★★ Resolve a proposal with the engine's own `council::resolve`.
+ * 
+ * Real: the rule that a person's vote overrides the council, that an abstaining
+ * person leaves it **in voting** rather than deciding, and that collected votes
+ * with nobody in favour fail. None of it is re-implemented here.
+ */
+async resolveProposal(votes: ([string, string, number])[], userVote: string | null, votesCollected: boolean) : Promise<CouncilOutcomeDto> {
+    return await TAURI_INVOKE("resolve_proposal", { votes, userVote, votesCollected });
 }
 }
 
@@ -132,6 +191,27 @@ refused: "refused"
 
 /** user-defined types **/
 
+/**
+ * The principal's authority over one Sustain.
+ */
+export type AccessDto = { principal: string; sustainId: string; 
+/**
+ * Effective privilege after the weakest-link path walk. `null` when the
+ * principal has no membership at all.
+ */
+tier: number | null; memberships: number; operators: OperatorAccessDto[]; 
+/**
+ * ★★★ Whether the gate is currently checking any of this. It is not.
+ */
+enforced: boolean; note: string }
+/**
+ * A definition as authored and persisted.
+ */
+export type AuthoredDefinition = { id: string; label: string; dimensions: DimDecl[]; operators: string[]; invariants: InvariantDecl[]; 
+/**
+ * The opening state a new instance starts from.
+ */
+openingState: JsonValue }
 /**
  * A whole hypothetical branch.
  */
@@ -191,6 +271,57 @@ export type ConstraintReading = { id: string; expression: string; holds: boolean
  * operand and the value that failed.
  */
 reason: string }
+/**
+ * What `council::resolve` decided.
+ */
+export type CouncilOutcomeDto = { 
+/**
+ * `Passed` | `Failed` | `InVoting` | `OverriddenByUser` | …
+ */
+status: string; 
+/**
+ * The councillor's single vote after `aggregate_delegated_votes`.
+ */
+aggregated: string; 
+/**
+ * The engine's own explanation of the aggregation.
+ */
+reasoning: string; utility: number; counted: number }
+/**
+ * What the engine said about an authored definition.
+ */
+export type DefinitionVerdict = 
+/**
+ * `typecheck` accepted it, and no live instance would be stranded.
+ */
+{ kind: "accepted" } | 
+/**
+ * ★ One entry per problem, each naming the invariant and the detail —
+ * `editing::typecheck`'s own words, not a summary of them.
+ */
+{ kind: "notWellTyped"; errors: string[] } | 
+/**
+ * ★★ Live Sustains this edit would push outside their viable region —
+ * each with the RULE it would break and the engine's reason. A refusal
+ * that cannot say which sustain and which rule is an alarm, not a
+ * diagnosis.
+ */
+{ kind: "wouldStrand"; instances: string[] }
+/**
+ * One dimension a person declared.
+ */
+export type DimDecl = { path: string; 
+/**
+ * `number` | `text` | `bool` | `any`.
+ */
+kind: string; 
+/**
+ * ★ Optional bounds for a number. `DimType::Number` carries them, so a
+ * dimension can be constrained at the SCHEMA level as well as by an
+ * invariant — two different questions: what values are representable, and
+ * what values are viable.
+ */
+lo: number | null; hi: number | null }
 /**
  * The whole economy, as one screen reads it.
  */
@@ -262,6 +393,10 @@ export type Holarchy =
  */
 { kind: "broken"; reason: string }
 /**
+ * One rule a person declared.
+ */
+export type InvariantDecl = { id: string; expression: string }
+/**
  * A rule the household declared it must stay within.
  */
 export type InvariantDto = { id: string; expression: string }
@@ -308,6 +443,19 @@ mutations: number }
  * showing a zero. A `0` from an unmeasured basis is silence, not cheapness.
  */
 export type MeasuredPawa = { runs: number; meanPawa: number; totalPawa: number; totalCompute: number; totalStorage: number }
+/**
+ * Whether the principal may run one operator, as the engine judges it.
+ */
+export type OperatorAccessDto = { operator: string; 
+/**
+ * The operator's declared `min_privilege`. ★ Lower is more privileged:
+ * 0 = owner, 3 = observer.
+ */
+requiredTier: number; permitted: boolean; 
+/**
+ * The engine's own denial text when it is not.
+ */
+denial: string | null }
 /**
  * One operator the selected Sustain may actually run.
  */

@@ -14,8 +14,10 @@ use std::path::PathBuf;
 use serde_json::{json, Map, Value};
 
 use mycelium_lib::dto::{Committed, ConstraintReading, GateResult, Refused, SustainSummary};
-use mycelium_lib::world::PRINCIPAL;
+use mycelium_lib::definitions::{AuthoredDefinition, DimDecl, InvariantDecl};
+use mycelium_lib::world::{memberships, PRINCIPAL};
 use mycelium_lib::store::Store;
+use mycelium_lib::templates::TemplateId;
 use mycelium_lib::world::World;
 
 fn params(pairs: &[(&str, Value)]) -> Map<String, Value> {
@@ -239,6 +241,95 @@ fn main() {
         println!("   holon.transfer      NOT in sustena-core -> honest unavailable");
         println!("   (juul::transfer exists, but that is the ECONOMY's internal unit,");
         println!("    not a conserved cross-Sustain move of household money)");
+
+
+        rule("V1.5 · DEFINE -- the engine decides what lands");
+        let mk = |id: &str, inv: Vec<InvariantDecl>| AuthoredDefinition {
+            id: id.into(),
+            label: "Garden".into(),
+            dimensions: vec![
+                DimDecl { path: "soil".into(), kind: "number".into(), lo: Some(0.0), hi: Some(100.0) },
+                DimDecl { path: "notes".into(), kind: "text".into(), lo: None, hi: None },
+            ],
+            operators: vec!["budget.record_income".into()],
+            invariants: inv,
+            opening_state: json!({ "soil": 40.0, "notes": "" }),
+        };
+
+        // (a) well-typed -> accepted and persisted
+        let good = mk("garden", vec![InvariantDecl { id: "soil_ok".into(), expression: "soil >= 0".into() }]);
+        println!("   well-typed        -> {:?}", world.author_definition(&good).expect("disk"));
+
+        // (b) invariant over a dimension the schema does not declare
+        let undeclared = mk("garden-bad-dim",
+            vec![InvariantDecl { id: "rain_ok".into(), expression: "rainfall >= 0".into() }]);
+        println!("   undeclared dim    -> {:?}", world.author_definition(&undeclared).expect("disk"));
+
+        // (c) an invariant that will not parse at all
+        let unparseable = mk("garden-bad-syntax",
+            vec![InvariantDecl { id: "nonsense".into(), expression: "soil >>= ??".into() }]);
+        println!("   unparseable       -> {:?}", world.author_definition(&unparseable).expect("disk"));
+
+        println!("   persisted definitions: {:?}",
+            world.definitions().iter().map(|d| d.id.clone()).collect::<Vec<_>>());
+        println!("   (only the well-typed one landed -- the store never holds a broken Sigma)");
+
+        // (d) instantiate from the authored definition, then EDIT it into a
+        //     rule the live instance breaks -> the engine names what it strands.
+        world.instantiate_from("garden-1", "Garden 1", TemplateId::Habitat, Some("garden"), None)
+            .expect("instantiate from an authored definition");
+        println!("   instantiated garden-1 from the authored definition");
+        let strands = mk("garden", vec![
+            InvariantDecl { id: "soil_ok".into(), expression: "soil >= 0".into() },
+            InvariantDecl { id: "soil_rich".into(), expression: "soil >= 90".into() },
+        ]);
+        println!("   edit that strands -> {:?}", world.author_definition(&strands).expect("disk"));
+
+        rule("V1.5 · PROFILE -- the real capability model");
+        {
+            use sustena_core::principal::{effective_privilege, permitted};
+            let m = memberships();
+            let path = vec!["homestead".to_string()];
+            println!("   principal          {PRINCIPAL}");
+            println!("   memberships        {}", m.len());
+            println!("   effective tier     {:?}  (0 = owner)", effective_privilege(&m, PRINCIPAL, &path));
+            for op in ["budget.record_income", "budget.spend"] {
+                if let Some(meta) = world.operators.get(op) {
+                    println!("   {:<24} needs tier {}  permitted={}",
+                        op, meta.min_privilege,
+                        permitted(&m, PRINCIPAL, &path, meta.min_privilege).is_ok());
+                }
+            }
+            println!("   NOTE: displayed, not enforced -- the gate still runs Authorization::Unchecked");
+        }
+
+        rule("V1.5 · COUNCIL -- resolve, by the engine");
+        {
+            use sustena_core::council::{aggregate_delegated_votes, resolve, DelegatedVote, ResolutionInput, VoteChoice};
+            let dv = |p: VoteChoice, c: f64| DelegatedVote { position: p, confidence: c, reasoning: String::new() };
+            let votes = vec![dv(VoteChoice::Yes, 0.9), dv(VoteChoice::Yes, 0.6), dv(VoteChoice::No, 0.4)];
+            let agg = aggregate_delegated_votes(&votes);
+            println!("   aggregated         {:?}  utility {:.2}", agg.vote, agg.utility);
+            println!("   reasoning          {}", agg.reasoning);
+            let cast: Vec<VoteChoice> = votes.iter().map(|v| v.position).collect();
+            for (label, user) in [
+                ("council alone", None),
+                ("person says yes", Some(VoteChoice::Yes)),
+                ("person says no", Some(VoteChoice::No)),
+                ("person abstains", Some(VoteChoice::Abstain)),
+            ] {
+                let st = resolve(&ResolutionInput { votes: &cast, votes_collected: true, user_vote: user, expired: false });
+                println!("   {:<18} -> {:?}", label, st);
+            }
+        }
+
+        rule("V1.5 · WHAT IS NOT IN THE CORE (grep-0)");
+        println!("   ingest / transducer / parse rules   NOT in sustena-core");
+        println!("   arena / library / marketplace       NOT in sustena-core");
+        println!("   (the one 'ingest' hit in the core is clocks.rs's t_ingest --");
+        println!("    an unrelated sense of the word, named so a re-grepper is not misled)");
+        println!("   network: the PRIMITIVES exist (crdt, vclock, consensus, router)");
+        println!("            but this host has no peer transport -- single node, honestly");
 
         rule("RUN 1 · V, evaluated by the engine");
         for (id, expr, holds, reason) in world.constraints("homestead") {

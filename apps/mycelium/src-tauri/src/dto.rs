@@ -539,3 +539,50 @@ pub struct EconomyDto {
     /// to show it.
     pub boundary_notice: String,
 }
+
+// ── access (Profile) ─────────────────────────────────────────────────────────
+
+/// Whether the principal may run one operator, as the engine judges it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorAccessDto {
+    pub operator: String,
+    /// The operator's declared `min_privilege`. ★ Lower is more privileged:
+    /// 0 = owner, 3 = observer.
+    pub required_tier: u8,
+    pub permitted: bool,
+    /// The engine's own denial text when it is not.
+    pub denial: Option<String>,
+}
+
+/// The principal's authority over one Sustain.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessDto {
+    pub principal: String,
+    pub sustain_id: String,
+    /// Effective privilege after the weakest-link path walk. `null` when the
+    /// principal has no membership at all.
+    pub tier: Option<u8>,
+    pub memberships: u32,
+    pub operators: Vec<OperatorAccessDto>,
+    /// ★★★ Whether the gate is currently checking any of this. It is not.
+    pub enforced: bool,
+    pub note: String,
+}
+
+// ── council ──────────────────────────────────────────────────────────────────
+
+/// What `council::resolve` decided.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CouncilOutcomeDto {
+    /// `Passed` | `Failed` | `InVoting` | `OverriddenByUser` | …
+    pub status: String,
+    /// The councillor's single vote after `aggregate_delegated_votes`.
+    pub aggregated: String,
+    /// The engine's own explanation of the aggregation.
+    pub reasoning: String,
+    pub utility: f64,
+    pub counted: u32,
+}

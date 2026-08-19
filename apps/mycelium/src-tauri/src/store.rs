@@ -91,6 +91,11 @@ pub struct SustainRecord {
     pub id: String,
     pub label: String,
     pub template: TemplateId,
+    /// ★ Set when this Sustain was instantiated from an AUTHORED definition
+    /// rather than a built-in template. `template` is then only a shape hint;
+    /// `custom` is the truth.
+    #[serde(default)]
+    pub custom: Option<String>,
     /// `⊕` — the parent in the household's composition, if any.
     pub parent: Option<String>,
 }
@@ -153,6 +158,53 @@ impl Store {
 
     fn registry_path(&self) -> PathBuf {
         self.root.join("sustains.json")
+    }
+
+    fn definitions_path(&self) -> PathBuf {
+        self.root.join("definitions.jsonl")
+    }
+
+    /// Every authored definition, in the order they were written.
+    ///
+    /// ★ Append-only, like the event log: a definition is never edited in
+    /// place. The LAST entry for an id is the current one, so the file is the
+    /// history of how a `Σ` was arrived at rather than only where it ended up.
+    pub fn read_definitions(&self) -> StoreResult<Vec<crate::definitions::AuthoredDefinition>> {
+        let path = self.definitions_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let file = File::open(&path)?;
+        let mut latest: std::collections::BTreeMap<String, crate::definitions::AuthoredDefinition> =
+            Default::default();
+        for (i, line) in BufReader::new(file).lines().enumerate() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let d: crate::definitions::AuthoredDefinition =
+                serde_json::from_str(&line).map_err(|e| StoreError::Corrupt {
+                    file: "definitions.jsonl".into(),
+                    line: i + 1,
+                    reason: e.to_string(),
+                })?;
+            latest.insert(d.id.clone(), d);
+        }
+        Ok(latest.into_values().collect())
+    }
+
+    /// Append one authored definition. ★ Durably, like every other append.
+    pub fn append_definition(
+        &self,
+        d: &crate::definitions::AuthoredDefinition,
+    ) -> StoreResult<()> {
+        let line = serde_json::to_string(d).map_err(|e| StoreError::Io(e.to_string()))?;
+        let mut f =
+            OpenOptions::new().create(true).append(true).open(self.definitions_path())?;
+        f.write_all(line.as_bytes())?;
+        f.write_all(b"\n")?;
+        f.sync_all()?;
+        Ok(())
     }
 
     fn log_path(&self, sustain_id: &str) -> PathBuf {

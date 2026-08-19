@@ -28,6 +28,9 @@ use sustena_core::{
     semantic::enforcement_of,
 };
 
+use sustena_core::principal::{MembershipEdge, Memberships, TIER_OWNER};
+
+use crate::definitions::{check as check_definition, AuthoredDefinition, DefinitionVerdict};
 use crate::economy::Economy;
 use crate::store::{LoggedEvent, Registry as Records, Store, StoreError, StoreResult, SustainRecord};
 use crate::templates::{self, TemplateId};
@@ -60,6 +63,8 @@ pub struct World {
     /// ★★ Every `PawaReading` this host has taken. This is what makes the
     /// Console's *measured pawa* a measurement rather than an author's guess.
     meter: Mutex<Meter>,
+    /// Definitions a person authored, checked by the engine before landing.
+    definitions: Mutex<Vec<AuthoredDefinition>>,
 }
 
 pub struct Inner {
@@ -75,8 +80,16 @@ impl World {
         let mut sustains = BTreeMap::new();
         let mut order = Vec::new();
 
+        let authored = store.read_definitions()?;
         for record in &records.sustains {
-            let definition = templates::definition(record.template);
+            let definition = match &record.custom {
+                Some(cid) => authored
+                    .iter()
+                    .find(|d| &d.id == cid)
+                    .map(|d| d.to_definition())
+                    .unwrap_or_else(|| templates::definition(record.template)),
+                None => templates::definition(record.template),
+            };
             let enforcement = enforcement_of(&definition);
             let (state, next_seq) = store.load_state(&record.id)?;
             order.push(record.id.clone());
@@ -87,6 +100,7 @@ impl World {
         }
 
         let selected = records.selected.filter(|id| sustains.contains_key(id)).or(order.first().cloned());
+        let definitions = authored;
 
         Ok(World {
             operators: Registry::default(),
@@ -94,6 +108,7 @@ impl World {
             store,
             economy: Mutex::new(Economy::open(PRINCIPAL)),
             meter: Mutex::new(Meter::new()),
+            definitions: Mutex::new(definitions),
         })
     }
 
@@ -154,6 +169,22 @@ impl World {
         template: TemplateId,
         parent: Option<&str>,
     ) -> StoreResult<bool> {
+        self.instantiate_from(id, label, template, None, parent)
+    }
+
+    /// Instantiate from a built-in template or an AUTHORED definition.
+    ///
+    /// ★★ One path. An authored definition is opened, gated and logged exactly
+    /// as a built-in is — nothing about being user-written makes it a
+    /// second-class Sustain.
+    pub fn instantiate_from(
+        &self,
+        id: &str,
+        label: &str,
+        template: TemplateId,
+        custom: Option<&str>,
+        parent: Option<&str>,
+    ) -> StoreResult<bool> {
         let mut inner = self.inner.lock().expect("world lock");
         if inner.sustains.contains_key(id) {
             return Ok(false);
@@ -164,7 +195,9 @@ impl World {
             }
         }
 
-        let state = templates::opening_state(template);
+        let (definition, state) = self
+            .resolve_template(template, custom)
+            .ok_or_else(|| StoreError::Io(format!("no such definition: {custom:?}")))?;
         let genesis = LoggedEvent::genesis(&state);
         self.store.append(id, &genesis)?;
 
@@ -172,9 +205,9 @@ impl World {
             id: id.to_string(),
             label: label.to_string(),
             template,
+            custom: custom.map(str::to_string),
             parent: parent.map(str::to_string),
         };
-        let definition = templates::definition(template);
         let enforcement = enforcement_of(&definition);
 
         inner.order.push(id.to_string());
@@ -481,4 +514,95 @@ impl Inner {
             .filter(|s| s.record.parent.as_deref() == Some(id))
             .collect()
     }
+}
+
+// ── authored definitions ─────────────────────────────────────────────────────
+
+impl World {
+    pub fn definitions(&self) -> Vec<AuthoredDefinition> {
+        self.definitions.lock().expect("definitions lock").clone()
+    }
+
+    /// ★★★ Check an authored definition with the ENGINE, and persist it only if
+    /// the engine accepted it.
+    ///
+    /// `typecheck` parses every invariant and binds it against the schema;
+    /// `safe` evaluates the candidate against every live instance already on
+    /// this definition. A definition that fails either is **never written**, so
+    /// the store cannot hold one that was broken when it was authored.
+    pub fn author_definition(&self, authored: &AuthoredDefinition) -> StoreResult<DefinitionVerdict> {
+        // Live instances already on this definition — empty for a new one,
+        // which is exactly why creating is safe and editing is where stranding
+        // can bite.
+        let instances: Vec<sustena_core::editing::Instance> = self.with(|i| {
+            i.order()
+                .iter()
+                .filter_map(|id| i.get(id))
+                .filter(|s| s.record.custom.as_deref() == Some(authored.id.as_str()))
+                .map(|s| sustena_core::editing::Instance {
+                    id: s.record.id.clone(),
+                    state: s.state.clone(),
+                })
+                .collect()
+        });
+
+        let verdict = check_definition(authored, &instances);
+        if matches!(verdict, DefinitionVerdict::Accepted) {
+            self.store.append_definition(authored)?;
+            let mut defs = self.definitions.lock().expect("definitions lock");
+            defs.retain(|d| d.id != authored.id);
+            defs.push(authored.clone());
+        }
+        Ok(verdict)
+    }
+
+    /// The `Definition` and opening state for a template ref — built-in or authored.
+    ///
+    /// ★ One resolver, so an authored definition is instantiated through
+    /// **exactly** the path a built-in uses. Nothing about being user-written
+    /// makes it a second-class Sustain.
+    pub fn resolve_template(
+        &self,
+        template: TemplateId,
+        custom: Option<&str>,
+    ) -> Option<(Definition, Value)> {
+        match custom {
+            None => Some((templates::definition(template), templates::opening_state(template))),
+            Some(id) => {
+                let defs = self.definitions.lock().expect("definitions lock");
+                let d = defs.iter().find(|d| d.id == id)?;
+                Some((d.to_definition(), d.opening_state.clone()))
+            }
+        }
+    }
+}
+
+// ── capability: the real authorization model ─────────────────────────────────
+
+/// ★★★ The household capability this app runs under, and what it permits.
+///
+/// The core has a genuine capability model — `Capability::issue`, `attenuate`
+/// (which **refuses amplification**), and `permits(sustain, operator, tier)`.
+/// This builds the one the local principal holds and asks it about every
+/// operator, so the Profile screen shows a real permission matrix.
+///
+/// ★★ **And it is not yet what the gate checks.** Every call in this host still
+/// runs `Authorization::Unchecked`, so this is the authority a person HAS,
+/// displayed — not an authority that is currently being enforced. Saying that
+/// plainly is the difference between a security model and a security theatre.
+pub fn memberships() -> Memberships {
+    // The declared membership graph. One Owner edge per Sustain, because this
+    // is a single-person household today -- a real household with several
+    // people is where the weakest-link path rule starts to earn its keep.
+    let mut m = Memberships::new();
+    for sustain in ["homestead", "habitat-bonnie", "habitat-cira", "habitat-epha",
+                    "habitat-mum", "habitat-kui", "habitat-frankie"] {
+        m.grant(MembershipEdge {
+            principal: PRINCIPAL.to_string(),
+            sustain: sustain.to_string(),
+            tier: TIER_OWNER,
+            skin: None,
+        });
+    }
+    m
 }

@@ -1,14 +1,16 @@
 /**
- * MYCELIUM — V1.4. The app shell.
+ * MYCELIUM — V1.5. Every panel navigable, and every one truthful.
  *
  * ★★ The frame is permanent and the panel swaps inside it: left nav, topbar
  * with the Sustain selector, status belt. **One selection model** — the
  * selector, the nav and the constellation all read and write `world.selected`,
  * so they cannot disagree about what you are looking at.
  *
- * ★ Panels the roadmap names but the app does not have yet are listed and
- * **disabled**, marked `soon`. A nav that hid them would misrepresent the
- * product; one that pretended they worked would be worse.
+ * ★★ **Every panel is now navigable.** Three of them (Ingest, Network, Library)
+ * describe a subsystem `sustena-core` does not have — and they say what exists,
+ * what does not, and where the capability lives, in the cockpit's own layout. A
+ * disabled item told a person nothing; a designed absence tells them the truth
+ * about the system they are running.
  */
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import * as s from "./styles/app.css";
@@ -21,8 +23,23 @@ import Console from "./screens/Console";
 import Simulate from "./screens/Simulate";
 import Composition from "./screens/Composition";
 import Economy from "./screens/Economy";
+import Define from "./screens/Define";
+import Profile from "./screens/Profile";
+import { Council, Ingest, Library, Network } from "./screens/Panels";
 
-type Panel = "constellation" | "monitor" | "console" | "simulate" | "composition" | "economy";
+type Panel =
+  | "constellation"
+  | "monitor"
+  | "console"
+  | "simulate"
+  | "composition"
+  | "economy"
+  | "define"
+  | "council"
+  | "ingest"
+  | "network"
+  | "library"
+  | "profile";
 
 /** The roadmap's panel list. `soon` ones are shown, disabled, and labelled. */
 const NAV: { group: string; items: { id: Panel | string; label: string; soon?: boolean }[] }[] = [
@@ -31,7 +48,7 @@ const NAV: { group: string; items: { id: Panel | string; label: string; soon?: b
     items: [
       { id: "constellation", label: "Constellation" },
       { id: "monitor", label: "Monitor" },
-      { id: "council", label: "Council", soon: true },
+      { id: "council", label: "Council" },
     ],
   },
   {
@@ -39,7 +56,7 @@ const NAV: { group: string; items: { id: Panel | string; label: string; soon?: b
     items: [
       { id: "console", label: "Console" },
       { id: "simulate", label: "Simulate" },
-      { id: "define", label: "Define", soon: true },
+      { id: "define", label: "Define" },
       { id: "composition", label: "Composition" },
     ],
   },
@@ -47,10 +64,10 @@ const NAV: { group: string; items: { id: Panel | string; label: string; soon?: b
     group: "system",
     items: [
       { id: "economy", label: "Economy" },
-      { id: "ingest", label: "Ingest", soon: true },
-      { id: "network", label: "Network", soon: true },
-      { id: "library", label: "Library", soon: true },
-      { id: "profile", label: "Profile", soon: true },
+      { id: "ingest", label: "Ingest" },
+      { id: "network", label: "Network" },
+      { id: "library", label: "Library" },
+      { id: "profile", label: "Profile" },
     ],
   },
 ];
@@ -109,7 +126,7 @@ export default function App() {
       {/* ── topbar ────────────────────────────────────────────────────────── */}
       <header class={s.topbar}>
         <span class={s.brand}>Mycelium</span>
-        <span class={s.brandSub}>v1.4</span>
+        <span class={s.brandSub}>v1.5</span>
 
         <select
           class={s.picker}
@@ -214,6 +231,24 @@ export default function App() {
             </Show>
             <Show when={panel() === "economy"}>
               <Economy />
+            </Show>
+            <Show when={panel() === "define"}>
+              <Define />
+            </Show>
+            <Show when={panel() === "council"}>
+              <Council />
+            </Show>
+            <Show when={panel() === "ingest"}>
+              <Ingest />
+            </Show>
+            <Show when={panel() === "network"}>
+              <Network />
+            </Show>
+            <Show when={panel() === "library"}>
+              <Library />
+            </Show>
+            <Show when={panel() === "profile"}>
+              <Profile />
             </Show>
           </Show>
         </div>

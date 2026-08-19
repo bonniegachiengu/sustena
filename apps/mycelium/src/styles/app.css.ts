@@ -853,3 +853,38 @@ export const pawaUnmeasured = style({
   fontSize: "10.5px",
   color: vars.color.textDim,
 });
+
+/* -- V1.5 ---------------------------------------------------------------- */
+
+export const unavailableBadge = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10px",
+  letterSpacing: "0.08em",
+  color: vars.color.textMuted,
+  border: `1px dashed ${vars.color.borderMid}`,
+  borderRadius: vars.radius.sm,
+  padding: `2px ${vars.space.sm}`,
+});
+
+export const absenceHeadline = style({
+  fontFamily: vars.font.ui,
+  fontSize: "14px",
+  lineHeight: 1.55,
+  color: vars.color.textPrimary,
+  margin: 0,
+});
+
+export const avatarLarge = style({
+  width: "44px",
+  height: "44px",
+  borderRadius: vars.radius.md,
+  background: vars.color.amberGlow,
+  border: `1px solid ${vars.color.amberBorder}`,
+  color: vars.color.amber,
+  fontFamily: vars.font.mono,
+  fontSize: "16px",
+  fontWeight: 500,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+});
