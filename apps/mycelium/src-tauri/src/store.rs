@@ -33,9 +33,13 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sustena_core::event::CausalStamp;
+use sustena_core::sync::{reconcile, LogEntry, Reconciliation, Replayable, Replica};
+use sustena_core::VectorClock;
 use sustena_core::{
     fold::{fold_events, FoldEvent},
     mutation::Mutation,
@@ -51,7 +55,7 @@ use crate::templates::TemplateId;
 /// events it published — because an event log a person cannot read is only a
 /// database. The fold uses `mutations` alone, so the extra fields can never
 /// change what the state is.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LoggedEvent {
     pub seq: u64,
     /// The operator that produced it, or `genesis` for the opening line.
@@ -60,6 +64,31 @@ pub struct LoggedEvent {
     pub events: Vec<EventDto>,
     #[serde(default)]
     pub mutations: Vec<Mutation>,
+    /// ★★★ **The node that wrote this line.** `seq` alone stopped being an
+    /// identity the moment a second node existed: two nodes both write
+    /// `seq: 5`, and a merge keyed on the bare sequence silently drops one.
+    /// `(origin, seq)` is the identity `sync::LogEntry` needs.
+    ///
+    /// ★★ `None` on every line written before peering existed — and those
+    /// lines genuinely DID originate here, so resolving them to this node is
+    /// a true statement rather than a default. Attribution is safe because a
+    /// legacy log can only exist for a Sustain this node already had: a
+    /// Sustain that arrives from a peer arrives with its origins attached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// The scalar Lamport clock that orders the merged fold (Multiparty §IV).
+    ///
+    /// ★ `None` on a legacy line, resolved to `seq + 1`: on a single node the
+    /// two are the same order, which is exactly why the migration needs no
+    /// rewrite of anyone's history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lamport: Option<u64>,
+}
+
+impl Replayable for LoggedEvent {
+    fn mutations(&self) -> &[Mutation] {
+        &self.mutations
+    }
 }
 
 impl LoggedEvent {
@@ -72,6 +101,8 @@ impl LoggedEvent {
             operator: "genesis".into(),
             events: Vec::new(),
             mutations: vec![Mutation::ReplaceRoot { value: state.clone() }],
+            origin: None,
+            lamport: None,
         }
     }
 
@@ -81,7 +112,21 @@ impl LoggedEvent {
             operator: operator.to_string(),
             events: x.events.iter().map(EventDto::from).collect(),
             mutations: x.mutations.clone(),
+            origin: None,
+            lamport: None,
         }
+    }
+
+    /// Stamp a line with the node that wrote it and its logical clock.
+    ///
+    /// ★ A builder rather than two more constructor arguments: `genesis` and
+    /// `of` are called from places that do not all know the clock yet, and a
+    /// half-filled stamp would be worse than a clearly unstamped one.
+    pub fn written_by(mut self, node: &str, seq: u64, lamport: u64) -> Self {
+        self.origin = Some(node.to_string());
+        self.seq = seq;
+        self.lamport = Some(lamport);
+        self
     }
 }
 
@@ -172,9 +217,15 @@ impl From<std::io::Error> for StoreError {
 pub type StoreResult<T> = Result<T, StoreError>;
 
 /// The household's durable home.
+///
+/// ★★ `Clone` shares the SAME append lock, deliberately. Once a peer server
+/// runs on its own thread there are two writers to one `.jsonl`, and an
+/// interleaved append would corrupt a line rather than merely reorder it. A
+/// clone is a second handle to one store, not a second store.
 #[derive(Debug, Clone)]
 pub struct Store {
     root: PathBuf,
+    appending: Arc<Mutex<()>>,
 }
 
 impl Store {
@@ -182,7 +233,7 @@ impl Store {
         let root = root.into();
         fs::create_dir_all(root.join("events"))?;
         fs::create_dir_all(root.join("transfers"))?;
-        Ok(Store { root })
+        Ok(Store { root, appending: Arc::new(Mutex::new(())) })
     }
 
     pub fn root(&self) -> &Path {
@@ -312,6 +363,8 @@ impl Store {
     /// as committed must survive the quit that follows it.
     pub fn append(&self, sustain_id: &str, event: &LoggedEvent) -> StoreResult<()> {
         let line = serde_json::to_string(event).map_err(|e| StoreError::Io(e.to_string()))?;
+        // ★ One writer at a time across every handle to this store.
+        let _guard = self.appending.lock().expect("append lock");
         let mut f = OpenOptions::new().create(true).append(true).open(self.log_path(sustain_id))?;
         f.write_all(line.as_bytes())?;
         f.write_all(b"\n")?;
@@ -395,7 +448,10 @@ impl Store {
             let already = self
                 .read_log(&leg.sustain_id)?
                 .iter()
-                .any(|e| e.seq == leg.event.seq);
+                // ★★ `(origin, seq)`, not `seq`. Once a log can hold a peer's
+                //    entries, a bare sequence is no longer an identity, and
+                //    "already present" would start matching the wrong line.
+                .any(|e| e.seq == leg.event.seq && e.origin == leg.event.origin);
             if !already {
                 self.append(&leg.sustain_id, &leg.event)?;
             }
@@ -466,5 +522,110 @@ impl Store {
             log.into_iter().map(|e| FoldEvent { mutations: e.mutations }).collect();
         let state = fold_events(&folded, None).map_err(|e| StoreError::Fold(format!("{e:?}")))?;
         Ok((state, next_seq))
+    }
+
+    // ── the replicated view of the same log ───────────────────────────
+
+    /// The same `.jsonl`, read as a CRDT replica.
+    ///
+    /// ★★★ **One file, two readings, and they agree on a single node.**
+    /// [`Store::load_state`] folds in FILE order; this folds in CAUSAL order.
+    /// While every line was written here those are the same sequence, which is
+    /// what makes the migration free. They diverge the moment a peer's entry
+    /// lands mid-history — and from then on the causal one is the correct one,
+    /// which is why [`Store::load_replicated`] is what the world uses once a
+    /// Sustain is shared.
+    ///
+    /// ★ `node` is this machine's public key. Legacy lines are attributed to
+    /// it (see [`LoggedEvent::origin`]).
+    pub fn read_replica(&self, sustain_id: &str, node: &str) -> StoreResult<Replica<LoggedEvent>> {
+        let mut replica = Replica::new();
+        for line in self.read_log(sustain_id)? {
+            replica.insert(entry_of(line, node));
+        }
+        Ok(replica)
+    }
+
+    /// Fold a Sustain in causal order, and report what the merge could not
+    /// decide. `invariants` are the Sustain's own — the same rules the gate
+    /// checks — and `None` means *unmeasured*, not *fine*.
+    pub fn load_replicated(
+        &self,
+        sustain_id: &str,
+        node: &str,
+        invariants: Option<&[(String, String)]>,
+    ) -> StoreResult<(Reconciliation, u64)> {
+        let replica = self.read_replica(sustain_id, node)?;
+        // ★★ This node's next sequence is read off its OWN frontier, never off
+        //    the last line in the file: a peer's entry appended after ours
+        //    would otherwise push this node's sequence forward into a number
+        //    the peer may already have used.
+        //
+        // ★ No `+ 1`: the frontier holds counters, and `counter = seq + 1`
+        //   (see `entry_of`), so the highest counter already IS the next seq.
+        //   A node with no entries reads `0`, which is genesis.
+        let next_seq = replica.frontier().get(node);
+        let out = reconcile(&replica, None, invariants)
+            .map_err(|e| StoreError::Fold(format!("{e:?}")))?;
+        Ok((out, next_seq))
+    }
+
+    /// Take entries from a peer, keeping only what is genuinely new.
+    ///
+    /// ★★ Idempotent by identity rather than by bookkeeping: an entry whose
+    /// `(origin, seq)` is already on disk is skipped, so re-syncing the same
+    /// peer any number of times appends nothing. That is the property that
+    /// makes a retry after a dropped connection always safe.
+    ///
+    /// Returns the entries actually written.
+    pub fn merge_entries(
+        &self,
+        sustain_id: &str,
+        node: &str,
+        incoming: Vec<LogEntry<LoggedEvent>>,
+    ) -> StoreResult<Vec<LogEntry<LoggedEvent>>> {
+        let mut have = self.read_replica(sustain_id, node)?;
+        let mut written = Vec::new();
+        for entry in incoming {
+            if have.contains(&entry.stamp.node, entry.stamp.counter) {
+                continue;
+            }
+            let mut line = entry.payload.clone();
+            line.origin = Some(entry.stamp.node.clone());
+            // The inverse of `entry_of`'s `seq + 1`, in the one other place
+            // the two representations meet.
+            line.seq = entry.stamp.counter.saturating_sub(1);
+            line.lamport = Some(entry.lamport);
+            self.append(sustain_id, &line)?;
+            have.insert(entry.clone());
+            written.push(entry);
+        }
+        Ok(written)
+    }
+}
+
+/// Resolve a stored line into a replicated entry.
+///
+/// ★ The one place the legacy defaults are interpreted, so there is exactly
+/// one answer to *what does an unstamped line mean* rather than one per
+/// call site.
+fn entry_of(line: LoggedEvent, this_node: &str) -> LogEntry<LoggedEvent> {
+    let origin = line.origin.clone().unwrap_or_else(|| this_node.to_string());
+    // ★★★ **`counter = seq + 1`, and the off-by-one is load-bearing.** A
+    //     vector clock's absent component is `0` and MEANS *this node has done
+    //     nothing* — that is what lets two clocks over different node sets be
+    //     compared at all. A log whose first line sits at `seq 0` would be
+    //     indistinguishable from a node that had never written, so
+    //     `missing_from` would never send anyone their genesis. Found by two
+    //     real nodes syncing and one of them receiving nothing.
+    let counter = line.seq + 1;
+    let lamport = line.lamport.unwrap_or(line.seq + 1);
+    let clock = VectorClock::new().at(&origin, counter);
+    LogEntry {
+        stamp: CausalStamp { counter, node: origin },
+        lamport,
+        clock,
+        t_event: 0,
+        payload: line,
     }
 }

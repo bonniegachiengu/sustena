@@ -34,7 +34,8 @@ import Define from "./screens/Define";
 import Profile from "./screens/Profile";
 import Lock from "./screens/Lock";
 import Orchie from "./screens/Orchie";
-import { Council, Library, Network } from "./screens/Panels";
+import { Council, Library } from "./screens/Panels";
+import { Network } from "./screens/Network";
 import Ingest from "./screens/Ingest";
 
 type Panel =

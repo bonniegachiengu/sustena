@@ -12,7 +12,7 @@
 //! would produce — and a relaunch rebuilds it from the log alone.
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value};
 use sustena_core::{
@@ -43,6 +43,9 @@ use crate::dto::{EventDto, RollupDto};
 use crate::economy::Economy;
 use crate::identity::{IdentityError, IdentityStore, Unlocked};
 use crate::ingest::{Capture, Ingested};
+use sustena_core::sync::Reconciliation;
+use crate::peers::{Peering, SyncOutcome};
+use crate::wire::SharedSpec;
 use crate::store::{LoggedEvent, Registry as Records, Store, StoreError, StoreResult, SustainRecord};
 use crate::templates::{self, TemplateId};
 
@@ -74,6 +77,13 @@ pub struct Sustain {
 }
 
 /// Everything the cockpit can look at.
+/// What one peer sync did, and what the merge could not decide.
+#[derive(Debug, Clone)]
+pub struct SyncReport {
+    pub outcome: SyncOutcome,
+    pub merge: Reconciliation,
+}
+
 pub struct World {
     pub operators: Registry,
     inner: Mutex<Inner>,
@@ -92,6 +102,11 @@ pub struct World {
     identity: Mutex<Option<Unlocked>>,
     /// Where the keypair lives on disk.
     identities: IdentityStore,
+    /// ★★★ **The network half.** Its own store handle and its own copy of the
+    /// unlocked identity, because a listener runs on its own thread and must
+    /// not hold the live world. Locking clears its identity too, so the node
+    /// genuinely leaves the network rather than merely hiding the button.
+    peering: Arc<Peering>,
     /// The capture queue. ★ Its own store, beside the logs — a message is not
     /// state, it is a thing that MIGHT become state once a person or a rule
     /// says what it means.
@@ -145,8 +160,11 @@ impl World {
         let selected = records.selected.filter(|id| sustains.contains_key(id)).or(order.first().cloned());
         let definitions = authored;
 
+        let peering = Arc::new(Peering::at(&store_root, store.clone()));
+
         Ok(World {
             operators: Registry::default(),
+            peering,
             inner: Mutex::new(Inner { sustains, order, selected }),
             store,
             economy: Mutex::new(Economy::open(DEFAULT_HANDLE)),
@@ -198,6 +216,10 @@ impl World {
         }
         inner.selected = Some(id.to_string());
         self.persist_registry(&inner)?;
+        drop(inner);
+        // ★ A Sustain created after the listener started is describable
+        //   without restarting anything.
+        self.install_specs();
         Ok(true)
     }
 
@@ -257,7 +279,7 @@ impl World {
         let (definition, state) = self
             .resolve_template(template, custom)
             .ok_or_else(|| StoreError::Io(format!("no such definition: {custom:?}")))?;
-        let genesis = LoggedEvent::genesis(&state);
+        let genesis = self.stamped(id, 0, LoggedEvent::genesis(&state));
         self.store.append(id, &genesis)?;
 
         let record = SustainRecord {
@@ -279,6 +301,10 @@ impl World {
             inner.selected = Some(id.to_string());
         }
         self.persist_registry(&inner)?;
+        drop(inner);
+        // ★ A Sustain created after the listener started is describable
+        //   without restarting anything.
+        self.install_specs();
         Ok(true)
     }
 
@@ -411,7 +437,8 @@ impl World {
         //   it would imply events that were never written.
         let seq = sustain.next_seq;
         if x.committed() {
-            self.store.append(sustain_id, &LoggedEvent::of(seq, operator, &x))?;
+            let line = self.stamped(sustain_id, seq, LoggedEvent::of(seq, operator, &x));
+            self.store.append(sustain_id, &line)?;
             let sustain = inner.sustains.get_mut(sustain_id).expect("checked above");
             sustain.state = x.state.clone();
             sustain.next_seq = seq + 1;
@@ -692,6 +719,9 @@ impl World {
     pub fn unlock(&self, passphrase: &str) -> Result<String, IdentityError> {
         let u = self.identities.unlock(passphrase)?;
         let handle = u.handle().to_string();
+        // ★ The peering gets its own copy: a session must be able to prove this
+        //   node's key without reaching into the world.
+        self.peering.set_identity(Some(u.clone()));
         *self.identity.lock().expect("identity lock") = Some(u);
         // ★ A pre-ownership store claims itself once, out loud.
         if let Ok(claimed) = self.claim_unowned_for(&handle) {
@@ -706,6 +736,7 @@ impl World {
     pub fn enrol(&self, handle: &str, passphrase: &str) -> Result<String, IdentityError> {
         let u = self.identities.enrol(handle, passphrase)?;
         let handle = u.handle().to_string();
+        self.peering.set_identity(Some(u.clone()));
         *self.identity.lock().expect("identity lock") = Some(u);
         Ok(handle)
     }
@@ -713,7 +744,190 @@ impl World {
     /// Drop the private key. ★ Not a UI state — the key genuinely leaves memory,
     /// so a locked cockpit cannot act even if a surface forgot to stop it.
     pub fn lock(&self) {
+        // ★★★ Both, and in this order. A listener still holding a key after
+        //   the screen said locked would be a lie with a socket attached.
+        self.peering.set_identity(None);
         *self.identity.lock().expect("identity lock") = None;
+    }
+
+    // ── peering ─────────────────────────────────────────────────────────
+
+    pub fn peering(&self) -> &Arc<Peering> {
+        &self.peering
+    }
+
+    /// Stamp a line with this node and the next clock for that Sustain.
+    ///
+    /// ★★★ **Every local write is stamped, from genesis onward.** A line
+    /// without an origin is only readable because the migration resolves it
+    /// to this node; nothing NEW should need that fallback, or the fallback
+    /// becomes load-bearing and the next node to join inherits ambiguity.
+    ///
+    /// ★ The lamport comes from the replica rather than from a counter in
+    /// memory, so a line written after a peer's entries arrived is ordered
+    /// **after** them — which is §IV's `max(C_i, C_msg) + 1` and the whole
+    /// reason a merged history stays causal.
+    fn stamped(&self, sustain_id: &str, seq: u64, line: LoggedEvent) -> LoggedEvent {
+        let Some(node) = self.node_id() else {
+            return line;
+        };
+        let lamport = self
+            .store
+            .read_replica(sustain_id, &node)
+            .map(|r| r.next_write(&node).1)
+            .unwrap_or(seq + 1);
+        line.written_by(&node, seq, lamport)
+    }
+
+    /// This node's own network identity — its public key — readable while
+    /// **locked**, because it is public and a screen should be able to show
+    /// who this machine is without holding the private half.
+    pub fn node_id(&self) -> Option<String> {
+        self.identities.read().ok().map(|f| f.public_key)
+    }
+
+    /// Start accepting peers. `None` port asks the OS for a free one.
+    pub fn listen(&self, port: Option<u16>) -> Result<u16, String> {
+        if !self.is_unlocked() {
+            return Err("this node is locked, so it cannot prove its own key".into());
+        }
+        self.install_specs();
+        match port {
+            Some(p) => self.peering.listen_on(p),
+            None => self.peering.listen(),
+        }
+    }
+
+    /// Converge one Sustain with one peer, then re-read it from disk.
+    ///
+    /// ★★★ **The reload is not a refresh, it is the correction.** The world
+    /// holds a state folded from the log as it was; a sync appends entries
+    /// that may belong EARLIER in causal order than lines already there, so
+    /// the in-memory state is not merely stale, it is folded from the wrong
+    /// sequence. Re-folding in causal order is what makes the two nodes equal.
+    /// Teach the peering to answer *what is this Sustain*.
+    ///
+    /// ★ A closure over the registry rather than a copy of it: a Sustain
+    /// created after the listener started is describable without restarting
+    /// anything.
+    fn install_specs(&self) {
+        let specs = self.with(|i| {
+            i.order()
+                .iter()
+                .filter_map(|id| {
+                    let s = i.get(id)?;
+                    // ★★ An authored definition is refused rather than
+                    //    half-shared — see `SharedSpec`. Omitting it means the
+                    //    receiver is told what it is missing rather than handed
+                    //    a household whose rules it cannot reconstruct.
+                    if s.record.custom.is_some() {
+                        return None;
+                    }
+                    Some((
+                        id.clone(),
+                        SharedSpec {
+                            label: s.record.label.clone(),
+                            template: s.record.template.label().to_string(),
+                            owner: s.record.owner.clone(),
+                        },
+                    ))
+                })
+                .collect()
+        });
+        self.peering.set_specs(specs);
+    }
+
+    /// Register a Sustain this node is meeting for the first time.
+    ///
+    /// ★★★ **No genesis is written.** The opening line arrives as an entry
+    /// like every other; writing one here would fork the history at line zero
+    /// — two genesis lines, two origins, and a household that never agrees
+    /// about where it started.
+    pub fn adopt(&self, id: &str, spec: &SharedSpec) -> Result<bool, String> {
+        let Some(template) = TemplateId::all().into_iter().find(|t| t.label() == spec.template)
+        else {
+            return Err(format!("this node has no template called '{}'", spec.template));
+        };
+        let mut inner = self.inner.lock().expect("world lock");
+        if inner.sustains.contains_key(id) {
+            return Ok(false);
+        }
+        let (definition, _) = self
+            .resolve_template(template, None)
+            .ok_or_else(|| format!("no such definition: {}", spec.template))?;
+        let enforcement = enforcement_of(&definition);
+        let record = SustainRecord {
+            id: id.to_string(),
+            label: spec.label.clone(),
+            template,
+            custom: None,
+            parent: None,
+            owner: spec.owner.clone(),
+        };
+        inner.order.push(id.to_string());
+        inner.sustains.insert(
+            id.to_string(),
+            // ★ An empty state and seq 0 until the fold runs: the log is the
+            //   authority, and it has not been read yet.
+            Sustain { record, definition, enforcement, state: Value::Null, next_seq: 0 },
+        );
+        self.persist_registry(&inner).map_err(|e| e.to_string())?;
+        drop(inner);
+        self.install_specs();
+        Ok(true)
+    }
+
+    pub fn sync_peer(&self, address: &str, sustain_id: &str) -> Result<SyncReport, String> {
+        let me = self
+            .identity
+            .lock()
+            .expect("identity lock")
+            .clone()
+            .ok_or_else(|| "this node is locked".to_string())?;
+        self.install_specs();
+        let outcome = self.peering.sync(address, sustain_id, &me)?;
+        // ★★ Adopt BEFORE folding: without a definition there is nothing to
+        //    check the merged state against, and `reload` would report
+        //    *unmeasured* for a household whose rules did arrive.
+        if let Some(spec) = &outcome.spec {
+            self.adopt(sustain_id, spec)?;
+        }
+        let merge = self.reload(sustain_id)?;
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.peering.edit(|b| b.note_sync(&outcome.peer, at))?;
+        Ok(SyncReport { outcome, merge })
+    }
+
+    /// Re-fold one Sustain from disk in causal order, and adopt the result.
+    ///
+    /// ★★ Returns the [`Reconciliation`] rather than swallowing it, because
+    /// *the merged state is outside the viable region* is exactly the thing a
+    /// person needs told — every entry was admitted where it was made, and
+    /// the merge was not.
+    pub fn reload(&self, sustain_id: &str) -> Result<Reconciliation, String> {
+        let node = self.node_id().ok_or_else(|| "no identity on this machine".to_string())?;
+        // ★★ The Sustain's OWN invariants, and only when enforcement is armed
+        //    for it. A Sustain that never opted in is genuinely unmeasured
+        //    rather than passing: reporting `admissible: true` for a household
+        //    that declared no rules would be a claim it never made.
+        let rules: Option<Vec<(String, String)>> = self.with(|i| {
+            i.get(sustain_id).and_then(|s| {
+                s.enforcement.enabled.then(|| s.enforcement.invariants.clone())
+            })
+        });
+        let (out, next_seq) = self
+            .store
+            .load_replicated(sustain_id, &node, rules.as_deref())
+            .map_err(|e| e.to_string())?;
+        let mut inner = self.inner.lock().expect("world lock");
+        if let Some(su) = inner.sustains.get_mut(sustain_id) {
+            su.state = out.state.clone();
+            su.next_seq = next_seq;
+        }
+        Ok(out)
     }
 
     // ── the membership model ─────────────────────────────────
@@ -894,8 +1108,14 @@ impl World {
         self.store.commit_transfer(
             &transfer_id,
             [
-                (debit.sustain_id().to_string(), leg_line(from_seq, debit)),
-                (credit.sustain_id().to_string(), leg_line(to_seq, credit)),
+                (
+                    debit.sustain_id().to_string(),
+                    self.stamped(debit.sustain_id(), from_seq, leg_line(from_seq, debit)),
+                ),
+                (
+                    credit.sustain_id().to_string(),
+                    self.stamped(credit.sustain_id(), to_seq, leg_line(to_seq, credit)),
+                ),
             ],
         )?;
 
@@ -1086,6 +1306,8 @@ fn leg_line(seq: u64, leg: &Leg) -> LoggedEvent {
         operator: "holon.transfer".to_string(),
         events: vec![EventDto::from(leg.event())],
         mutations: leg.mutations().to_vec(),
+        origin: None,
+        lamport: None,
     }
 }
 

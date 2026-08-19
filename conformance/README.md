@@ -3106,3 +3106,34 @@ The same hazard is recorded one module over in `rollup.rs`, where an empty
 pocket container rendered `-0.00` and read as a debt; `unsign_zero` is now
 shared. Same number, different claim — which is the whole reason it counts as a
 divergence at all.
+
+
+### peer transport — **no vectors, and why**
+
+★★★ **The reference has no peer transport at all.** Grepped for sockets,
+websockets, gossip, vector clocks, Paxos and CRDTs across `apps/api/sustena`:
+the only websocket is `devui.py`'s `/state-stream`, a **browser** state feed
+from a server to its own UI — not node-to-node. There is nothing to be at
+parity *with*, so `sync.rs` and the host's `wire.rs`/`peers.rs` are **R2 SPEC**
+work authored from Multiparty §§IV–VI, the same call `authorization.json`
+recorded.
+
+★★ **What stands in for vectors is 11 two-node tests over real sockets.** A
+recorded vector compares two engines on one input; there is no second engine
+here, and a vector that froze a pretend peer would be testing the freeze. So
+the proof is two real `World`s on two data directories with two ed25519
+identities, and the properties are asserted end to end: a change reaching the
+other side, concurrent writes converging, the same answer whichever side drives
+the sync, idempotent re-sync, `rebuild == fold` on both sides plus a third
+fresh reader, and every refusal (untrusted, trusted-but-not-shared, first
+contact, blocked, locked).
+
+★★★ **One divergence-shaped fact worth recording even without a counterpart:
+convergence is not preservation.** Two concurrent `budget.record_income` calls
+of 300 and 700 converge to **700, not 1000**, because the operator writes an
+absolute `Set`. §VI's promise — *same updates, same state* — holds exactly;
+its stronger promise, *never erase the node*, belongs to the value CRDTs in
+`crdt.rs` and not to a JSON state document. The reference could not disagree
+about this, because it has no merge at all. It is recorded here rather than in
+a vector file because **a future value-CRDT state model would change this
+number**, and whoever makes that change should find this note first.

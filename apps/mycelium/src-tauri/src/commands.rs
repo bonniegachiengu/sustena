@@ -16,8 +16,10 @@ use crate::dto::{
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
     AttentionDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
     InferenceDto, IngestDto, MessageDto, QuietDto, RuleDto, SourceDto,
+    NetworkDto, PeerDto, SupersededDto, SyncDto,
     TransferLegDto, TransferResult, Verdict, WorldDto,
 };
+use crate::peers::Standing;
 use crate::definitions::{AuthoredDefinition, DefinitionVerdict};
 use crate::templates::TemplateId;
 use sustena_core::holon::Transfer as HolonTransfer;
@@ -1250,4 +1252,152 @@ pub fn orchie_confirm(
         }
     }
     Ok(result)
+}
+
+// ---------------------------------------------------------------------------
+// Network
+// ---------------------------------------------------------------------------
+
+fn peer_dto(p: &crate::peers::Peer) -> PeerDto {
+    PeerDto {
+        public_key: p.public_key.clone(),
+        handle: p.handle.clone(),
+        address: p.address.clone(),
+        standing: match p.standing {
+            Standing::Pending => "pending",
+            Standing::Trusted => "trusted",
+            Standing::Blocked => "blocked",
+        }
+        .to_string(),
+        shares: p.shares.iter().cloned().collect(),
+        last_synced: p.last_synced.map(|t| t.to_string()),
+        last_error: p.last_error.clone(),
+    }
+}
+
+/// This node, its peers, and whether it is reachable at all.
+#[tauri::command]
+#[specta::specta]
+pub fn get_network(world: State<'_, World>) -> NetworkDto {
+    let book = world.peering().book();
+    let shareable = world.with(|i| {
+        i.order()
+            .iter()
+            .filter_map(|id| i.get(id).map(|s| (id.clone(), s.record.label.clone())))
+            .collect()
+    });
+    NetworkDto {
+        node_id: world.node_id(),
+        handle: world.principal(),
+        listening: world.peering().port(),
+        unlocked: world.is_unlocked(),
+        peers: book.all().into_iter().map(peer_dto).collect(),
+        shareable,
+    }
+}
+
+/// Start accepting peers. ★ A locked node refuses, because it has nothing to
+/// answer a handshake with.
+#[tauri::command]
+#[specta::specta]
+pub fn start_listening(world: State<'_, World>, port: Option<u16>) -> Result<u16, String> {
+    let bound = world.listen(port)?;
+    trace!("listening for peers on {bound}");
+    Ok(bound)
+}
+
+/// Record a peer by key and address, without granting it anything.
+#[tauri::command]
+#[specta::specta]
+pub fn add_peer(
+    world: State<'_, World>,
+    public_key: String,
+    handle: String,
+    address: String,
+) -> Result<(), String> {
+    world.peering().edit(|b| b.seen(&public_key, &handle, Some(address)))
+}
+
+/// Trust, un-trust or block a peer. ★★ Trusting is not sharing: it makes
+/// sharing POSSIBLE, and each Sustain is still granted one at a time.
+#[tauri::command]
+#[specta::specta]
+pub fn set_peer_standing(
+    world: State<'_, World>,
+    public_key: String,
+    standing: String,
+) -> Result<bool, String> {
+    let standing = match standing.as_str() {
+        "pending" => Standing::Pending,
+        "trusted" => Standing::Trusted,
+        "blocked" => Standing::Blocked,
+        other => return Err(format!("no such standing: {other}")),
+    };
+    world.peering().edit(|b| b.set_standing(&public_key, standing))
+}
+
+/// Share one Sustain with one peer.
+#[tauri::command]
+#[specta::specta]
+pub fn share_sustain(
+    world: State<'_, World>,
+    public_key: String,
+    sustain_id: String,
+) -> Result<(), String> {
+    world.peering().edit(|b| b.share(&public_key, &sustain_id))?
+}
+
+/// Withdraw one Sustain from one peer.
+#[tauri::command]
+#[specta::specta]
+pub fn unshare_sustain(
+    world: State<'_, World>,
+    public_key: String,
+    sustain_id: String,
+) -> Result<bool, String> {
+    world.peering().edit(|b| b.unshare(&public_key, &sustain_id))
+}
+
+/// Converge one Sustain with one peer, both directions, in one session.
+#[tauri::command]
+#[specta::specta]
+pub fn sync_with_peer(
+    world: State<'_, World>,
+    address: String,
+    sustain_id: String,
+) -> Result<SyncDto, String> {
+    let report = world.sync_peer(&address, &sustain_id)?;
+    trace!(
+        "sync {sustain_id} with {address}: +{} / -{}",
+        report.outcome.received,
+        report.outcome.sent
+    );
+    Ok(SyncDto {
+        peer: report.outcome.peer,
+        handle: report.outcome.handle,
+        sustain_id: report.outcome.sustain_id,
+        received: report.outcome.received as u32,
+        sent: report.outcome.sent as u32,
+        entries: report.merge.entries as u32,
+        concurrent: report.merge.concurrent.len() as u32,
+        superseded: report
+            .merge
+            .superseded
+            .iter()
+            .map(|x| SupersededDto {
+                path: x.path.clone(),
+                winner: format!("{}:{}", short(&x.winner.node), x.winner.counter),
+                loser: format!("{}:{}", short(&x.loser.node), x.loser.counter),
+            })
+            .collect(),
+        forks: report.merge.forks.len() as u32,
+        admissible: report.merge.admissible,
+        violated: report.merge.violated.clone(),
+        summary: report.merge.describe(),
+    })
+}
+
+/// A key is 64 hex characters; a screen needs the first few.
+fn short(key: &str) -> String {
+    key.chars().take(8).collect()
 }

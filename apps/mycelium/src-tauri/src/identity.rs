@@ -86,6 +86,7 @@ pub struct IdentityFile {
 
 /// An unlocked identity. ★★★ Holding one IS the authentication: it cannot be
 /// constructed without a passphrase that genuinely decrypted the key.
+#[derive(Clone)]
 pub struct Unlocked {
     handle: String,
     signing: SigningKey,

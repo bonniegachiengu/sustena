@@ -948,6 +948,8 @@ fn line(seq: u64, leg: &Leg) -> LoggedEvent {
         operator: "holon.transfer".to_string(),
         events: vec![mycelium_lib::dto::EventDto::from(leg.event())],
         mutations: leg.mutations().to_vec(),
+        origin: None,
+        lamport: None,
     }
 }
 

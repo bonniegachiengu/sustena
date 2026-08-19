@@ -31,34 +31,6 @@ import {
 } from "../ui";
 import { engine, type CouncilOutcomeDto } from "../lib/engine";
 
-/* ── Network ────────────────────────────────────────────────────────────── */
-
-export function Network() {
-  return (
-    <Unavailable
-      absence={{
-        title: "network · nodes",
-        headline:
-          "This is a single node, and there is no peer transport. The distributed machinery exists in the engine; the connection does not.",
-        present: [
-          "CRDTs with proven convergence laws — `GCounter`, `PnCounter`, `OrSet`, `Rga`, plus `converges` and `laws_hold` as real checks.",
-          "Vector clocks (`vclock`) and causal stamps for ordering without a shared clock.",
-          "Paxos-style consensus — `propose`, `Promise`, `Accepted`, `Decision`, with a declared `ByzantineBound`.",
-          "A `Router` with reinforcement and a `Division` model for assigning roles across principals.",
-        ],
-        missing: [
-          "Any transport. There is no socket, no peer discovery and no gossip — by ADR-0001 the core has no I/O at all, and this host has not added one.",
-          "A node identity beyond the local principal, and therefore no peer list to show.",
-        ],
-        where:
-          "The primitives are in `sustena-core` today and are genuinely tested. What is absent is the host-side layer that would carry them between machines — the Axum/WebSocket half of the stack document's one-core-two-hosts diagram.",
-        refusal:
-          "A peer list showing `0` would imply a network that found nobody. There is no network. The distinction matters when the next question is *why has nothing synced*.",
-      }}
-    />
-  );
-}
-
 /* ── Library ────────────────────────────────────────────────────────────── */
 
 export function Library() {

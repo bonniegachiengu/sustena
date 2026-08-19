@@ -43,7 +43,8 @@
 //! can each be admissible alone and jointly carry the merged state outside
 //! `V`. Union-then-fold converges — the CRDT law is untouched — but it can
 //! converge onto a state no node would have admitted. [`reconcile`] therefore
-//! folds **and then re-checks the region**, and says so. It does not repair:
+//! folds **and then re-checks the Sustain's own invariants — the same
+//! predicates the gate evaluates** — and says so. It does not repair:
 //! choosing which of two admitted facts to discard is a governance decision,
 //! not an arithmetic one, and §V's quorum is the mechanism for the Sustains
 //! that cannot tolerate the risk.
@@ -66,7 +67,7 @@ use crate::event::CausalStamp;
 use crate::error::FoldError;
 use crate::fold::{fold_events, FoldEvent};
 use crate::mutation::Mutation;
-use crate::region::Region;
+use crate::predicate;
 use crate::vclock::{CausalVerdict, VectorClock};
 
 // ---------------------------------------------------------------------------
@@ -263,6 +264,27 @@ impl<T: Clone + PartialEq + Serialize> JoinSemilattice for Replica<T> {
 // Reconciliation
 // ---------------------------------------------------------------------------
 
+/// One concurrent write that another concurrent write overwrote.
+///
+/// ★★★ **Convergence is not preservation, and this is the difference.** The
+/// log is a grow-only set, so no ENTRY is ever lost — that is the CRDT law and
+/// it holds unconditionally. But a `Set` mutation is an absolute assignment,
+/// so two concurrent entries writing the same path both replay and the later
+/// one in the fold order wins. Both nodes reach the same state (§VI's promise,
+/// intact); one node's *value* is superseded.
+///
+/// ★★ §VI's stronger promise — *no member's number is ever overwritten by the
+/// group* — belongs to the value CRDTs in [`crate::crdt`] (a `GCounter` merges
+/// by per-node maximum and cannot lose a contribution). A state document of
+/// arbitrary JSON is not one of those. Rather than pretend otherwise, every
+/// supersession is **named**: which path, which entry won, which lost.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Supersession {
+    pub path: String,
+    pub winner: CausalStamp,
+    pub loser: CausalStamp,
+}
+
 /// A pair of entries neither of which happened before the other.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Concurrent {
@@ -281,13 +303,19 @@ pub struct Reconciliation {
     pub concurrent: Vec<Concurrent>,
     /// Stamps carrying two payloads — equivocation, surfaced.
     pub forks: Vec<CausalStamp>,
-    /// ★★★ Whether the merged state sits inside the declared viable region.
-    /// `None` when no region was supplied — *unmeasured*, which is not the
-    /// same as *fine*, and the type says which.
-    pub within_region: Option<bool>,
-    /// The dimensions outside `V`, worst first. Empty when inside, and also
-    /// empty when unmeasured — read it with `within_region`.
-    pub outside: Vec<String>,
+    /// ★★★ Concurrent writes to one path, where the fold order decided which
+    /// value survives. **Empty is a real answer**: it means no two concurrent
+    /// entries touched the same place, so nothing was overwritten.
+    pub superseded: Vec<Supersession>,
+    /// ★★★ Whether the merged state satisfies the Sustain's own invariants —
+    /// **the same predicates the gate checks**, so this answers *would this
+    /// state have been admitted* rather than a different question that merely
+    /// sounds like it. `None` when the caller supplied none to check against:
+    /// *unmeasured*, which is not the same as *fine*, and the type says which.
+    pub admissible: Option<bool>,
+    /// The invariants the merged state breaks, as `(id, why)`. Empty when
+    /// admissible, and also empty when unmeasured — read it with `admissible`.
+    pub violated: Vec<(String, String)>,
 }
 
 impl Reconciliation {
@@ -295,7 +323,7 @@ impl Reconciliation {
     /// admitted. Not an error and not a repair — a fact a surface must be able
     /// to say out loud.
     pub fn admissible_gap(&self) -> bool {
-        self.within_region == Some(false)
+        self.admissible == Some(false)
     }
 
     pub fn describe(&self) -> String {
@@ -306,13 +334,27 @@ impl Reconciliation {
         if !self.forks.is_empty() {
             parts.push(format!("{} forked stamp(s)", self.forks.len()));
         }
-        match self.within_region {
-            None => parts.push("no region declared — admissibility unmeasured".into()),
-            Some(true) => parts.push("inside the viable region".into()),
+        if !self.superseded.is_empty() {
+            parts.push(format!(
+                "{} value(s) superseded ({}) — the entries all survive; these values did not",
+                self.superseded.len(),
+                self.superseded
+                    .iter()
+                    .map(|s| s.path.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        match self.admissible {
+            None => parts.push("nothing to check against — admissibility unmeasured".into()),
+            Some(true) => parts.push("every invariant still holds".into()),
             Some(false) => parts.push(format!(
-                "OUTSIDE the viable region on {} — every entry was admitted locally; \
-                 the merge was not",
-                self.outside.join(", ")
+                "OUTSIDE the viable region — {} — every entry was admitted locally; the merge was not",
+                self.violated
+                    .iter()
+                    .map(|(id, why)| format!("{id}: {why}"))
+                    .collect::<Vec<_>>()
+                    .join("; ")
             )),
         }
         parts.join(" · ")
@@ -328,7 +370,7 @@ impl Reconciliation {
 pub fn reconcile<T: Clone + PartialEq + Serialize + Replayable>(
     replica: &Replica<T>,
     initial: Option<Value>,
-    region: Option<&Region>,
+    invariants: Option<&[(String, String)]>,
 ) -> Result<Reconciliation, FoldError> {
     let ordered = replica.ordered();
 
@@ -354,18 +396,53 @@ pub fn reconcile<T: Clone + PartialEq + Serialize + Replayable>(
         }
     }
 
-    let (within_region, outside) = match region {
+    // ★★★ The SAME predicates the gate evaluates, through the same
+    //     `predicate::check`. Checking anything else here — a `Region`, a
+    //     schema, a heuristic — would answer a question that merely sounds
+    //     like *would this have been admitted*.
+    let (admissible, violated) = match invariants {
         None => (None, Vec::new()),
-        Some(v) => match v.distance(&state) {
-            // A region that cannot be measured against this state is
-            // unmeasured, not satisfied.
-            Err(_) => (None, Vec::new()),
-            Ok(d) => (
-                Some(d.weighted <= 0.0 && d.relations_violated.is_empty()),
-                d.per_dimension.iter().map(|(dim, _)| dim.clone()).collect(),
-            ),
-        },
+        Some(rules) => {
+            let params = serde_json::Map::new();
+            let mut broken = Vec::new();
+            for (id, expr) in rules {
+                match predicate::check(expr, &state, &params) {
+                    // ★ A rule that will not parse is a BREACH, not a skip — the
+                    //   gate's own fail-safe rule, applied here for the same
+                    //   reason: skipping is how a check fails open.
+                    Err(e) => broken.push((id.clone(), format!("could not be parsed: {e}"))),
+                    Ok((false, why)) => broken.push((id.clone(), why)),
+                    Ok((true, _)) => {}
+                }
+            }
+            (Some(broken.is_empty()), broken)
+        }
     };
+
+    // ★★★ Which concurrent write lost. Only pairs the clocks call CONCURRENT
+    //     count: a later write that genuinely saw the earlier one is an
+    //     update, not a supersession, and calling it one would cry wolf on
+    //     every ordinary edit.
+    let mut superseded = Vec::new();
+    for (i, a) in ordered.iter().enumerate() {
+        for b in ordered.iter().skip(i + 1) {
+            if a.stamp.node == b.stamp.node
+                || a.clock.compare(&b.clock) != CausalVerdict::Concurrent
+            {
+                continue;
+            }
+            for path in touched(a.payload.mutations()) {
+                if touched(b.payload.mutations()).contains(&path) {
+                    superseded.push(Supersession {
+                        path,
+                        // `b` is later in the fold order, so `b` wins.
+                        winner: b.stamp.clone(),
+                        loser: a.stamp.clone(),
+                    });
+                }
+            }
+        }
+    }
 
     let forks = replica
         .forks()
@@ -378,9 +455,25 @@ pub fn reconcile<T: Clone + PartialEq + Serialize + Replayable>(
         entries: ordered.len(),
         concurrent,
         forks,
-        within_region,
-        outside,
+        superseded,
+        admissible,
+        violated,
     })
+}
+
+/// Every path a mutation list writes to. ★ `ReplaceRoot` writes everything,
+/// so it is reported as the root — a genesis that lands concurrently with an
+/// edit really does supersede it.
+fn touched(mutations: &[Mutation]) -> Vec<String> {
+    mutations
+        .iter()
+        .map(|m| match m {
+            Mutation::Set { path, .. } => path.clone(),
+            Mutation::Append { path, .. } => path.clone(),
+            Mutation::Remove { path, .. } => path.clone(),
+            Mutation::ReplaceRoot { .. } => String::new(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -634,24 +727,77 @@ mod tests {
         let b_spend = entry("bob", 1, 2, set("balance", json!(-40.0)));
         let r = replica(vec![genesis, a_spend, b_spend]);
 
-        let v = Region::new()
-            .bounding(crate::region::Interval::at_least("balance", 0.0))
-            .weighing("balance", 1.0);
+        let rules = [("solvent".to_string(), "balance >= 0".to_string())];
 
-        let out = reconcile(&r, None, Some(&v)).expect("folds");
-        assert_eq!(out.within_region, Some(false));
+        let out = reconcile(&r, None, Some(&rules)).expect("folds");
+        assert_eq!(out.admissible, Some(false));
         assert!(out.admissible_gap());
-        assert_eq!(out.outside, vec!["balance"]);
+        assert_eq!(out.violated.len(), 1);
+        assert_eq!(out.violated[0].0, "solvent");
         assert!(out.describe().contains("every entry was admitted locally"));
         // And it did NOT repair: the state is the fold, unedited.
         assert_eq!(out.state["balance"], json!(-40.0));
     }
 
     #[test]
+    fn a_superseded_value_is_named_rather_than_quietly_dropped() {
+        // ★★★ The difference between convergence and preservation. Both nodes
+        //     write the same path while unaware of each other; the fold order
+        //     picks one, and the other is REPORTED rather than vanishing.
+        let mut a_clock = VectorClock::new();
+        a_clock = a_clock.at("alice", 2);
+        let mut b_clock = VectorClock::new();
+        b_clock = b_clock.at("bob", 1);
+
+        let r = replica(vec![
+            entry("alice", 1, 1, root(json!({"balance": 0}))),
+            LogEntry {
+                stamp: CausalStamp { counter: 2, node: "alice".into() },
+                lamport: 2,
+                clock: a_clock,
+                t_event: 0,
+                payload: set("balance", json!(300)),
+            },
+            LogEntry {
+                stamp: CausalStamp { counter: 1, node: "bob".into() },
+                lamport: 3,
+                clock: b_clock,
+                t_event: 0,
+                payload: set("balance", json!(700)),
+            },
+        ]);
+        let out = reconcile(&r, None, None).expect("folds");
+        // Converged, deterministically — the law is untouched.
+        assert_eq!(out.state["balance"], json!(700));
+        // And the loss is named.
+        let lost: Vec<&Supersession> =
+            out.superseded.iter().filter(|s| s.path == "balance").collect();
+        assert_eq!(lost.len(), 1);
+        assert_eq!(lost[0].winner.node, "bob");
+        assert_eq!(lost[0].loser.node, "alice");
+        assert!(out.describe().contains("superseded"));
+    }
+
+    #[test]
+    fn a_write_that_saw_the_earlier_one_is_an_update_not_a_supersession() {
+        // ★★ Only genuinely concurrent pairs count. An ordinary sequence of
+        //    edits to one path must not be reported as loss, or the report
+        //    cries wolf on every household that spends twice.
+        let r = replica(vec![
+            entry("alice", 1, 1, root(json!({"balance": 0}))),
+            entry("alice", 2, 2, set("balance", json!(300))),
+            entry("alice", 3, 3, set("balance", json!(500))),
+        ]);
+        let out = reconcile(&r, None, None).expect("folds");
+        assert_eq!(out.state["balance"], json!(500));
+        assert!(out.superseded.is_empty());
+    }
+
+    #[test]
     fn unmeasured_is_not_the_same_as_fine() {
         let r = replica(vec![entry("alice", 1, 1, root(json!({"balance": -5.0})))]);
         let out = reconcile(&r, None, None).expect("folds");
-        assert_eq!(out.within_region, None, "no region declared, so nothing is claimed");
+        assert_eq!(out.admissible, None, "nothing to check against, so nothing is claimed");
         assert!(!out.admissible_gap(), "and unmeasured is not reported as a breach either");
         assert!(out.describe().contains("unmeasured"));
     }
@@ -662,11 +808,9 @@ mod tests {
             entry("alice", 1, 1, root(json!({"balance": 100.0}))),
             entry("bob", 1, 2, set("balance", json!(40.0))),
         ]);
-        let v = Region::new()
-            .bounding(crate::region::Interval::at_least("balance", 0.0))
-            .weighing("balance", 1.0);
-        let out = reconcile(&r, None, Some(&v)).expect("folds");
-        assert_eq!(out.within_region, Some(true));
-        assert!(out.outside.is_empty());
+        let rules = [("solvent".to_string(), "balance >= 0".to_string())];
+        let out = reconcile(&r, None, Some(&rules)).expect("folds");
+        assert_eq!(out.admissible, Some(true));
+        assert!(out.violated.is_empty());
     }
 }

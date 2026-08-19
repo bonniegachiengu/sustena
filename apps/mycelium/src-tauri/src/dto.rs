@@ -68,7 +68,11 @@ impl From<OperatorStatus> for Verdict {
 }
 
 /// One event the call published.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+///
+/// ★ `PartialEq` because a log line is compared for equality by the
+/// replicated log: two nodes claiming one stamp must be told apart by their
+/// CONTENT, and that comparison reaches all the way down.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct EventDto {
     pub name: String,
@@ -1017,4 +1021,85 @@ pub enum InferenceDto {
 pub struct ChoiceDto {
     pub value: String,
     pub label: String,
+}
+
+// ---------------------------------------------------------------------------
+// Network
+// ---------------------------------------------------------------------------
+
+/// One peer, as a screen sees it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerDto {
+    /// ★ The identity. The handle beside it is a label the peer chose.
+    pub public_key: String,
+    pub handle: String,
+    /// `host:port`, or `None` for a peer that reached in and was never given
+    /// an address to dial back. **Not** an empty string — unreachable and
+    /// "reachable at nowhere" are different facts.
+    pub address: Option<String>,
+    /// `pending` | `trusted` | `blocked`.
+    pub standing: String,
+    /// Sustains this node has shared WITH this peer. Never what the peer holds
+    /// — this node cannot know that.
+    pub shares: Vec<String>,
+    /// Seconds since the epoch at the last completed sync, as a string
+    /// because a 64-bit integer would cross the boundary as a `BigInt`.
+    /// `None` means **never synced**, which is not zero.
+    pub last_synced: Option<String>,
+    pub last_error: Option<String>,
+}
+
+/// This node on the network.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkDto {
+    /// This node's own public key, readable while locked — it is public.
+    pub node_id: Option<String>,
+    pub handle: Option<String>,
+    /// The port this node accepts peers on. `None` means **not listening**,
+    /// which a `0` would have read as a port.
+    pub listening: Option<u16>,
+    /// ★★ A locked node cannot prove its own key, so it cannot peer at all.
+    /// The screen says which, rather than showing an idle network.
+    pub unlocked: bool,
+    pub peers: Vec<PeerDto>,
+    /// Sustains this node could offer — `(id, label)`. An authored definition
+    /// is absent, because v1 shares built-in templates only.
+    pub shareable: Vec<(String, String)>,
+}
+
+/// One value a concurrent write overwrote.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SupersededDto {
+    pub path: String,
+    pub winner: String,
+    pub loser: String,
+}
+
+/// What one sync did, and what the merge could not decide.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncDto {
+    pub peer: String,
+    pub handle: String,
+    pub sustain_id: String,
+    pub received: u32,
+    pub sent: u32,
+    pub entries: u32,
+    /// Pairs neither of which happened before the other.
+    pub concurrent: u32,
+    /// ★★★ Values a concurrent write overwrote. **Every entry survives; these
+    /// values did not.** Named rather than dropped.
+    pub superseded: Vec<SupersededDto>,
+    /// Stamps that arrived carrying two payloads — a node forking its history.
+    pub forks: u32,
+    /// ★★★ Whether the merged state still satisfies the Sustain's own rules.
+    /// `None` = unmeasured (no armed enforcement), which is not *fine*.
+    pub admissible: Option<bool>,
+    /// `(id, why)` for each rule the merged state breaks.
+    pub violated: Vec<(String, String)>,
+    /// One line, in the engine's own words.
+    pub summary: String,
 }

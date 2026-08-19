@@ -12,6 +12,9 @@ pub mod economy;
 pub mod identity;
 pub mod ingest;
 pub mod orchie;
+pub mod peers;
+#[cfg(test)]
+mod peers_test;
 pub mod store;
 pub mod templates;
 pub mod wire;
@@ -57,6 +60,13 @@ pub fn specta_builder() -> Builder {
         commands::orchie_infer,
         commands::orchie_confirm,
         commands::resolve_proposal,
+        commands::get_network,
+        commands::start_listening,
+        commands::add_peer,
+        commands::set_peer_standing,
+        commands::share_sustain,
+        commands::unshare_sustain,
+        commands::sync_with_peer,
     ])
     // ★★★ The push channel, typed from the same Rust as the commands — so a
     //   listener the UI writes for an event that does not exist will not

@@ -28,6 +28,9 @@ import {
   type IdentityDto,
   type IngestDto,
   type CaptureResult,
+  type NetworkDto,
+  type PeerDto,
+  type SyncDto,
   type MessageDto,
   type FeedDto,
   type InferenceDto,
@@ -59,6 +62,9 @@ export type {
   IdentityDto,
   IngestDto,
   CaptureResult,
+  NetworkDto,
+  PeerDto,
+  SyncDto,
   MessageDto,
   FeedDto,
   InferenceDto,
@@ -199,6 +205,26 @@ export const engine = {
     operator: string,
     params: JsonValue,
   ): Promise<GateResult | null> => unwrap(await commands.runOperator(sustainId, operator, params)),
+
+  // ── the network ─────────────────────────────────────────────────
+  /** This node, its peers, and whether it is reachable at all. */
+  network: async (): Promise<NetworkDto> => await commands.getNetwork(),
+  /** Start accepting peers. A locked node refuses. */
+  listen: async (port: number | null): Promise<number> =>
+    unwrap(await commands.startListening(port)),
+  /** Record a key and an address, granting nothing. */
+  addPeer: async (publicKey: string, handle: string, address: string): Promise<null> =>
+    unwrap(await commands.addPeer(publicKey, handle, address)),
+  /** `pending` | `trusted` | `blocked`. Trusting is not sharing. */
+  setStanding: async (publicKey: string, standing: string): Promise<boolean> =>
+    unwrap(await commands.setPeerStanding(publicKey, standing)),
+  shareSustain: async (publicKey: string, sustainId: string): Promise<null> =>
+    unwrap(await commands.shareSustain(publicKey, sustainId)),
+  unshareSustain: async (publicKey: string, sustainId: string): Promise<boolean> =>
+    unwrap(await commands.unshareSustain(publicKey, sustainId)),
+  /** Converge one Sustain with one peer, both directions, in one session. */
+  syncWith: async (address: string, sustainId: string): Promise<SyncDto> =>
+    unwrap(await commands.syncWithPeer(address, sustainId)),
 };
 
 /* ── reading real state, honestly ─────────────────────────────────────────

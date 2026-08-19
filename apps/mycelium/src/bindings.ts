@@ -346,6 +346,80 @@ async orchieConfirm(sustainId: string, operator: string, params: JsonValue, mess
  */
 async resolveProposal(votes: ([string, string, number])[], userVote: string | null, votesCollected: boolean) : Promise<CouncilOutcomeDto> {
     return await TAURI_INVOKE("resolve_proposal", { votes, userVote, votesCollected });
+},
+/**
+ * This node, its peers, and whether it is reachable at all.
+ */
+async getNetwork() : Promise<NetworkDto> {
+    return await TAURI_INVOKE("get_network");
+},
+/**
+ * Start accepting peers. ★ A locked node refuses, because it has nothing to
+ * answer a handshake with.
+ */
+async startListening(port: number | null) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_listening", { port }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Record a peer by key and address, without granting it anything.
+ */
+async addPeer(publicKey: string, handle: string, address: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_peer", { publicKey, handle, address }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Trust, un-trust or block a peer. ★★ Trusting is not sharing: it makes
+ * sharing POSSIBLE, and each Sustain is still granted one at a time.
+ */
+async setPeerStanding(publicKey: string, standing: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_peer_standing", { publicKey, standing }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Share one Sustain with one peer.
+ */
+async shareSustain(publicKey: string, sustainId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("share_sustain", { publicKey, sustainId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Withdraw one Sustain from one peer.
+ */
+async unshareSustain(publicKey: string, sustainId: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("unshare_sustain", { publicKey, sustainId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Converge one Sustain with one peer, both directions, in one session.
+ */
+async syncWithPeer(address: string, sustainId: string) : Promise<Result<SyncDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sync_with_peer", { address, sustainId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -603,6 +677,10 @@ metered: ([string, MeasuredPawa])[];
 boundaryNotice: string }
 /**
  * One event the call published.
+ * 
+ * ★ `PartialEq` because a log line is compared for equality by the
+ * replicated log: two nodes claiming one stamp must be told apart by their
+ * CONTENT, and that comparison reaches all the way down.
  */
 export type EventDto = { name: string; payload: JsonValue }
 /**
@@ -795,6 +873,29 @@ rawPayload: string; amount: number | null; counterparty: string | null; directio
  */
 gateReason: string | null; resolved: boolean; needsAttention: boolean }
 /**
+ * This node on the network.
+ */
+export type NetworkDto = { 
+/**
+ * This node's own public key, readable while locked — it is public.
+ */
+nodeId: string | null; handle: string | null; 
+/**
+ * The port this node accepts peers on. `None` means **not listening**,
+ * which a `0` would have read as a port.
+ */
+listening: number | null; 
+/**
+ * ★★ A locked node cannot prove its own key, so it cannot peer at all.
+ * The screen says which, rather than showing an idle network.
+ */
+unlocked: boolean; peers: PeerDto[]; 
+/**
+ * Sustains this node could offer — `(id, label)`. An authored definition
+ * is absent, because v1 shares built-in templates only.
+ */
+shareable: ([string, string])[] }
+/**
  * Whether the principal may run one operator, as the engine judges it.
  */
 export type OperatorAccessDto = { operator: string; 
@@ -841,6 +942,35 @@ namesWithin: string | null }
  * One governed parameter and its declared bounds.
  */
 export type ParameterDto = { name: string; value: number; genesis: number; min: number; max: number }
+/**
+ * One peer, as a screen sees it.
+ */
+export type PeerDto = { 
+/**
+ * ★ The identity. The handle beside it is a label the peer chose.
+ */
+publicKey: string; handle: string; 
+/**
+ * `host:port`, or `None` for a peer that reached in and was never given
+ * an address to dial back. **Not** an empty string — unreachable and
+ * "reachable at nowhere" are different facts.
+ */
+address: string | null; 
+/**
+ * `pending` | `trusted` | `blocked`.
+ */
+standing: string; 
+/**
+ * Sustains this node has shared WITH this peer. Never what the peer holds
+ * — this node cannot know that.
+ */
+shares: string[]; 
+/**
+ * Seconds since the epoch at the last completed sync, as a string
+ * because a 64-bit integer would cross the boundary as a `BigInt`.
+ * `None` means **never synced**, which is not zero.
+ */
+lastSynced: string | null; lastError: string | null }
 /**
  * A pocket, at summary scale.
  * 
@@ -933,6 +1063,10 @@ export type SourceDto = { id: string; label: string; captures: number;
  */
 expectedIntervalMinutes: number | null; everSeen: boolean }
 /**
+ * One value a concurrent write overwrote.
+ */
+export type SupersededDto = { path: string; winner: string; loser: string }
+/**
  * `Σ = ⟨B, S, V, T, ⊕⟩`, as much of it as a cockpit needs to draw.
  * 
  * ★ Deliberately not the whole `Definition`: a walking skeleton should carry
@@ -986,6 +1120,36 @@ pockets: PocketSummary[];
  * can show a broken rule anywhere without hydrating anything.
  */
 constraints: ConstraintReading[] }
+/**
+ * What one sync did, and what the merge could not decide.
+ */
+export type SyncDto = { peer: string; handle: string; sustainId: string; received: number; sent: number; entries: number; 
+/**
+ * Pairs neither of which happened before the other.
+ */
+concurrent: number; 
+/**
+ * ★★★ Values a concurrent write overwrote. **Every entry survives; these
+ * values did not.** Named rather than dropped.
+ */
+superseded: SupersededDto[]; 
+/**
+ * Stamps that arrived carrying two payloads — a node forking its history.
+ */
+forks: number; 
+/**
+ * ★★★ Whether the merged state still satisfies the Sustain's own rules.
+ * `None` = unmeasured (no armed enforcement), which is not *fine*.
+ */
+admissible: boolean | null; 
+/**
+ * `(id, why)` for each rule the merged state breaks.
+ */
+violated: ([string, string])[]; 
+/**
+ * One line, in the engine's own words.
+ */
+summary: string }
 /**
  * Which kind of Sustain to instantiate.
  * 

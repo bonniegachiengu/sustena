@@ -97,6 +97,14 @@ pub enum Frame {
         entries: Vec<Value>,
         /// What the sender holds, so the asker knows whether it is now level.
         frontier: VectorClock,
+        /// ★★★ **What the Sustain IS**, for a node meeting it for the first
+        /// time. A log alone is a sequence of mutations; without the
+        /// definition the receiver has no schema to close over and no
+        /// invariants to gate against, so it would be holding a household it
+        /// could not refuse anything on. Absent on the push direction, where
+        /// the receiver already has it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spec: Option<SharedSpec>,
     },
     /// *Which Sustains would you share with me?*
     Catalogue,
@@ -110,6 +118,25 @@ pub enum Frame {
     /// borrowed static cannot come out of bytes that arrived at runtime. The
     /// names are still the gate's own; only the ownership differs.
     Refused { rule: String, reason: String },
+}
+
+/// What a Sustain is, in the smallest form a peer can rebuild it from.
+///
+/// ★★ **Built-in templates only, in v1, and said out loud.** An authored
+/// definition is a second artefact with its own history, and shipping it
+/// alongside a log without also shipping its edit chain would let two nodes
+/// disagree about the rules while agreeing about the facts — the one
+/// disagreement a shared household cannot survive. A custom Sustain is
+/// therefore refused rather than half-shared.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SharedSpec {
+    pub label: String,
+    /// The template's own name, as `TemplateId::as_str` gives it.
+    pub template: String,
+    /// Who the sender says owns it. Advisory — the receiver decides what that
+    /// means under its own membership graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
 }
 
 pub const PROTOCOL: u32 = 1;
