@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
 
-use mycelium_lib::dto::{GateResult, SustainSummary};
+use mycelium_lib::dto::{Committed, ConstraintReading, GateResult, Refused, SustainSummary};
 use mycelium_lib::store::Store;
 use mycelium_lib::world::World;
 
@@ -27,7 +27,13 @@ fn rule(title: &str) {
 
 fn household(world: &World) {
     let rows: Vec<SustainSummary> =
-        world.with(|i| i.order().iter().filter_map(|id| i.get(id)).map(SustainSummary::of).collect());
+        world.with(|i| {
+            i.order()
+                .iter()
+                .filter_map(|id| i.get(id))
+                .map(|x| SustainSummary::of(x, Vec::new()))
+                .collect()
+        });
     for r in &rows {
         let liquid = r.liquid.map(|v| format!("{v:>10.2}")).unwrap_or_else(|| "         —".into());
         let under = r.parent.clone().map(|p| format!("  ⊕ under {p}")).unwrap_or_default();
@@ -45,14 +51,42 @@ fn call(world: &World, sustain: &str, op: &str, p: &[(&str, Value)]) {
         None => println!("   {sustain} · no such Sustain"),
         Some((x, seq)) => {
             let r = GateResult::of(op, &x);
-            let _ = seq;
             println!(
                 "   {sustain} · {op} -> {:?}  mutations={} events={}{}",
                 r.verdict,
                 r.mutations,
                 r.events.len(),
-                r.reason.map(|s| format!("\n      reason: {s}")).unwrap_or_default()
+                r.reason.clone().map(|s| format!("\n      reason: {s}")).unwrap_or_default()
             );
+            // The message the push channel would carry, built by the SAME
+            // constructors the Tauri command uses -- so this is what the UI
+            // receives, not a demo's imitation of it.
+            if x.committed() {
+                let readings: Vec<ConstraintReading> = world
+                    .constraints(sustain)
+                    .into_iter()
+                    .map(|(id, expression, holds, reason)| ConstraintReading {
+                        id,
+                        expression,
+                        holds,
+                        reason,
+                    })
+                    .collect();
+                let msg = Committed::of(sustain, op, seq, &x, readings);
+                println!(
+                    "      ~> PUSH Committed  seq={}  liquid={:?}  events=[{}]  rules={}  (state attached)",
+                    msg.seq,
+                    msg.liquid,
+                    msg.events.iter().map(|e| e.name.clone()).collect::<Vec<_>>().join(", "),
+                    msg.constraints.len()
+                );
+            } else {
+                let msg = Refused::of(sustain, op, &r);
+                println!(
+                    "      ~> PUSH Refused    rule={:?}  (this message has NO state field at all)",
+                    msg.constraint_violated
+                );
+            }
         }
     }
 }
@@ -85,6 +119,34 @@ fn main() {
         for e in world.log("homestead").expect("log") {
             let names: Vec<String> = e.events.iter().map(|x| x.name.clone()).collect();
             println!("   #{}  {:<24} {} mutation(s)  {}", e.seq, e.operator, e.mutations.len(), names.join(", "));
+        }
+
+        rule("RUN 1 · the world, as the Constellation reads it");
+        for r in world.with(|i| {
+            i.order()
+                .iter()
+                .filter_map(|id| i.get(id))
+                .map(|x| {
+                    let readings: Vec<ConstraintReading> = Vec::new();
+                    SustainSummary::of(x, readings)
+                })
+                .collect::<Vec<_>>()
+        }) {
+            let broken: Vec<String> = world
+                .constraints(&r.id)
+                .into_iter()
+                .filter(|(_, _, holds, _)| !holds)
+                .map(|(id, _, _, _)| id)
+                .collect();
+            println!(
+                "   {:<18} {:<9} liquid {:>9}  pockets {}  events {:>2}  {}",
+                r.id,
+                r.label,
+                r.liquid.map(|v| format!("{v:.2}")).unwrap_or_else(|| "—".into()),
+                r.pockets.len(),
+                r.events,
+                if broken.is_empty() { "rules hold".to_string() } else { format!("BROKEN: {}", broken.join(", ")) }
+            );
         }
 
         rule("RUN 1 · V, evaluated by the engine");

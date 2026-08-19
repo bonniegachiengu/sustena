@@ -11,11 +11,11 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::dto::{
-    Committed, ConstraintReading, EventDto, GateResult, Holarchy, LogEntryDto, SustainDto,
+    Committed, ConstraintReading, GateResult, Holarchy, LogEntryDto, Refused, SustainDto,
     SustainSummary, WorldDto,
 };
 use crate::templates::TemplateId;
-use crate::world::World;
+use crate::world::{World, PRINCIPAL};
 
 /// `V`, evaluated against current state by the engine.
 fn readings(world: &World, sustain_id: &str) -> Vec<ConstraintReading> {
@@ -43,17 +43,23 @@ pub fn get_world(world: State<'_, World>) -> WorldDto {
         Ok(linked) => Holarchy::Holds { linked: linked as u32 },
         Err(reason) => Holarchy::Broken { reason },
     };
-    let (sustains, selected) = world.with(|i| {
-        (
-            i.order().iter().filter_map(|id| i.get(id)).map(SustainSummary::of).collect::<Vec<_>>(),
-            i.selected().map(|s| s.record.id.clone()),
-        )
-    });
+    // ★ Every summary carries `V` as the engine reads it, so a constellation can
+    //   show a broken rule anywhere without hydrating a single state document.
+    let ids: Vec<String> = world.with(|i| i.order().to_vec());
+    let sustains: Vec<SustainSummary> = ids
+        .iter()
+        .filter_map(|id| {
+            let readings = readings(&world, id);
+            world.with(|i| i.get(id).map(|s| SustainSummary::of(s, readings.clone())))
+        })
+        .collect();
+    let selected = world.with(|i| i.selected().map(|s| s.record.id.clone()));
     trace!("get_world -> {} sustain(s), holarchy={:?}", sustains.len(), holarchy);
     WorldDto {
         sustains,
         selected,
         store_path: world.store().root().display().to_string(),
+        principal: PRINCIPAL.to_string(),
         holarchy,
         // ★★★ Stated, not implied. See `WorldDto::rollup_available`.
         rollup_available: false,
@@ -169,25 +175,25 @@ pub fn run_operator(
             //   message announcing no change would be a change that did not
             //   happen. One message per real change, no tick, no sampler.
             if x.committed() {
-                let msg = Committed {
-                    sustain_id: sustain_id.clone(),
-                    operator: operator.clone(),
-                    seq: *seq as u32,
-                    events: x.events.iter().map(EventDto::from).collect(),
-                    mutations: x.mutations.len() as u32,
-                    liquid: x
-                        .state
-                        .pointer("/finances/liquid/balance")
-                        .and_then(Value::as_f64),
-                    constraints: readings(&world, &sustain_id),
-                    state: x.state.clone(),
-                };
+                let msg =
+                    Committed::of(&sustain_id, &operator, *seq, x, readings(&world, &sustain_id));
                 if let Err(e) = msg.emit(&app) {
                     // ★ Reported, never swallowed: a push that silently failed
                     //   would leave the UI confidently stale.
                     trace!("  !! push failed: {e}");
                 } else {
                     trace!("  ~> pushed Committed seq={} to the UI", seq);
+                }
+            } else {
+                // ★★ A refusal pushes an ACTIVITY message carrying NO STATE.
+                //    The state rule is untouched — nothing changed, so nothing
+                //    about state travels. What travels is that a request was
+                //    made and declined, which is worth watching.
+                let msg = Refused::of(&sustain_id, &operator, r);
+                if let Err(e) = msg.emit(&app) {
+                    trace!("  !! push failed: {e}");
+                } else {
+                    trace!("  ~> pushed Refused to the UI (no state)");
                 }
             }
         }

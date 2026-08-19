@@ -1,8 +1,9 @@
 # Mycelium — the Sustena cockpit
 
-**Status: V1.2 — live.** The household lives in an append-only event log on
-disk, rebuilt by folding it on every launch, and every committed change is
-**pushed** to the UI. Two screens: Monitor and Console.
+**Status: V1.3 — the cockpit.** A persistent app shell (left nav · topbar with
+the Sustain selector · status belt) with the **Constellation** home, Monitor
+and Console swapping inside it. Every gate decision is pushed to a live gate
+stream.
 
 ```bash
 npm install
@@ -114,6 +115,26 @@ channel behind a re-read.
 Sustain. Fine for a household; a very large Sustain would want a delta, and the
 mutations are already in the log if that day comes.
 
+## Two events, because there are two questions
+
+| | `Committed` | `Refused` |
+|---|---|---|
+| answers | *what changed* | *what was asked and declined* |
+| carries state | **yes** | **no field at all** |
+| appears in | live state, Monitor, the gate stream | the gate stream only |
+
+★★ This does **not** weaken the V1.2 rule. A refusal still emits **no state
+delta** — the fold is still the only truth about state. What travels on
+`Refused` is the *activity*, which a person watching a household wants to see.
+Keeping them as separate types means a consumer cannot treat a refusal as a
+change by forgetting to branch: there is no `state` to read.
+
+## One selection model
+
+The topbar selector, the left nav and the Constellation all read and write
+`world.selected`. Clicking a node selects that Sustain **and** opens Monitor on
+it. Nothing can disagree about what you are looking at.
+
 ## What is real, and what is not
 
 **Real:** the Sustain's definition (`Σ`), its viable region (`V`), its
@@ -149,8 +170,17 @@ a cycle, and the UI shows what it said.
   state into a parent aggregate does not exist in `sustena-core` (the Python
   engine has it; the Rust port does not). Nothing is summed. A household total
   computed in the host would be a number with no rule behind it.
-- **no Constellation, no app shell.** One flat selector and two tabs; the
-  left nav, topbar Sustain selector and status belt of the mockup are V1.3–1.4.
+- **the nav lists panels that do not exist yet**, disabled and marked `soon`
+  (Council, Simulate, Define, Composition, Economy, Ingest, Network, Library,
+  Profile). Hiding them would misrepresent the product; pretending they worked
+  would be worse.
+- **the identity `bg.myc` is declared, not authenticated.** Every call still
+  runs under `Authorization::Unchecked`; it is a name the cockpit displays, not
+  one the gate enforces.
+- **the topbar clock is the UI's**, not the engine's. The core has no clock and
+  nothing on screen attributes a timestamp to it.
+- **status-belt cells that cannot be honest are dashes**: household liquid
+  (`— needs ρ`), peers (`— single node`), pawa (`— not metered here`).
 - **no simulation, economy, governance, council, ingest, or definition editor.**
   All exist in the engine. None are wired.
 - **templates are declared in Rust** (`templates.rs`), not authored in-app.

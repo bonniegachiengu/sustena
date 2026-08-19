@@ -165,6 +165,19 @@ impl SustainDto {
 
 // ── the household ────────────────────────────────────────────────────────────
 
+/// A pocket, at summary scale.
+///
+/// ★ Small on purpose. The Constellation reads summaries for every Sustain and
+/// hydrates full state only on drill-in, so this carries the three numbers a
+/// vitals reading needs and not the document they came from.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PocketSummary {
+    pub name: String,
+    pub allocated: f64,
+    pub spent: f64,
+}
+
 /// One Sustain, as a selector row needs it.
 ///
 /// ★ Deliberately not the full `SustainDto`: a list of six should not carry six
@@ -183,10 +196,15 @@ pub struct SustainSummary {
     /// Its liquid balance, or `null` when the Sustain declares no such
     /// dimension. **Never 0 for absent** — a missing figure renders as "—".
     pub liquid: Option<f64>,
+    /// Its pockets, at summary scale.
+    pub pockets: Vec<PocketSummary>,
+    /// ★★ `V` for THIS Sustain, evaluated by the engine — so a constellation
+    /// can show a broken rule anywhere without hydrating anything.
+    pub constraints: Vec<ConstraintReading>,
 }
 
 impl SustainSummary {
-    pub fn of(s: &Sustain) -> Self {
+    pub fn of(s: &Sustain, constraints: Vec<ConstraintReading>) -> Self {
         SustainSummary {
             id: s.record.id.clone(),
             label: s.record.label.clone(),
@@ -197,6 +215,21 @@ impl SustainSummary {
                 .state
                 .pointer("/finances/liquid/balance")
                 .and_then(serde_json::Value::as_f64),
+            pockets: s
+                .state
+                .pointer("/finances/pockets")
+                .and_then(serde_json::Value::as_object)
+                .map(|m| {
+                    m.iter()
+                        .map(|(name, p)| PocketSummary {
+                            name: name.clone(),
+                            allocated: p.get("allocated").and_then(serde_json::Value::as_f64).unwrap_or(0.0),
+                            spent: p.get("spent").and_then(serde_json::Value::as_f64).unwrap_or(0.0),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            constraints,
         }
     }
 }
@@ -227,6 +260,13 @@ pub struct WorldDto {
     pub store_path: String,
     /// ★★ `⊕` validated by the engine (`MonitorEngine::flatten_holarchy`).
     pub holarchy: Holarchy,
+    /// ★ The local principal, as declared by the host.
+    ///
+    /// ★★ **Not yet bound to anything the engine checks.** Every call still runs
+    /// under `Authorization::Unchecked`; this is an identity the app displays,
+    /// not one the gate enforces. Naming that here keeps a later capability
+    /// slice honest about what it is actually adding.
+    pub principal: String,
     /// ★★★ **NOT AVAILABLE, and said so.** Roll-up `ρ` — folding children's
     /// state into a parent aggregate — does **not exist in `sustena-core`**
     /// (the Python engine has it; the Rust port does not, per the UX spec's
@@ -294,4 +334,68 @@ pub struct Committed {
     /// `V` re-evaluated after the change, by the engine.
     pub constraints: Vec<ConstraintReading>,
     pub liquid: Option<f64>,
+}
+
+/// ★★★ **A refusal, pushed — and it carries NO STATE.**
+///
+/// A separate type from [`Committed`] on purpose. The two answer different
+/// questions: *what changed* and *what was asked and declined*. Collapsing them
+/// into one message with a verdict flag would make it possible for a consumer
+/// to treat a refusal as a change by forgetting to branch — here there is no
+/// `state` field to read, so that mistake is unspellable.
+///
+/// ★★ This does not weaken V1.2's rule. **A refusal still emits no state
+/// delta**; the fold is still the only truth about state. What travels here is
+/// the *activity*: a request happened and the gate declined it, which a person
+/// watching a household genuinely wants to see.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct Refused {
+    pub sustain_id: String,
+    pub operator: String,
+    /// The engine's own words.
+    pub reason: Option<String>,
+    /// Which rule declined it.
+    pub constraint_violated: Option<String>,
+}
+
+impl Committed {
+    /// Build the message a commit pushes.
+    ///
+    /// ★ Constructed HERE rather than at the emit site, so the headless proof
+    /// and the running app produce the byte-identical message. A demo that
+    /// built its own copy would be testing the demo.
+    pub fn of(
+        sustain_id: &str,
+        operator: &str,
+        seq: u64,
+        x: &Execution,
+        constraints: Vec<ConstraintReading>,
+    ) -> Self {
+        Committed {
+            sustain_id: sustain_id.to_string(),
+            operator: operator.to_string(),
+            seq: seq as u32,
+            events: x.events.iter().map(EventDto::from).collect(),
+            mutations: x.mutations.len() as u32,
+            liquid: x
+                .state
+                .pointer("/finances/liquid/balance")
+                .and_then(serde_json::Value::as_f64),
+            constraints,
+            state: x.state.clone(),
+        }
+    }
+}
+
+impl Refused {
+    /// Build the message a refusal pushes. ★ No state, by shape.
+    pub fn of(sustain_id: &str, operator: &str, r: &GateResult) -> Self {
+        Refused {
+            sustain_id: sustain_id.to_string(),
+            operator: operator.to_string(),
+            reason: r.reason.clone(),
+            constraint_violated: r.constraint_violated.clone(),
+        }
+    }
 }

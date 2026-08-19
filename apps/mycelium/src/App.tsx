@@ -1,23 +1,73 @@
 /**
- * MYCELIUM — V1.2.
+ * MYCELIUM — V1.3. The app shell.
  *
- * The shell: a household selector, two screens, and **one subscription to the
- * push channel** that both of them read from. There is no polling anywhere in
- * this app.
+ * ★★ The frame is permanent and the panel swaps inside it: left nav, topbar
+ * with the Sustain selector, status belt. **One selection model** — the
+ * selector, the nav and the constellation all read and write `world.selected`,
+ * so they cannot disagree about what you are looking at.
+ *
+ * ★ Panels the roadmap names but the app does not have yet are listed and
+ * **disabled**, marked `soon`. A nav that hid them would misrepresent the
+ * product; one that pretended they worked would be worse.
  */
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import * as s from "./styles/app.css";
 import { vars } from "./styles/tokens.css";
-import { fmt, type SustainSummary } from "./lib/engine";
-import { engine } from "./lib/engine";
-import { childrenOf, hydrate, refreshWorld, selectedSustain, subscribe, world } from "./lib/live";
+import { engine, fmt } from "./lib/engine";
+import { attentionAcross, hydrate, refreshWorld, selectedSustain, subscribe, world } from "./lib/live";
+import Constellation from "./screens/Constellation";
 import Monitor from "./screens/Monitor";
 import Console from "./screens/Console";
 
-type Screen = "monitor" | "console";
+type Panel = "constellation" | "monitor" | "console";
+
+/** The roadmap's panel list. `soon` ones are shown, disabled, and labelled. */
+const NAV: { group: string; items: { id: Panel | string; label: string; soon?: boolean }[] }[] = [
+  {
+    group: "watch",
+    items: [
+      { id: "constellation", label: "Constellation" },
+      { id: "monitor", label: "Monitor" },
+      { id: "council", label: "Council", soon: true },
+    ],
+  },
+  {
+    group: "act",
+    items: [
+      { id: "console", label: "Console" },
+      { id: "simulate", label: "Simulate", soon: true },
+      { id: "define", label: "Define", soon: true },
+      { id: "composition", label: "Composition", soon: true },
+    ],
+  },
+  {
+    group: "system",
+    items: [
+      { id: "economy", label: "Economy", soon: true },
+      { id: "ingest", label: "Ingest", soon: true },
+      { id: "network", label: "Network", soon: true },
+      { id: "library", label: "Library", soon: true },
+      { id: "profile", label: "Profile", soon: true },
+    ],
+  },
+];
+
+function Clock() {
+  const [now, setNow] = createSignal(new Date());
+  // ★ The UI's own clock, for the person reading the screen. The ENGINE has
+  //   none, and nothing here feeds it — no timestamp on this screen is ever
+  //   attributed to the engine.
+  const t = setInterval(() => setNow(new Date()), 1000);
+  onCleanup(() => clearInterval(t));
+  return (
+    <span class={s.brandSub}>
+      {now().toLocaleTimeString(undefined, { hour12: false })} local
+    </span>
+  );
+}
 
 export default function App() {
-  const [screen, setScreen] = createSignal<Screen>("monitor");
+  const [panel, setPanel] = createSignal<Panel>("constellation");
   const [busy, setBusy] = createSignal(false);
 
   onMount(async () => {
@@ -27,12 +77,12 @@ export default function App() {
     onCleanup(stop);
 
     await refreshWorld();
-    // Hydrate every Sustain once — the parts a push does not carry (the log,
-    // and state for Sustains we have not touched yet).
     await Promise.all(world.order.map((id) => hydrate(id)));
   });
 
-  const pick = async (id: string) => {
+  /** ★★ The single selection path. Everything that changes the subject calls this. */
+  const select = async (id: string) => {
+    if (!id || id === world.selected) return;
     setBusy(true);
     try {
       await engine.select(id);
@@ -43,102 +93,83 @@ export default function App() {
     }
   };
 
-  const roots = () =>
-    world.order.map((k) => world.sustains[k]!).filter((x) => x && x.summary.parent === null);
+  /** Drill-in: pick the Sustain AND open Monitor on it. */
+  const open = async (id: string) => {
+    await select(id);
+    setPanel("monitor");
+  };
 
-  const Row = (props: { row: SustainSummary; child?: boolean }) => (
-    <button
-      class={`${world.selected === props.row.id ? s.sustainRowActive : s.sustainRow} ${
-        props.child ? s.childIndent : ""
-      }`}
-      onClick={() => void pick(props.row.id)}
-      disabled={busy()}
-    >
-      <span
-        class={s.dot}
-        style={{
-          background: world.selected === props.row.id ? vars.color.amber : vars.color.borderLight,
-        }}
-      />
-      <span>
-        <span class={s.sustainName}>{props.row.label}</span>
-        <br />
-        <span class={s.sustainMeta}>
-          {props.row.template} · {props.row.events} event{props.row.events === 1 ? "" : "s"}
-        </span>
-      </span>
-      <span class={s.sustainFigure}>{fmt(props.row.liquid)}</span>
-    </button>
-  );
+  const attentionCount = () => attentionAcross().length;
 
   return (
-    <div class={s.shell}>
+    <div class={s.frame}>
+      {/* ── topbar ────────────────────────────────────────────────────────── */}
       <header class={s.topbar}>
         <span class={s.brand}>Mycelium</span>
-        <span class={s.brandSub}>v1.2 · live</span>
+        <span class={s.brandSub}>v1.3</span>
 
-        <div class={s.tabs} style={{ "margin-left": vars.space.lg }}>
-          <button
-            class={screen() === "monitor" ? s.tabActive : s.tab}
-            onClick={() => setScreen("monitor")}
-          >
-            monitor
-          </button>
-          <button
-            class={screen() === "console" ? s.tabActive : s.tab}
-            onClick={() => setScreen("console")}
-          >
-            console
-          </button>
-        </div>
+        <select
+          class={s.picker}
+          value={world.selected ?? ""}
+          disabled={busy() || world.order.length === 0}
+          onChange={(e) => void select(e.currentTarget.value)}
+        >
+          <For each={world.order}>
+            {(id) => {
+              const su = world.sustains[id];
+              return (
+                <option value={id}>
+                  {su?.summary.parent ? "· " : ""}
+                  {su?.summary.label ?? id}
+                </option>
+              );
+            }}
+          </For>
+        </select>
 
         <span class={s.spacer} />
 
-        {/* ★ The push counter. Not decoration — it is the number that says the
-            channel is live, and it only moves when the engine commits. */}
         <span class={s.pushBadge}>{world.pushes} pushed</span>
-        <Show when={selectedSustain()}>
-          {(l) => <span class={s.brandSub}>· {l().summary.label}</span>}
+        <Show when={world.refusals > 0}>
+          <span class={s.refusedBadge}>{world.refusals} refused</span>
         </Show>
+
+        <span class={s.avatar}>bg</span>
+        <span class={s.identity}>{world.principal || "—"}</span>
+        <Clock />
       </header>
 
-      <div style={{ display: "grid", "grid-template-columns": "260px 1fr", "min-height": 0 }}>
-        {/* ── the household ────────────────────────────────────────────── */}
-        <nav
-          class={s.column}
-          style={{
-            padding: vars.space.md,
-            "border-right": `1px solid ${vars.color.border}`,
-            background: vars.color.bgSurface,
-          }}
-        >
-          <span class={s.cardTitle}>the household</span>
-          <Show
-            when={world.loaded}
-            fallback={
-              <div class={s.empty}>{world.error ? "engine unreachable" : "opening…"}</div>
-            }
-          >
-            <Show
-              when={world.order.length > 0}
-              fallback={<div class={s.empty}>no sustains yet · the store is empty</div>}
-            >
-              <div class={s.selector}>
-                <For each={roots()}>
-                  {(root) => (
-                    <>
-                      <Row row={root.summary} />
-                      <For each={childrenOf(root.summary.id)}>
-                        {(kid) => <Row row={kid} child />}
-                      </For>
-                    </>
+      {/* ── body ──────────────────────────────────────────────────────────── */}
+      <div class={s.body}>
+        <nav class={s.nav}>
+          <For each={NAV}>
+            {(g) => (
+              <div class={s.navGroup}>
+                <span class={s.navGroupTitle}>{g.group}</span>
+                <For each={g.items}>
+                  {(item) => (
+                    <button
+                      class={panel() === item.id ? s.navItemActive : s.navItem}
+                      disabled={item.soon}
+                      onClick={() => !item.soon && setPanel(item.id as Panel)}
+                    >
+                      {item.label}
+                      <Show when={item.id === "constellation" && attentionCount() > 0}>
+                        <span class={s.navSoon} style={{ color: vars.color.warn }}>
+                          {attentionCount()}
+                        </span>
+                      </Show>
+                      <Show when={item.soon}>
+                        <span class={s.navSoon}>soon</span>
+                      </Show>
+                    </button>
                   )}
                 </For>
               </div>
-            </Show>
-          </Show>
+            )}
+          </For>
 
-          <div class={s.invariantRow} style={{ "margin-top": vars.space.md }}>
+          <div class={s.invariantRow} style={{ "margin-top": "auto" }}>
             <span
               class={s.dot}
               style={{
@@ -160,17 +191,53 @@ export default function App() {
         </nav>
 
         <div style={{ "min-width": 0, "min-height": 0, overflow: "hidden", display: "grid" }}>
-          <Show when={screen() === "monitor"} fallback={<Console />}>
-            <Monitor />
+          <Show when={world.loaded} fallback={<div class={s.empty} style={{ padding: vars.space.xl }}>
+            {world.error ? `engine unreachable — ${world.error}` : "opening the household…"}
+          </div>}>
+            <Show when={panel() === "constellation"}>
+              <Constellation onOpen={(id) => void open(id)} />
+            </Show>
+            <Show when={panel() === "monitor"}>
+              <Monitor />
+            </Show>
+            <Show when={panel() === "console"}>
+              <Console />
+            </Show>
           </Show>
         </div>
       </div>
 
+      {/* ── status belt ───────────────────────────────────────────────────── */}
       <footer class={s.statusBelt}>
-        <span>store</span>
-        <span style={{ color: vars.color.textSecondary }}>{world.storePath || "—"}</span>
+        <span class={s.beltCell}>
+          <span>engine</span>
+          <span class={s.beltValue}>sustena-core · embedded</span>
+        </span>
+        <span class={s.beltCell}>
+          <span>host</span>
+          <span class={s.beltValue}>{world.storePath || "—"}</span>
+        </span>
+        <span class={s.beltCell}>
+          <span>sustains</span>
+          <span class={s.beltValue}>{world.order.length}</span>
+        </span>
+        <span class={s.beltCell}>
+          <span>liquid (household)</span>
+          {/* ★ Not summed — roll-up ρ is not in the core. */}
+          <span class={s.beltAbsent}>— needs ρ</span>
+        </span>
+        <span class={s.beltCell}>
+          <span>peers</span>
+          {/* ★ No multi-node host exists. An honest dash, not a zero. */}
+          <span class={s.beltAbsent}>— single node</span>
+        </span>
+        <span class={s.beltCell}>
+          <span>pawa</span>
+          {/* ★ The economy is built in the engine and not wired into this host. */}
+          <span class={s.beltAbsent}>— not metered here</span>
+        </span>
         <span class={s.spacer} />
-        <span>push channel · one message per committed change · no polling</span>
+        <span>push channel · one message per gate decision · no polling</span>
       </footer>
     </div>
   );

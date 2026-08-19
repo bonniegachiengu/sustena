@@ -84,9 +84,11 @@ async getLog(sustainId: string) : Promise<Result<LogEntryDto[], string>> {
 
 
 export const events = __makeEvents__<{
-committed: Committed
+committed: Committed,
+refused: Refused
 }>({
-committed: "committed"
+committed: "committed",
+refused: "refused"
 })
 
 /** user-defined constants **/
@@ -196,6 +198,37 @@ operator: string; events: EventDto[];
  */
 mutations: number }
 /**
+ * A pocket, at summary scale.
+ * 
+ * ★ Small on purpose. The Constellation reads summaries for every Sustain and
+ * hydrates full state only on drill-in, so this carries the three numbers a
+ * vitals reading needs and not the document they came from.
+ */
+export type PocketSummary = { name: string; allocated: number; spent: number }
+/**
+ * ★★★ **A refusal, pushed — and it carries NO STATE.**
+ * 
+ * A separate type from [`Committed`] on purpose. The two answer different
+ * questions: *what changed* and *what was asked and declined*. Collapsing them
+ * into one message with a verdict flag would make it possible for a consumer
+ * to treat a refusal as a change by forgetting to branch — here there is no
+ * `state` field to read, so that mistake is unspellable.
+ * 
+ * ★★ This does not weaken V1.2's rule. **A refusal still emits no state
+ * delta**; the fold is still the only truth about state. What travels here is
+ * the *activity*: a request happened and the gate declined it, which a person
+ * watching a household genuinely wants to see.
+ */
+export type Refused = { sustainId: string; operator: string; 
+/**
+ * The engine's own words.
+ */
+reason: string | null; 
+/**
+ * Which rule declined it.
+ */
+constraintViolated: string | null }
+/**
  * `Σ = ⟨B, S, V, T, ⊕⟩`, as much of it as a cockpit needs to draw.
  * 
  * ★ Deliberately not the whole `Definition`: a walking skeleton should carry
@@ -239,7 +272,16 @@ events: number;
  * Its liquid balance, or `null` when the Sustain declares no such
  * dimension. **Never 0 for absent** — a missing figure renders as "—".
  */
-liquid: number | null }
+liquid: number | null; 
+/**
+ * Its pockets, at summary scale.
+ */
+pockets: PocketSummary[]; 
+/**
+ * ★★ `V` for THIS Sustain, evaluated by the engine — so a constellation
+ * can show a broken rule anywhere without hydrating anything.
+ */
+constraints: ConstraintReading[] }
 /**
  * Which kind of Sustain to instantiate.
  * 
@@ -291,6 +333,15 @@ storePath: string;
  * ★★ `⊕` validated by the engine (`MonitorEngine::flatten_holarchy`).
  */
 holarchy: Holarchy; 
+/**
+ * ★ The local principal, as declared by the host.
+ * 
+ * ★★ **Not yet bound to anything the engine checks.** Every call still runs
+ * under `Authorization::Unchecked`; this is an identity the app displays,
+ * not one the gate enforces. Naming that here keeps a later capability
+ * slice honest about what it is actually adding.
+ */
+principal: string; 
 /**
  * ★★★ **NOT AVAILABLE, and said so.** Roll-up `ρ` — folding children's
  * state into a parent aggregate — does **not exist in `sustena-core`**

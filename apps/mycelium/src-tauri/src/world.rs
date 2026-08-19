@@ -29,6 +29,14 @@ use sustena_core::{
 use crate::store::{LoggedEvent, Registry as Records, Store, StoreError, StoreResult, SustainRecord};
 use crate::templates::{self, TemplateId};
 
+/// ★ The local principal this app runs as.
+///
+/// ★★ Declared, not authenticated. There is no sign-in and the gate still runs
+/// every call under `Authorization::Unchecked` — this is the name the cockpit
+/// displays, and binding it to a real capability is a later slice. Said plainly
+/// so nobody mistakes a label for a check.
+pub const PRINCIPAL: &str = "bg.myc";
+
 /// One live Sustain.
 pub struct Sustain {
     pub record: SustainRecord,

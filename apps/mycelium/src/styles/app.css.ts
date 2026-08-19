@@ -532,3 +532,233 @@ export const pushBadge = style({
   borderRadius: vars.radius.sm,
   padding: `2px ${vars.space.sm}`,
 });
+
+/* -- the app shell (V1.3) ------------------------------------------------ */
+
+export const frame = style({
+  display: "grid",
+  gridTemplateRows: "44px 1fr auto",
+  height: "100%",
+  minWidth: 0,
+});
+
+export const body = style({
+  display: "grid",
+  gridTemplateColumns: "212px 1fr",
+  minHeight: 0,
+  minWidth: 0,
+});
+
+export const nav = style({
+  display: "flex",
+  flexDirection: "column",
+  gap: vars.space.md,
+  padding: vars.space.md,
+  borderRight: `1px solid ${vars.color.border}`,
+  background: vars.color.bgSurface,
+  overflowY: "auto",
+  minHeight: 0,
+});
+
+export const navGroup = style({
+  display: "flex",
+  flexDirection: "column",
+  gap: "1px",
+});
+
+export const navGroupTitle = style({
+  fontFamily: vars.font.mono,
+  fontSize: "9px",
+  fontWeight: 500,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  color: vars.color.textDim,
+  padding: `${vars.space.xs} ${vars.space.sm}`,
+});
+
+export const navItem = style({
+  display: "flex",
+  alignItems: "center",
+  gap: vars.space.sm,
+  fontFamily: vars.font.ui,
+  fontSize: "12.5px",
+  color: vars.color.textSecondary,
+  background: "transparent",
+  border: "1px solid transparent",
+  borderRadius: vars.radius.sm,
+  padding: `${vars.space.sm} ${vars.space.sm}`,
+  cursor: "pointer",
+  textAlign: "left",
+  width: "100%",
+  selectors: {
+    "&:hover:not(:disabled)": { background: vars.color.bgRaised, color: vars.color.textPrimary },
+    "&:disabled": { color: vars.color.textDim, cursor: "default" },
+  },
+});
+
+export const navItemActive = style([
+  navItem,
+  {
+    color: vars.color.amber,
+    borderColor: vars.color.amberBorder,
+    background: vars.color.amberGlow,
+  },
+]);
+
+/** A panel that exists in the roadmap but not yet in the app. */
+export const navSoon = style({
+  fontFamily: vars.font.mono,
+  fontSize: "9px",
+  letterSpacing: "0.08em",
+  color: vars.color.textDim,
+  marginLeft: "auto",
+});
+
+export const identity = style({
+  fontFamily: vars.font.mono,
+  fontSize: "11px",
+  color: vars.color.textSecondary,
+  letterSpacing: "0.04em",
+});
+
+export const avatar = style({
+  width: "20px",
+  height: "20px",
+  borderRadius: "2px",
+  background: vars.color.amberGlow,
+  border: `1px solid ${vars.color.amberBorder}`,
+  color: vars.color.amber,
+  fontFamily: vars.font.mono,
+  fontSize: "9px",
+  fontWeight: 500,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+});
+
+export const picker = style({
+  fontFamily: vars.font.mono,
+  fontSize: "11px",
+  color: vars.color.textPrimary,
+  background: vars.color.bgRaised,
+  border: `1px solid ${vars.color.borderMid}`,
+  borderRadius: vars.radius.sm,
+  padding: `3px ${vars.space.sm}`,
+  outline: "none",
+  maxWidth: "220px",
+});
+
+export const beltCell = style({
+  display: "flex",
+  alignItems: "baseline",
+  gap: vars.space.xs,
+});
+
+export const beltValue = style({ color: vars.color.textSecondary });
+export const beltAbsent = style({ color: vars.color.textDim });
+
+/* -- constellation ------------------------------------------------------- */
+
+export const constellationGrid = style({
+  display: "grid",
+  gridTemplateColumns: "minmax(420px, 1fr) minmax(320px, 420px)",
+  gap: vars.space.lg,
+  padding: vars.space.lg,
+  minHeight: 0,
+  minWidth: 0,
+  overflow: "hidden",
+  "@media": { "screen and (max-width: 1040px)": { gridTemplateColumns: "1fr" } },
+});
+
+export const constellationSvg = style({
+  width: "100%",
+  height: "auto",
+  display: "block",
+});
+
+export const node = style({ cursor: "pointer" });
+
+// vanilla-extract refuses a descendant selector inside `style` (it would leak
+// specificity into elements it does not own). A hover on a child element is a
+// global rule scoped to this class, and saying so is the fix.
+globalStyle(`${node}:hover circle`, { stroke: vars.color.amber });
+
+export const nodeLabel = style({
+  fontFamily: vars.font.ui,
+  fontSize: "11px",
+  fontWeight: 500,
+});
+
+export const nodeFigure = style({
+  fontFamily: vars.font.mono,
+  fontSize: "9.5px",
+});
+
+export const telemetry = style({
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))",
+  gap: vars.space.md,
+  padding: `${vars.space.md} 0`,
+  marginTop: vars.space.md,
+  borderTop: `1px solid ${vars.color.border}`,
+});
+
+export const telemetryCell = style({
+  display: "flex",
+  flexDirection: "column",
+  gap: "2px",
+});
+
+export const streamRow = style({
+  display: "grid",
+  gridTemplateColumns: "76px 1fr",
+  gap: vars.space.sm,
+  alignItems: "baseline",
+  padding: `${vars.space.sm} 0`,
+  borderTop: `1px solid ${vars.color.border}`,
+  fontFamily: vars.font.mono,
+  fontSize: "11px",
+});
+
+export const streamRowRefused = style([
+  streamRow,
+  { background: vars.color.dangerGlow, borderTopColor: vars.color.dangerBorder },
+]);
+
+export const streamVerdict = style({
+  fontFamily: vars.font.mono,
+  fontSize: "9.5px",
+  fontWeight: 500,
+  letterSpacing: "0.10em",
+});
+
+export const refusedBadge = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10px",
+  letterSpacing: "0.08em",
+  color: vars.color.danger,
+  border: `1px solid ${vars.color.dangerBorder}`,
+  background: vars.color.dangerGlow,
+  borderRadius: vars.radius.sm,
+  padding: `2px ${vars.space.sm}`,
+  marginLeft: vars.space.sm,
+});
+
+export const attentionButton = style({
+  display: "flex",
+  gap: vars.space.sm,
+  alignItems: "baseline",
+  padding: `${vars.space.sm} 0`,
+  borderTop: `1px solid ${vars.color.border}`,
+  background: "transparent",
+  border: "none",
+  borderTopWidth: "1px",
+  borderTopStyle: "solid",
+  borderTopColor: vars.color.border,
+  color: "inherit",
+  font: "inherit",
+  textAlign: "left",
+  width: "100%",
+  cursor: "pointer",
+  selectors: { "&:hover": { background: vars.color.bgRaised } },
+});
