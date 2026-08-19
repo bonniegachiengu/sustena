@@ -25,6 +25,7 @@ import {
   type Result,
   type RollupDto,
   type TransferResult,
+  type IdentityDto,
   type AggregateDto,
   type SustainDto,
   type SustainSummary,
@@ -50,6 +51,7 @@ export type {
   RollupDto,
   AggregateDto,
   TransferResult,
+  IdentityDto,
   SustainDto,
   SustainSummary,
   TemplateId,
@@ -72,6 +74,18 @@ function unwrap<T>(r: Result<T, string>): T {
 
 export const engine = {
   world: (): Promise<WorldDto> => commands.getWorld(),
+
+  /**
+   * ★★★ The local identity. `unlocked` means a private key is in memory —
+   * nothing acts until it is, and that is enforced in the HOST, not here.
+   * A UI-only gate would be a curtain in front of an open door.
+   */
+  identity: (): Promise<IdentityDto> => commands.getIdentity(),
+  unlock: async (passphrase: string): Promise<IdentityDto> =>
+    unwrap(await commands.unlockIdentity(passphrase)),
+  enrol: async (handle: string, passphrase: string): Promise<IdentityDto> =>
+    unwrap(await commands.enrolIdentity(handle, passphrase)),
+  lockIdentity: (): Promise<IdentityDto> => commands.lockIdentity(),
   sustain: (id: string | null = null): Promise<SustainDto | null> => commands.getSustain(id),
   select: async (id: string): Promise<boolean> => unwrap(await commands.selectSustain(id)),
   create: async (

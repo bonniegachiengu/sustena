@@ -1,0 +1,226 @@
+{
+  "conformance_version": 1,
+  "slice": "authorization",
+  "authored_from": "Immune §IV (the extended admit) · Sustain §4.5 (min_privilege / privilege.check)",
+  "note": "SPEC vectors, Rust-only. The reference DECLARES `min_privilege` on OperatorMeta and reads it NOWHERE — grep-confirmed: one declaration site, one dataclass field, zero readers, and no `permitted` / `effective_privilege` / `privilege.check` anywhere in the Python engine. So there is nothing to record from it, and these cases are authored from the articles. See conformance/README.md.",
+  "cases": [
+    {
+      "name": "permitted_admits",
+      "why": "An owner acting on their own Sustain passes the authorization conjunct, and the call proceeds to the rest of admit().",
+      "principal": "bg.myc",
+      "edges": [
+        {
+          "sustain": "own",
+          "tier": 0
+        }
+      ],
+      "path": [
+        "own"
+      ],
+      "min_privilege": 1,
+      "expect": {
+        "permitted": true,
+        "rule": null
+      }
+    },
+    {
+      "name": "insufficient_tier_names_what_is_missing",
+      "why": "An observer may not act. The refusal must say the tier HELD and the tier REQUIRED — 'you may not' is useless without which authority was short.",
+      "principal": "bg.myc",
+      "edges": [
+        {
+          "sustain": "theirs",
+          "tier": 3
+        }
+      ],
+      "path": [
+        "theirs"
+      ],
+      "min_privilege": 1,
+      "expect": {
+        "permitted": false,
+        "rule": "insufficient_privilege",
+        "held": 3,
+        "required": 1,
+        "reason_mentions": [
+          "bg.myc",
+          "theirs",
+          "3",
+          "1"
+        ]
+      }
+    },
+    {
+      "name": "no_edge_is_a_different_refusal_from_too_little_authority",
+      "why": "§IV is explicit that 'you are not a member here' and 'you are a member who may not do this' are different answers. Collapsing them would tell a person to fix the wrong thing.",
+      "principal": "stranger",
+      "edges": [],
+      "path": [
+        "own"
+      ],
+      "min_privilege": 1,
+      "expect": {
+        "permitted": false,
+        "rule": "not_a_member"
+      }
+    },
+    {
+      "name": "the_weakest_link_along_the_path_governs",
+      "why": "Permission is the conjunction of every gate on the containing path. Owner of the household and observer on a child gives OBSERVER on the child — nesting can only shrink authority, never widen it.",
+      "principal": "bg.myc",
+      "edges": [
+        {
+          "sustain": "household",
+          "tier": 0
+        },
+        {
+          "sustain": "child",
+          "tier": 3
+        }
+      ],
+      "path": [
+        "household",
+        "child"
+      ],
+      "min_privilege": 1,
+      "expect": {
+        "permitted": false,
+        "rule": "insufficient_privilege",
+        "held": 3,
+        "required": 1
+      }
+    },
+    {
+      "name": "a_missing_edge_anywhere_on_the_path_denies",
+      "why": "There is no inherit-from-the-parent rule. Owner of the household does not confer membership of a child the principal has no edge to.",
+      "principal": "bg.myc",
+      "edges": [
+        {
+          "sustain": "household",
+          "tier": 0
+        }
+      ],
+      "path": [
+        "household",
+        "child"
+      ],
+      "min_privilege": 1,
+      "expect": {
+        "permitted": false,
+        "rule": "not_a_member"
+      }
+    },
+    {
+      "name": "authorization_is_a_separate_conjunct_from_the_viable_region",
+      "why": "admit = permitted ∧ guard ∧ result∈A ∧ D. Every conjunct must hold, and each refuses with its OWN rule name so a person can tell 'you may not' from 'your own guard said no' from 'that would break a rule'. ★ The invariant is a CEILING the operator's own guard cannot pre-empt: an authored version using a negative amount was corrected after running it, because `params.amount > 0` fired first and proved the wrong conjunct.",
+      "principal": "bg.myc",
+      "invariant": "finances.liquid.balance <= 400",
+      "cases": [
+        {
+          "tier": 0,
+          "amount": 100,
+          "note": "balance 500 -> 600, over the 400 ceiling",
+          "expect": {
+            "committed": false,
+            "rule": "enforcement_gate"
+          }
+        },
+        {
+          "tier": 3,
+          "amount": 100,
+          "expect": {
+            "committed": false,
+            "rule": "insufficient_privilege",
+            "note": "authority is decided BEFORE the guard and before the gate, so an unauthorized caller is told they may not act -- not what the state would have done."
+          }
+        },
+        {
+          "tier": 0,
+          "amount": -100,
+          "expect": {
+            "committed": false,
+            "rule": "params.amount > 0",
+            "note": "the operator's OWN guard, a third distinct conjunct."
+          }
+        },
+        {
+          "tier": 3,
+          "amount": -100,
+          "expect": {
+            "committed": false,
+            "rule": "insufficient_privilege"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an_unauthorized_call_leaves_state_byte_unchanged",
+      "why": "The refusal must produce no mutation, no event and no state change — the same guarantee an enforcement-gate refusal gives, for a different reason.",
+      "principal": "bg.myc",
+      "edges": [
+        {
+          "sustain": "own",
+          "tier": 3
+        }
+      ],
+      "path": [
+        "own"
+      ],
+      "min_privilege": 1,
+      "expect": {
+        "permitted": false,
+        "mutations": 0,
+        "events": 0,
+        "state_unchanged": true,
+        "rule": "insufficient_privilege"
+      }
+    },
+    {
+      "name": "an_unresolved_skin_fails_closed",
+      "why": "An edge naming a bundle no registry resolves is REFUSED, never quietly demoted to the edge's own tier. A typo'd role name becoming owner-by-accident is exactly what the fail-closed rule prevents.",
+      "principal": "bg.myc",
+      "edges": [
+        {
+          "sustain": "own",
+          "tier": 0,
+          "skin": "no-such-role"
+        }
+      ],
+      "path": [
+        "own"
+      ],
+      "min_privilege": 1,
+      "expect": {
+        "permitted": false,
+        "rule": "skin_resolves"
+      }
+    },
+    {
+      "name": "a_skin_may_restrict_an_edge_but_never_widen_it",
+      "why": "Where both an edge tier and a skin tier are present the WEAKER wins — the same weakest-link algebra as the path walk. A bundle meant to restrict must not be able to widen.",
+      "principal": "bg.myc",
+      "edges": [
+        {
+          "sustain": "own",
+          "tier": 0,
+          "skin": "observer-role"
+        }
+      ],
+      "skins": [
+        {
+          "name": "observer-role",
+          "tier": 3
+        }
+      ],
+      "path": [
+        "own"
+      ],
+      "min_privilege": 1,
+      "expect": {
+        "permitted": false,
+        "rule": "insufficient_privilege",
+        "held": 3
+      }
+    }
+  ]
+}

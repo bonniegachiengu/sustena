@@ -1,19 +1,24 @@
 /**
- * PROFILE — identity, and the **real** capability model.
+ * PROFILE — the authenticated identity, and the **enforced** capability model.
  *
  * ★★ The permission matrix is the engine's: `effective_privilege` walks the
  * membership path with the weakest-link rule, and `permitted` compares it
  * against each operator's declared `min_privilege`.
  *
- * ★★★ **And the gate is not checking any of it.** Every call in this host runs
- * `Authorization::Unchecked`. This screen shows the authority the principal
- * *holds*, not one being enforced — a permission matrix that implied
- * enforcement would be security theatre, so it says so at the top.
+ * ★★★ **And the gate now checks it.** Every call runs
+ * `Authorization::Principal` with the unlocked identity, so this is the
+ * authority in force rather than the authority held. The earlier honest note
+ * — *displayed, not enforced* — is retired because it stopped being true, not
+ * because it stopped being convenient.
+ *
+ * ★ The screen asks the HOST for these figures, which asks the same
+ * `permitted` the gate asks. A screen computing permission its own way would
+ * eventually disagree with the thing that actually decides.
  */
 import { createResource, For, Show } from "solid-js";
 import {
-  Absent,
   Badge,
+  Button,
   Caption,
   Card,
   Cluster,
@@ -61,12 +66,40 @@ export default function Profile() {
             </Fill>
           </Cluster>
 
-          {/* ★★★ The honesty that matters most on this screen. */}
+          {/* ★★★ Was "declared, not authenticated". It is neither now. */}
           <Note gap="lg">
-            <Absent title="declared, not authenticated">
-              There is no sign-in. This handle is a name the host declares and the ledger charges
-              to — it is not proof of anything, and nothing checked it.
-            </Absent>
+            <Readout label="key" tone="ok">
+              {world.identity?.publicKey
+                ? `${world.identity.publicKey.slice(0, 16)}…`
+                : "—"}
+            </Readout>
+            <Readout label="kdf">
+              {world.identity?.kdf ?? "—"}
+              {world.identity?.iterations
+                ? ` · ${world.identity.iterations.toLocaleString()} iterations`
+                : ""}
+            </Readout>
+            <Caption>
+              An <strong>ed25519 keypair</strong>, unlocked this session by a passphrase that
+              genuinely decrypted the private half — and then made to prove itself against the
+              public half on file. The handle is the key's name, not a claim.
+            </Caption>
+          </Note>
+          <Note>
+            <Cluster>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  void engine.lockIdentity().then(() => window.location.reload());
+                }}
+              >
+                lock
+              </Button>
+            </Cluster>
+            <Caption>
+              Locking drops the private key from the host's memory — not a screen state. A
+              locked cockpit cannot act even if a surface forgot to stop it.
+            </Caption>
           </Note>
         </Card>
 
@@ -128,7 +161,7 @@ export default function Profile() {
                 </For>
 
                 <Note gap="lg">
-                  <Absent title="displayed, not enforced">{a().note}</Absent>
+                  <Caption>{a().note}</Caption>
                 </Note>
               </>
             )}

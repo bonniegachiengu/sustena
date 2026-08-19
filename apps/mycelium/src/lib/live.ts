@@ -19,7 +19,7 @@
  */
 import { createStore, produce, reconcile } from "solid-js/store";
 import { events, type Committed, type Refused, type RollupDto } from "../bindings";
-import { engine, type ConstraintReading, type LogEntryDto, type SustainSummary, type WorldDto } from "./engine";
+import { engine, type ConstraintReading, type IdentityDto, type LogEntryDto, type SustainSummary, type WorldDto } from "./engine";
 
 export type { Committed, ConstraintReading, LogEntryDto, Refused, RollupDto };
 
@@ -66,6 +66,12 @@ type LiveWorld = {
 
   sustains: Record<string, LiveSustain>;
   principal: string;
+  /**
+   * ★★★ Who this machine is, and whether the key is unlocked. The whole
+   * cockpit is behind this: `loaded` is never reached while locked, because
+   * there is nothing a locked world can honestly show.
+   */
+  identity: IdentityDto | null;
   /** ★ Counts pushes received. The number a proof can point at. */
   pushes: number;
   lastPush: Committed | null;
@@ -85,6 +91,7 @@ const [world, setWorld] = createStore<LiveWorld>({
   linked: 0,
   sustains: {},
   principal: "",
+  identity: null,
   pushes: 0,
   lastPush: null,
   stream: [],
@@ -153,6 +160,20 @@ export async function hydrate(id: string): Promise<void> {
     );
   } catch (e) {
     setWorld("error", String(e));
+  }
+}
+
+/** Re-read the identity. ★ The only thing a locked cockpit may ask for. */
+export async function refreshIdentity(): Promise<IdentityDto | null> {
+  try {
+    const id = await engine.identity();
+    setWorld("identity", id);
+    return id;
+  } catch (e) {
+    setWorld(produce((s) => {
+      s.error = String(e);
+    }));
+    return null;
   }
 }
 

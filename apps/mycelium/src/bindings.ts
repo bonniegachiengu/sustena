@@ -154,10 +154,11 @@ async createFromDefinition(id: string, label: string, definitionId: string, pare
  * compares against each operator's declared `min_privilege`. This is the real
  * model, not a display of intentions.
  * 
- * ★★★ **And it is not what the gate currently checks.** Every call in this
- * host runs `Authorization::Unchecked`, so this is the authority a person
- * HOLDS, shown — not one being enforced. The screen says so, because a
- * permission matrix that implied enforcement would be security theatre.
+ * ★★★ **And it IS what the gate checks.** Every call runs
+ * `Authorization::Principal` with the unlocked identity, so this is authority
+ * in force. It asks the same `permitted` the gate asks, from the same
+ * memberships and the same path — a screen computing permission its own way
+ * would eventually disagree with the thing that decides.
  */
 async getAccess(sustainId: string) : Promise<AccessDto> {
     return await TAURI_INVOKE("get_access", { sustainId });
@@ -190,6 +191,47 @@ async transfer(fromSustainId: string, toSustainId: string, path: string, amount:
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Who this machine is, and whether the key is unlocked.
+ */
+async getIdentity() : Promise<IdentityDto> {
+    return await TAURI_INVOKE("get_identity");
+},
+/**
+ * **Unlock** the local identity with a passphrase.
+ * 
+ * ★★★ The passphrase is not compared against anything. It derives a key, and
+ * either that key decrypts the private half or it does not — there is no
+ * branch here an attacker could invert, and a wrong passphrase leaves the
+ * world locked. The error text is the same for a wrong passphrase and a
+ * tampered file, on purpose.
+ */
+async unlockIdentity(passphrase: string) : Promise<Result<IdentityDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("unlock_identity", { passphrase }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **Enrol** a new identity on a machine that has none.
+ */
+async enrolIdentity(handle: string, passphrase: string) : Promise<Result<IdentityDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("enrol_identity", { handle, passphrase }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Drop the private key from memory. ★ Not a UI state — the key genuinely
+ * leaves, so a locked cockpit cannot act even if a surface forgot to stop it.
+ */
+async lockIdentity() : Promise<IdentityDto> {
+    return await TAURI_INVOKE("lock_identity");
 },
 /**
  * ★★★ Resolve a proposal with the engine's own `council::resolve`.
@@ -465,6 +507,30 @@ export type Holarchy =
  * It refused, and here is what it said.
  */
 { kind: "broken"; reason: string }
+/**
+ * Who this machine is, and whether the key is in memory.
+ * 
+ * ★★ `handle` is readable while LOCKED — a person should be able to see which
+ * identity they are being asked to unlock. `publicKey` is not: it is derived
+ * from the private half, and having it means the unlock genuinely happened.
+ */
+export type IdentityDto = { 
+/**
+ * Whether an identity exists on this machine at all.
+ */
+enrolled: boolean; 
+/**
+ * Whether the private key is in memory right now.
+ */
+unlocked: boolean; handle: string | null; 
+/**
+ * The verifying key, hex — present only once unlocked.
+ */
+publicKey: string | null; 
+/**
+ * The KDF actually in force, named rather than assumed.
+ */
+kdf: string | null; iterations: number | null }
 /**
  * One rule a person declared.
  */

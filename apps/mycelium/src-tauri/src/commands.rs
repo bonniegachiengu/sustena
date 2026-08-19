@@ -14,12 +14,12 @@ use crate::dto::{
     AccessDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
-    TransferLegDto, TransferResult, Verdict, WorldDto,
+    IdentityDto, TransferLegDto, TransferResult, Verdict, WorldDto,
 };
 use crate::definitions::{AuthoredDefinition, DefinitionVerdict};
 use crate::templates::TemplateId;
 use sustena_core::holon::Transfer as HolonTransfer;
-use crate::world::{memberships, World, PRINCIPAL};
+use crate::world::{World, DEFAULT_HANDLE};
 
 /// `V`, evaluated against current state by the engine.
 fn readings(world: &World, sustain_id: &str) -> Vec<ConstraintReading> {
@@ -63,7 +63,9 @@ pub fn get_world(world: State<'_, World>) -> WorldDto {
         sustains,
         selected,
         store_path: world.store().root().display().to_string(),
-        principal: PRINCIPAL.to_string(),
+        // ★ Empty while locked. A cockpit that showed a name before the key was
+        //   recovered would be showing a claim, not an identity.
+        principal: world.principal().unwrap_or_default(),
         holarchy,
     }
 }
@@ -326,6 +328,7 @@ pub fn simulate(
 #[tauri::command]
 #[specta::specta]
 pub fn get_economy(world: State<'_, World>) -> EconomyDto {
+    let who = world.principal().unwrap_or_else(|| DEFAULT_HANDLE.to_string());
     use sustena_core::governance::declared_parameters;
     use sustena_core::juul::{Entry, MintAuthority};
 
@@ -406,8 +409,8 @@ pub fn get_economy(world: State<'_, World>) -> EconomyDto {
         });
 
         EconomyDto {
-            principal: PRINCIPAL.to_string(),
-            balance: e.ledger.balance_of(PRINCIPAL),
+            principal: who.clone(),
+            balance: e.ledger.balance_of(&who),
             circulation: e.ledger.total_in_circulation(),
             minted_total: e.ledger.minted_total(),
             issued_total: e.ledger.issued_total(),
@@ -493,18 +496,23 @@ pub fn create_from_definition(
 /// compares against each operator's declared `min_privilege`. This is the real
 /// model, not a display of intentions.
 ///
-/// ★★★ **And it is not what the gate currently checks.** Every call in this
-/// host runs `Authorization::Unchecked`, so this is the authority a person
-/// HOLDS, shown — not one being enforced. The screen says so, because a
-/// permission matrix that implied enforcement would be security theatre.
+/// ★★★ **And it IS what the gate checks.** Every call runs
+/// `Authorization::Principal` with the unlocked identity, so this is authority
+/// in force. It asks the same `permitted` the gate asks, from the same
+/// memberships and the same path — a screen computing permission its own way
+/// would eventually disagree with the thing that decides.
 #[tauri::command]
 #[specta::specta]
 pub fn get_access(world: State<'_, World>, sustain_id: String) -> AccessDto {
     use sustena_core::principal::{effective_privilege, permitted};
 
-    let m = memberships();
-    let path = vec![sustain_id.clone()];
-    let tier = effective_privilege(&m, PRINCIPAL, &path).ok();
+    // ★★★ The SAME principal, memberships and path the gate uses. A screen
+    //   computing permission its own way would eventually disagree with the
+    //   thing that actually decides.
+    let who = world.principal().unwrap_or_default();
+    let m = world.memberships_for(&who);
+    let path = world.authority_path(&sustain_id);
+    let tier = effective_privilege(&m, &who, &path).ok();
 
     let allowed: Vec<String> =
         world.with(|i| i.get(&sustain_id).map(|s| s.definition.operators.clone()).unwrap_or_default());
@@ -513,7 +521,7 @@ pub fn get_access(world: State<'_, World>, sustain_id: String) -> AccessDto {
         .iter()
         .filter_map(|name| {
             let meta = world.operators.get(name)?;
-            let verdict = permitted(&m, PRINCIPAL, &path, meta.min_privilege);
+            let verdict = permitted(&m, &who, &path, meta.min_privilege);
             Some(OperatorAccessDto {
                 operator: name.clone(),
                 required_tier: meta.min_privilege,
@@ -524,16 +532,16 @@ pub fn get_access(world: State<'_, World>, sustain_id: String) -> AccessDto {
         .collect();
 
     AccessDto {
-        principal: PRINCIPAL.to_string(),
+        principal: who,
         sustain_id,
         tier,
         memberships: m.len() as u32,
         operators,
-        enforced: false,
-        note: "This is the authority the principal HOLDS. It is not yet what the gate \
-               checks: every call in this host runs `Authorization::Unchecked`, so the \
-               capability model is displayed, not enforced."
-            .into(),
+        // ★ True now, and it is the host reporting a fact about itself:
+        //   `World::call` passes `Authorization::Principal`, never `Unchecked`.
+        enforced: true,
+        note: "Enforced. Every call runs Authorization::Principal with the unlocked \nidentity, and permitted(principal, operator, sustain) is a conjunct of admit() -- \ndecided BEFORE the guard and refused with its own name. An authorization refusal \nreads insufficient_privilege or not_a_member, never enforcement_gate."
+            .to_string(),
     }
 }
 
@@ -712,4 +720,62 @@ fn dot(state: &Value, path: &str) -> Option<f64> {
         node = node.get(seg)?;
     }
     node.as_f64()
+}
+
+// ── identity ──────────────────────────────────────────────────
+
+/// Who this machine is, and whether the key is unlocked.
+#[tauri::command]
+#[specta::specta]
+pub fn get_identity(world: State<'_, World>) -> IdentityDto {
+    let store = world.identity_store();
+    let file = store.read().ok();
+    IdentityDto {
+        enrolled: store.exists(),
+        unlocked: world.is_unlocked(),
+        handle: world.principal().or_else(|| file.as_ref().map(|f| f.handle.clone())),
+        public_key: world.public_key(),
+        kdf: file.as_ref().map(|f| f.kdf.clone()),
+        iterations: file.as_ref().map(|f| f.iterations),
+    }
+}
+
+/// **Unlock** the local identity with a passphrase.
+///
+/// ★★★ The passphrase is not compared against anything. It derives a key, and
+/// either that key decrypts the private half or it does not — there is no
+/// branch here an attacker could invert, and a wrong passphrase leaves the
+/// world locked. The error text is the same for a wrong passphrase and a
+/// tampered file, on purpose.
+#[tauri::command]
+#[specta::specta]
+pub fn unlock_identity(world: State<'_, World>, passphrase: String) -> Result<IdentityDto, String> {
+    trace!("unlock_identity");
+    world.unlock(&passphrase).map_err(|e| e.to_string())?;
+    trace!("  -> unlocked as {:?}", world.principal());
+    Ok(get_identity(world))
+}
+
+/// **Enrol** a new identity on a machine that has none.
+#[tauri::command]
+#[specta::specta]
+pub fn enrol_identity(
+    world: State<'_, World>,
+    handle: String,
+    passphrase: String,
+) -> Result<IdentityDto, String> {
+    let handle = if handle.trim().is_empty() { DEFAULT_HANDLE.to_string() } else { handle };
+    trace!("enrol_identity  {handle}");
+    world.enrol(&handle, &passphrase).map_err(|e| e.to_string())?;
+    Ok(get_identity(world))
+}
+
+/// Drop the private key from memory. ★ Not a UI state — the key genuinely
+/// leaves, so a locked cockpit cannot act even if a surface forgot to stop it.
+#[tauri::command]
+#[specta::specta]
+pub fn lock_identity(world: State<'_, World>) -> IdentityDto {
+    trace!("lock_identity");
+    world.lock();
+    get_identity(world)
 }

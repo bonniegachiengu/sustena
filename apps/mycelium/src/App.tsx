@@ -16,7 +16,14 @@ import * as L from "./ui/layout.css";
 import * as S from "./ui/ui.css";
 import { Badge, Caption, Empty, ErrorState, NoteRow } from "./ui";
 import { engine, fmt } from "./lib/engine";
-import { attentionAcross, hydrate, refreshWorld, subscribe, world } from "./lib/live";
+import {
+  attentionAcross,
+  hydrate,
+  refreshIdentity,
+  refreshWorld,
+  subscribe,
+  world,
+} from "./lib/live";
 import Constellation from "./screens/Constellation";
 import Monitor from "./screens/Monitor";
 import Console from "./screens/Console";
@@ -25,6 +32,7 @@ import Composition from "./screens/Composition";
 import Economy from "./screens/Economy";
 import Define from "./screens/Define";
 import Profile from "./screens/Profile";
+import Lock from "./screens/Lock";
 import { Council, Ingest, Library, Network } from "./screens/Panels";
 
 type Panel =
@@ -76,13 +84,24 @@ export default function App() {
   const [panel, setPanel] = createSignal<Panel>("constellation");
   const [busy, setBusy] = createSignal(false);
 
-  onMount(async () => {
-    // ★★★ ONE subscription for the whole app. Every screen reads the store it
-    //   fills; none of them listens on its own, and none of them polls.
+  /**
+   * ★★★ Everything the cockpit needs, AFTER the identity is unlocked.
+   *
+   * Not a convenience: while locked there is no principal, so every command
+   * that touches a Sustain would be refused anyway. Loading a world nobody may
+   * act on would render a cockpit that looks alive and can do nothing.
+   */
+  const openCockpit = async () => {
     const stop = await subscribe();
     onCleanup(stop);
     await refreshWorld();
     await Promise.all(world.order.map((id) => hydrate(id)));
+  };
+
+  onMount(async () => {
+    // The one thing a locked cockpit may ask for: who this machine is.
+    const id = await refreshIdentity();
+    if (id?.unlocked) await openCockpit();
   });
 
   /** ★★ The single selection path. Everything that changes the subject calls this. */
@@ -121,7 +140,24 @@ export default function App() {
     return undefined;
   };
 
+  // ★★★ THE DOOR. Not a curtain: the host has no key while locked, so the gate
+  //   refuses every call with `not_authenticated` whatever this renders.
   return (
+    <Show
+      when={world.identity?.unlocked}
+      fallback={
+        <Show when={world.identity} fallback={<div class={L.panelPad}><Empty>reading the local identity…</Empty></div>}>
+          {(id) => (
+            <Lock
+              identity={id()}
+              onUnlocked={() => {
+                void refreshIdentity().then(() => void openCockpit());
+              }}
+            />
+          )}
+        </Show>
+      }
+    >
     <div class={L.frame}>
       <header class={L.topbar}>
         <span class={S.brand}>MYCELIUM</span>
@@ -155,7 +191,13 @@ export default function App() {
         </Show>
 
         <span class={S.avatar}>bg</span>
+        {/* ★★ An AUTHENTICATED principal, and the key that proves it. The
+            fingerprint is short on purpose — enough to notice if it ever
+            changed, not so long it becomes furniture. */}
         <span class={`${S.meta} ${L.hideNarrow}`}>{world.principal || "—"}</span>
+        <span class={`${S.caption} ${L.hideNarrow}`} title={world.identity?.publicKey ?? ""}>
+          {world.identity?.publicKey ? `key ${world.identity.publicKey.slice(0, 8)}` : ""}
+        </span>
         <span class={L.hideNarrow}>
           <Clock />
         </span>
@@ -273,5 +315,6 @@ export default function App() {
         <span class={L.hideNarrow}>push channel · one message per gate decision · no polling</span>
       </footer>
     </div>
+    </Show>
   );
 }

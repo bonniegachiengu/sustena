@@ -150,8 +150,12 @@ export function Meta(props: { children: JSX.Element }) {
   return <span class={S.meta}>{props.children}</span>;
 }
 
-export function Caption(props: { children: JSX.Element }) {
-  return <div class={S.caption}>{props.children}</div>;
+export function Caption(props: { style?: JSX.CSSProperties; children: JSX.Element }) {
+  return (
+    <div class={S.caption} style={props.style}>
+      {props.children}
+    </div>
+  );
 }
 
 export function Value(props: { big?: boolean; tone?: Tone; children: JSX.Element }) {

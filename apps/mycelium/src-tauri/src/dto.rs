@@ -775,3 +775,25 @@ pub enum TransferResult {
         reason: String,
     },
 }
+
+// ── identity ──────────────────────────────────────────────────
+
+/// Who this machine is, and whether the key is in memory.
+///
+/// ★★ `handle` is readable while LOCKED — a person should be able to see which
+/// identity they are being asked to unlock. `publicKey` is not: it is derived
+/// from the private half, and having it means the unlock genuinely happened.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityDto {
+    /// Whether an identity exists on this machine at all.
+    pub enrolled: bool,
+    /// Whether the private key is in memory right now.
+    pub unlocked: bool,
+    pub handle: Option<String>,
+    /// The verifying key, hex — present only once unlocked.
+    pub public_key: Option<String>,
+    /// The KDF actually in force, named rather than assumed.
+    pub kdf: Option<String>,
+    pub iterations: Option<u32>,
+}

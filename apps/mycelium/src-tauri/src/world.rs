@@ -29,13 +29,18 @@ use sustena_core::{
     compute_rollup, ChildState,
     holon::transfer as holon_transfer,
     holon::{Leg, Link, Linked, Moving, Party, Transfer},
+    operator::OperatorResult,
 };
 
-use sustena_core::principal::{MembershipEdge, Memberships, TIER_OWNER};
+use sustena_core::principal::{
+    permitted, Denial, MembershipEdge, Memberships, SkinRegistry, Tier, TIER_MEMBER,
+    TIER_OBSERVER, TIER_OWNER,
+};
 
 use crate::definitions::{check as check_definition, AuthoredDefinition, DefinitionVerdict};
 use crate::dto::{EventDto, RollupDto};
 use crate::economy::Economy;
+use crate::identity::{IdentityError, IdentityStore, Unlocked};
 use crate::store::{LoggedEvent, Registry as Records, Store, StoreError, StoreResult, SustainRecord};
 use crate::templates::{self, TemplateId};
 
@@ -45,7 +50,17 @@ use crate::templates::{self, TemplateId};
 /// every call under `Authorization::Unchecked` — this is the name the cockpit
 /// displays, and binding it to a real capability is a later slice. Said plainly
 /// so nobody mistakes a label for a check.
-pub const PRINCIPAL: &str = "bg.myc";
+/// The handle this machine enrols under. ★★ It is no longer *the principal* —
+/// it is the name a keypair is enrolled with. Nothing acts under it until
+/// [`crate::identity::IdentityStore::unlock`] has recovered the private key,
+/// and every acting id comes from that unlocked identity rather than from here.
+pub const DEFAULT_HANDLE: &str = "bg.myc";
+
+/// ★ Tier a cross-Sustain transfer demands. Declared in the host beside the
+/// household model, because `holon::transfer` is not a registry operator and so
+/// carries no `min_privilege` of its own. Set at MEMBER: moving money is a
+/// member act, not a bystander act.
+pub const TRANSFER_MIN_PRIVILEGE: Tier = TIER_MEMBER;
 
 /// One live Sustain.
 pub struct Sustain {
@@ -69,6 +84,12 @@ pub struct World {
     meter: Mutex<Meter>,
     /// Definitions a person authored, checked by the engine before landing.
     definitions: Mutex<Vec<AuthoredDefinition>>,
+    /// ★★★ The unlocked identity, or `None`. **This is the authentication.**
+    /// Every write path reads it; a locked world can decide nothing, because
+    /// there is no principal to decide on behalf of.
+    identity: Mutex<Option<Unlocked>>,
+    /// Where the keypair lives on disk.
+    identities: IdentityStore,
 }
 
 pub struct Inner {
@@ -80,6 +101,7 @@ pub struct Inner {
 impl World {
     /// Open the household from disk, folding every log.
     pub fn open(store: Store) -> StoreResult<World> {
+        let store_root = store.root().to_path_buf();
         // ★★★ BEFORE anything is folded. A transfer a crash interrupted is
         //   finished here, so no state is ever computed from a log that is
         //   missing a leg its counterpart already has. Recovery runs first
@@ -121,9 +143,11 @@ impl World {
             operators: Registry::default(),
             inner: Mutex::new(Inner { sustains, order, selected }),
             store,
-            economy: Mutex::new(Economy::open(PRINCIPAL)),
+            economy: Mutex::new(Economy::open(DEFAULT_HANDLE)),
             meter: Mutex::new(Meter::new()),
             definitions: Mutex::new(definitions),
+            identity: Mutex::new(None),
+            identities: IdentityStore::at(store_root),
         })
     }
 
@@ -200,6 +224,19 @@ impl World {
         custom: Option<&str>,
         parent: Option<&str>,
     ) -> StoreResult<bool> {
+        self.instantiate_owned(id, label, template, custom, parent, None)
+    }
+
+    /// [`instantiate_from`], declaring who the new Sustain belongs to.
+    pub fn instantiate_owned(
+        &self,
+        id: &str,
+        label: &str,
+        template: TemplateId,
+        custom: Option<&str>,
+        parent: Option<&str>,
+        owner: Option<&str>,
+    ) -> StoreResult<bool> {
         let mut inner = self.inner.lock().expect("world lock");
         if inner.sustains.contains_key(id) {
             return Ok(false);
@@ -222,6 +259,7 @@ impl World {
             template,
             custom: custom.map(str::to_string),
             parent: parent.map(str::to_string),
+            owner: owner.map(str::to_string),
         };
         let enforcement = enforcement_of(&definition);
 
@@ -247,10 +285,19 @@ impl World {
         if !self.is_empty() {
             return Ok(false);
         }
-        self.instantiate("homestead", "Homestead", TemplateId::Homestead, None)?;
+        // ★★★ Ownership is DECLARED at seed time, not inferred later. The
+        //   person running this machine owns the household and their own
+        //   habitat; the other five belong to members who have no identity here
+        //   yet, and saying so is what makes the observer tier honest rather
+        //   than an accident.
+        let me = self.identities.handle().unwrap_or_else(|| DEFAULT_HANDLE.to_string());
+        self.instantiate_owned("homestead", "Homestead", TemplateId::Homestead, None, None, Some(&me))?;
         for member in ["Bonnie", "Cira", "Epha", "Mum", "Kui", "Frankie"] {
             let id = format!("habitat-{}", member.to_lowercase());
-            self.instantiate(&id, member, TemplateId::Habitat, Some("homestead"))?;
+            // Bonnie is the person at this keyboard; the rest are family whose
+            // handles do not exist yet, so their habitats stay unclaimed.
+            let owner = if member == "Bonnie" { Some(me.as_str()) } else { None };
+            self.instantiate_owned(&id, member, TemplateId::Habitat, None, Some("homestead"), owner)?;
         }
         let mut inner = self.inner.lock().expect("world lock");
         inner.selected = Some("homestead".to_string());
@@ -273,6 +320,27 @@ impl World {
         operator: &str,
         params: &Map<String, Value>,
     ) -> StoreResult<Option<(Execution, u64)>> {
+        // ★★★ AUTHENTICATION FIRST. A locked world has no principal, so there is
+        //   nobody to decide on behalf of — and `Unchecked` is no longer an
+        //   option this host can reach.
+        let Some(principal) = self.principal() else {
+            return Ok(Some((
+                Execution {
+                    result: OperatorResult::fail(
+                        "the local identity is locked — unlock it before acting".to_string(),
+                        "not_authenticated",
+                    ),
+                    mutations: vec![],
+                    events: vec![],
+                    state: Value::Null,
+                },
+                0,
+            )));
+        };
+        let path = self.authority_path(sustain_id);
+        let memberships = self.memberships_for(&principal);
+        let skins = SkinRegistry::empty();
+
         let mut inner = self.inner.lock().expect("world lock");
         let Some(sustain) = inner.sustains.get(sustain_id) else {
             return Ok(None);
@@ -292,10 +360,10 @@ impl World {
             let mut afford = Affordability::Metered {
                 ledger: &mut economy.ledger,
                 parameters: &parameters,
-                principal: PRINCIPAL,
+                principal: &principal,
                 sustain: sustain_id,
                 at: 0,
-                serving: Some((&issuance, PRINCIPAL)),
+                serving: Some((&issuance, &principal)),
             };
             execute_afforded(
                 &self.operators,
@@ -304,7 +372,15 @@ impl World {
                 &sustain.state,
                 operator,
                 params,
-                &Authorization::Unchecked,
+                // ★★★ The real conjunct. `permitted(α, o, Σ)` runs BEFORE the
+                //   guard, and its refusal is its own class — "you may not" is
+                //   not "that would break a rule".
+                &Authorization::Principal {
+                    id: &principal,
+                    memberships: &memberships,
+                    path: &path,
+                    skins: &skins,
+                },
                 &EffectClass::Unchecked,
                 &mut NonceLedger::new(),
                 &mut afford,
@@ -317,7 +393,7 @@ impl World {
         //    which is why the Console's figures are honest.
         if let Some(m) = self.operators.get(operator) {
             if let Some(reading) =
-                meter(&x, m, &sustain.enforcement, &parameters, sustain_id, PRINCIPAL, 0)
+                meter(&x, m, &sustain.enforcement, &parameters, sustain_id, &principal, 0)
             {
                 self.meter.lock().expect("meter lock").record(reading);
             }
@@ -511,6 +587,146 @@ impl World {
             .map_err(|e| format!("{e:?}"))
     }
 
+    // ── identity ─────────────────────────────────────────
+
+    pub fn identity_store(&self) -> &IdentityStore {
+        &self.identities
+    }
+
+    /// The authenticated principal, or `None` while locked.
+    ///
+    /// ★★★ There is no fallback to a declared string. A caller that wants an
+    /// id when the world is locked does not get one — which is what makes
+    /// "nothing acts until the key is unlocked" a property rather than a habit.
+    pub fn principal(&self) -> Option<String> {
+        self.identity.lock().expect("identity lock").as_ref().map(|u| u.handle().to_string())
+    }
+
+    pub fn is_unlocked(&self) -> bool {
+        self.identity.lock().expect("identity lock").is_some()
+    }
+
+    /// The public half, for a screen that wants to show WHICH key is acting.
+    pub fn public_key(&self) -> Option<String> {
+        self.identity.lock().expect("identity lock").as_ref().map(|u| u.public_key())
+    }
+
+    /// Unlock the local identity. The passphrase is checked by the only thing
+    /// that can check it — whether it decrypts the private key.
+    pub fn unlock(&self, passphrase: &str) -> Result<String, IdentityError> {
+        let u = self.identities.unlock(passphrase)?;
+        let handle = u.handle().to_string();
+        *self.identity.lock().expect("identity lock") = Some(u);
+        // ★ A pre-ownership store claims itself once, out loud.
+        if let Ok(claimed) = self.claim_unowned_for(&handle) {
+            for id in claimed {
+                eprintln!("[mycelium] {handle} claimed ownership of {id} (seeded before ownership was declared)");
+            }
+        }
+        Ok(handle)
+    }
+
+    /// Mint an identity on a machine that has none.
+    pub fn enrol(&self, handle: &str, passphrase: &str) -> Result<String, IdentityError> {
+        let u = self.identities.enrol(handle, passphrase)?;
+        let handle = u.handle().to_string();
+        *self.identity.lock().expect("identity lock") = Some(u);
+        Ok(handle)
+    }
+
+    /// Drop the private key. ★ Not a UI state — the key genuinely leaves memory,
+    /// so a locked cockpit cannot act even if a surface forgot to stop it.
+    pub fn lock(&self) {
+        *self.identity.lock().expect("identity lock") = None;
+    }
+
+    // ── the membership model ─────────────────────────────────
+
+    /// `path` for `permitted`: outermost containing Sustain first, target last.
+    ///
+    /// ★★ The weakest link along this path is the authority in force, so the
+    /// path is not decoration — it is what makes "a child cannot be acted on
+    /// more freely than its household" true by construction.
+    pub fn authority_path(&self, sustain_id: &str) -> Vec<String> {
+        let mut chain = vec![sustain_id.to_string()];
+        let mut cursor = sustain_id.to_string();
+        // Bounded by the number of Sustains: a cycle cannot outlast it, and
+        // `flatten_holarchy` refuses one anyway.
+        for _ in 0..64 {
+            let parent = self.with(|i| i.get(&cursor).and_then(|s| s.record.parent.clone()));
+            match parent {
+                Some(p) => {
+                    chain.push(p.clone());
+                    cursor = p;
+                }
+                None => break,
+            }
+        }
+        chain.reverse();
+        chain
+    }
+
+    /// The declared membership graph for the authenticated principal.
+    ///
+    /// ★★★ **The household model, and it is not uniform on purpose.** The
+    /// person is OWNER of the household and of their OWN habitat, and an
+    /// OBSERVER on every other member's habitat. That is what a household
+    /// actually means: you can see what your family holds — the roll-up reads
+    /// state, which authority does not gate — and you may not spend it.
+    ///
+    /// ★ A uniform owner-everywhere graph would make the enforcement true and
+    /// pointless: nothing would ever be refused, and a check that can never
+    /// fire proves nothing about the gate.
+    pub fn memberships_for(&self, principal: &str) -> Memberships {
+        let mut m = Memberships::new();
+        let ids: Vec<String> = self.with(|i| i.order().to_vec());
+        for id in ids {
+            let owner = self.with(|i| i.get(&id).and_then(|s| s.record.owner.clone()));
+            // ★ OWNER where the Sustain says so, OBSERVER everywhere else. An
+            //   unclaimed Sustain is not yours; it is nobody's, and reading it
+            //   is all anyone may do.
+            let tier = if owner.as_deref() == Some(principal) { TIER_OWNER } else { TIER_OBSERVER };
+            m.grant(MembershipEdge {
+                principal: principal.to_string(),
+                sustain: id,
+                tier,
+                skin: None,
+            });
+        }
+        m
+    }
+
+    /// ★★ A store seeded before ownership was declared has none, which would
+    /// lock its own household out of itself. Claim the root and the enrolling
+    /// handle's own habitat once, and say so — a silent backfill of an
+    /// authority model would be the wrong thing to do quietly.
+    pub fn claim_unowned_for(&self, principal: &str) -> StoreResult<Vec<String>> {
+        let ids: Vec<String> = self.with(|i| i.order().to_vec());
+        let any_owner = ids.iter().any(|id| {
+            self.with(|i| i.get(id).map(|s| s.record.owner.is_some())).unwrap_or(false)
+        });
+        if any_owner {
+            return Ok(Vec::new());
+        }
+        let mut claimed = Vec::new();
+        {
+            let mut inner = self.inner.lock().expect("world lock");
+            for id in &ids {
+                let Some(su) = inner.sustains.get_mut(id) else { continue };
+                let is_root = su.record.parent.is_none();
+                if is_root || id == "habitat-bonnie" {
+                    su.record.owner = Some(principal.to_string());
+                    claimed.push(id.clone());
+                }
+            }
+        }
+        if !claimed.is_empty() {
+            let inner = self.inner.lock().expect("world lock");
+            self.persist_registry(&inner)?;
+        }
+        Ok(claimed)
+    }
+
     /// Every declared parent/child edge, as `holon::Linked` needs them.
     fn links(&self) -> Vec<Link> {
         self.with(|i| {
@@ -541,6 +757,29 @@ impl World {
         path: &str,
         amount: f64,
     ) -> StoreResult<Transfer> {
+        // ★★★ A transfer is not a registry operator, so it does not inherit
+        //   `execute_afforded`'s authorization conjunct — it needs its own, and
+        //   it needs it on BOTH sides. Moving money out of a Sustain you may
+        //   not act on is exactly the hole an operator-only check would leave.
+        let Some(principal) = self.principal() else {
+            return Ok(Transfer::Refused {
+                rule: "not_authenticated".into(),
+                reason: "the local identity is locked — unlock it before acting".into(),
+            });
+        };
+        let memberships = self.memberships_for(&principal);
+        for side in [from_id, to_id] {
+            let path = self.authority_path(side);
+            if let Err(denial) =
+                permitted(&memberships, &principal, &path, TRANSFER_MIN_PRIVILEGE)
+            {
+                return Ok(Transfer::Refused {
+                    rule: denial_rule(&denial).to_string(),
+                    reason: format!("'{side}': {denial}"),
+                });
+            }
+        }
+
         let links = self.links();
         let Some(link) = Linked::between(from_id, to_id, &links) else {
             return Ok(Transfer::Refused {
@@ -751,6 +990,18 @@ impl World {
 /// runs `Authorization::Unchecked`, so this is the authority a person HAS,
 /// displayed — not an authority that is currently being enforced. Saying that
 /// plainly is the difference between a security model and a security theatre.
+/// The refusal name for one denial — the SAME six the core's own gate uses, so
+/// an authorization refusal reads identically whichever path produced it.
+pub fn denial_rule(d: &Denial) -> &'static str {
+    match d {
+        Denial::NoEdge { .. } => "not_a_member",
+        Denial::InsufficientTier { .. } => "insufficient_privilege",
+        Denial::UnresolvedSkin { .. } => "skin_resolves",
+        Denial::NotDesignated { .. } => "capability_designates",
+        Denial::RightNotHeld { .. } => "capability_carries",
+    }
+}
+
 /// One leg as a log line. ★ Both carry the same `operator`, so a reader
 /// scanning either log sees the same event by the same name.
 fn leg_line(seq: u64, leg: &Leg) -> LoggedEvent {
@@ -762,19 +1013,3 @@ fn leg_line(seq: u64, leg: &Leg) -> LoggedEvent {
     }
 }
 
-pub fn memberships() -> Memberships {
-    // The declared membership graph. One Owner edge per Sustain, because this
-    // is a single-person household today -- a real household with several
-    // people is where the weakest-link path rule starts to earn its keep.
-    let mut m = Memberships::new();
-    for sustain in ["homestead", "habitat-bonnie", "habitat-cira", "habitat-epha",
-                    "habitat-mum", "habitat-kui", "habitat-frankie"] {
-        m.grant(MembershipEdge {
-            principal: PRINCIPAL.to_string(),
-            sustain: sustain.to_string(),
-            tier: TIER_OWNER,
-            skin: None,
-        });
-    }
-    m
-}

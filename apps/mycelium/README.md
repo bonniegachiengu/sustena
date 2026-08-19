@@ -181,15 +181,74 @@ error — the engine's predicate parser partially consumes it. Still a refusal,
 still nothing written, but the message misleads. The UI shows the engine's words
 verbatim rather than inventing a friendlier lie.
 
-## Profile — the real capability model, honestly unenforced
+## Identity — a keypair, and a door
 
-`effective_privilege` walks the membership path with the **weakest-link** rule;
-`permitted` compares it against each operator's declared `min_privilege`.
+`bg.myc` is not a string the host declares. It is the **name of an ed25519
+keypair**, and nothing acts until the private half has been recovered from disk.
 
-★★★ **And the gate is not checking any of it.** Every call runs
-`Authorization::Unchecked`. The screen shows the authority the principal
-*holds*, not one being enforced — a permission matrix implying enforcement would
-be security theatre.
+```
+identity.json
+  handle          bg.myc
+  public_key      32 bytes, hex — never secret
+  kdf             pbkdf2-hmac-sha256 · 600,000 iterations · salt
+  sealed_secret   the private key, XChaCha20-Poly1305
+  proof           a signature over a fixed message by that key
+```
+
+★★★ **The passphrase is not compared against anything.** It derives a key; that
+key either decrypts the private half or it does not. There is no stored
+"is this right" flag and no branch to invert, so **failing closed is the only
+available outcome**. The recovered key is then made to prove itself against the
+public half and the stored signature — decryption succeeding is already strong,
+and this makes the identity's claim about itself testable.
+
+★★ **One message** for a wrong passphrase, a tampered ciphertext and a swapped
+public key. Telling them apart would tell an attacker which half they got right.
+
+★ **The lock screen is a door, not a curtain.** A locked host has no principal,
+so `admit()` refuses every call with `not_authenticated` whatever the UI
+renders. Deleting the screen would not unlock anything.
+
+**Named as next, not done:** a memory-hard KDF (Argon2id/scrypt) is strictly
+better than PBKDF2 against GPU attackers — PBKDF2 is used so this and the Python
+reference are comparable. There is **no key rotation, no recovery phrase and no
+second device**: losing the passphrase loses the identity.
+
+## Authorization — enforced, and its own kind of refusal
+
+Every call runs `Authorization::Principal` with the unlocked identity.
+`permitted(α, o, Σ)` is a **conjunct of `admit()`**, decided *before* the guard
+— *may this principal act here* does not depend on state, so there is no reason
+to run an effect for it to judge.
+
+★★★ **An authorization refusal is its own class.** `insufficient_privilege` and
+`not_a_member` are never reported as `enforcement_gate`, because *you may not*
+and *that would break a rule* are different answers and call for different
+things from whoever reads them. Six denials, six names.
+
+★★ **Authority is the weakest link along the containing path**, and there is no
+inherit-from-the-parent rule. The household model is deliberately **not
+uniform**:
+
+| | tier | may act |
+|---|---|---|
+| the household | owner (0) | yes |
+| your own habitat | owner (0) | yes |
+| another member's habitat | observer (3) | **no** — `insufficient_privilege` |
+
+A uniform owner-everywhere graph would make the enforcement true and pointless:
+a check that can never fire proves nothing. You can *see* what your family holds
+— roll-up ρ reads state, which authority does not gate — and you may not spend
+it.
+
+★ **Ownership is declared on the Sustain**, not inferred from its id. An earlier
+pass matched `habitat-<x>` against the principal's handle and was wrong the
+moment `bg.myc` and `bonnie` were not the same word.
+
+★ `holon.transfer` carries its **own** authorization check, on **both** sides:
+it is not a registry operator, so it does not inherit the conjunct, and moving
+money out of a Sustain you may not act on is exactly the hole an operator-only
+check would leave.
 
 ## What is real, and what is not
 
@@ -238,10 +297,6 @@ a cycle, and the UI shows what it said.
   persisted proposals, deadlines and operatives that actually deliberate are
   not — the votes are yours to set, so it is the engine's rule engine exercised
   by hand.
-- **authority is displayed, not enforced.** `effective_privilege` and
-  `permitted` are the engine's, but every call still runs
-  `Authorization::Unchecked`. The identity `bg.myc` is declared, not
-  authenticated.
 - **the topbar clock is the UI's**, not the engine's. The core has no clock and
   nothing on screen attributes a timestamp to it.
 - **no undo, no delete.** The log is append-only and nothing removes a Sustain.

@@ -15,7 +15,7 @@ use serde_json::{json, Map, Value};
 
 use mycelium_lib::dto::{Committed, ConstraintReading, GateResult, Refused, SustainSummary};
 use mycelium_lib::definitions::{AuthoredDefinition, DimDecl, InvariantDecl};
-use mycelium_lib::world::{memberships, PRINCIPAL};
+use mycelium_lib::world::DEFAULT_HANDLE;
 use mycelium_lib::store::{LoggedEvent, Store};
 use mycelium_lib::templates::TemplateId;
 use mycelium_lib::world::World;
@@ -107,6 +107,41 @@ fn main() {
     // ── first run ────────────────────────────────────────────────────────────
     {
         let world = World::open(Store::at(&dir).expect("store")).expect("open");
+
+        // ── identity ───────────────────────────────────────
+        //
+        // ★★★ NOTHING acts before this. The private key is recovered from disk by
+        //   a passphrase that genuinely decrypts it; until then there is no
+        //   principal, and a call with no principal is refused rather than run
+        //   under a declared string.
+        rule("IDENTITY - the key, unlocked");
+        let locked = world.call("homestead", "budget.record_income", &income(1.0)).expect("call");
+        match &locked {
+            Some((x, _)) => println!("   while LOCKED   {:?}   {}   rule={:?}",
+                x.result.status,
+                x.result.reason.clone().unwrap_or_default(),
+                x.result.constraint_violated.clone().unwrap_or_default()),
+            None => println!("   while LOCKED   no such sustain"),
+        }
+        assert!(
+            locked.as_ref().is_some_and(|(x, _)| !x.committed()),
+            "a locked world must not commit anything"
+        );
+
+        if !world.identity_store().exists() {
+            world.enrol(DEFAULT_HANDLE, PASSPHRASE).expect("enrol");
+            println!("   enrolled       {DEFAULT_HANDLE}");
+        }
+        world.lock();
+        let wrong = world.unlock("not the passphrase");
+        println!("   wrong pass     {:?}", wrong.as_ref().err().map(|e| e.to_string()));
+        assert!(wrong.is_err(), "a wrong passphrase must fail closed");
+        assert!(!world.is_unlocked(), "and must leave the world locked");
+
+        let who = world.unlock(PASSPHRASE).expect("unlock");
+        println!("   unlocked as    {who}");
+        println!("   public key     {}", world.public_key().unwrap_or_default());
+        assert!(world.is_unlocked());
         let seeded = world.seed_if_empty().expect("seed");
         rule(&format!("RUN 1 · {}", if seeded { "seeded" } else { "loaded from log" }));
         household(&world);
@@ -161,7 +196,7 @@ fn main() {
         rule("V1.4 · ECONOMY -- the real ledger, in the real gate");
         world.with_economy(|e| {
             println!("   genesis            {} -> {:.2} juul", e.genesis.id(), e.genesis.total());
-            println!("   balance now        {:.2}", e.ledger.balance_of(PRINCIPAL));
+            println!("   balance now        {:.2}", e.ledger.balance_of(&who_now(&world)));
             println!("   circulation        {:.2}  (mints {:.2}, issued {:.2})",
                 e.ledger.total_in_circulation(), e.ledger.minted_total(), e.ledger.issued_total());
             let audit = e.genesis.audit(&e.ledger);
@@ -192,7 +227,7 @@ fn main() {
         rule("V1.4 · SIMULATE -- a fork through the real gate, writing NOTHING");
         let before_state = world.with(|i| i.get("homestead").map(|s| s.state.clone())).unwrap();
         let before_log = world.log("homestead").expect("log").len();
-        let before_balance = world.with_economy(|e| e.ledger.balance_of(PRINCIPAL));
+        let before_balance = world.with_economy(|e| e.ledger.balance_of(&who_now(&world)));
 
         let branch = world
             .fork(
@@ -214,7 +249,7 @@ fn main() {
         println!();
         println!("   live state unchanged?   {}", before_state == after_state);
         println!("   log unchanged?          {}", before_log == world.log("homestead").expect("log").len());
-        println!("   ledger unchanged?       {}", before_balance == world.with_economy(|e| e.ledger.balance_of(PRINCIPAL)));
+        println!("   ledger unchanged?       {}", before_balance == world.with_economy(|e| e.ledger.balance_of(&who_now(&world))));
         assert_eq!(before_state, after_state, "a fork must not touch live state");
 
         rule("V1.4 · GOVERNANCE -- the only path to a parameter");
@@ -235,7 +270,7 @@ fn main() {
         call(&world, "habitat-cira", "budget.record_income", &[("amount", json!(2500.0)), ("source", json!("work"))]);
         world.with_economy(|e| {
             println!("   issued before {:.4}  ->  after {:.4}", before_issued, e.ledger.issued_total());
-            println!("   balance now   {:.4}", e.ledger.balance_of(PRINCIPAL));
+            println!("   balance now   {:.4}", e.ledger.balance_of(&who_now(&world)));
         });
 
         rule("V1.4 · COMPOSITION -- what the core does and does not have");
@@ -288,22 +323,52 @@ fn main() {
         ]);
         println!("   edit that strands -> {:?}", world.author_definition(&strands).expect("disk"));
 
-        rule("V1.5 · PROFILE -- the real capability model");
+        rule("AUTH - the capability model, ENFORCED at the gate");
         {
             use sustena_core::principal::{effective_privilege, permitted};
-            let m = memberships();
-            let path = vec!["homestead".to_string()];
-            println!("   principal          {PRINCIPAL}");
+            let who = who_now(&world);
+            let m = world.memberships_for(&who);
+            println!("   principal          {who}   (authenticated: a key was unlocked)");
             println!("   memberships        {}", m.len());
-            println!("   effective tier     {:?}  (0 = owner)", effective_privilege(&m, PRINCIPAL, &path));
-            for op in ["budget.record_income", "budget.spend"] {
-                if let Some(meta) = world.operators.get(op) {
-                    println!("   {:<24} needs tier {}  permitted={}",
-                        op, meta.min_privilege,
-                        permitted(&m, PRINCIPAL, &path, meta.min_privilege).is_ok());
-                }
+            for target in ["homestead", "habitat-bonnie", "habitat-cira"] {
+                let path = world.authority_path(target);
+                println!("   {:<18} path {:?}  effective tier {:?}",
+                    target, path, effective_privilege(&m, &who, &path));
             }
-            println!("   NOTE: displayed, not enforced -- the gate still runs Authorization::Unchecked");
+
+            // The household model: owner of the household and of your OWN
+            // habitat, observer on everyone else\'s.
+            let op = "budget.record_income";
+            let meta = world.operators.get(op).expect("registered");
+            for target in ["habitat-bonnie", "habitat-cira"] {
+                let path = world.authority_path(target);
+                let verdict = permitted(&m, &who, &path, meta.min_privilege);
+                println!("   {op} on {:<16} -> {}", target,
+                    match &verdict { Ok(()) => "PERMITTED".to_string(), Err(d) => format!("{d}") });
+            }
+
+            // \u2605\u2605\u2605 And the GATE agrees, which is the whole point. The same call
+            //   on the same two Sustains, through the real path.
+            let before = world.with(|i| i.get("habitat-cira").map(|s| s.state.clone()));
+            let mine = world.call("habitat-bonnie", op, &income(10.0)).expect("call");
+            let theirs = world.call("habitat-cira", op, &income(10.0)).expect("call");
+            let after = world.with(|i| i.get("habitat-cira").map(|s| s.state.clone()));
+            println!("   gate on my own habitat     -> {:?}",
+                mine.as_ref().map(|(x, _)| x.result.status));
+            println!("   gate on another\'s habitat  -> {:?}   rule={:?}",
+                theirs.as_ref().map(|(x, _)| x.result.status),
+                theirs.as_ref().and_then(|(x, _)| x.result.constraint_violated.clone()));
+            println!("   reason: {}",
+                theirs.as_ref().and_then(|(x, _)| x.result.reason.clone()).unwrap_or_default());
+            println!("   their state byte-unchanged -> {}", before == after);
+            assert!(mine.as_ref().is_some_and(|(x, _)| x.committed()), "owner may act");
+            assert!(theirs.as_ref().is_some_and(|(x, _)| !x.committed()), "observer may not");
+            assert_eq!(
+                theirs.as_ref().and_then(|(x, _)| x.result.constraint_violated.clone()).as_deref(),
+                Some("insufficient_privilege"),
+                "an authorization refusal has its OWN name, not the gate\'s"
+            );
+            assert_eq!(before, after, "a refused call must leave state untouched");
         }
 
         rule("V1.5 · COUNCIL -- resolve, by the engine");
@@ -344,6 +409,11 @@ fn main() {
     // ── second run ───────────────────────────────────────────────────────────
     {
         let world = World::open(Store::at(&dir).expect("store")).expect("reopen");
+        // A reopened world starts LOCKED. The key is not on disk in usable
+        // form and nothing acts until the passphrase recovers it -- which is
+        // the property, stated by exercising it rather than by a comment.
+        assert!(!world.is_unlocked(), "a reopened world must start locked");
+        world.unlock(PASSPHRASE).expect("unlock");
         let seeded = world.seed_if_empty().expect("seed");
         rule(&format!("RUN 2 · reopened · {}", if seeded { "SEEDED AGAIN (BUG)" } else { "loaded from log" }));
         household(&world);
@@ -567,4 +637,21 @@ fn line(seq: u64, leg: &Leg) -> LoggedEvent {
         events: vec![mycelium_lib::dto::EventDto::from(leg.event())],
         mutations: leg.mutations().to_vec(),
     }
+}
+
+/// The smoke passphrase. ★ A fixture for a scratch store the run creates and
+/// throws away — never a real identity.
+const PASSPHRASE: &str = "smoke-run passphrase";
+
+/// `budget.record_income` params, for the locked-world check above.
+fn income(amount: f64) -> Map<String, Value> {
+    let mut m = Map::new();
+    m.insert("amount".into(), json!(amount));
+    m.insert("source".into(), json!("smoke"));
+    m
+}
+
+/// The authenticated handle, read off the world rather than declared.
+fn who_now(world: &World) -> String {
+    world.principal().unwrap_or_else(|| "<locked>".to_string())
 }

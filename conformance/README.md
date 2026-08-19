@@ -2946,3 +2946,57 @@ loses money on.
 know what was committed before, and inventing a memory for it would give this
 module state it has no business holding. The host answers the same need with its
 write-ahead journal instead (see the Mycelium README).
+
+
+### `authorization.json` — `permitted(α, o, Σ)` as a conjunct of `admit()` (IMM · Immune §IV · Sustain §4.5)
+
+**SPEC vectors, Rust-only — and the gap is unusually clean.** The reference
+*declares* `min_privilege` on `OperatorMeta` and **reads it nowhere**:
+grep-confirmed as one dataclass field, one keyword argument, **zero readers**,
+and no `permitted` / `effective_privilege` / `privilege.check` anywhere in the
+Python engine. The conjunct exists in the articles and in the declaration, and
+never once in a decision — so there is nothing to record from the reference and
+every case is authored from the spec.
+
+★★★ **The property the file exists for** is
+`authorization_is_a_separate_conjunct_from_the_viable_region`: authority and the
+viable region are two conjuncts of `admit()`, **both** must hold, and each
+refuses with its **own rule name** so a person can tell *you may not* from *your
+own guard said no* from *that would break a rule*. Authority is decided
+**first**, because *may this principal act here* does not depend on state — so
+an unauthorized caller is never told what the state would have done.
+
+★★ **Six refusals, six names**, and the vectors pin the distinctions the paper is
+explicit about: `not_a_member` (*you are not a member here*) is not
+`insufficient_privilege` (*you are a member who may not do this*), and
+`skin_resolves` fails **closed** rather than quietly demoting an edge to its raw
+tier — a typo'd role name becoming owner-by-accident is exactly what that
+prevents. `insufficient_privilege` must name the tier **held** and the tier
+**required**; a refusal with no tiers in it tells a person nothing they can act
+on, so the vector asserts the reason text mentions both.
+
+★★ **The weakest link along the containing path governs**, and there is no
+inherit-from-the-parent rule: owner of a household plus observer on a child
+gives OBSERVER on the child, and owner of a household with no edge to the child
+gives `not_a_member`. Nesting can only shrink authority.
+
+★ **An authored case was wrong and running it corrected it.** The composite case
+first used a *negative* amount to reach the viable region, and
+`budget.record_income`'s own guard (`params.amount > 0`) fired first — proving
+the guard conjunct rather than the gate. The vector now uses a **ceiling the
+operator cannot pre-empt**, and the corrected case carries the third conjunct
+too. Recorded here rather than quietly fixed, because the vectors are supposed
+to be reviewable against the articles and this one was not what it claimed.
+
+**Where the parity actually is:** the *authentication* half. The reference has
+real local auth — PBKDF2-HMAC-SHA256 at **260,000** iterations plus a JWT
+carrying `token_version` for revocation. The Rust host uses the **same KDF** at
+**600,000** iterations (OWASP's 2023 floor), and diverges deliberately in what
+it protects: the reference stores a password *verifier*, the host seals an
+**ed25519 private key** under the derived key. A verifier answers *did you type
+the right thing*; a keypair answers *can you produce a signature only this
+identity can produce*, which is the question a peer will ask when there is a
+network. There is no vector for it because it is host-side and has no core
+surface — it is proven by the host's own tests (`identity.rs`, 9 cases including
+wrong-passphrase, tampered-ciphertext and swapped-public-key, all failing closed
+with the **same** message).

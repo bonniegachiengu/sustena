@@ -498,6 +498,26 @@ export const avatarLarge = style([
   { width: "44px", height: "44px", borderRadius: vars.radius.md, fontSize: "16px" },
 ]);
 
+/* ── the lock screen ────────────────────────────────────── */
+
+/** ★ The whole viewport, because there is nothing behind it to see. */
+export const lockFrame = style({
+  display: "grid",
+  placeItems: "center",
+  minHeight: "100%",
+  padding: vars.space.lg,
+  minWidth: 0,
+});
+
+export const lockPanel = style({
+  width: "100%",
+  maxWidth: "420px",
+  display: "flex",
+  flexDirection: "column",
+  gap: vars.space.sm,
+  minWidth: 0,
+});
+
 /* ── constellation ──────────────────────────────────────────────────────── */
 
 export const constellationSvg = style({ width: "100%", height: "auto", display: "block" });

@@ -117,6 +117,19 @@ pub struct SustainRecord {
     pub custom: Option<String>,
     /// `⊕` — the parent in the household's composition, if any.
     pub parent: Option<String>,
+    /// ★★★ **Whose Sustain this is** — the handle that holds OWNER authority
+    /// over it.
+    ///
+    /// The membership graph is derived from this rather than guessed from the
+    /// id: an earlier pass matched `habitat-<x>` against the principal's handle
+    /// and got it wrong the moment the handle (`bg.myc`) and the member name
+    /// (`bonnie`) were not the same word. A Sustain says who it belongs to; the
+    /// host does not infer it from spelling.
+    ///
+    /// `None` means *nobody has claimed it*, which is a real state — the five
+    /// habitats whose members have no identity on this machine yet.
+    #[serde(default)]
+    pub owner: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

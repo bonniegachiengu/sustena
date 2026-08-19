@@ -9,6 +9,7 @@ pub mod commands;
 pub mod dto;
 pub mod definitions;
 pub mod economy;
+pub mod identity;
 pub mod store;
 pub mod templates;
 pub mod world;
@@ -40,6 +41,10 @@ pub fn specta_builder() -> Builder {
         commands::get_access,
         commands::get_rollup,
         commands::transfer,
+        commands::get_identity,
+        commands::unlock_identity,
+        commands::enrol_identity,
+        commands::lock_identity,
         commands::resolve_proposal,
     ])
     // ★★★ The push channel, typed from the same Rust as the commands — so a
