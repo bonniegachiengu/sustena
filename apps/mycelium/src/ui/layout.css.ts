@@ -282,6 +282,29 @@ export const panelPad = style({ padding: vars.space.xl, minWidth: 0 });
 export const navCountLive = style([navCount, { color: vars.color.warn }]);
 
 /** The reading half of a status-belt cell. */
+/* ── the Orchie face ────────────────────────────────────────────────────── */
+
+/** ★ Phone-first: one column, centred, capped at a comfortable reading width.
+ *  The same primitives Mycelium uses — this is a different arrangement of
+ *  them, not a second design system. */
+export const orchieFrame = style({
+  minHeight: "100%",
+  overflowY: "auto",
+  padding: vars.space.md,
+  display: "grid",
+  justifyItems: "center",
+  minWidth: 0,
+});
+
+export const orchieColumn = style({
+  width: "100%",
+  maxWidth: "440px",
+  display: "flex",
+  flexDirection: "column",
+  gap: vars.space.md,
+  minWidth: 0,
+});
+
 export const beltValue = style({ color: vars.color.textSecondary });
 
 /** A belt cell that cannot be honest, so it is a dash and says why. */

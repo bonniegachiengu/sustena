@@ -11,6 +11,7 @@ pub mod definitions;
 pub mod economy;
 pub mod identity;
 pub mod ingest;
+pub mod orchie;
 pub mod store;
 pub mod templates;
 pub mod world;
@@ -51,6 +52,9 @@ pub fn specta_builder() -> Builder {
         commands::declare_source,
         commands::resolve_message,
         commands::learn_rule,
+        commands::get_feed,
+        commands::orchie_infer,
+        commands::orchie_confirm,
         commands::resolve_proposal,
     ])
     // ★★★ The push channel, typed from the same Rust as the commands — so a

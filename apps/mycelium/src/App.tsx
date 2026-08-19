@@ -33,6 +33,7 @@ import Economy from "./screens/Economy";
 import Define from "./screens/Define";
 import Profile from "./screens/Profile";
 import Lock from "./screens/Lock";
+import Orchie from "./screens/Orchie";
 import { Council, Library, Network } from "./screens/Panels";
 import Ingest from "./screens/Ingest";
 
@@ -83,6 +84,12 @@ function Clock() {
 
 export default function App() {
   const [panel, setPanel] = createSignal<Panel>("constellation");
+  /**
+   * ★★★ One app, two faces. Mycelium is the cockpit; Orchie is the phone-first
+   * curated surface. Same engine, same gate, same unlocked identity — a
+   * different question, so a different arrangement of the same primitives.
+   */
+  const [face, setFace] = createSignal<"mycelium" | "orchie">("mycelium");
   const [busy, setBusy] = createSignal(false);
 
   /**
@@ -186,6 +193,12 @@ export default function App() {
 
         <span class={S.spacer} />
 
+        <button
+          class={S.chip}
+          onClick={() => setFace((f) => (f === "mycelium" ? "orchie" : "mycelium"))}
+        >
+          {face() === "mycelium" ? "orchie" : "mycelium"}
+        </button>
         <Badge tone="ok">{world.pushes} pushed</Badge>
         <Show when={world.refusals > 0}>
           <Badge tone="danger">{world.refusals} refused</Badge>
@@ -204,7 +217,10 @@ export default function App() {
         </span>
       </header>
 
-      <div class={L.body}>
+      <Show when={face() === "orchie"}>
+        <Orchie />
+      </Show>
+      <div class={L.body} style={{ display: face() === "orchie" ? "none" : undefined }}>
         <nav class={L.nav}>
           <For each={NAV}>
             {(g) => (

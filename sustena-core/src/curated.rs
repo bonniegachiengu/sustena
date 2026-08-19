@@ -582,7 +582,12 @@ fn urgency_of(widget: &LoadedWidget, region: &Region, state: &Value) -> f64 {
         .filter(|(dim, _)| reads.contains(dim.as_str()))
         .map(|(_, excess)| excess)
         .sum();
-    (mine / distance.weighted).clamp(0.0, 1.0)
+    // ★ `Sum for f64` folds from the additive identity `-0.0`, so a widget that
+    //   reads none of the out-of-region dimensions sums to NEGATIVE zero, and
+    //   `clamp` preserves it (it is within bounds). It would reach a screen as
+    //   `-0.0%` urgent, which reads as a claim rather than as calm. Same number,
+    //   different claim -- the rollup module's own hazard, here.
+    crate::rollup::unsign_zero((mine / distance.weighted).clamp(0.0, 1.0))
 }
 
 /// Token overlap between the query and what the widget is about.
@@ -1822,6 +1827,38 @@ mod tests {
         let _ = compose_view(&set, &region(), &state, &log, &Request::default(), &SaliencePolicy::default());
         assert_eq!(state, before_state);
         assert_eq!(log, before_log);
+    }
+
+    #[test]
+    fn a_calm_card_is_zero_urgent_not_negative_zero_urgent() {
+        // ★★ `Sum for f64` folds from `-0.0`, so a card that reads none of
+        //    the dimensions currently outside V summed to NEGATIVE zero, and
+        //    `clamp` kept it (it is in bounds). It reached a screen as `-0.0%`
+        //    urgent -- a claim, where the truth is calm. Caught by a real feed
+        //    printing `urgency -0.000`, not by reading this function.
+        let set = load(vec![WidgetDecl::new("calm", "card").unit().reading("mood")]);
+        // `balance` is outside the region; `mood` is not. The calm card reads
+        // only `mood`, so its share of the excess is an EMPTY sum.
+        let state = json!({"balance": 160.0, "stock": 50.0, "mood": 50.0});
+        let view = compose_view(
+            &set,
+            &region(),
+            &state,
+            &[],
+            &Request::default(),
+            &SaliencePolicy::default(),
+        );
+        let calm = view
+            .selected
+            .iter()
+            .chain(view.excluded.iter())
+            .find(|c| c.id == "calm")
+            .expect("a candidate");
+        assert_eq!(calm.urgency, 0.0);
+        assert!(
+            !calm.urgency.is_sign_negative(),
+            "0.0 and -0.0 are the same number and not the same claim",
+        );
     }
 
     #[test]

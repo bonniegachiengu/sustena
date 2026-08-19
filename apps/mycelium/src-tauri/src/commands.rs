@@ -14,7 +14,8 @@ use crate::dto::{
     AccessDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
-    CaptureResult, IdentityDto, IngestDto, MessageDto, RuleDto, SourceDto,
+    AttentionDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
+    InferenceDto, IngestDto, MessageDto, QuietDto, RuleDto, SourceDto,
     TransferLegDto, TransferResult, Verdict, WorldDto,
 };
 use crate::definitions::{AuthoredDefinition, DefinitionVerdict};
@@ -951,4 +952,302 @@ pub fn learn_rule(
         .map_err(|e| e.to_string())?;
     world.ingest().add_rule(&candidate).map_err(|e| e.to_string())?;
     Ok(candidate.id)
+}
+
+// ── Orchie ──────────────────────────────────────────────────
+
+/// **The curated feed** — `compose(r)` over one household.
+#[tauri::command]
+#[specta::specta]
+pub fn get_feed(
+    world: State<'_, World>,
+    sustain_id: String,
+    query: Option<String>,
+) -> Result<FeedDto, String> {
+    let Some((label, state)) = world
+        .with(|i| i.get(&sustain_id).map(|s| (s.record.label.clone(), s.state.clone())))
+    else {
+        return Err(format!("no Sustain called '{sustain_id}'"));
+    };
+
+    let queued: Vec<_> = world
+        .ingest()
+        .current()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|m| m.sustain_id == sustain_id && m.needs_attention())
+        .collect();
+
+    // ★ The recent log, as β needs it — what actually happened, not a guess.
+    let recent: Vec<sustena_core::event::Event> = world
+        .log(&sustain_id)
+        .map_err(|e| e.to_string())?
+        .iter()
+        .rev()
+        .take(25)
+        .flat_map(|entry| {
+            entry.events.iter().map(|e| {
+                sustena_core::event::Event::backfilled(
+                    format!("{}-{}", entry.seq, e.name),
+                    e.name.clone(),
+                    entry.seq as i64,
+                    sustena_core::event::CausalStamp::new("host"),
+                )
+            })
+        })
+        .collect();
+
+    let (reading, view) =
+        crate::orchie::feed(&world.operators, &state, queued.len(), &recent, query.as_deref())
+            .map_err(|errors| errors.join("; "))?;
+
+    let emits_of = |id: &str| -> Vec<String> {
+        crate::orchie::widget_declarations()
+            .into_iter()
+            .find(|w| w.id == id)
+            .map(|w| w.emits)
+            .unwrap_or_default()
+    };
+
+    let cards: Vec<CardDto> = view
+        .selected
+        .iter()
+        .map(|c| CardDto {
+            id: c.id.clone(),
+            render: c.render.clone(),
+            rank: c.rank as u32,
+            urgency: c.urgency,
+            measured: c.basis.is_measured(),
+            basis: c.basis.describe(),
+            relevance: c.relevance,
+            score: c.score,
+            cost: c.cost as u32,
+            eligibility: c.why.describe(),
+            emits: emits_of(&c.id),
+        })
+        .collect();
+
+    // ★★ Withdrawn and excluded in ONE list, each saying which it is — the
+    //    "N stayed quiet" line has to be able to tell them apart.
+    let mut quiet: Vec<QuietDto> = view
+        .withdrawn
+        .iter()
+        .map(|w| QuietDto {
+            id: w.id.clone(),
+            reason: Some(w.reason.clone()),
+            score: None,
+            withdrew: true,
+        })
+        .collect();
+    quiet.extend(view.excluded.iter().map(|c| QuietDto {
+        id: c.id.clone(),
+        reason: None,
+        score: Some(c.score),
+        withdrew: false,
+    }));
+
+    // The standing things, each with a real "why".
+    let mut attention: Vec<AttentionDto> = Vec::new();
+    if let Some(pocket) = reading.get("worst_pocket").and_then(|v| v.as_str()) {
+        let spent = reading.get("worst_spent").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let allocated = reading.get("worst_allocated").and_then(|v| v.as_f64()).unwrap_or(1.0);
+        if spent >= allocated {
+            attention.push(AttentionDto {
+                kind: "pocket".into(),
+                what: pocket.to_string(),
+                why: format!(
+                    "{spent:.0} of {allocated:.0} — past the limit you set for it"
+                ),
+                severity: "danger".into(),
+                message_id: None,
+            });
+        }
+    }
+    for m in &queued {
+        attention.push(AttentionDto {
+            kind: "capture".into(),
+            what: m
+                .parsed_fields
+                .get("counterparty")
+                .and_then(|v| v.as_str())
+                .unwrap_or("a captured message")
+                .to_string(),
+            why: m.reason.clone(),
+            severity: "warn".into(),
+            message_id: Some(m.id.clone()),
+        });
+    }
+
+    Ok(FeedDto {
+        sustain_id: sustain_id.clone(),
+        label,
+        cards,
+        quiet,
+        budget: view.budget as u32,
+        spent: view.spent as u32,
+        candidates_considered: view.candidates_considered as u32,
+        reading,
+        attention,
+        rollup: world.rollup(&sustain_id),
+        liquid: state.pointer("/finances/liquid/balance").and_then(Value::as_f64),
+    })
+}
+
+fn pockets_of(state: &Value) -> Vec<String> {
+    state
+        .pointer("/finances/pockets")
+        .and_then(|p| p.as_object().map(|o| o.keys().cloned().collect()))
+        .unwrap_or_default()
+}
+
+/// **`ε → (o, θ)`** — one inference pass over a narrated effect or a captured
+/// message. Read-only: it resolves, it never writes.
+#[tauri::command]
+#[specta::specta]
+pub fn orchie_infer(
+    world: State<'_, World>,
+    sustain_id: String,
+    message_id: Option<String>,
+    effect_text: Option<String>,
+    known: Value,
+    ignore_history: bool,
+) -> Result<InferenceDto, String> {
+    let Some(state) = world.with(|i| i.get(&sustain_id).map(|s| s.state.clone())) else {
+        return Err(format!("no Sustain called '{sustain_id}'"));
+    };
+    let pockets = pockets_of(&state);
+
+    let message = match &message_id {
+        Some(id) => world
+            .ingest()
+            .current()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|m| &m.id == id),
+        None => None,
+    };
+
+    let known_map: BTreeMap<String, Value> = match known {
+        Value::Object(o) => o.into_iter().collect(),
+        _ => BTreeMap::new(),
+    };
+    let parsed = message.as_ref().map(|m| m.parsed_fields.clone()).unwrap_or_default();
+    let raw = message.as_ref().map(|m| m.raw_payload.clone());
+
+    // ★ The candidates are the CARD's own declared emits — a widget may only
+    //   propose what it declared it can propose.
+    let candidates: Vec<String> = crate::orchie::widget_declarations()
+        .into_iter()
+        .find(|w| w.id == "classify_capture")
+        .map(|w| w.emits)
+        .unwrap_or_default();
+
+    // ★★ History is looked up by the SAME description the inference will
+    //    resolve, so the two can never key on different things.
+    let description = sustena_core::resolve_description(effect_text.as_deref(), &parsed, &known_map);
+    let history = if ignore_history {
+        None
+    } else {
+        description.as_ref().and_then(|d| world.ingest().recall(&sustain_id, d))
+    };
+
+    let capture = sustena_core::Capture {
+        candidates: &candidates,
+        pockets: &pockets,
+        effect_text: effect_text.as_deref(),
+        parsed_fields: parsed,
+        known: known_map,
+        history,
+        raw_text: raw.as_deref(),
+    };
+
+    Ok(match sustena_core::infer(&world.operators, &capture) {
+        sustena_core::Inference::Ready {
+            operator,
+            params,
+            why,
+            description,
+            from_history,
+            history_use_count,
+        } => InferenceDto::Ready {
+            operator,
+            params: Value::Object(params.into_iter().collect()),
+            why,
+            description,
+            from_history,
+            history_use_count,
+        },
+        sustena_core::Inference::NeedsDisambiguation { field, question, options, why } => {
+            InferenceDto::NeedsDisambiguation {
+                field,
+                question,
+                options: options.map(|o| {
+                    o.into_iter()
+                        .map(|c| ChoiceDto { value: c.value, label: c.label })
+                        .collect()
+                }),
+                why,
+            }
+        }
+        sustena_core::Inference::CannotInfer { why } => InferenceDto::CannotInfer { why },
+    })
+}
+
+/// **Confirm** an inferred capture: run the operator through the real gate.
+///
+/// ★★★ The same `World::call` the Console uses, as the unlocked principal.
+/// A refusal comes back as a normal verdict — an inference made at time T can
+/// honestly fail at T+n if the household moved, and that is the correct
+/// outcome, not an error.
+#[tauri::command]
+#[specta::specta]
+pub fn orchie_confirm(
+    app: AppHandle,
+    world: State<'_, World>,
+    sustain_id: String,
+    operator: String,
+    params: Value,
+    message_id: Option<String>,
+    description: Option<String>,
+) -> Result<GateResult, String> {
+    let params_map: Map<String, Value> = match params {
+        Value::Object(o) => o,
+        _ => Map::new(),
+    };
+    trace!("orchie_confirm  {sustain_id}  {operator}");
+
+    let Some((x, seq)) = world
+        .call(&sustain_id, &operator, &params_map)
+        .map_err(|e| e.to_string())?
+    else {
+        return Err(format!("no Sustain called '{sustain_id}'"));
+    };
+    let result = GateResult::of(&operator, &x);
+
+    if x.committed() {
+        let msg = Committed::of(&sustain_id, &operator, seq, &x, readings(&world, &sustain_id));
+        let _ = msg.emit(&app);
+        if let Some(subject) = world.rollup_subject(&sustain_id) {
+            if let Some(r) = world.rollup(&subject) {
+                let _ = (RolledUp { rollup: r }).emit(&app);
+            }
+        }
+        // ★ Remember the classification only on a real success, and only when
+        //   there is a pocket to remember — income has none.
+        if let (Some(d), Some(pocket)) = (
+            description.as_deref(),
+            params_map.get("pocket_name").and_then(|v| v.as_str()),
+        ) {
+            let _ = world.ingest().remember(&sustain_id, d, pocket);
+        }
+        if let Some(id) = &message_id {
+            let _ = world.ingest().record_outcome(id, true, None);
+        }
+    } else {
+        let _ = Refused::of(&sustain_id, &operator, &result).emit(&app);
+        if let Some(id) = &message_id {
+            let _ = world.ingest().record_outcome(id, false, result.reason.clone());
+        }
+    }
+    Ok(result)
 }

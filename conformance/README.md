@@ -3084,3 +3084,25 @@ someone's behalf. And `verify_candidate` refuses a candidate that does not match
 its own inducing example, one that would capture a message an existing rule
 already handles, and one that is ill-typed — checked **before** it is ever run,
 because a broken pattern must not reach the fidelity check.
+
+
+### `curated.json` — an unrecorded divergence the vectors did not catch (2026-08-19)
+
+★★★ **The 45 curated cases were green on both sides while Rust was returning
+`-0.0` where the reference returns `0.0`.** Rust's `Sum for f64` folds from the
+additive identity **`-0.0`**, so a widget reading none of the dimensions
+currently outside `V` summed to negative zero, and `clamp` **kept** it — it is
+in bounds. Python's own loop seeds at `0.0` and never has the case.
+
+★★ **Why no vector caught it:** every recorded case has each candidate reading
+at least one dimension the region bounds, so the filtered sum is never empty.
+The divergence lives precisely in the case the vectors do not contain, which is
+the honest reason rather than an excuse — it was found by a **real feed printing
+`urgency -0.000`** on Bonnie's household, not by a test.
+
+★ **`-0.0 == 0.0` is `true`**, so an equality-comparing vector would have passed
+even had one existed. It is pinned instead by a test asserting the **sign bit**.
+The same hazard is recorded one module over in `rollup.rs`, where an empty
+pocket container rendered `-0.00` and read as a debt; `unsign_zero` is now
+shared. Same number, different claim — which is the whole reason it counts as a
+divergence at all.

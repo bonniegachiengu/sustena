@@ -487,7 +487,7 @@ fn resolve_contribution(state: &Value, segments: &[PathSegment]) -> Option<f64> 
 }
 
 /// `-0.0` is `0.0`, and only one of them is honest on a screen.
-fn unsign_zero(v: f64) -> f64 {
+pub(crate) fn unsign_zero(v: f64) -> f64 {
     if v == 0.0 {
         0.0
     } else {

@@ -765,6 +765,175 @@ fn main() {
         assert_eq!(m2.status, "mapped", "the learned rule now recognises the shape");
         assert_eq!(m2.parser_name, "learned_smoke");
         assert!(m2.applied, "and it applied through the gate");
+
+        // -- ORCHIE ----------------------------------------------------------
+        //
+        // The curated face, over the same real household. Nothing below sorts
+        // anything: compose(r) does, and this reports what came back.
+        rule("ORCHIE - the feed, ranked by the engine");
+        let state = again.with(|i| i.get(target).map(|s| s.state.clone())).expect("open");
+        let queued = again
+            .ingest()
+            .current()
+            .expect("queue")
+            .into_iter()
+            .filter(|m| m.sustain_id == target && m.needs_attention())
+            .count();
+        let recent: Vec<sustena_core::event::Event> = again
+            .log(target)
+            .expect("log")
+            .iter()
+            .rev()
+            .take(25)
+            .flat_map(|e| {
+                e.events.iter().map(|ev| {
+                    sustena_core::event::Event::backfilled(
+                        format!("{}-{}", e.seq, ev.name),
+                        ev.name.clone(),
+                        e.seq as i64,
+                        sustena_core::event::CausalStamp::new("host"),
+                    )
+                })
+            })
+            .collect();
+
+        let (reading, view) =
+            mycelium_lib::orchie::feed(&again.operators, &state, queued, &recent, None)
+                .expect("composed");
+        println!("   projection     {}", serde_json::to_string(&reading).unwrap_or_default());
+        println!("   budget {} spent {}   {} candidates considered",
+                 view.budget, view.spent, view.candidates_considered);
+        for c in &view.selected {
+            println!("   [{}] {:<20} urgency {:.3} ({}) relevance {:.2} score {:.3} cost {}",
+                c.rank, c.id, c.urgency,
+                if c.basis.is_measured() { "measured" } else { "NOT measured" },
+                c.relevance, c.score, c.cost);
+        }
+        for w in &view.withdrawn {
+            println!("   quiet: {:<20} withdrew -- {}", w.id, w.reason);
+        }
+        for x in &view.excluded {
+            println!("   quiet: {:<20} outranked -- score {:.3}", x.id, x.score);
+        }
+        assert!(view.spent <= view.budget, "the attention budget is a budget");
+        assert!(!view.selected.is_empty(), "a real household has something to show");
+
+        // A strained pocket produces REAL measured urgency, and the calm card
+        // on the same household does not.
+        rule("ORCHIE - urgency is measured against the household own ceiling");
+        let strained = serde_json::json!({
+            "finances": { "liquid": { "balance": 500.0 },
+                          "pockets": { "food": { "allocated": 8000.0, "spent": 9000.0 } } }
+        });
+        let (_, v2) = mycelium_lib::orchie::feed(&again.operators, &strained, 0, &[], None)
+            .expect("composed");
+        for c in v2.selected.iter().chain(v2.excluded.iter()) {
+            println!("   {:<20} urgency {:.3}  {}", c.id, c.urgency,
+                if c.basis.is_measured() { "measured" } else { "NOT measured" });
+        }
+        let strain = v2.selected.iter().chain(v2.excluded.iter())
+            .find(|c| c.id == "pocket_strain").expect("candidate");
+        assert!(strain.urgency > 0.0 && strain.basis.is_measured());
+        let calm = v2.selected.iter().chain(v2.excluded.iter())
+            .find(|c| c.id == "household_summary").expect("candidate");
+        assert_eq!(calm.urgency, 0.0, "the same household, a different dimension");
+
+        // -- effect-first capture, all the way through the gate --------------
+        rule("ORCHIE - a narrated effect, confirmed through the real gate");
+        let pockets: Vec<String> = state
+            .pointer("/finances/pockets")
+            .and_then(|p| p.as_object().map(|o| o.keys().cloned().collect()))
+            .unwrap_or_default();
+        let pocket = pockets.first().cloned().expect("the household has a pocket");
+        let narration = format!("spent 40 on {pocket}");
+        let candidates: Vec<String> =
+            vec!["budget.spend".to_string(), "budget.allocate".to_string()];
+        let inferred = sustena_core::infer(
+            &again.operators,
+            &sustena_core::Capture {
+                candidates: &candidates,
+                pockets: &pockets,
+                effect_text: Some(&narration),
+                ..Default::default()
+            },
+        );
+        let sustena_core::Inference::Ready { operator, params, why, .. } = inferred else {
+            panic!("expected ready, got {inferred:?}")
+        };
+        println!("   \"{narration}\"");
+        println!("   -> {operator}  {params:?}");
+        println!("   why: {why}");
+
+        let spent_before = state
+            .pointer(&format!("/finances/pockets/{pocket}/spent"))
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        let call_params: Map<String, Value> = params.clone().into_iter().collect();
+        let (x, _) = again.call(target, &operator, &call_params).expect("call").expect("sustain");
+        let spent_after = again
+            .with(|i| i.get(target).map(|s| s.state.clone()))
+            .and_then(|st| st.pointer(&format!("/finances/pockets/{pocket}/spent"))
+                .and_then(Value::as_f64))
+            .unwrap_or(0.0);
+        println!("   gate: {:?}   {pocket} spent {spent_before:.2} -> {spent_after:.2}",
+                 x.result.status);
+        assert!(x.committed(), "a confirmed capture commits through the real gate");
+        assert_eq!(spent_after, spent_before + 40.0);
+
+        // -- and an honest refusal on drift ----------------------------------
+        rule("ORCHIE - a refusal on drift, honestly");
+        let over: Map<String, Value> = [
+            ("pocket_name".to_string(), json!(pocket)),
+            ("amount".to_string(), json!(9_999_999.0)),
+        ]
+        .into_iter()
+        .collect();
+        let before = again.with(|i| i.get(target).map(|s| s.state.clone()));
+        let (refused, _) =
+            again.call(target, "budget.spend", &over).expect("call").expect("sustain");
+        let after = again.with(|i| i.get(target).map(|s| s.state.clone()));
+        println!("   {:?}   {}", refused.result.status,
+                 refused.result.reason.clone().unwrap_or_default());
+        assert!(!refused.committed());
+        assert_eq!(before, after, "a refusal leaves the household byte-unchanged");
+
+        // -- what stayed quiet, and why --------------------------------------
+        //
+        // Two different kinds of quiet, and the feed does not conflate them:
+        // a card that WITHDREW (it had nothing to say, and says so), and a card
+        // that beta never offered (no such event has happened).
+        rule("ORCHIE - the two kinds of quiet");
+        let (_, v3) = mycelium_lib::orchie::feed(&again.operators, &strained, 0, &[], None)
+            .expect("composed");
+        for w in &v3.withdrawn {
+            println!("   withdrew   {:<20} -- {}", w.id, w.reason);
+        }
+        assert!(
+            v3.withdrawn.iter().any(|w| w.id == "classify_capture"),
+            "nothing to classify -- the card withdraws rather than showing an empty box",
+        );
+        assert!(v3.withdrawn.iter().all(|w| !w.reason.is_empty()), "and each says why");
+        assert!(
+            !v3.selected.iter().chain(v3.excluded.iter()).any(|c| c.id == "recent_spend"),
+            "no spend has happened, so beta never offers the card",
+        );
+
+        // The same household, after money actually moved: beta now binds it.
+        let spent_event = sustena_core::event::Event::backfilled(
+            "e-spent".to_string(),
+            "event.finances.pocket_spent".to_string(),
+            1,
+            sustena_core::event::CausalStamp::new("host"),
+        );
+        let (_, v4) =
+            mycelium_lib::orchie::feed(&again.operators, &strained, 0, &[spent_event], None)
+                .expect("composed");
+        println!("   after a real spend, beta offers {} candidates (was {})",
+                 v4.candidates_considered, v3.candidates_considered);
+        assert!(
+            v4.selected.iter().chain(v4.excluded.iter()).any(|c| c.id == "recent_spend"),
+            "money moved, so the card is a candidate -- beta decided that, not an `if`",
+        );
     }
 }
 

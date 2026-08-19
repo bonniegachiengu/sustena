@@ -908,3 +908,113 @@ impl MessageDto {
         }
     }
 }
+
+// ── Orchie ──────────────────────────────────────────────────
+
+/// One card the knapsack selected, with everything a person needs to ask
+/// **"why am I seeing this?"** and get a true answer.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CardDto {
+    pub id: String,
+    /// What the surface should draw. An opaque tag from the declaration.
+    pub render: String,
+    /// ★★ Salience RANK, not array index. Widgets that tie on every
+    /// un-gameable key share a rank, and showing one above the other as though
+    /// it mattered is exactly the fabricated prominence to avoid.
+    pub rank: u32,
+    pub urgency: f64,
+    /// ★★★ Whether that urgency was MEASURED. A `0` on an undeclared basis is
+    /// silence, not safety, and the card says which it is.
+    pub measured: bool,
+    pub basis: String,
+    pub relevance: f64,
+    pub score: f64,
+    pub cost: u32,
+    /// Why it was eligible at all — always-on, or an event that fired.
+    pub eligibility: String,
+    /// The operators this card may emit, from its own declaration.
+    pub emits: Vec<String>,
+}
+
+/// A card that withdrew before ranking.
+///
+/// ★★ Distinct from an exclusion: an excluded card was **considered and
+/// outranked** and carries a score; a withdrawn one had **nothing to say** and
+/// carries a reason, because no score was ever computed.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct QuietDto {
+    pub id: String,
+    /// A reason for a withdrawal; a score for an exclusion. Never both.
+    pub reason: Option<String>,
+    pub score: Option<f64>,
+    pub withdrew: bool,
+}
+
+/// One standing thing that needs a person, and why.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AttentionDto {
+    pub kind: String,
+    pub what: String,
+    pub why: String,
+    pub severity: String,
+    /// A captured message this points at, when there is one.
+    pub message_id: Option<String>,
+}
+
+/// The whole curated view.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedDto {
+    pub sustain_id: String,
+    pub label: String,
+    pub cards: Vec<CardDto>,
+    /// ★ What stayed quiet — withdrawn and excluded alike, each saying which.
+    pub quiet: Vec<QuietDto>,
+    pub budget: u32,
+    pub spent: u32,
+    pub candidates_considered: u32,
+    /// The projection `compose` reasoned over — exposed so a card can render
+    /// the very numbers it was ranked on.
+    pub reading: serde_json::Value,
+    pub attention: Vec<AttentionDto>,
+    /// The calm read: the household's own roll-up ρ, when it declares one.
+    pub rollup: Option<RollupDto>,
+    pub liquid: Option<f64>,
+}
+
+/// One inference pass, on the wire.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum InferenceDto {
+    #[serde(rename_all = "camelCase")]
+    Ready {
+        operator: String,
+        params: serde_json::Value,
+        why: String,
+        description: Option<String>,
+        /// ★★ A history pre-fill is never silent: the surface labels it and
+        /// offers a change, and it still stops here for a confirmation.
+        from_history: bool,
+        history_use_count: Option<u32>,
+    },
+    /// ★ `options: null` means the answer is not a tap — render an input.
+    #[serde(rename_all = "camelCase")]
+    NeedsDisambiguation {
+        field: String,
+        question: String,
+        options: Option<Vec<ChoiceDto>>,
+        why: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    CannotInfer { why: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceDto {
+    pub value: String,
+    pub label: String,
+}

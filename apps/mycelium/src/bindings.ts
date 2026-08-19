@@ -299,6 +299,45 @@ async learnRule(messageId: string, operator: string, params: JsonValue) : Promis
 }
 },
 /**
+ * **The curated feed** — `compose(r)` over one household.
+ */
+async getFeed(sustainId: string, query: string | null) : Promise<Result<FeedDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_feed", { sustainId, query }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **`ε → (o, θ)`** — one inference pass over a narrated effect or a captured
+ * message. Read-only: it resolves, it never writes.
+ */
+async orchieInfer(sustainId: string, messageId: string | null, effectText: string | null, known: JsonValue, ignoreHistory: boolean) : Promise<Result<InferenceDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("orchie_infer", { sustainId, messageId, effectText, known, ignoreHistory }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **Confirm** an inferred capture: run the operator through the real gate.
+ * 
+ * ★★★ The same `World::call` the Console uses, as the unlocked principal.
+ * A refusal comes back as a normal verdict — an inference made at time T can
+ * honestly fail at T+n if the household moved, and that is the correct
+ * outcome, not an error.
+ */
+async orchieConfirm(sustainId: string, operator: string, params: JsonValue, messageId: string | null, description: string | null) : Promise<Result<GateResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("orchie_confirm", { sustainId, operator, params, messageId, description }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * ★★★ Resolve a proposal with the engine's own `council::resolve`.
  * 
  * Real: the rule that a person's vote overrides the council, that an abstaining
@@ -362,6 +401,14 @@ value: number | null;
  */
 grounded: boolean; included: ContributionDto[]; excluded: ExclusionDto[]; includesHouseholdOwn: boolean }
 /**
+ * One standing thing that needs a person, and why.
+ */
+export type AttentionDto = { kind: string; what: string; why: string; severity: string; 
+/**
+ * A captured message this points at, when there is one.
+ */
+messageId: string | null }
+/**
  * A definition as authored and persisted.
  */
 export type AuthoredDefinition = { id: string; label: string; dimensions: DimDecl[]; operators: string[]; invariants: InvariantDecl[]; 
@@ -403,7 +450,36 @@ export type CaptureResult =
  * there was nothing to store.
  */
 { kind: "rejected"; reason: string } | { kind: "duplicate"; message: MessageDto } | { kind: "stored"; message: MessageDto }
+/**
+ * One card the knapsack selected, with everything a person needs to ask
+ * **"why am I seeing this?"** and get a true answer.
+ */
+export type CardDto = { id: string; 
+/**
+ * What the surface should draw. An opaque tag from the declaration.
+ */
+render: string; 
+/**
+ * ★★ Salience RANK, not array index. Widgets that tie on every
+ * un-gameable key share a rank, and showing one above the other as though
+ * it mattered is exactly the fabricated prominence to avoid.
+ */
+rank: number; urgency: number; 
+/**
+ * ★★★ Whether that urgency was MEASURED. A `0` on an undeclared basis is
+ * silence, not safety, and the card says which it is.
+ */
+measured: boolean; basis: string; relevance: number; score: number; cost: number; 
+/**
+ * Why it was eligible at all — always-on, or an event that fired.
+ */
+eligibility: string; 
+/**
+ * The operators this card may emit, from its own declaration.
+ */
+emits: string[] }
 export type ChildStatusDto = { sustainId: string; label: string; readable: boolean }
+export type ChoiceDto = { value: string; label: string }
 /**
  * ★★★ **A committed change, pushed.** One message per real change.
  * 
@@ -539,6 +615,23 @@ export type EventDto = { name: string; payload: JsonValue }
  */
 export type ExclusionDto = { sustainId: string; label: string; isHousehold: boolean; reason: string }
 /**
+ * The whole curated view.
+ */
+export type FeedDto = { sustainId: string; label: string; cards: CardDto[]; 
+/**
+ * ★ What stayed quiet — withdrawn and excluded alike, each saying which.
+ */
+quiet: QuietDto[]; budget: number; spent: number; candidatesConsidered: number; 
+/**
+ * The projection `compose` reasoned over — exposed so a card can render
+ * the very numbers it was ranked on.
+ */
+reading: JsonValue; attention: AttentionDto[]; 
+/**
+ * The calm read: the household's own roll-up ρ, when it declares one.
+ */
+rollup: RollupDto | null; liquid: number | null }
+/**
  * The gate's own words about one call.
  */
 export type GateResult = { verdict: Verdict; 
@@ -605,6 +698,14 @@ publicKey: string | null;
  * The KDF actually in force, named rather than assumed.
  */
 kdf: string | null; iterations: number | null }
+/**
+ * One inference pass, on the wire.
+ */
+export type InferenceDto = { status: "ready"; operator: string; params: JsonValue; why: string; description: string | null; fromHistory: boolean; historyUseCount: number | null } | 
+/**
+ * ★ `options: null` means the answer is not a tap — render an input.
+ */
+{ status: "needsDisambiguation"; field: string; question: string; options: ChoiceDto[] | null; why: string } | { status: "cannotInfer"; why: string }
 /**
  * The whole ingest picture for one Sustain.
  */
@@ -748,6 +849,18 @@ export type ParameterDto = { name: string; value: number; genesis: number; min: 
  * vitals reading needs and not the document they came from.
  */
 export type PocketSummary = { name: string; allocated: number; spent: number }
+/**
+ * A card that withdrew before ranking.
+ * 
+ * ★★ Distinct from an exclusion: an excluded card was **considered and
+ * outranked** and carries a score; a withdrawn one had **nothing to say** and
+ * carries a reason, because no score was ever computed.
+ */
+export type QuietDto = { id: string; 
+/**
+ * A reason for a withdrawal; a score for an exclusion. Never both.
+ */
+reason: string | null; score: number | null; withdrew: boolean }
 /**
  * ★★★ **A refusal, pushed — and it carries NO STATE.**
  * 

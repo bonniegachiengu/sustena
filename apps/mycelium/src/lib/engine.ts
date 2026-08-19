@@ -29,6 +29,8 @@ import {
   type IngestDto,
   type CaptureResult,
   type MessageDto,
+  type FeedDto,
+  type InferenceDto,
   type AggregateDto,
   type SustainDto,
   type SustainSummary,
@@ -58,6 +60,8 @@ export type {
   IngestDto,
   CaptureResult,
   MessageDto,
+  FeedDto,
+  InferenceDto,
   SustainDto,
   SustainSummary,
   TemplateId,
@@ -107,6 +111,29 @@ export const engine = {
     unwrap(await commands.declareSource(id, label, minutes)),
   resolveMessage: async (id: string): Promise<boolean> =>
     unwrap(await commands.resolveMessage(id)),
+  // ── Orchie ──────────────────────────────────────────────────────────────
+  /** `compose(r)` — the curated feed for one household. Read-only. */
+  feed: async (sustainId: string, query: string | null): Promise<FeedDto> =>
+    unwrap(await commands.getFeed(sustainId, query)),
+  /** ε → (o, θ). Resolves or asks one question; never writes. */
+  infer: async (
+    sustainId: string,
+    messageId: string | null,
+    effectText: string | null,
+    known: JsonValue,
+    ignoreHistory: boolean,
+  ): Promise<InferenceDto> =>
+    unwrap(await commands.orchieInfer(sustainId, messageId, effectText, known, ignoreHistory)),
+  /** Confirm — the operator through the real gate, as the unlocked principal. */
+  confirm: async (
+    sustainId: string,
+    operator: string,
+    params: JsonValue,
+    messageId: string | null,
+    description: string | null,
+  ): Promise<GateResult> =>
+    unwrap(await commands.orchieConfirm(sustainId, operator, params, messageId, description)),
+
   /** "remember this format" — synthesise a rule from a confirmed correction. */
   learnRule: async (messageId: string, operator: string, params: JsonValue): Promise<string> =>
     unwrap(await commands.learnRule(messageId, operator, params)),
