@@ -14,6 +14,7 @@ pub mod ingest;
 pub mod orchie;
 pub mod store;
 pub mod templates;
+pub mod wire;
 pub mod world;
 
 use tauri::Manager;

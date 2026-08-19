@@ -87,7 +87,12 @@ use thiserror::Error;
 use crate::event::Event;
 
 /// `V` — one counter per node.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+///
+/// ★ Serialisable because a clock **crosses a wire**: a peer asking for what
+/// it lacks sends its own frontier, and the reply is computed against it. That
+/// is the whole of the sync request (`sync::Replica::missing_from`), so the
+/// type has to survive the trip.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VectorClock {
     counters: BTreeMap<String, u64>,
 }
@@ -109,6 +114,20 @@ impl VectorClock {
     pub fn tick(&self, node: &str) -> Self {
         let mut c = self.counters.clone();
         *c.entry(node.to_string()).or_insert(0) += 1;
+        Self { counters: c }
+    }
+
+    /// One component set outright, if it is an advance.
+    ///
+    /// ★★ Distinct from [`VectorClock::tick`] on purpose. `tick` is *I did
+    /// something*; this is *I have observed that node reach this counter* —
+    /// which is what building a **frontier** from a log of entries is, and
+    /// there is no way to express it by ticking. It never goes backwards, so
+    /// it cannot be used to forget.
+    pub fn at(&self, node: &str, counter: u64) -> Self {
+        let mut c = self.counters.clone();
+        let e = c.entry(node.to_string()).or_insert(0);
+        *e = (*e).max(counter);
         Self { counters: c }
     }
 

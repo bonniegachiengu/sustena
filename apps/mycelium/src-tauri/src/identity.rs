@@ -113,6 +113,33 @@ impl Unlocked {
     }
 }
 
+/// Check a signature against a claimed public key.
+///
+/// ★★★ The **peer** half of [`Unlocked::sign`], and a free function on
+/// purpose: verifying is something this node does about SOMEONE ELSE, and
+/// nothing about it should need an unlocked identity of its own. A locked node
+/// can still tell a real signature from a forged one.
+///
+/// ★ Returns `bool` rather than a `Result` because every failure means the
+/// same thing to the caller — *this is not who it says it is* — and there is
+/// nothing an attacker should learn from which check failed. Malformed hex, a
+/// key that is not on the curve, a wrong length and a genuinely bad signature
+/// are all `false`.
+pub fn verify(public_key: &str, message: &[u8], signature: &str) -> bool {
+    let (Ok(key_bytes), Ok(sig_bytes)) = (unhex(public_key), unhex(signature)) else {
+        return false;
+    };
+    let (Ok(key), Ok(sig)): (Result<[u8; 32], _>, Result<[u8; 64], _>) =
+        (key_bytes.try_into(), sig_bytes.try_into())
+    else {
+        return false;
+    };
+    let Ok(verifying) = VerifyingKey::from_bytes(&key) else {
+        return false;
+    };
+    verifying.verify(message, &Signature::from_bytes(&sig)).is_ok()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdentityError {
     NotEnrolled,

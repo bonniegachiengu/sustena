@@ -174,6 +174,7 @@ pub mod semantic;
 pub mod stranding;
 pub mod signal;
 pub mod state;
+pub mod sync;
 pub mod strategy;
 pub mod tenet;
 pub mod transducer;
@@ -373,6 +374,9 @@ pub use router::{
 };
 pub use schema::{bind, preserves_shape, validate, DimType, Schema};
 pub use state::State;
+pub use sync::{
+    reconcile, Concurrent, LogEntry, Reconciliation, Replayable, Replica,
+};
 pub use vclock::{
     assign_clocks, merge as merge_stamped, CausalVerdict, ClockError, Dimension, MergeResolution, Resolved,
     Stamped, VectorClock,
