@@ -33,6 +33,7 @@ use tauri_specta::Event;
 use sustena_core::{
     editing::Definition,
     operator::{meta::OperatorStatus, EmittedEvent, Execution, OperatorResult},
+    Rollup,
 };
 
 use crate::templates::TemplateId;
@@ -267,14 +268,6 @@ pub struct WorldDto {
     /// not one the gate enforces. Naming that here keeps a later capability
     /// slice honest about what it is actually adding.
     pub principal: String,
-    /// ★★★ **NOT AVAILABLE, and said so.** Roll-up `ρ` — folding children's
-    /// state into a parent aggregate — does **not exist in `sustena-core`**
-    /// (the Python engine has it; the Rust port does not, per the UX spec's
-    /// §9.2 gap list). The composition tree here is real and engine-checked;
-    /// the *aggregate over it* is not computed, and the UI renders an honest
-    /// unavailable state rather than summing the children in the host and
-    /// passing host arithmetic off as an engine capability.
-    pub rollup_available: bool,
 }
 
 // ── what the engine says about V, right now ──────────────────────────────────
@@ -585,4 +578,158 @@ pub struct CouncilOutcomeDto {
     pub reasoning: String,
     pub utility: f64,
     pub counted: u32,
+}
+
+// ── roll-up ρ ────────────────────────────────────────────────────────────────
+
+/// One contributor to a household total.
+///
+/// ★★ `isHousehold` is a real distinction, not decoration: a surface has to be
+/// able to say *the household's own 6,600 plus six members* rather than listing
+/// seven anonymous numbers, and inferring it by comparing ids would be the kind
+/// of guess this layer exists to remove.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ContributionDto {
+    pub sustain_id: String,
+    /// The member's name, else the slot, else the id.
+    pub label: String,
+    pub is_household: bool,
+    pub value: f64,
+}
+
+/// A contributor that could NOT be read, and the engine's own reason.
+///
+/// ★★★ This is the honest-exclusion contract on the wire. A total that dropped
+/// a member silently would be indistinguishable from one where that member
+/// genuinely holds nothing — so the exclusions travel with the value, and a
+/// screen showing one without the other is misreporting on its own account.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExclusionDto {
+    pub sustain_id: String,
+    pub label: String,
+    pub is_household: bool,
+    pub reason: String,
+}
+
+/// One declared aggregate, answered by the engine.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AggregateDto {
+    pub id: String,
+    pub child_path: String,
+    /// `SUM` | `COUNT` | `AVG` | `MIN` | `MAX`.
+    pub op: String,
+    /// ★ `null` for `MIN`/`MAX` over nothing — there is no smallest element of
+    /// an empty set, and `0` would be a claim.
+    pub value: Option<f64>,
+    /// ★ Whether ANYTHING was readable. `sum` over nothing is `0`, which is
+    /// arithmetically right and still not a measurement — a surface uses this
+    /// to say so rather than print a confident zero.
+    pub grounded: bool,
+    pub included: Vec<ContributionDto>,
+    pub excluded: Vec<ExclusionDto>,
+    pub includes_household_own: bool,
+}
+
+/// **ρ** for one parent, computed fresh.
+///
+/// ★ `declared` is empty for a Sustain that asked for no totals — which is a
+/// different fact from *a total that could not be computed*, and the two must
+/// not render the same.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RollupDto {
+    pub sustain_id: String,
+    pub aggregates: Vec<AggregateDto>,
+    /// Linked children, and whether each was readable at all.
+    pub children: Vec<ChildStatusDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ChildStatusDto {
+    pub sustain_id: String,
+    pub label: String,
+    pub readable: bool,
+}
+
+impl RollupDto {
+    /// Build the wire form from the engine's own reading.
+    ///
+    /// ★ Built here, like `Committed::of`, so the command and the push event
+    /// ship the byte-identical shape.
+    pub fn of(sustain_id: &str, r: &Rollup) -> Self {
+        RollupDto {
+            sustain_id: sustain_id.to_string(),
+            children: r
+                .children()
+                .iter()
+                .map(|c| ChildStatusDto {
+                    sustain_id: c.contributor().sustain_id().to_string(),
+                    label: c.contributor().label().to_string(),
+                    readable: c.readable(),
+                })
+                .collect(),
+            aggregates: r
+                .aggregates()
+                .iter()
+                .map(|a| AggregateDto {
+                    id: a.id().to_string(),
+                    child_path: a.child_path().to_string(),
+                    op: a.op().name().to_string(),
+                    value: a.value().as_f64(),
+                    grounded: a.is_grounded(),
+                    includes_household_own: a.includes_household_own(),
+                    included: a
+                        .included()
+                        .iter()
+                        .map(|c| ContributionDto {
+                            sustain_id: c.contributor().sustain_id().to_string(),
+                            label: c.contributor().label().to_string(),
+                            is_household: c.contributor().is_household(),
+                            value: c.value(),
+                        })
+                        .collect(),
+                    excluded: a
+                        .excluded()
+                        .iter()
+                        .map(|e| ExclusionDto {
+                            sustain_id: e.contributor().sustain_id().to_string(),
+                            label: e.contributor().label().to_string(),
+                            is_household: e.contributor().is_household(),
+                            reason: e.reason().to_string(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// ★★★ **A household total, recomputed and pushed.**
+///
+/// A THIRD typed event, for the same reason there is a second: it answers a
+/// third question. `Committed` says *what changed, in the Sustain that
+/// changed*; ρ is a **different Sustain's** derived reading, and folding it
+/// into `Committed` would mean a message about Bonnie's habitat carrying the
+/// homestead's state under a field name that did not say so.
+///
+/// ★★ It is emitted only after a real commit, only for a Sustain that actually
+/// declares aggregates. A refusal emits nothing here either — ρ is a function
+/// of state, and a refused call changed no state, so the total it would carry
+/// is the one the subscriber already has.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct RolledUp {
+    pub rollup: RollupDto,
+}
+
+impl RolledUp {
+    pub fn of(sustain_id: &str, r: &Rollup) -> Self {
+        RolledUp {
+            rollup: RollupDto::of(sustain_id, r),
+        }
+    }
 }

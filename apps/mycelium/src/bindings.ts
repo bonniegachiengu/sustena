@@ -163,6 +163,17 @@ async getAccess(sustainId: string) : Promise<AccessDto> {
     return await TAURI_INVOKE("get_access", { sustainId });
 },
 /**
+ * **ρ** for one Sustain — its declared totals, folded fresh from its own state
+ * and every linked child's.
+ * 
+ * ★ `None` only when there is no such Sustain. A Sustain that declares no
+ * aggregates answers with an empty reading, because *asked for no totals* and
+ * *a total that could not be computed* are different facts.
+ */
+async getRollup(sustainId: string) : Promise<RollupDto | null> {
+    return await TAURI_INVOKE("get_rollup", { sustainId });
+},
+/**
  * ★★★ Resolve a proposal with the engine's own `council::resolve`.
  * 
  * Real: the rule that a person's vote overrides the council, that an abstaining
@@ -179,10 +190,12 @@ async resolveProposal(votes: ([string, string, number])[], userVote: string | nu
 
 export const events = __makeEvents__<{
 committed: Committed,
-refused: Refused
+refused: Refused,
+rolledUp: RolledUp
 }>({
 committed: "committed",
-refused: "refused"
+refused: "refused",
+rolledUp: "rolled-up"
 })
 
 /** user-defined constants **/
@@ -204,6 +217,25 @@ tier: number | null; memberships: number; operators: OperatorAccessDto[];
  * ★★★ Whether the gate is currently checking any of this. It is not.
  */
 enforced: boolean; note: string }
+/**
+ * One declared aggregate, answered by the engine.
+ */
+export type AggregateDto = { id: string; childPath: string; 
+/**
+ * `SUM` | `COUNT` | `AVG` | `MIN` | `MAX`.
+ */
+op: string; 
+/**
+ * ★ `null` for `MIN`/`MAX` over nothing — there is no smallest element of
+ * an empty set, and `0` would be a claim.
+ */
+value: number | null; 
+/**
+ * ★ Whether ANYTHING was readable. `sum` over nothing is `0`, which is
+ * arithmetically right and still not a measurement — a surface uses this
+ * to say so rather than print a confident zero.
+ */
+grounded: boolean; included: ContributionDto[]; excluded: ExclusionDto[]; includesHouseholdOwn: boolean }
 /**
  * A definition as authored and persisted.
  */
@@ -237,6 +269,7 @@ export type BranchStep = { operator: string; verdict: Verdict; reason: string | 
  * The hypothetical state after this step.
  */
 state: JsonValue }
+export type ChildStatusDto = { sustainId: string; label: string; readable: boolean }
 /**
  * ★★★ **A committed change, pushed.** One message per real change.
  * 
@@ -271,6 +304,19 @@ export type ConstraintReading = { id: string; expression: string; holds: boolean
  * operand and the value that failed.
  */
 reason: string }
+/**
+ * One contributor to a household total.
+ * 
+ * ★★ `isHousehold` is a real distinction, not decoration: a surface has to be
+ * able to say *the household's own 6,600 plus six members* rather than listing
+ * seven anonymous numbers, and inferring it by comparing ids would be the kind
+ * of guess this layer exists to remove.
+ */
+export type ContributionDto = { sustainId: string; 
+/**
+ * The member's name, else the slot, else the id.
+ */
+label: string; isHousehold: boolean; value: number }
 /**
  * What `council::resolve` decided.
  */
@@ -349,6 +395,15 @@ boundaryNotice: string }
  * One event the call published.
  */
 export type EventDto = { name: string; payload: JsonValue }
+/**
+ * A contributor that could NOT be read, and the engine's own reason.
+ * 
+ * ★★★ This is the honest-exclusion contract on the wire. A total that dropped
+ * a member silently would be indistinguishable from one where that member
+ * genuinely holds nothing — so the exclusions travel with the value, and a
+ * screen showing one without the other is misreporting on its own account.
+ */
+export type ExclusionDto = { sustainId: string; label: string; isHousehold: boolean; reason: string }
 /**
  * The gate's own words about one call.
  */
@@ -522,6 +577,33 @@ reason: string | null;
  */
 constraintViolated: string | null }
 /**
+ * ★★★ **A household total, recomputed and pushed.**
+ * 
+ * A THIRD typed event, for the same reason there is a second: it answers a
+ * third question. `Committed` says *what changed, in the Sustain that
+ * changed*; ρ is a **different Sustain's** derived reading, and folding it
+ * into `Committed` would mean a message about Bonnie's habitat carrying the
+ * homestead's state under a field name that did not say so.
+ * 
+ * ★★ It is emitted only after a real commit, only for a Sustain that actually
+ * declares aggregates. A refusal emits nothing here either — ρ is a function
+ * of state, and a refused call changed no state, so the total it would carry
+ * is the one the subscriber already has.
+ */
+export type RolledUp = { rollup: RollupDto }
+/**
+ * **ρ** for one parent, computed fresh.
+ * 
+ * ★ `declared` is empty for a Sustain that asked for no totals — which is a
+ * different fact from *a total that could not be computed*, and the two must
+ * not render the same.
+ */
+export type RollupDto = { sustainId: string; aggregates: AggregateDto[]; 
+/**
+ * Linked children, and whether each was readable at all.
+ */
+children: ChildStatusDto[] }
+/**
  * `Σ = ⟨B, S, V, T, ⊕⟩`, as much of it as a cockpit needs to draw.
  * 
  * ★ Deliberately not the whole `Definition`: a walking skeleton should carry
@@ -634,17 +716,7 @@ holarchy: Holarchy;
  * not one the gate enforces. Naming that here keeps a later capability
  * slice honest about what it is actually adding.
  */
-principal: string; 
-/**
- * ★★★ **NOT AVAILABLE, and said so.** Roll-up `ρ` — folding children's
- * state into a parent aggregate — does **not exist in `sustena-core`**
- * (the Python engine has it; the Rust port does not, per the UX spec's
- * §9.2 gap list). The composition tree here is real and engine-checked;
- * the *aggregate over it* is not computed, and the UI renders an honest
- * unavailable state rather than summing the children in the host and
- * passing host arithmetic off as an engine capability.
- */
-rollupAvailable: boolean }
+principal: string }
 
 /** tauri-specta globals **/
 

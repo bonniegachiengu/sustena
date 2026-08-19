@@ -2820,3 +2820,71 @@ exact in the reals and `f64` summation is not associative.
 (PAWA-9 owns verification and multi-server splitting); the seam is **opt-in**,
 so `serving: None` still means an economy that only shrinks — now a host's
 choice rather than a missing mechanism.
+
+
+### `rollup.json` — roll-up ρ (Composition §VIII · the reference's `compute_rollup`)
+
+**PARITY vectors (R1).** ρ genuinely exists in the reference —
+`sustain_engine.py::_aggregate_from_child_states`, the shared core of
+`compute_rollup` — so these 20 cases are *recorded from it* and replayed by
+`sustena_core::rollup`. Value, contributor-by-contributor numbers, and the
+**excluded set** are all compared: a roll-up that got the arithmetic right while
+silently dropping a member would pass a value-only check and be exactly the
+failure ρ exists to prevent.
+
+★★★ **One reducer, not a third one.** The reference has this arithmetic twice —
+`predicates.py`'s aggregate operand and `sustain_engine.py`'s `_ROLLUP_OPS` —
+and they happen to agree, including on the empty set (`sum`→0, `avg`→0,
+`min`/`max`→`null`). Two copies that agree today are still two copies, so the
+Rust port has **one**: `AggFunc::reduce`, which the predicate evaluator and ρ
+both call. The `count` population is passed in rather than inferred, because the
+two callers honestly count different things — inside a predicate `COUNT` counts
+every element, and in a roll-up the non-numeric contributors have already been
+excluded and named.
+
+★★ **One path grammar and one resolver**, likewise: ρ reaches
+`parse_state_path` and `resolve_path`, the same two `V` uses. A wildcard means
+the same thing to a rule and to a household total, which is the two-evaluator
+divergence this core deleted rather than ported.
+
+**Three divergences, all narrow, all recorded rather than smoothed:**
+
+1. ★ **Whole floats render as integers.** The reference seeds the wildcard
+   form's inner sum with Python's `0.0`, so it reports `28200.0` where this core
+   reports `28200`. Every number this crate produces goes through one
+   normalisation (`num`), which is why the predicate vectors match at all. The
+   *values* are equal; `conformance_rollup.rs` compares numbers numerically
+   rather than by JSON token, and says so at the top of the file.
+
+2. ★★ **An array container is readable under a wildcard; Python excludes it.**
+   `_resolve_child_path_value` accepts only a `dict` there and returns `None`
+   for anything else, so a child whose `finances.pockets` is a list is excluded
+   and named. This core accepts a dict **or** an array, because `resolve_path`
+   already maps over both for `V`. **Leaning Rust, with the counterweight
+   stated:** refusing an array in ρ alone would make one wildcard path mean two
+   different things depending on which subsystem read it — the exact divergence
+   `parse_state_path` exists to prevent on the grammar side. Everything Python
+   accepts, this core accepts identically; the difference shows only on a shape
+   Python calls unreadable, and **no vector exercises it** because the reference
+   has no recorded answer to compare against.
+
+3. ★★ **A scalar container is EXCLUDED, in both — and getting there took a
+   fix.** Resolving a wildcard against a scalar yields an empty list, and
+   summing that would report a confident `0` for a contributor whose shape could
+   not be read at all — the fabricated zero this module exists to refuse. The
+   Rust port checks the container is genuinely a collection before mapping.
+   Recorded as `wildcard_scalar_container_is_excluded_not_zeroed`, and it passes
+   both ways.
+
+★ **A defect this port found in itself, not in the reference:** Rust's
+`Sum for f64` folds from the additive identity **`-0.0`**, so an empty pocket
+container contributed a *negative* zero — the same number, formatting as
+`-0.00`, and reading on a household screen as a debt. The reference seeds its
+own loop with `0.0` and never sees it. Normalised at the source, with a test
+that asserts the sign bit rather than the value.
+
+**What is deliberately NOT in this file:** the reference's `_hypothetical_rollup`
+override arm (one child's not-yet-committed state substituted for a disk read,
+serving the binding gate and the simulator). This crate has no disk, so the arm
+collapses — a caller wanting the hypothetical passes the candidate state as that
+child's state. One function, no mode flag, nothing to diverge.

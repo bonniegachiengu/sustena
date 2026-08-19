@@ -12,7 +12,6 @@
  */
 import { createMemo, createSignal, For, Show } from "solid-js";
 import {
-  Absent,
   Caption,
   Card,
   Chip,
@@ -26,6 +25,7 @@ import {
   Note,
   NoteRow,
   Readout,
+  Rollup,
   Split,
   Sym,
   Value,
@@ -33,7 +33,7 @@ import {
   sx as S,
 } from "../ui";
 import { fmt, pockets, type Pocket } from "../lib/engine";
-import { childrenOf, selectedSustain, world } from "../lib/live";
+import { childrenOf, selectedSustain } from "../lib/live";
 
 /**
  * ★★ The attention threshold is a **UI policy, declared here**, not an engine
@@ -170,15 +170,11 @@ export default function Monitor() {
           <Meta>
             {kids().length} linked {kids().length === 1 ? "child" : "children"}
           </Meta>
-          <Show when={!world.rollupAvailable}>
-            <Note gap="sm">
-              <Absent title={<>roll-up <Sym>ρ</Sym> · not available</>}>
-                The engine holds and checks this tree but cannot yet fold a child's state into a
-                parent aggregate — that exists in the Python engine and is not ported to
-                <code> sustena-core</code>. Nothing is summed here.
-              </Absent>
-            </Note>
-          </Show>
+          {/* ★★★ Real, and the engine's. `compute_rollup` folds this Sustain's
+              own state and every linked child's into its declared aggregates,
+              fresh on every read and never cached. The exclusions travel with
+              the figure — see `AggregateReadout`. */}
+          <Rollup rollup={live()?.rollup ?? null} />
         </Card>
       </Column>
 

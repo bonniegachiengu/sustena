@@ -18,10 +18,10 @@
  * refusal as a state change, because there is no state on the message to show.
  */
 import { createStore, produce, reconcile } from "solid-js/store";
-import { events, type Committed, type Refused } from "../bindings";
+import { events, type Committed, type Refused, type RollupDto } from "../bindings";
 import { engine, type ConstraintReading, type LogEntryDto, type SustainSummary, type WorldDto } from "./engine";
 
-export type { Committed, ConstraintReading, LogEntryDto, Refused };
+export type { Committed, ConstraintReading, LogEntryDto, Refused, RollupDto };
 
 /**
  * One line of the gate stream.
@@ -44,6 +44,14 @@ export type LiveSustain = {
   state: unknown;
   constraints: ConstraintReading[];
   log: LogEntryDto[];
+  /**
+   * ρ, as the engine last computed it — `null` until it has.
+   *
+   * ★ Held per Sustain rather than globally: a household total belongs to the
+   * household, and a cockpit that can select any Sustain needs to know whose
+   * total it is looking at.
+   */
+  rollup: RollupDto | null;
 };
 
 type LiveWorld = {
@@ -55,7 +63,7 @@ type LiveWorld = {
   holds: boolean;
   holarchyReason: string;
   linked: number;
-  rollupAvailable: boolean;
+
   sustains: Record<string, LiveSustain>;
   principal: string;
   /** ★ Counts pushes received. The number a proof can point at. */
@@ -75,7 +83,6 @@ const [world, setWorld] = createStore<LiveWorld>({
   holds: false,
   holarchyReason: "",
   linked: 0,
-  rollupAvailable: false,
   sustains: {},
   principal: "",
   pushes: 0,
@@ -95,7 +102,6 @@ function mergeWorld(w: WorldDto) {
       s.principal = w.principal;
       s.selected = w.selected;
       s.order = w.sustains.map((x) => x.id);
-      s.rollupAvailable = w.rollupAvailable;
       if (w.holarchy.kind === "holds") {
         s.holds = true;
         s.linked = w.holarchy.linked;
@@ -110,7 +116,13 @@ function mergeWorld(w: WorldDto) {
         if (existing) {
           existing.summary = summary;
         } else {
-          s.sustains[summary.id] = { summary, state: null, constraints: [], log: [] };
+          s.sustains[summary.id] = {
+            summary,
+            state: null,
+            constraints: [],
+            log: [],
+            rollup: null,
+          };
         }
       }
     }),
@@ -120,10 +132,14 @@ function mergeWorld(w: WorldDto) {
 /** Pull the parts a push does not carry — the log, and any Sustain's state we have not seen. */
 export async function hydrate(id: string): Promise<void> {
   try {
-    const [full, constraints, log] = await Promise.all([
+    const [full, constraints, log, rollup] = await Promise.all([
       engine.sustain(id),
       engine.constraints(id),
       engine.log(id),
+      // ★ ρ on hydrate only. After that the channel carries it — a total that
+      //   re-read itself on a timer would be polling for a number the engine
+      //   already pushed.
+      engine.rollup(id),
     ]);
     setWorld(
       produce((s) => {
@@ -132,6 +148,7 @@ export async function hydrate(id: string): Promise<void> {
         entry.state = full?.state ?? null;
         entry.constraints = constraints;
         entry.log = log;
+        entry.rollup = rollup;
       }),
     );
   } catch (e) {
@@ -226,9 +243,25 @@ export async function subscribe(): Promise<() => void> {
     );
   });
 
+  // ★★★ ρ, pushed. A member's commit moves its HOUSEHOLD's total, so this
+  //     message names a different Sustain from the one that changed — which is
+  //     exactly why it is its own event rather than a field on `Committed`.
+  //     Nothing here asks the engine anything; the total arrives computed.
+  const stopRolledUp = await events.rolledUp.listen((e) => {
+    const r = e.payload.rollup;
+    setWorld(
+      produce((s) => {
+        const entry = s.sustains[r.sustainId];
+        if (!entry) return;
+        entry.rollup = r;
+      }),
+    );
+  });
+
   return () => {
     stopCommitted();
     stopRefused();
+    stopRolledUp();
   };
 }
 

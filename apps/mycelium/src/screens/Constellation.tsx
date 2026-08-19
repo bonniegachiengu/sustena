@@ -73,6 +73,21 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
   const attention = createMemo(attentionAcross);
   const nodeAt = (id: string) => world.sustains[id];
 
+  /**
+   * ★★ The household total, taken from whichever root Sustain actually
+   * declares one — never assembled here. If no Sustain declares a total there
+   * is none to show, and the strip says so rather than inventing a sum.
+   */
+  const householdTotal = createMemo(() => {
+    for (const id of world.order) {
+      const agg = world.sustains[id]?.rollup?.aggregates.find((a) =>
+        a.childPath === "finances.liquid.balance",
+      );
+      if (agg) return agg;
+    }
+    return undefined;
+  });
+
   return (
     <Split variant="wideLeft">
       {/* ── the graph ────────────────────────────────────────────────────── */}
@@ -202,18 +217,45 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
           <TelemetryCell label="rules broken" tone={telemetry().broken > 0 ? "danger" : "ok"}>
             {telemetry().broken}
           </TelemetryCell>
-          {/* ★★★ NOT summed. Roll-up ρ is not in the core, and adding six
-              numbers here would be host arithmetic wearing an engine's name.
-              The honest figure is no figure. */}
-          <TelemetryCell label="household liquid" tone="idle">
-            —
+          {/* ★★★ Summed BY THE ENGINE now, not by this screen. `compute_rollup`
+              folds the household's own state and every linked child's; this
+              cell reads what it returned. ★ Still a dash when nothing was
+              readable — `sum` over nothing is 0, and a confident zero for a
+              household nobody could read would be the same lie in a new place. */}
+          <TelemetryCell
+            label="household liquid"
+            tone={householdTotal()?.grounded ? undefined : "idle"}
+          >
+            <Show when={householdTotal()?.grounded} fallback="—">
+              {fmt(householdTotal()!.value)}
+            </Show>
           </TelemetryCell>
         </TelemetryStrip>
-        <Caption>
-          <strong>household liquid is not summed.</strong> Roll-up ρ — folding children into a
-          parent aggregate — does not exist in <code>sustena-core</code>. Every other figure above
-          is a real count over the persisted world.
-        </Caption>
+        <Show
+          when={householdTotal()}
+          fallback={
+            <Caption>
+              No Sustain here declares a household total. Every figure above is a real count over
+              the persisted world.
+            </Caption>
+          }
+        >
+          {(a) => (
+            <Caption>
+              <strong>household liquid is the engine's roll-up ρ</strong> — {a().op.toLowerCase()}{" "}
+              over <code>{a().childPath}</code>, folded from the household's own state and{" "}
+              {a().included.filter((c) => !c.isHousehold).length} member
+              {a().included.filter((c) => !c.isHousehold).length === 1 ? "" : "s"}, fresh on every
+              read.
+              <Show when={a().excluded.length > 0}>
+                {" "}
+                {a().excluded.length} contributor{a().excluded.length === 1 ? " was" : "s were"} not
+                readable and {a().excluded.length === 1 ? "is" : "are"} left out rather than counted
+                as zero — see Composition.
+              </Show>
+            </Caption>
+          )}
+        </Show>
       </Card>
 
       {/* ── right column ─────────────────────────────────────────────────── */}

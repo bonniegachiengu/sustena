@@ -1,0 +1,1262 @@
+{
+  "conformance_version": 1,
+  "slice": "rollup",
+  "generated_from": "sustena/core/sustain_engine.py::_aggregate_from_child_states",
+  "note": "Recorded from the reference engine. See conformance/README.md.",
+  "cases": [
+    {
+      "name": "household_plus_children",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "bonnie",
+          "slot": "habitat_1",
+          "member": "Bonnie"
+        },
+        {
+          "child_sustain_id": "cira",
+          "slot": "habitat_2",
+          "member": "Cira"
+        }
+      ],
+      "child_states": {
+        "bonnie": {
+          "finances": {
+            "liquid": {
+              "balance": 1800
+            }
+          }
+        },
+        "cira": {
+          "finances": {
+            "liquid": {
+              "balance": 5000
+            }
+          }
+        }
+      },
+      "own_state": {
+        "finances": {
+          "liquid": {
+            "balance": 14000
+          }
+        }
+      },
+      "expect": {
+        "total": {
+          "op": "sum",
+          "child_path": "finances.liquid.balance",
+          "value": 20800,
+          "included": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "value": 14000,
+              "is_self": true
+            },
+            {
+              "sustain_id": "bonnie",
+              "slot": "habitat_1",
+              "member": "Bonnie",
+              "value": 1800,
+              "is_self": false
+            },
+            {
+              "sustain_id": "cira",
+              "slot": "habitat_2",
+              "member": "Cira",
+              "value": 5000,
+              "is_self": false
+            }
+          ],
+          "excluded": [],
+          "includes_parent_own_contribution": true
+        }
+      }
+    },
+    {
+      "name": "children_only_when_no_own_state",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "bonnie",
+          "slot": "habitat_1",
+          "member": "Bonnie"
+        }
+      ],
+      "child_states": {
+        "bonnie": {
+          "finances": {
+            "liquid": {
+              "balance": 1800
+            }
+          }
+        }
+      },
+      "own_state": null,
+      "expect": {
+        "total": {
+          "op": "sum",
+          "child_path": "finances.liquid.balance",
+          "value": 1800,
+          "included": [
+            {
+              "sustain_id": "bonnie",
+              "slot": "habitat_1",
+              "member": "Bonnie",
+              "value": 1800,
+              "is_self": false
+            }
+          ],
+          "excluded": [],
+          "includes_parent_own_contribution": false
+        }
+      }
+    },
+    {
+      "name": "unreadable_child_excluded_and_named",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "bonnie",
+          "slot": "habitat_1",
+          "member": "Bonnie"
+        },
+        {
+          "child_sustain_id": "frankie",
+          "slot": "habitat_6",
+          "member": "Frankie"
+        }
+      ],
+      "child_states": {
+        "bonnie": {
+          "finances": {
+            "liquid": {
+              "balance": 600
+            }
+          }
+        }
+      },
+      "own_state": {
+        "finances": {
+          "liquid": {
+            "balance": 1000
+          }
+        }
+      },
+      "expect": {
+        "total": {
+          "op": "sum",
+          "child_path": "finances.liquid.balance",
+          "value": 1600,
+          "included": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "value": 1000,
+              "is_self": true
+            },
+            {
+              "sustain_id": "bonnie",
+              "slot": "habitat_1",
+              "member": "Bonnie",
+              "value": 600,
+              "is_self": false
+            }
+          ],
+          "excluded": [
+            {
+              "sustain_id": "frankie",
+              "slot": "habitat_6",
+              "member": "Frankie",
+              "is_self": false,
+              "reason": "child state unavailable"
+            }
+          ],
+          "includes_parent_own_contribution": true
+        }
+      }
+    },
+    {
+      "name": "child_without_the_path_excluded_and_named",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "garden",
+          "slot": null,
+          "member": "Garden"
+        }
+      ],
+      "child_states": {
+        "garden": {
+          "soil": 40
+        }
+      },
+      "own_state": {
+        "finances": {
+          "liquid": {
+            "balance": 1000
+          }
+        }
+      },
+      "expect": {
+        "total": {
+          "op": "sum",
+          "child_path": "finances.liquid.balance",
+          "value": 1000,
+          "included": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "value": 1000,
+              "is_self": true
+            }
+          ],
+          "excluded": [
+            {
+              "sustain_id": "garden",
+              "slot": null,
+              "member": "Garden",
+              "is_self": false,
+              "reason": "path 'finances.liquid.balance' not present or not numeric on this child"
+            }
+          ],
+          "includes_parent_own_contribution": true
+        }
+      }
+    },
+    {
+      "name": "household_without_the_path_excluded_and_named",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "bonnie",
+          "slot": null,
+          "member": "Bonnie"
+        }
+      ],
+      "child_states": {
+        "bonnie": {
+          "finances": {
+            "liquid": {
+              "balance": 600
+            }
+          }
+        }
+      },
+      "own_state": {
+        "soil": 40
+      },
+      "expect": {
+        "total": {
+          "op": "sum",
+          "child_path": "finances.liquid.balance",
+          "value": 600,
+          "included": [
+            {
+              "sustain_id": "bonnie",
+              "slot": null,
+              "member": "Bonnie",
+              "value": 600,
+              "is_self": false
+            }
+          ],
+          "excluded": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "is_self": true,
+              "reason": "path 'finances.liquid.balance' not present or not numeric on the household's own state"
+            }
+          ],
+          "includes_parent_own_contribution": true
+        }
+      }
+    },
+    {
+      "name": "avg_over_contributors",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "avg"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "a",
+          "slot": null,
+          "member": null
+        },
+        {
+          "child_sustain_id": "b",
+          "slot": null,
+          "member": null
+        }
+      ],
+      "child_states": {
+        "a": {
+          "finances": {
+            "liquid": {
+              "balance": 10
+            }
+          }
+        },
+        "b": {
+          "finances": {
+            "liquid": {
+              "balance": 30
+            }
+          }
+        }
+      },
+      "own_state": null,
+      "expect": {
+        "total": {
+          "op": "avg",
+          "child_path": "finances.liquid.balance",
+          "value": 20.0,
+          "included": [
+            {
+              "sustain_id": "a",
+              "slot": null,
+              "member": null,
+              "value": 10,
+              "is_self": false
+            },
+            {
+              "sustain_id": "b",
+              "slot": null,
+              "member": null,
+              "value": 30,
+              "is_self": false
+            }
+          ],
+          "excluded": [],
+          "includes_parent_own_contribution": false
+        }
+      }
+    },
+    {
+      "name": "min_over_contributors",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "min"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "a",
+          "slot": null,
+          "member": null
+        },
+        {
+          "child_sustain_id": "b",
+          "slot": null,
+          "member": null
+        }
+      ],
+      "child_states": {
+        "a": {
+          "finances": {
+            "liquid": {
+              "balance": 10
+            }
+          }
+        },
+        "b": {
+          "finances": {
+            "liquid": {
+              "balance": 30
+            }
+          }
+        }
+      },
+      "own_state": {
+        "finances": {
+          "liquid": {
+            "balance": 25
+          }
+        }
+      },
+      "expect": {
+        "total": {
+          "op": "min",
+          "child_path": "finances.liquid.balance",
+          "value": 10,
+          "included": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "value": 25,
+              "is_self": true
+            },
+            {
+              "sustain_id": "a",
+              "slot": null,
+              "member": null,
+              "value": 10,
+              "is_self": false
+            },
+            {
+              "sustain_id": "b",
+              "slot": null,
+              "member": null,
+              "value": 30,
+              "is_self": false
+            }
+          ],
+          "excluded": [],
+          "includes_parent_own_contribution": true
+        }
+      }
+    },
+    {
+      "name": "max_over_contributors",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "max"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "a",
+          "slot": null,
+          "member": null
+        },
+        {
+          "child_sustain_id": "b",
+          "slot": null,
+          "member": null
+        }
+      ],
+      "child_states": {
+        "a": {
+          "finances": {
+            "liquid": {
+              "balance": 10
+            }
+          }
+        },
+        "b": {
+          "finances": {
+            "liquid": {
+              "balance": 30
+            }
+          }
+        }
+      },
+      "own_state": {
+        "finances": {
+          "liquid": {
+            "balance": 25
+          }
+        }
+      },
+      "expect": {
+        "total": {
+          "op": "max",
+          "child_path": "finances.liquid.balance",
+          "value": 30,
+          "included": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "value": 25,
+              "is_self": true
+            },
+            {
+              "sustain_id": "a",
+              "slot": null,
+              "member": null,
+              "value": 10,
+              "is_self": false
+            },
+            {
+              "sustain_id": "b",
+              "slot": null,
+              "member": null,
+              "value": 30,
+              "is_self": false
+            }
+          ],
+          "excluded": [],
+          "includes_parent_own_contribution": true
+        }
+      }
+    },
+    {
+      "name": "count_counts_contributors_not_attempts",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "count"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "a",
+          "slot": null,
+          "member": null
+        },
+        {
+          "child_sustain_id": "gone",
+          "slot": null,
+          "member": null
+        }
+      ],
+      "child_states": {
+        "a": {
+          "finances": {
+            "liquid": {
+              "balance": 2
+            }
+          }
+        }
+      },
+      "own_state": {
+        "finances": {
+          "liquid": {
+            "balance": 1
+          }
+        }
+      },
+      "expect": {
+        "total": {
+          "op": "count",
+          "child_path": "finances.liquid.balance",
+          "value": 2,
+          "included": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "value": 1,
+              "is_self": true
+            },
+            {
+              "sustain_id": "a",
+              "slot": null,
+              "member": null,
+              "value": 2,
+              "is_self": false
+            }
+          ],
+          "excluded": [
+            {
+              "sustain_id": "gone",
+              "slot": null,
+              "member": null,
+              "is_self": false,
+              "reason": "child state unavailable"
+            }
+          ],
+          "includes_parent_own_contribution": true
+        }
+      }
+    },
+    {
+      "name": "min_over_nothing_is_null",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "min"
+        }
+      ],
+      "links": [],
+      "child_states": {},
+      "own_state": null,
+      "expect": {
+        "total": {
+          "op": "min",
+          "child_path": "finances.liquid.balance",
+          "value": null,
+          "included": [],
+          "excluded": [],
+          "includes_parent_own_contribution": false
+        }
+      }
+    },
+    {
+      "name": "max_over_nothing_is_null",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "max"
+        }
+      ],
+      "links": [],
+      "child_states": {},
+      "own_state": null,
+      "expect": {
+        "total": {
+          "op": "max",
+          "child_path": "finances.liquid.balance",
+          "value": null,
+          "included": [],
+          "excluded": [],
+          "includes_parent_own_contribution": false
+        }
+      }
+    },
+    {
+      "name": "sum_over_nothing_is_zero",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "sum"
+        }
+      ],
+      "links": [],
+      "child_states": {},
+      "own_state": null,
+      "expect": {
+        "total": {
+          "op": "sum",
+          "child_path": "finances.liquid.balance",
+          "value": 0,
+          "included": [],
+          "excluded": [],
+          "includes_parent_own_contribution": false
+        }
+      }
+    },
+    {
+      "name": "avg_over_nothing_is_zero",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "avg"
+        }
+      ],
+      "links": [],
+      "child_states": {},
+      "own_state": null,
+      "expect": {
+        "total": {
+          "op": "avg",
+          "child_path": "finances.liquid.balance",
+          "value": 0.0,
+          "included": [],
+          "excluded": [],
+          "includes_parent_own_contribution": false
+        }
+      }
+    },
+    {
+      "name": "wildcard_sums_within_each_contributor",
+      "aggregates": [
+        {
+          "id": "pockets",
+          "child_path": "finances.pockets[*].allocated",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "bonnie",
+          "slot": null,
+          "member": "Bonnie"
+        }
+      ],
+      "child_states": {
+        "bonnie": {
+          "finances": {
+            "pockets": {
+              "food": {
+                "allocated": 800
+              },
+              "rent": {
+                "allocated": 200
+              }
+            }
+          }
+        }
+      },
+      "own_state": {
+        "finances": {
+          "pockets": {
+            "food": {
+              "allocated": 1500
+            },
+            "rent": {
+              "allocated": 500
+            }
+          }
+        }
+      },
+      "expect": {
+        "pockets": {
+          "op": "sum",
+          "child_path": "finances.pockets[*].allocated",
+          "value": 3000.0,
+          "included": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "value": 2000.0,
+              "is_self": true
+            },
+            {
+              "sustain_id": "bonnie",
+              "slot": null,
+              "member": "Bonnie",
+              "value": 1000.0,
+              "is_self": false
+            }
+          ],
+          "excluded": [],
+          "includes_parent_own_contribution": true
+        }
+      }
+    },
+    {
+      "name": "wildcard_empty_container_is_a_real_zero",
+      "aggregates": [
+        {
+          "id": "pockets",
+          "child_path": "finances.pockets[*].allocated",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "empty",
+          "slot": null,
+          "member": "Empty"
+        }
+      ],
+      "child_states": {
+        "empty": {
+          "finances": {
+            "pockets": {}
+          }
+        }
+      },
+      "own_state": null,
+      "expect": {
+        "pockets": {
+          "op": "sum",
+          "child_path": "finances.pockets[*].allocated",
+          "value": 0.0,
+          "included": [
+            {
+              "sustain_id": "empty",
+              "slot": null,
+              "member": "Empty",
+              "value": 0.0,
+              "is_self": false
+            }
+          ],
+          "excluded": [],
+          "includes_parent_own_contribution": false
+        }
+      }
+    },
+    {
+      "name": "wildcard_scalar_container_is_excluded_not_zeroed",
+      "aggregates": [
+        {
+          "id": "pockets",
+          "child_path": "finances.pockets[*].allocated",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "scalar",
+          "slot": null,
+          "member": "Scalar"
+        }
+      ],
+      "child_states": {
+        "scalar": {
+          "finances": {
+            "pockets": 7
+          }
+        }
+      },
+      "own_state": null,
+      "expect": {
+        "pockets": {
+          "op": "sum",
+          "child_path": "finances.pockets[*].allocated",
+          "value": 0,
+          "included": [],
+          "excluded": [
+            {
+              "sustain_id": "scalar",
+              "slot": null,
+              "member": "Scalar",
+              "is_self": false,
+              "reason": "path 'finances.pockets[*].allocated' not present or not numeric on this child"
+            }
+          ],
+          "includes_parent_own_contribution": false
+        }
+      }
+    },
+    {
+      "name": "wildcard_missing_container_is_excluded",
+      "aggregates": [
+        {
+          "id": "pockets",
+          "child_path": "finances.pockets[*].allocated",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "nope",
+          "slot": null,
+          "member": "Nope"
+        }
+      ],
+      "child_states": {
+        "nope": {
+          "soil": 1
+        }
+      },
+      "own_state": null,
+      "expect": {
+        "pockets": {
+          "op": "sum",
+          "child_path": "finances.pockets[*].allocated",
+          "value": 0,
+          "included": [],
+          "excluded": [
+            {
+              "sustain_id": "nope",
+              "slot": null,
+              "member": "Nope",
+              "is_self": false,
+              "reason": "path 'finances.pockets[*].allocated' not present or not numeric on this child"
+            }
+          ],
+          "includes_parent_own_contribution": false
+        }
+      }
+    },
+    {
+      "name": "a_bool_is_not_a_number",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "flag",
+          "slot": null,
+          "member": "Flag"
+        }
+      ],
+      "child_states": {
+        "flag": {
+          "finances": {
+            "liquid": {
+              "balance": true
+            }
+          }
+        }
+      },
+      "own_state": null,
+      "expect": {
+        "total": {
+          "op": "sum",
+          "child_path": "finances.liquid.balance",
+          "value": 0,
+          "included": [],
+          "excluded": [
+            {
+              "sustain_id": "flag",
+              "slot": null,
+              "member": "Flag",
+              "is_self": false,
+              "reason": "path 'finances.liquid.balance' not present or not numeric on this child"
+            }
+          ],
+          "includes_parent_own_contribution": false
+        }
+      }
+    },
+    {
+      "name": "several_aggregates_answered_independently",
+      "aggregates": [
+        {
+          "id": "total",
+          "child_path": "finances.liquid.balance",
+          "op": "sum"
+        },
+        {
+          "id": "pockets",
+          "child_path": "finances.pockets[*].allocated",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "bonnie",
+          "slot": "habitat_1",
+          "member": "Bonnie"
+        }
+      ],
+      "child_states": {
+        "bonnie": {
+          "finances": {
+            "liquid": {
+              "balance": 100
+            },
+            "pockets": {
+              "food": {
+                "allocated": 9
+              }
+            }
+          }
+        }
+      },
+      "own_state": {
+        "finances": {
+          "liquid": {
+            "balance": 5
+          },
+          "pockets": {
+            "food": {
+              "allocated": 1
+            }
+          }
+        }
+      },
+      "expect": {
+        "total": {
+          "op": "sum",
+          "child_path": "finances.liquid.balance",
+          "value": 105,
+          "included": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "value": 5,
+              "is_self": true
+            },
+            {
+              "sustain_id": "bonnie",
+              "slot": "habitat_1",
+              "member": "Bonnie",
+              "value": 100,
+              "is_self": false
+            }
+          ],
+          "excluded": [],
+          "includes_parent_own_contribution": true
+        },
+        "pockets": {
+          "op": "sum",
+          "child_path": "finances.pockets[*].allocated",
+          "value": 10.0,
+          "included": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "value": 1.0,
+              "is_self": true
+            },
+            {
+              "sustain_id": "bonnie",
+              "slot": "habitat_1",
+              "member": "Bonnie",
+              "value": 9.0,
+              "is_self": false
+            }
+          ],
+          "excluded": [],
+          "includes_parent_own_contribution": true
+        }
+      }
+    },
+    {
+      "name": "the_real_household_shape",
+      "aggregates": [
+        {
+          "id": "household_liquid_total",
+          "child_path": "finances.liquid.balance",
+          "op": "sum"
+        },
+        {
+          "id": "household_pockets_total",
+          "child_path": "finances.pockets[*].allocated",
+          "op": "sum"
+        }
+      ],
+      "links": [
+        {
+          "child_sustain_id": "habitat-bonnie",
+          "slot": "habitat_1",
+          "member": "Bonnie"
+        },
+        {
+          "child_sustain_id": "habitat-cira",
+          "slot": "habitat_2",
+          "member": "Cira"
+        },
+        {
+          "child_sustain_id": "habitat-epha",
+          "slot": "habitat_3",
+          "member": "Epha"
+        },
+        {
+          "child_sustain_id": "habitat-mum",
+          "slot": "habitat_4",
+          "member": "Mum"
+        },
+        {
+          "child_sustain_id": "habitat-kui",
+          "slot": "habitat_5",
+          "member": "Kui"
+        },
+        {
+          "child_sustain_id": "habitat-frankie",
+          "slot": "habitat_6",
+          "member": "Frankie"
+        }
+      ],
+      "child_states": {
+        "habitat-bonnie": {
+          "finances": {
+            "liquid": {
+              "balance": 1800
+            },
+            "pockets": {
+              "food": {
+                "allocated": 200
+              }
+            }
+          }
+        },
+        "habitat-cira": {
+          "finances": {
+            "liquid": {
+              "balance": 5000
+            },
+            "pockets": {}
+          }
+        },
+        "habitat-epha": {
+          "finances": {
+            "liquid": {
+              "balance": 0
+            },
+            "pockets": {}
+          }
+        },
+        "habitat-mum": {
+          "finances": {
+            "liquid": {
+              "balance": 0
+            },
+            "pockets": {}
+          }
+        },
+        "habitat-kui": {
+          "finances": {
+            "liquid": {
+              "balance": 0
+            },
+            "pockets": {}
+          }
+        },
+        "habitat-frankie": {
+          "finances": {
+            "liquid": {
+              "balance": 0
+            },
+            "pockets": {}
+          }
+        }
+      },
+      "own_state": {
+        "finances": {
+          "liquid": {
+            "balance": 6600
+          },
+          "pockets": {
+            "food": {
+              "allocated": 8000
+            },
+            "rent": {
+              "allocated": 20000
+            }
+          }
+        }
+      },
+      "expect": {
+        "household_liquid_total": {
+          "op": "sum",
+          "child_path": "finances.liquid.balance",
+          "value": 13400,
+          "included": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "value": 6600,
+              "is_self": true
+            },
+            {
+              "sustain_id": "habitat-bonnie",
+              "slot": "habitat_1",
+              "member": "Bonnie",
+              "value": 1800,
+              "is_self": false
+            },
+            {
+              "sustain_id": "habitat-cira",
+              "slot": "habitat_2",
+              "member": "Cira",
+              "value": 5000,
+              "is_self": false
+            },
+            {
+              "sustain_id": "habitat-epha",
+              "slot": "habitat_3",
+              "member": "Epha",
+              "value": 0,
+              "is_self": false
+            },
+            {
+              "sustain_id": "habitat-mum",
+              "slot": "habitat_4",
+              "member": "Mum",
+              "value": 0,
+              "is_self": false
+            },
+            {
+              "sustain_id": "habitat-kui",
+              "slot": "habitat_5",
+              "member": "Kui",
+              "value": 0,
+              "is_self": false
+            },
+            {
+              "sustain_id": "habitat-frankie",
+              "slot": "habitat_6",
+              "member": "Frankie",
+              "value": 0,
+              "is_self": false
+            }
+          ],
+          "excluded": [],
+          "includes_parent_own_contribution": true
+        },
+        "household_pockets_total": {
+          "op": "sum",
+          "child_path": "finances.pockets[*].allocated",
+          "value": 28200.0,
+          "included": [
+            {
+              "sustain_id": "homestead",
+              "slot": null,
+              "member": "(household's own)",
+              "value": 28000.0,
+              "is_self": true
+            },
+            {
+              "sustain_id": "habitat-bonnie",
+              "slot": "habitat_1",
+              "member": "Bonnie",
+              "value": 200.0,
+              "is_self": false
+            },
+            {
+              "sustain_id": "habitat-cira",
+              "slot": "habitat_2",
+              "member": "Cira",
+              "value": 0.0,
+              "is_self": false
+            },
+            {
+              "sustain_id": "habitat-epha",
+              "slot": "habitat_3",
+              "member": "Epha",
+              "value": 0.0,
+              "is_self": false
+            },
+            {
+              "sustain_id": "habitat-mum",
+              "slot": "habitat_4",
+              "member": "Mum",
+              "value": 0.0,
+              "is_self": false
+            },
+            {
+              "sustain_id": "habitat-kui",
+              "slot": "habitat_5",
+              "member": "Kui",
+              "value": 0.0,
+              "is_self": false
+            },
+            {
+              "sustain_id": "habitat-frankie",
+              "slot": "habitat_6",
+              "member": "Frankie",
+              "value": 0.0,
+              "is_self": false
+            }
+          ],
+          "excluded": [],
+          "includes_parent_own_contribution": true
+        }
+      }
+    }
+  ]
+}

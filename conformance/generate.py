@@ -32,6 +32,7 @@ from sustena.core.state import StateAccessor, StatePathError, StateValueError  #
 from gen_council import (AGGREGATION_CASES, RESOLUTION_CASES,  # noqa: E402
                          run_aggregation_case, run_resolution_case)
 from gen_operators import OPERATOR_CASES, run_operator_case  # noqa: E402
+from gen_rollup import ROLLUP_CASES, run_rollup_case  # noqa: E402
 
 CONFORMANCE_VERSION = 1
 
@@ -332,6 +333,19 @@ def main() -> int:
         ],
     }
 
+    rollup_doc = {
+        "conformance_version": CONFORMANCE_VERSION,
+        "slice": "rollup",
+        "generated_from": "sustena/core/sustain_engine.py::_aggregate_from_child_states",
+        "note": "Recorded from the reference engine. See conformance/README.md.",
+        "cases": [
+            {"name": name, "aggregates": aggs, "links": links,
+             "child_states": child_states, "own_state": own,
+             "expect": run_rollup_case(aggs, links, child_states, own)}
+            for name, aggs, links, child_states, own in ROLLUP_CASES
+        ],
+    }
+
     operators_doc = {
         "conformance_version": CONFORMANCE_VERSION,
         "slice": "operators",
@@ -365,7 +379,7 @@ def main() -> int:
 
     for filename, doc in (("state.json", state_doc), ("fold.json", fold_doc),
                           ("rules.json", rules_doc), ("operators.json", operators_doc),
-                          ("council.json", council_doc)):
+                          ("council.json", council_doc), ("rollup.json", rollup_doc)):
         path = out_dir / filename
         path.write_text(json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8")
         count = (len(doc.get("cases", [])) + len(doc.get("fold_cases", []))

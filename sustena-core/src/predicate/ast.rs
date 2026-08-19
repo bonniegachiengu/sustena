@@ -53,6 +53,57 @@ impl AggFunc {
             Self::Max => "MAX",
         }
     }
+
+    /// Combine a set of numbers. **The one definition of this arithmetic.**
+    ///
+    /// The reference engine has it twice — `predicates.py`'s aggregate operand
+    /// and `sustain_engine.py`'s `_ROLLUP_OPS` — with, as it happens, the same
+    /// empty-set answers. Two copies that agree today are still two copies, so
+    /// [`crate::predicate::eval`] and [`crate::rollup`] both call this.
+    ///
+    /// ★ `population` is separate from `nums.len()` on purpose. Inside a
+    /// predicate, `COUNT(pockets[*].allocated)` counts **every element**,
+    /// numeric or not; in a roll-up, non-numeric contributors have already been
+    /// excluded and named, so the population *is* the numeric set. One
+    /// arithmetic, two honest populations, rather than a second `reduce`.
+    ///
+    /// ★★ Empty is not zero for `Min`/`Max`: there is no smallest element of
+    /// nothing, so the answer is `Null` rather than a confident number.
+    pub fn reduce(&self, nums: &[f64], population: usize) -> Value {
+        match self {
+            Self::Sum => num(nums.iter().sum::<f64>()),
+            Self::Count => Value::from(population),
+            Self::Avg => {
+                if nums.is_empty() {
+                    Value::from(0)
+                } else {
+                    num(nums.iter().sum::<f64>() / nums.len() as f64)
+                }
+            }
+            Self::Min => nums
+                .iter()
+                .cloned()
+                .fold(None::<f64>, |acc, v| Some(acc.map_or(v, |a| a.min(v))))
+                .map(num)
+                .unwrap_or(Value::Null),
+            Self::Max => nums
+                .iter()
+                .cloned()
+                .fold(None::<f64>, |acc, v| Some(acc.map_or(v, |a| a.max(v))))
+                .map(num)
+                .unwrap_or(Value::Null),
+        }
+    }
+}
+
+/// Python renders a whole float as an int; the reference's recorded output does
+/// too, so every number this crate produces goes through here.
+pub(crate) fn num(v: f64) -> Value {
+    if v.fract() == 0.0 && v.abs() < 9.0e15 {
+        Value::from(v as i64)
+    } else {
+        Value::from(v)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

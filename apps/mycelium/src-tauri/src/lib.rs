@@ -38,12 +38,13 @@ pub fn specta_builder() -> Builder {
         commands::author_definition,
         commands::create_from_definition,
         commands::get_access,
+        commands::get_rollup,
         commands::resolve_proposal,
     ])
     // ★★★ The push channel, typed from the same Rust as the commands — so a
     //   listener the UI writes for an event that does not exist will not
     //   compile.
-    .events(collect_events![dto::Committed, dto::Refused])
+    .events(collect_events![dto::Committed, dto::Refused, dto::RolledUp])
 }
 
 /// ★★★ Write `src/bindings.ts` from the Rust types.

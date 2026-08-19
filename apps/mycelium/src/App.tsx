@@ -15,7 +15,7 @@ import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import * as L from "./ui/layout.css";
 import * as S from "./ui/ui.css";
 import { Badge, Caption, Empty, ErrorState, NoteRow } from "./ui";
-import { engine } from "./lib/engine";
+import { engine, fmt } from "./lib/engine";
 import { attentionAcross, hydrate, refreshWorld, subscribe, world } from "./lib/live";
 import Constellation from "./screens/Constellation";
 import Monitor from "./screens/Monitor";
@@ -105,6 +105,21 @@ export default function App() {
   };
 
   const attentionCount = () => attentionAcross().length;
+
+  /**
+   * ★ The household total for the belt — read from whichever Sustain declares
+   * one, never assembled here. `undefined` means nothing declared a total,
+   * which is a different fact from a total nobody could compute.
+   */
+  const householdTotal = () => {
+    for (const id of world.order) {
+      const agg = world.sustains[id]?.rollup?.aggregates.find(
+        (a) => a.childPath === "finances.liquid.balance",
+      );
+      if (agg) return agg;
+    }
+    return undefined;
+  };
 
   return (
     <div class={L.frame}>
@@ -233,10 +248,18 @@ export default function App() {
           <span>sustains</span>
           <span class={L.beltValue}>{world.order.length}</span>
         </span>
-        {/* ★ Cells that cannot be honest are dashes, and each says why. */}
+        {/* ★★ Real now: the engine's roll-up ρ, pushed after every commit that
+            could have moved it. ★ Still a dash when nothing declares a total or
+            nothing was readable — the cells that cannot be honest stay dashes,
+            and each says why. */}
         <span class={L.beltCell}>
           <span>household liquid</span>
-          <span class={L.beltAbsent}>— needs ρ</span>
+          <Show
+            when={householdTotal()?.grounded}
+            fallback={<span class={L.beltAbsent}>{householdTotal() ? "— none readable" : "— none declared"}</span>}
+          >
+            <span class={L.beltValue}>{fmt(householdTotal()!.value)}</span>
+          </Show>
         </span>
         <span class={L.beltCell}>
           <span>peers</span>

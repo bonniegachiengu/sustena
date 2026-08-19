@@ -163,6 +163,7 @@ pub mod region;
 pub mod preattentive;
 pub mod principal;
 pub mod router;
+pub mod rollup;
 pub mod royalty;
 pub mod schema;
 pub mod semantic;
@@ -383,6 +384,10 @@ pub use goodhart::{coverage, referenced_dimensions, Coverage, GoodhartGuard, Gua
 pub use presentation::{
     discharged_by_this_build, present, present_joint, CollapseRule, Collapsed, Discharge, Duty,
     PresentationError, Presented,
+};
+pub use rollup::{
+    compute as compute_rollup, AggregateDecl, AggregateReading, ChildState, ChildStatus,
+    Contribution, Contributor, Exclusion, Rollup, RollupError,
 };
 pub use holarchy::{
     escalate, validate_holarchy, Breach, Capacity, Escalation, EscalationOutcome, HolarchyError,

@@ -26,11 +26,13 @@ use sustena_core::{
     predicate::check,
     region::Region,
     semantic::enforcement_of,
+    compute_rollup, ChildState,
 };
 
 use sustena_core::principal::{MembershipEdge, Memberships, TIER_OWNER};
 
 use crate::definitions::{check as check_definition, AuthoredDefinition, DefinitionVerdict};
+use crate::dto::RollupDto;
 use crate::economy::Economy;
 use crate::store::{LoggedEvent, Registry as Records, Store, StoreError, StoreResult, SustainRecord};
 use crate::templates::{self, TemplateId};
@@ -494,6 +496,66 @@ impl World {
         MonitorEngine::flatten_holarchy(watches)
             .map(|e| e.sustains().len())
             .map_err(|e| format!("{e:?}"))
+    }
+
+    /// **ρ** — the declared totals for one Sustain, folded from its own state
+    /// and every linked child's.
+    ///
+    /// ★★★ The host reads states and the ENGINE does the arithmetic. Nothing
+    /// here sums anything: it hands `compute_rollup` the parent's state and the
+    /// children's, and reports what came back — the same division of labour as
+    /// `V`, where the host asks `predicate::check` rather than judging a rule.
+    ///
+    /// ★★ Computed fresh, never cached. A household figure that could be stale
+    /// would be a number with no way to say when it stopped being true.
+    ///
+    /// `None` only when there is no such Sustain. A Sustain that declares no
+    /// aggregates returns a real, empty reading — *asked for no totals* is a
+    /// different fact from *a total that could not be computed*.
+    pub fn rollup(&self, sustain_id: &str) -> Option<RollupDto> {
+        self.with(|i| {
+            let parent = i.get(sustain_id)?;
+            let children: Vec<ChildState> = i
+                .children_of(sustain_id)
+                .into_iter()
+                .map(|c| {
+                    // ★ Every child in this host is in memory and readable, so
+                    //   the unreadable arm is not exercised here — but the
+                    //   contract travels anyway, because the state a caller
+                    //   cannot read is exactly what must not silently become 0.
+                    ChildState::readable(&c.record.id, c.state.clone())
+                        .named(c.record.label.as_str())
+                })
+                .collect();
+            let r = compute_rollup(
+                &parent.definition.aggregates,
+                sustain_id,
+                Some(&parent.state),
+                &children,
+            );
+            Some(RollupDto::of(sustain_id, &r))
+        })
+    }
+
+    /// The Sustain whose roll-up a commit on `sustain_id` could have changed.
+    ///
+    /// ★ A member's commit moves its household's total, not its own — so this
+    /// answers with the PARENT when there is one, and with the Sustain itself
+    /// when it is a parent that declares totals. `None` when neither, which is
+    /// most Sustains and is why the channel stays quiet for them.
+    pub fn rollup_subject(&self, sustain_id: &str) -> Option<String> {
+        self.with(|i| {
+            let s = i.get(sustain_id)?;
+            if let Some(p) = &s.record.parent {
+                if i.get(p).is_some_and(|p| !p.definition.aggregates.is_empty()) {
+                    return Some(p.clone());
+                }
+            }
+            if !s.definition.aggregates.is_empty() {
+                return Some(sustain_id.to_string());
+            }
+            None
+        })
     }
 }
 

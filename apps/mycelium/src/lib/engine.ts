@@ -23,6 +23,8 @@ import {
   type LogEntryDto,
   type OperatorDto,
   type Result,
+  type RollupDto,
+  type AggregateDto,
   type SustainDto,
   type SustainSummary,
   type TemplateId,
@@ -44,6 +46,8 @@ export type {
   Holarchy,
   JsonValue,
   LogEntryDto,
+  RollupDto,
+  AggregateDto,
   SustainDto,
   SustainSummary,
   TemplateId,
@@ -90,6 +94,14 @@ export const engine = {
   ): Promise<boolean> =>
     unwrap(await commands.createFromDefinition(id, label, definitionId, parent)),
   access: (sustainId: string): Promise<AccessDto> => commands.getAccess(sustainId),
+  /**
+   * ρ — a Sustain's declared totals, folded fresh by the engine.
+   *
+   * ★ `null` only when there is no such Sustain. A Sustain that declares no
+   * totals answers with an empty `aggregates` list, which is a different fact
+   * and must not render the same.
+   */
+  rollup: (sustainId: string): Promise<RollupDto | null> => commands.getRollup(sustainId),
   resolveProposal: (
     votes: [string, string, number][],
     userVote: string | null,

@@ -57,11 +57,34 @@ pub fn definition(template: TemplateId) -> Definition {
         .with_invariant("liquid_non_negative", "finances.liquid.balance >= 0");
 
     match template {
-        // ★ The household carries a shared pocket and the rule that guards it.
-        TemplateId::Homestead => base.with_invariant(
-            "food_not_overspent",
-            "finances.pockets.food.spent <= finances.pockets.food.allocated",
-        ),
+        // ★ The household carries a shared pocket and the rule that guards it,
+        //   and it is the one that declares what gets TOTALLED across the
+        //   holarchy — roll-up ρ's declarations, part of `Σ` rather than of
+        //   this app.
+        //
+        // ★★ Both totals include the household's OWN state, not only its
+        //   members'. A "household total" that skipped the household would
+        //   answer *what your members collectively hold*, which is a different
+        //   question from the one the label asks — the reference shipped it
+        //   children-only and corrected it for exactly that reason.
+        TemplateId::Homestead => base
+            .with_invariant(
+                "food_not_overspent",
+                "finances.pockets.food.spent <= finances.pockets.food.allocated",
+            )
+            .with_aggregate("household_liquid_total", "finances.liquid.balance", "sum")
+            .expect("a declared aggregate this crate wrote itself")
+            .with_aggregate(
+                "household_pockets_total",
+                "finances.pockets[*].allocated",
+                "sum",
+            )
+            .expect("a declared aggregate this crate wrote itself"),
+        // ★ A habitat declares no aggregate either: it has no children, and a
+        //   "household total" over one person is that person's balance under a
+        //   grander name. Declaring one would put a card on screen that only
+        //   ever restated a figure already above it.
+        //
         // ★ A habitat declares NO pocket invariant, because it opens with no
         //   pockets — and an invariant over a path the state does not hold
         //   compares `None` to a number, which is a type error the gate then

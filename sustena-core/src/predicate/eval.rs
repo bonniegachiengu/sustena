@@ -112,9 +112,9 @@ fn eval_node(
         }
 
         Predicate::Quantifier { kind, list_path, body } => {
-            let mut container = resolve_owned(scope, &list_path.segments);
+            let mut container = resolve_path(scope, &list_path.segments);
             if container.as_ref().is_none_or(|v| v.is_null()) && !std::ptr::eq(scope, global_root) {
-                container = resolve_owned(global_root, &list_path.segments);
+                container = resolve_path(global_root, &list_path.segments);
             }
 
             let items: Vec<Value> = match container {
@@ -189,15 +189,15 @@ fn eval_operand(
         Operand::Path(p) => {
             // Python cannot tell "missing" from "explicitly null" — both are
             // None there — so both fall back to the outer root here.
-            let v = resolve_owned(scope, &p.segments).unwrap_or(Value::Null);
+            let v = resolve_path(scope, &p.segments).unwrap_or(Value::Null);
             if v.is_null() && !std::ptr::eq(scope, global_root) {
-                resolve_owned(global_root, &p.segments).unwrap_or(Value::Null)
+                resolve_path(global_root, &p.segments).unwrap_or(Value::Null)
             } else {
                 v
             }
         }
         Operand::Aggregate { func, path } => {
-            let values = match resolve_owned(scope, &path.segments) {
+            let values = match resolve_path(scope, &path.segments) {
                 Some(Value::Array(a)) => a,
                 _ => Vec::new(),
             };
@@ -209,36 +209,23 @@ fn eval_operand(
                 .filter_map(|v| v.as_f64())
                 .collect();
 
-            match func {
-                AggFunc::Sum => num(nums.iter().sum::<f64>()),
-                AggFunc::Count => Value::from(values.len()),
-                AggFunc::Avg => {
-                    if nums.is_empty() {
-                        Value::from(0)
-                    } else {
-                        num(nums.iter().sum::<f64>() / nums.len() as f64)
-                    }
-                }
-                AggFunc::Min => nums
-                    .iter()
-                    .cloned()
-                    .fold(None::<f64>, |acc, v| Some(acc.map_or(v, |a| a.min(v))))
-                    .map(num)
-                    .unwrap_or(Value::Null),
-                AggFunc::Max => nums
-                    .iter()
-                    .cloned()
-                    .fold(None::<f64>, |acc, v| Some(acc.map_or(v, |a| a.max(v))))
-                    .map(num)
-                    .unwrap_or(Value::Null),
-            }
+            // ★ One definition of this arithmetic, shared with roll-up ρ. The
+            //   population is EVERY element here — `COUNT` inside a predicate
+            //   counts what is there, numeric or not.
+            func.reduce(&nums, values.len())
         }
         Operand::List(items) => Value::Array(items.clone()),
     }
 }
 
-/// Owned resolution, needed once a wildcard is involved.
-fn resolve_owned(root: &Value, segments: &[PathSegment]) -> Option<Value> {
+/// Resolve a parsed path against a state document, cloning what it lands on.
+///
+/// ★ **The one path resolver in this crate.** `V` reaches it through the
+/// predicate evaluator and roll-up ρ reaches it directly, so a wildcard means
+/// the same thing to a rule and to a household total — which is exactly the
+/// divergence [`crate::predicate::parse_state_path`] exists to prevent on the
+/// grammar side.
+pub fn resolve_path(root: &Value, segments: &[PathSegment]) -> Option<Value> {
     let mut node = root.clone();
     for (i, seg) in segments.iter().enumerate() {
         match seg {
@@ -253,7 +240,7 @@ fn resolve_owned(root: &Value, segments: &[PathSegment]) -> Option<Value> {
                 let rest = &segments[i + 1..];
                 let mapped: Vec<Value> = items
                     .iter()
-                    .map(|item| resolve_owned(item, rest).unwrap_or(Value::Null))
+                    .map(|item| resolve_path(item, rest).unwrap_or(Value::Null))
                     .collect();
                 return Some(Value::Array(mapped));
             }
@@ -316,14 +303,6 @@ fn numeric(v: &Value) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Number(_) => v.as_f64(),
         _ => None,
-    }
-}
-
-fn num(v: f64) -> Value {
-    if v.fract() == 0.0 && v.abs() < 9.0e15 {
-        Value::from(v as i64)
-    } else {
-        Value::from(v)
     }
 }
 

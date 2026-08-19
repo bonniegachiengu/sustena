@@ -13,7 +13,8 @@ use tauri_specta::Event;
 use crate::dto::{
     AccessDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
-    OperatorDto, ParamDto, ParameterDto, Refused, SustainDto, SustainSummary, Verdict, WorldDto,
+    OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
+    Verdict, WorldDto,
 };
 use crate::definitions::{AuthoredDefinition, DefinitionVerdict};
 use crate::templates::TemplateId;
@@ -63,8 +64,6 @@ pub fn get_world(world: State<'_, World>) -> WorldDto {
         store_path: world.store().root().display().to_string(),
         principal: PRINCIPAL.to_string(),
         holarchy,
-        // ★★★ Stated, not implied. See `WorldDto::rollup_available`.
-        rollup_available: false,
     }
 }
 
@@ -185,6 +184,26 @@ pub fn run_operator(
                     trace!("  !! push failed: {e}");
                 } else {
                     trace!("  ~> pushed Committed seq={} to the UI", seq);
+                }
+
+                // ★★★ ρ, recomputed and pushed — for the SUSTAIN WHOSE TOTAL
+                //   MOVED, which for a member's commit is its household. A
+                //   third question needs a third message: `Committed` is about
+                //   the Sustain that changed, and a household total is a
+                //   different Sustain's derived reading.
+                //
+                // ★ Nothing is pushed when no aggregate could have moved, so
+                //   the channel stays silent for the Sustains that declare
+                //   none — which is most of them.
+                if let Some(subject) = world.rollup_subject(&sustain_id) {
+                    if let Some(r) = world.rollup(&subject) {
+                        let msg = RolledUp { rollup: r };
+                        if let Err(e) = msg.emit(&app) {
+                            trace!("  !! rollup push failed: {e}");
+                        } else {
+                            trace!("  ~> pushed RolledUp for {subject}");
+                        }
+                    }
                 }
             } else {
                 // ★★ A refusal pushes an ACTIVITY message carrying NO STATE.
@@ -567,4 +586,16 @@ pub fn resolve_proposal(
         utility: aggregated.utility,
         counted: votes.len() as u32,
     }
+}
+
+/// **ρ** for one Sustain — its declared totals, folded fresh from its own state
+/// and every linked child's.
+///
+/// ★ `None` only when there is no such Sustain. A Sustain that declares no
+/// aggregates answers with an empty reading, because *asked for no totals* and
+/// *a total that could not be computed* are different facts.
+#[tauri::command]
+#[specta::specta]
+pub fn get_rollup(world: State<'_, World>, sustain_id: String) -> Option<RollupDto> {
+    world.rollup(&sustain_id)
 }

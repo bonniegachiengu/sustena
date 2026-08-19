@@ -1,6 +1,7 @@
 # Mycelium — the Sustena cockpit
 
-**Status: v1 complete (V1.6).** Twelve panels, built from one shared component
+**Status: v1 complete (V1.6), and the honest absences are being closed —
+roll-up `ρ` is now real.** Twelve panels, built from one shared component
 system. Nine are wired to real engine capability; three describe a subsystem
 `sustena-core` does not have, in the cockpit's own layout, naming what exists
 and where the capability lives. The look holds from a wide desktop down to a
@@ -117,20 +118,6 @@ channel behind a re-read.
 Sustain. Fine for a household; a very large Sustain would want a delta, and the
 mutations are already in the log if that day comes.
 
-## Two events, because there are two questions
-
-| | `Committed` | `Refused` |
-|---|---|---|
-| answers | *what changed* | *what was asked and declined* |
-| carries state | **yes** | **no field at all** |
-| appears in | live state, Monitor, the gate stream | the gate stream only |
-
-★★ This does **not** weaken the V1.2 rule. A refusal still emits **no state
-delta** — the fold is still the only truth about state. What travels on
-`Refused` is the *activity*, which a person watching a household wants to see.
-Keeping them as separate types means a consumer cannot treat a refusal as a
-change by forgetting to branch: there is no `state` to read.
-
 ## One selection model
 
 The topbar selector, the left nav and the Constellation all read and write
@@ -243,11 +230,6 @@ a cycle, and the UI shows what it said.
   money that looks like a feature. (`juul::transfer` exists, but that moves the
   *economy's internal unit* between principals, not a household's money between
   Sustains.)
-- ★★★ **roll-up `ρ` — NOT AVAILABLE, and the UI says so.** Folding children's
-  state into a parent aggregate does not exist in `sustena-core` (the Python
-  engine has it; the Rust port does not). Nothing is summed — not on the
-  Constellation strip, not on the Monitor, not in a fork. A household total
-  computed in the host would be a number with no rule behind it.
 - ★★ **ingest / the transducer.** No parser turns an SMS or a bank alert into a
   proposed call. Not written here on purpose: the Python transducer's own
   history is speculative patterns that matched no real message until real
@@ -276,6 +258,62 @@ a cycle, and the UI shows what it said.
   responsive primitives above are its groundwork.
 - **desktop only.** `[lib] crate-type` is `["lib"]`; the mobile crate-types
   (`staticlib`, `cdylib`) go back when the mobile target lands.
+
+## Roll-up ρ — real, and it refuses to fabricate
+
+`sustena_core::rollup` folds a Sustain's **own** state and every linked child's
+into the aggregates its `Σ` declares. The homestead declares two:
+
+```
+household_liquid_total    sum over finances.liquid.balance
+household_pockets_total   sum over finances.pockets[*].allocated
+```
+
+Three properties, each a refusal rather than a feature:
+
+- **Fresh every call, never persisted.** There is no stored total anywhere, so a
+  figure here can never be one that quietly stopped being true. Call it twice
+  against unchanged states and it reproduces itself.
+- **An unreadable member is EXCLUDED AND NAMED, never counted as zero.** A
+  silent drop is arithmetically indistinguishable from a member who genuinely
+  holds nothing. `included`/`excluded` travel with every value, the exclusion
+  carries the engine's own reason, and the UI shows both or neither.
+- **The household's own contribution is in.** A "household total" that skipped
+  the household would answer *what your members collectively hold*, which is a
+  different question from the one the label asks. The reference shipped it
+  children-only and corrected it for exactly that reason.
+
+★★ **The host does not sum anything.** It reads states and hands them to
+`compute_rollup`, the same division of labour as `V`, where it asks
+`predicate::check` about a rule rather than judging one.
+
+★ `AggregateReading` has **no public constructor**: the only way to hold one is
+to have computed it, so a total cannot travel without the lists that say what it
+covered — the same structural guarantee `PawaReading` gives a debit.
+
+Prove it without the GUI:
+
+```bash
+cargo run --manifest-path src-tauri/Cargo.toml --bin smoke
+```
+
+The last section computes ρ over the real seeded household and checks it against
+a **hand sum taken from the same states**, then adds one unreadable member and
+confirms it is named and that the total **does not move**.
+
+## The push channel carries three events
+
+| | `Committed` | `Refused` | `RolledUp` |
+|---|---|---|---|
+| answers | *what changed* | *what was declined* | *what a household now totals* |
+| carries state | **yes** | **no field at all** | no — a derived reading |
+| about | the Sustain that changed | the Sustain that asked | its **parent** |
+
+★★ ρ is its own event because it is a **different Sustain's** figure. A member's
+commit moves its household's total, and folding that into `Committed` would mean
+a message about Bonnie's habitat carrying the homestead's numbers under a field
+name that did not say so. A refusal emits none of the three's state: ρ is a
+function of state, and a refused call changed none.
 
 ## The design system — `src/ui`
 

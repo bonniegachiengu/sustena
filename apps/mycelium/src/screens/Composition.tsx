@@ -23,6 +23,7 @@ import {
   Meta,
   Note,
   NoteRow,
+  Rollup,
   Row,
   Spacer,
   Split,
@@ -91,16 +92,21 @@ export default function Composition() {
 
       <Column>
         <Card title={<>roll-up <Sym>ρ</Sym></>}>
-          <Absent title="not available">
-            The engine holds and checks this tree, but it cannot yet fold a child's state into a
-            parent aggregate. ρ exists in the Python engine and has not been ported to{" "}
-            <code>sustena-core</code>.
-            <br />
-            <br />
-            Nothing is summed. A household total computed by this app rather than by the engine
-            would be a number with no rule behind it — and no way to tell you when it stopped being
-            true.
-          </Absent>
+          {/* ★★★ Real, and the ENGINE's arithmetic. `sustena_core::rollup`
+              folds this Sustain's own state and every linked child's into the
+              declared aggregates — the host reads states and reports what came
+              back, exactly as it asks `predicate::check` about a rule rather
+              than judging one. Computed fresh every read, never persisted. */}
+          <Rollup rollup={live()?.rollup ?? null} big />
+          <Note>
+            <Caption>
+              Folded from this Sustain's own state and every linked child's,
+              fresh on every read — there is no stored total anywhere, so a
+              figure here can never be one that quietly stopped being true.
+              Anything unreadable is named above and left out of the sum rather
+              than counted as zero.
+            </Caption>
+          </Note>
         </Card>
 
         <Card title="transfer between Sustains">

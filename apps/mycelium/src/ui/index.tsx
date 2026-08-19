@@ -22,6 +22,7 @@ import { For, Show, type JSX } from "solid-js";
 import * as L from "./layout.css";
 import * as S from "./ui.css";
 import { vars } from "./tokens.css";
+import { fmt, type AggregateDto, type RollupDto } from "../lib/engine";
 
 export { vars, bp } from "./tokens.css";
 export * as layout from "./layout.css";
@@ -250,6 +251,96 @@ export function TelemetryCell(props: { label: string; tone?: Tone; children: JSX
       <Label>{props.label}</Label>
       <Value tone={props.tone}>{props.children}</Value>
     </div>
+  );
+}
+
+/* ── roll-up ρ ──────────────────────────────────────────────────────────── */
+
+/**
+ * ★★★ One declared aggregate, as the ENGINE answered it — and the exclusions
+ * beside it, always.
+ *
+ * The whole reason ρ is worth having is that it refuses to fabricate. Two
+ * refusals travel through this component and neither is optional:
+ *
+ * - **A member that could not be read is named, never counted as zero.** A
+ *   silent drop is arithmetically indistinguishable from a member who genuinely
+ *   holds nothing, so the excluded list renders whenever it is non-empty and it
+ *   carries the engine's own reason.
+ * - **`grounded: false` prints a dash, not a number.** `sum` over nothing is
+ *   `0`, which is correct arithmetic and still not a measurement — a confident
+ *   zero for a household nobody could read is the exact lie this replaced.
+ *
+ * One definition, three screens: the Monitor, the Constellation and
+ * Composition all show the same figure the same way, so a household total
+ * cannot appear to differ depending on where you look at it.
+ */
+export function AggregateReadout(props: { reading: AggregateDto; big?: boolean }) {
+  const members = () =>
+    props.reading.included.filter((c) => !c.isHousehold).length;
+  return (
+    <div class={S.note.sm}>
+      <div class={S.readout}>
+        <Label>{props.reading.id.replace(/_/g, " ")}</Label>
+        <Show
+          when={props.reading.grounded}
+          fallback={
+            <Value big={props.big} tone="idle">
+              —
+            </Value>
+          }
+        >
+          <Value big={props.big}>{fmt(props.reading.value)}</Value>
+        </Show>
+      </div>
+      <Caption>
+        {props.reading.op.toLowerCase()} over{" "}
+        <code>{props.reading.childPath}</code>
+        <Show when={props.reading.grounded}>
+          {" · "}
+          {props.reading.includesHouseholdOwn ? "this Sustain's own" : "children"}
+          {members() > 0 ? ` + ${members()} member${members() === 1 ? "" : "s"}` : ""}
+        </Show>
+        <Show when={!props.reading.grounded}>
+          {" · nothing readable contributed — a 0 here would be a claim, not a measurement"}
+        </Show>
+      </Caption>
+      <Show when={props.reading.excluded.length > 0}>
+        <div class={S.note.sm}>
+          <Absent title={`${props.reading.excluded.length} not counted`}>
+            <For each={props.reading.excluded}>
+              {(x) => (
+                <div>
+                  <strong>{x.label}</strong> — {x.reason}
+                </div>
+              )}
+            </For>
+            The figure above is the honest total of what <em>was</em> readable.
+          </Absent>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+/**
+ * A whole roll-up. ★ `declared nothing` is a real, separate state from
+ * `could not compute` — a Sustain that asked for no totals is not a failure.
+ */
+export function Rollup(props: { rollup: RollupDto | null; big?: boolean }) {
+  return (
+    <Show when={props.rollup} fallback={<Empty>ρ has not been read for this Sustain yet</Empty>}>
+      {(r) => (
+        <Show
+          when={r().aggregates.length > 0}
+          fallback={<Empty>this Sustain declares no totals · nothing to fold</Empty>}
+        >
+          <For each={r().aggregates}>
+            {(a) => <AggregateReadout reading={a} big={props.big} />}
+          </For>
+        </Show>
+      )}
+    </Show>
   );
 }
 

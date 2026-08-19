@@ -74,6 +74,7 @@ use thiserror::Error;
 use crate::consensus::Decision;
 use crate::council::ProposalStatus;
 use crate::predicate::{self, parse_predicate};
+use crate::rollup::{AggregateDecl, RollupError};
 use crate::schema::{bind, DimType, Schema, TypeError};
 
 /// A definition **D** — the state of the meta-Sustain.
@@ -89,11 +90,38 @@ pub struct Definition {
     pub invariants: Vec<(String, String)>,
     /// The operators this definition permits, by name.
     pub operators: Vec<String>,
+    /// What this Sustain wants totalled across itself and its children —
+    /// roll-up ρ's declarations.
+    ///
+    /// ★★ These live in `Σ` rather than in a host, because a household total is
+    /// a property of what the household IS, not of which product happens to be
+    /// displaying it. The reference declares them in the sustain spec for the
+    /// same reason. A Sustain with no children still declares them honestly —
+    /// ρ simply reads the household alone.
+    ///
+    /// ★ They are NOT invariants and never gate anything. An aggregate is
+    /// upward *information*; a rule that reads one and refuses a child is
+    /// downward *authority*, a different mechanism the reference keeps separate
+    /// and defaults to advisory.
+    pub aggregates: Vec<AggregateDecl>,
 }
 
 impl Definition {
     pub fn new(schema: Schema) -> Self {
-        Self { schema, invariants: vec![], operators: vec![] }
+        Self { schema, invariants: vec![], operators: vec![], aggregates: vec![] }
+    }
+
+    /// Declare an aggregate for roll-up ρ. Refuses an unknown op or an
+    /// unreadable path at declaration time rather than at read time.
+    pub fn with_aggregate(
+        mut self,
+        id: &str,
+        child_path: &str,
+        op: &str,
+    ) -> Result<Self, RollupError> {
+        self.aggregates
+            .push(AggregateDecl::declare(id, child_path, op)?);
+        Ok(self)
     }
 
     pub fn with_invariant(mut self, id: &str, expression: &str) -> Self {

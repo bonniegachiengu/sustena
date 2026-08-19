@@ -19,6 +19,7 @@ use mycelium_lib::world::{memberships, PRINCIPAL};
 use mycelium_lib::store::Store;
 use mycelium_lib::templates::TemplateId;
 use mycelium_lib::world::World;
+use sustena_core::{compute_rollup, ChildState};
 
 fn params(pairs: &[(&str, Value)]) -> Map<String, Value> {
     pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
@@ -360,5 +361,72 @@ fn main() {
         }
         println!("\n   rebuild == fold(persisted log)  ->  {all}");
         assert!(all, "the fold must reproduce every Sustain's state");
+
+        // -- roll-up rho ---------------------------------------------------
+        //
+        // The engine arithmetic, checked against a HAND SUM computed here from
+        // the same states -- so this proves rho rather than restating whatever
+        // rho said.
+        rule("RUN 2 - roll-up rho -- the engine total vs a hand sum");
+        let r = world.rollup("homestead").expect("the household exists");
+        for a in &r.aggregates {
+            let hand: f64 = a.included.iter().map(|c| c.value).sum();
+            let engine = a.value.unwrap_or(f64::NAN);
+            let same = (hand - engine).abs() < 1e-9;
+            println!(
+                "   {:<24} {:>12.2}   hand {:>12.2}   {}   {} in / {} out{}",
+                a.id, engine, hand,
+                if same { "match" } else { "DIVERGED" },
+                a.included.len(), a.excluded.len(),
+                if a.includes_household_own { "   (household own included)" } else { "" },
+            );
+            for c in &a.included {
+                println!("        {:<14} {:>12.2}{}", c.label, c.value,
+                    if c.is_household { "   <- the household itself" } else { "" });
+            }
+            for x in &a.excluded {
+                println!("        {:<14} EXCLUDED  {}", x.label, x.reason);
+            }
+            assert!(same, "rho must equal the sum of what it says it counted");
+        }
+
+        // Fresh every call: a second read with nothing changed reproduces
+        // itself, the same discipline the fold has.
+        let again = world.rollup("homestead").expect("the household exists");
+        let stable = serde_json::to_string(&r).unwrap() == serde_json::to_string(&again).unwrap();
+        println!("   recompute reproduces itself     ->  {stable}");
+        assert!(stable, "rho is computed fresh and must be reproducible");
+
+        // The honest-exclusion contract, exercised for real: a link to a child
+        // whose state cannot be read is NAMED and LEFT OUT, never counted as 0.
+        rule("RUN 2 - an unreadable member is excluded and NAMED");
+        let own = world.with(|i| i.get("homestead").map(|s| s.state.clone())).expect("present");
+        let decls = world
+            .with(|i| i.get("homestead").map(|s| s.definition.aggregates.clone()))
+            .expect("present");
+        let mut kids: Vec<ChildState> = world
+            .with(|i| {
+                i.children_of("homestead")
+                    .into_iter()
+                    .map(|c| (c.record.id.clone(), c.record.label.clone(), c.state.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .into_iter()
+            .map(|(id, label, st)| ChildState::readable(&id, st).named(&label))
+            .collect();
+        let counted_before = kids.len();
+        kids.push(ChildState::unreadable("habitat-ghost").named("Ghost"));
+        let with_ghost = compute_rollup(&decls, "homestead", Some(&own), &kids);
+        let a = with_ghost.aggregate("household_liquid_total").expect("declared");
+        println!("   counted {} of {} contributors", a.included().len(),
+                 a.included().len() + a.excluded().len());
+        for x in a.excluded() {
+            println!("   EXCLUDED  {:<12} {}", x.contributor().label(), x.reason());
+        }
+        let unchanged = a.value().as_f64() == r.aggregates[0].value;
+        println!("   the total is unchanged by the ghost -> {unchanged}   (a zero would have moved it)");
+        assert_eq!(a.included().len(), counted_before + 1, "the household plus every readable member");
+        assert_eq!(a.excluded().len(), 1, "exactly the unreadable one");
+        assert!(unchanged, "an excluded member must not contribute a zero");
     }
 }
