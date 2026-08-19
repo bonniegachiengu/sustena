@@ -16,10 +16,14 @@ use crate::dto::{
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
     AttentionDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
     InferenceDto, IngestDto, MessageDto, QuietDto, RuleDto, SourceDto,
-    NetworkDto, PeerDto, SupersededDto, SyncDto,
+    InstallDto, LibraryDto, NetworkDto, PackageDto, PeerDto, RoyaltyDto, SupersededDto,
+    SyncDto,
     TransferLegDto, TransferResult, Verdict, WorldDto,
 };
+use crate::arena::Publication;
 use crate::peers::Standing;
+use sustena_core::package::{Authenticity, InstallVerdict, Integrity, Origin};
+use sustena_core::royalty::Settlement;
 use crate::definitions::{AuthoredDefinition, DefinitionVerdict};
 use crate::templates::TemplateId;
 use sustena_core::holon::Transfer as HolonTransfer;
@@ -999,8 +1003,17 @@ pub fn get_feed(
         })
         .collect();
 
+    // ★ Installed cards, read back from the arena. An undecodable one is
+    //   counted rather than silently dropped — see `Arena::widgets_for`.
+    let (installed, undecodable) = world.arena().widgets_for(&sustain_id);
+    if undecodable > 0 {
+        trace!("{undecodable} installed widget(s) no longer decode and were left out");
+    }
+    let extra: Vec<sustena_core::widget::WidgetDecl> =
+        installed.iter().map(|w| w.to_decl()).collect();
+
     let (reading, view) =
-        crate::orchie::feed(&world.operators, &state, queued.len(), &recent, query.as_deref())
+        crate::orchie::feed(&world.operators, &state, queued.len(), &recent, query.as_deref(), extra)
             .map_err(|errors| errors.join("; "))?;
 
     let emits_of = |id: &str| -> Vec<String> {
@@ -1400,4 +1413,157 @@ pub fn sync_with_peer(
 /// A key is 64 hex characters; a screen needs the first few.
 fn short(key: &str) -> String {
     key.chars().take(8).collect()
+}
+
+// ---------------------------------------------------------------------------
+// The arena
+// ---------------------------------------------------------------------------
+
+fn verdict_words(v: &InstallVerdict) -> (String, String, Vec<String>) {
+    match v {
+        InstallVerdict::Admitted(_) => ("admitted".into(), String::new(), vec![]),
+        InstallVerdict::Refused { rule, errors } => {
+            ("refused".into(), (*rule).to_string(), errors.clone())
+        }
+        InstallVerdict::NotHere { why } => ("not_here".into(), String::new(), vec![why.clone()]),
+    }
+}
+
+/// The registry: every package, judged **now**.
+#[tauri::command]
+#[specta::specta]
+pub fn get_library(world: State<'_, World>, into: Option<String>) -> LibraryDto {
+    let installs = world.arena().installs();
+    let packages = world
+        .arena()
+        .all()
+        .into_iter()
+        .map(|p| {
+            let prov = p.provenance();
+            // ★★ Judged on read, not remembered from publish. A definition that
+            //    typechecked yesterday can strand an instance that moved since.
+            let verdict = world.judge(&p, into.as_deref());
+            let (outcome, _, _) = verdict_words(&verdict);
+            let install = installs.iter().find(|i| i.package_id == p.id);
+            PackageDto {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                kind: p.kind.label().to_string(),
+                version: p.version.clone(),
+                description: p.description.clone(),
+                tags: p.tags.clone(),
+                author: p.author.clone(),
+                author_handle: p.author_handle.clone(),
+                content_hash: p.content_hash.clone(),
+                integrity: match prov.integrity {
+                    Integrity::Intact => "intact".into(),
+                    Integrity::Altered { .. } => "altered".into(),
+                },
+                authenticity: match prov.authenticity {
+                    Authenticity::Signed => "signed".into(),
+                    Authenticity::Unsigned => "unsigned".into(),
+                    Authenticity::Forged => "forged".into(),
+                },
+                origin: match &prov.origin {
+                    Origin::Authored => "authored here".into(),
+                    Origin::Bundled => "bundled".into(),
+                    Origin::FromPeer { peer } => format!("from {peer}"),
+                },
+                provenance: prov.describe(),
+                per_mille: p.per_mille,
+                installed: install.is_some(),
+                installed_into: install.and_then(|i| i.into.clone()),
+                verdict: verdict.describe(),
+                installable: outcome == "admitted" && prov.safe_to_install(),
+            }
+        })
+        .collect();
+
+    let published: Vec<String> = world.arena().all().into_iter().map(|p| p.name).collect();
+    let publishable = world
+        .definitions()
+        .into_iter()
+        .filter(|d| !published.contains(&d.label))
+        .map(|d| (d.id, d.label))
+        .collect();
+    let targets = world.with(|i| {
+        i.order()
+            .iter()
+            .filter_map(|id| i.get(id).map(|s| (id.clone(), s.record.label.clone())))
+            .collect()
+    });
+
+    LibraryDto { packages, publishable, targets, unlocked: world.is_unlocked() }
+}
+
+/// Publish an artifact. ★★★ The gate runs before the write.
+#[tauri::command]
+#[specta::specta]
+pub fn publish_package(
+    world: State<'_, World>,
+    request: Publication,
+) -> Result<InstallDto, String> {
+    let (package, verdict) = world.publish(&request)?;
+    let (outcome, rule, errors) = verdict_words(&verdict);
+    trace!("publish {} → {outcome}", package.name);
+    Ok(InstallDto {
+        outcome,
+        rule,
+        errors,
+        provenance: package.provenance().describe(),
+        applied: None,
+        summary: verdict.describe(),
+    })
+}
+
+/// Install a package, through the same gate a local artifact faces.
+#[tauri::command]
+#[specta::specta]
+pub fn install_package(
+    world: State<'_, World>,
+    package_id: String,
+    into: Option<String>,
+) -> Result<InstallDto, String> {
+    let out = world.install(&package_id, into.as_deref())?;
+    let (outcome, rule, errors) = verdict_words(&out.verdict);
+    trace!("install {package_id} → {outcome}");
+    Ok(InstallDto {
+        outcome,
+        rule,
+        errors,
+        provenance: out.provenance.describe(),
+        applied: out.applied,
+        summary: out.verdict.describe(),
+    })
+}
+
+/// Pay a package's royalty, in juul. ★★★ Internal credit. Never money.
+#[tauri::command]
+#[specta::specta]
+pub fn pay_royalty(
+    world: State<'_, World>,
+    package_id: String,
+    amount: u32,
+) -> Result<RoyaltyDto, String> {
+    let before = world.circulation();
+    let settlement = world.pay_royalty(&package_id, u64::from(amount))?;
+    let after = world.circulation();
+    let (outcome, shares) = match &settlement {
+        Settlement::Settled { shares, .. } => (
+            "settled",
+            shares
+                .iter()
+                .map(|s| (s.role.name().to_string(), s.recipient.clone(), s.amount as u32))
+                .collect(),
+        ),
+        Settlement::NoRoyalty => ("no_royalty", vec![]),
+        Settlement::Insufficient { .. } => ("insufficient", vec![]),
+    };
+    Ok(RoyaltyDto {
+        outcome: outcome.to_string(),
+        transferred: settlement.transferred() as u32,
+        shares,
+        circulation_before: format!("{before:.0}"),
+        circulation_after: format!("{after:.0}"),
+    })
 }

@@ -31,30 +31,6 @@ import {
 } from "../ui";
 import { engine, type CouncilOutcomeDto } from "../lib/engine";
 
-/* ── Library ────────────────────────────────────────────────────────────── */
-
-export function Library() {
-  return (
-    <Unavailable
-      absence={{
-        title: "library · arena",
-        headline:
-          "There is no package registry in this engine. Nothing here can publish, browse or install a shared operator, operative or widget.",
-        present: [
-          "The pieces a package would carry: `OperatorMeta` with declared params and protocol, `WidgetDecl` with a real typecheck, `StrategyGraph`, and `MemeLibrary` with provenance-scoped trust.",
-          "The economy that would price a contribution — `royalty::split` with the ratified five-way schedule, settling as a conserved internal transfer.",
-        ],
-        missing: [
-          "The Arena itself: packages, trust scores, downloads, orders — none of it is in the core.",
-          "Any notion of a remote source to fetch from, which is the transport gap the Network panel names.",
-        ],
-        where:
-          "Arena lives in the Python app (`routes/arena.py`, `arena_packages`, `arena_orders`). Porting it is a distribution question as much as an engine one, and it depends on the transport that does not exist yet.",
-      }}
-    />
-  );
-}
-
 /* ── Council — real ─────────────────────────────────────────────────────── */
 
 type Vote = { operative: string; choice: string; confidence: number };

@@ -5,6 +5,9 @@
 //! beyond the one that carries the answer to the webview. The app works with
 //! the machine offline because there is nothing to be offline *from*.
 
+pub mod arena;
+#[cfg(test)]
+mod arena_test;
 pub mod commands;
 pub mod dto;
 pub mod definitions;
@@ -17,6 +20,7 @@ pub mod peers;
 mod peers_test;
 pub mod store;
 pub mod templates;
+pub mod widgets;
 pub mod wire;
 pub mod world;
 
@@ -67,6 +71,10 @@ pub fn specta_builder() -> Builder {
         commands::share_sustain,
         commands::unshare_sustain,
         commands::sync_with_peer,
+        commands::get_library,
+        commands::publish_package,
+        commands::install_package,
+        commands::pay_royalty,
     ])
     // ★★★ The push channel, typed from the same Rust as the commands — so a
     //   listener the UI writes for an event that does not exist will not

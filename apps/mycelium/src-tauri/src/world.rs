@@ -44,6 +44,14 @@ use crate::economy::Economy;
 use crate::identity::{IdentityError, IdentityStore, Unlocked};
 use crate::ingest::{Capture, Ingested};
 use sustena_core::sync::Reconciliation;
+use crate::arena::{content_hash, signed_message, Arena, Install, Package, Publication};
+use crate::widgets::AuthoredWidget;
+use sustena_core::editing::Instance;
+use sustena_core::package::{
+    definition_installs, operator_installs, strategy_installs, widget_installs, InstallVerdict,
+    Kind, Origin, PackageProvenance,
+};
+use sustena_core::royalty::{settle, Licence, Recipients, RevenueType, Settlement};
 use crate::peers::{Peering, SyncOutcome};
 use crate::wire::SharedSpec;
 use crate::store::{LoggedEvent, Registry as Records, Store, StoreError, StoreResult, SustainRecord};
@@ -77,6 +85,26 @@ pub struct Sustain {
 }
 
 /// Everything the cockpit can look at.
+/// What an install attempt did.
+#[derive(Debug, Clone)]
+pub struct Installed {
+    pub verdict: InstallVerdict,
+    pub provenance: PackageProvenance,
+    /// The artifact's id once applied. `None` for anything refused, and also
+    /// for a strategy — which was not refused and did not apply either.
+    pub applied: Option<String>,
+}
+
+/// The commons this host's treasury share lands in.
+pub const TREASURY: &str = "treasury";
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// What one peer sync did, and what the merge could not decide.
 #[derive(Debug, Clone)]
 pub struct SyncReport {
@@ -102,6 +130,10 @@ pub struct World {
     identity: Mutex<Option<Unlocked>>,
     /// Where the keypair lives on disk.
     identities: IdentityStore,
+    /// The package registry. ★ Its own store beside the logs, like the ingest
+    /// queue: a package is not state, it is a thing that MIGHT become state
+    /// once a gate says it may.
+    arena: Arena,
     /// ★★★ **The network half.** Its own store handle and its own copy of the
     /// unlocked identity, because a listener runs on its own thread and must
     /// not hold the live world. Locking clears its identity too, so the node
@@ -161,10 +193,12 @@ impl World {
         let definitions = authored;
 
         let peering = Arc::new(Peering::at(&store_root, store.clone()));
+        let arena = Arena::at(&store_root);
 
         Ok(World {
             operators: Registry::default(),
             peering,
+            arena,
             inner: Mutex::new(Inner { sustains, order, selected }),
             store,
             economy: Mutex::new(Economy::open(DEFAULT_HANDLE)),
@@ -754,6 +788,269 @@ impl World {
 
     pub fn peering(&self) -> &Arc<Peering> {
         &self.peering
+    }
+
+    // ── the arena ──────────────────────────────────────────────────────
+
+    pub fn arena(&self) -> &Arena {
+        &self.arena
+    }
+
+    /// Every juul this host has, across every balance.
+    ///
+    /// ★★★ The number a royalty must not change. `settle` only transfers,
+    /// so this is how *nothing was minted* is checked rather than asserted.
+    pub fn circulation(&self) -> f64 {
+        self.economy.lock().expect("economy lock").ledger.total_in_circulation()
+    }
+
+    /// Live instances of one authored definition — what `safe` needs.
+    fn instances_of(&self, definition_id: &str) -> Vec<Instance> {
+        self.with(|i| {
+            i.order()
+                .iter()
+                .filter_map(|id| i.get(id))
+                .filter(|s| s.record.custom.as_deref() == Some(definition_id))
+                .map(|s| Instance { id: s.record.id.clone(), state: s.state.clone() })
+                .collect()
+        })
+    }
+
+    /// ★★★ **The gate, for whatever kind this is.** One function, so there is
+    /// exactly one answer to *may this be installed* and no per-call-site
+    /// variant of it. `into` is the target Sustain a widget would join —
+    /// meaningless for a definition, and required for a widget, because
+    /// `inputs ⊆ dim(S)` is a question about a household.
+    pub fn judge(&self, package: &Package, into: Option<&str>) -> InstallVerdict {
+        match package.kind {
+            Kind::Definition => {
+                let authored: AuthoredDefinition = match serde_json::from_value(package.spec.clone())
+                {
+                    Ok(a) => a,
+                    Err(e) => {
+                        return InstallVerdict::Refused {
+                            rule: "decodable",
+                            errors: vec![format!("this is not a definition: {e}")],
+                        }
+                    }
+                };
+                let instances = self.instances_of(&authored.id);
+                definition_installs(&authored.id, &authored.to_definition(), &instances)
+            }
+            Kind::Widget => {
+                let authored: AuthoredWidget = match serde_json::from_value(package.spec.clone()) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        return InstallVerdict::Refused {
+                            rule: "decodable",
+                            errors: vec![format!("this is not a widget: {e}")],
+                        }
+                    }
+                };
+                let Some(target) = into else {
+                    return InstallVerdict::Refused {
+                        rule: "needs_a_target",
+                        errors: vec![
+                            "a widget is checked against the household it would join, so one \
+                             has to be named"
+                                .to_string(),
+                        ],
+                    };
+                };
+                if self.with(|i| i.get(target).is_none()) {
+                    return InstallVerdict::Refused {
+                        rule: "needs_a_target",
+                        errors: vec![format!("no such Sustain: {target}")],
+                    };
+                }
+                // ★★★ **Checked against the VIEW definition, not the
+                //     household's**, and that is not a shortcut — it is the
+                //     schema the widget will actually be loaded against.
+                //     `compose(r)` runs over a PROJECTION (slice 5's finding:
+                //     root-granularity attribution makes per-card urgency
+                //     impossible on a nested money shape), so an Orchie card
+                //     reads `liquid` and `worst_spent`, never
+                //     `finances.liquid.balance`. Checking it against the
+                //     household's own schema here would admit widgets the feed
+                //     then refuses — two gates disagreeing, which is worse than
+                //     either being wrong.
+                //
+                // ★ The target still matters: it names WHOSE feed this joins.
+                widget_installs(authored.to_decl(), &crate::orchie::view_definition(), &self.operators)
+            }
+            Kind::Operator => {
+                let name = package.spec.get("name").and_then(Value::as_str).unwrap_or(&package.name);
+                operator_installs(name, &self.operators)
+            }
+            Kind::Strategy => strategy_installs(&package.name),
+        }
+    }
+
+    /// Publish an artifact: stamp it, **gate it**, then store it.
+    ///
+    /// ★★★ The gate runs BEFORE the write. A registry that stored a broken
+    /// artifact and refused it later would be a place where bad things wait —
+    /// which is precisely what the reference does.
+    pub fn publish(&self, request: &Publication) -> Result<(Package, InstallVerdict), String> {
+        let me = self
+            .identity
+            .lock()
+            .expect("identity lock")
+            .clone()
+            .ok_or_else(|| "this node is locked, so nothing can be published under its key".to_string())?;
+
+        let Some(kind) = Kind::parse(&request.kind) else {
+            return Err(format!(
+                "this build has no package kind called '{}' — it knows definition, widget,                  operator and strategy",
+                request.kind
+            ));
+        };
+        let content_hash = content_hash(&request.spec);
+        let package = Package {
+            id: format!("pkg-{}", &content_hash[..12]),
+            name: request.name.clone(),
+            kind,
+            version: request.version.clone(),
+            description: request.description.clone(),
+            tags: request.tags.clone(),
+            spec: request.spec.clone(),
+            author: me.public_key(),
+            author_handle: me.handle().to_string(),
+            // ★ Signed over the HASH, not over the spec: the signature and the
+            //   integrity check then agree by construction, and a signature can
+            //   be verified without re-serialising anything.
+            signature: Some(me.sign(signed_message(&content_hash).as_bytes())),
+            content_hash,
+            origin: Origin::Authored,
+            per_mille: request.per_mille,
+            published_at: now_secs(),
+        };
+
+        let verdict = self.judge(&package, request.into.as_deref());
+        match &verdict {
+            InstallVerdict::Refused { .. } => Ok((package, verdict)),
+            // ★★ `NotHere` publishes. Nothing is wrong with a strategy; this
+            //    node simply has nothing that would run one, and refusing to
+            //    publish it would make this registry unable to carry anything
+            //    it cannot itself consume.
+            _ => {
+                self.arena.record(package.clone())?;
+                Ok((package, verdict))
+            }
+        }
+    }
+
+    /// Install a published package, through the **same** gate.
+    ///
+    /// ★★★ Three checks in order, and each answers its own question:
+    /// integrity (are these the published bytes), authenticity (did that key
+    /// publish them), then the **real gate**. A package can be impeccably
+    /// signed and still refused; it can be unsigned and still install.
+    pub fn install(&self, package_id: &str, into: Option<&str>) -> Result<Installed, String> {
+        let Some(package) = self.arena.get(package_id) else {
+            return Err(format!("no such package: {package_id}"));
+        };
+        let provenance = package.provenance();
+        if !provenance.safe_to_install() {
+            return Ok(Installed {
+                verdict: InstallVerdict::Refused {
+                    rule: "provenance",
+                    errors: vec![provenance.describe()],
+                },
+                provenance,
+                applied: None,
+            });
+        }
+
+        let verdict = self.judge(&package, into);
+        let Some(admitted) = verdict.admitted() else {
+            return Ok(Installed { verdict, provenance, applied: None });
+        };
+
+        // ★★★ From here the artifact takes the SAME path a local one does.
+        let applied = match admitted.kind() {
+            Kind::Definition => {
+                let authored: AuthoredDefinition = serde_json::from_value(package.spec.clone())
+                    .map_err(|e| e.to_string())?;
+                // The same call the Define screen makes. It re-runs the check,
+                // which is not waste: it is the one place a definition lands.
+                match self.author_definition(&authored).map_err(|e| e.to_string())? {
+                    DefinitionVerdict::Accepted => Some(authored.id.clone()),
+                    other => {
+                        return Ok(Installed {
+                            verdict: InstallVerdict::Refused {
+                                rule: "well_typed",
+                                errors: vec![format!("{other:?}")],
+                            },
+                            provenance,
+                            applied: None,
+                        })
+                    }
+                }
+            }
+            // A widget install is a record: `orchie::feed` reads installed
+            // widgets back and offers them alongside the built-in set.
+            Kind::Widget => Some(admitted.id().to_string()),
+            // An operator was already present — that is what admitting it
+            // meant. Recording the install is what makes it visible as chosen.
+            Kind::Operator => Some(admitted.id().to_string()),
+            Kind::Strategy => None,
+        };
+
+        if let Some(artifact_id) = &applied {
+            self.arena.record_install(Install {
+                package_id: package.id.clone(),
+                kind: package.kind,
+                artifact_id: artifact_id.clone(),
+                into: into.map(str::to_string),
+                content_hash: package.content_hash.clone(),
+                installed_at: now_secs(),
+            })?;
+        }
+
+        Ok(Installed { verdict, provenance, applied })
+    }
+
+    /// Pay a package's royalty, in **juul**.
+    ///
+    /// ★★★ **Internal points, and the boundary is the point.** `royalty::settle`
+    /// only ever calls `JuulLedger::transfer`, so circulation is unchanged and
+    /// nothing is minted. Per ADR-0001 D5 juul is internal accounting on a
+    /// single host: it is **never real money, never transferable off this host,
+    /// and never a payment rail**. A package trades in definitions, trust and
+    /// internal credit — never cash.
+    pub fn pay_royalty(&self, package_id: &str, amount: u64) -> Result<Settlement, String> {
+        let Some(package) = self.arena.get(package_id) else {
+            return Err(format!("no such package: {package_id}"));
+        };
+        let payer = self.principal().ok_or_else(|| "this node is locked".to_string())?;
+        let licence = if package.per_mille == 0 {
+            Licence::Free
+        } else {
+            Licence::Royalty { per_mille: package.per_mille, payee: package.author_handle.clone() }
+        };
+        let mut economy = self.economy.lock().expect("economy lock");
+        let recipients = Recipients {
+            contributor: package.author_handle.clone(),
+            treasury: TREASURY.to_string(),
+            // ★ A single host genuinely has no validator — there is no second
+            //   node to validate anything. An absent role's share folds into
+            //   the treasury by the declared rule, never dropped.
+            validator: None,
+            proposer: None,
+            referrer: None,
+        };
+        Ok(settle(
+            &mut economy.ledger,
+            &payer,
+            &licence,
+            amount,
+            // ★★ `Access`, not `Usage`: installing is paying to HAVE it. Paying
+            //    to run it is the pawa meter's business, and that is a cost
+            //    rather than a transfer.
+            RevenueType::Access,
+            &recipients,
+        ))
     }
 
     /// Stamp a line with this node and the next clock for that Sustain.

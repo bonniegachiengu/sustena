@@ -798,7 +798,7 @@ fn main() {
             .collect();
 
         let (reading, view) =
-            mycelium_lib::orchie::feed(&again.operators, &state, queued, &recent, None)
+            mycelium_lib::orchie::feed(&again.operators, &state, queued, &recent, None, Vec::new())
                 .expect("composed");
         println!("   projection     {}", serde_json::to_string(&reading).unwrap_or_default());
         println!("   budget {} spent {}   {} candidates considered",
@@ -825,7 +825,7 @@ fn main() {
             "finances": { "liquid": { "balance": 500.0 },
                           "pockets": { "food": { "allocated": 8000.0, "spent": 9000.0 } } }
         });
-        let (_, v2) = mycelium_lib::orchie::feed(&again.operators, &strained, 0, &[], None)
+        let (_, v2) = mycelium_lib::orchie::feed(&again.operators, &strained, 0, &[], None, Vec::new())
             .expect("composed");
         for c in v2.selected.iter().chain(v2.excluded.iter()) {
             println!("   {:<20} urgency {:.3}  {}", c.id, c.urgency,
@@ -903,7 +903,7 @@ fn main() {
         // a card that WITHDREW (it had nothing to say, and says so), and a card
         // that beta never offered (no such event has happened).
         rule("ORCHIE - the two kinds of quiet");
-        let (_, v3) = mycelium_lib::orchie::feed(&again.operators, &strained, 0, &[], None)
+        let (_, v3) = mycelium_lib::orchie::feed(&again.operators, &strained, 0, &[], None, Vec::new())
             .expect("composed");
         for w in &v3.withdrawn {
             println!("   withdrew   {:<20} -- {}", w.id, w.reason);
@@ -926,7 +926,7 @@ fn main() {
             sustena_core::event::CausalStamp::new("host"),
         );
         let (_, v4) =
-            mycelium_lib::orchie::feed(&again.operators, &strained, 0, &[spent_event], None)
+            mycelium_lib::orchie::feed(&again.operators, &strained, 0, &[spent_event], None, Vec::new())
                 .expect("composed");
         println!("   after a real spend, beta offers {} candidates (was {})",
                  v4.candidates_considered, v3.candidates_considered);

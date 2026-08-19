@@ -313,6 +313,18 @@ pub fn settle(
         if s.amount == 0 {
             continue;
         }
+        // ★★★ **A share owed to the payer is already where it belongs.**
+        //     `JuulLedger::transfer` refuses `from == to` (correctly — a
+        //     self-transfer is not a movement), and the case is real rather
+        //     than pathological: a contributor installing their own package,
+        //     or one who is also the referrer. Skipping the movement is the
+        //     honest arithmetic — the share is still THEIRS and is still
+        //     reported in `shares`; nothing moved because nothing needed to.
+        //     Found by a host test doing exactly that, where this line used to
+        //     be a `debug_assert!` that fired.
+        if s.recipient == payer {
+            continue;
+        }
         let moved = ledger.transfer(
             payer,
             &s.recipient,
@@ -328,6 +340,36 @@ pub fn settle(
 mod tests {
     use super::*;
     use crate::juul::Genesis;
+
+    #[test]
+    fn paying_a_royalty_to_yourself_moves_nothing_and_panics_at_nothing() {
+        // ★★★ A contributor installing their own package. The share is still
+        //     reported — it is still theirs — and the only thing that actually
+        //     moves is the part owed to someone else.
+        let genesis = Genesis::declared("g", &[("ada", 1_000.0)]).expect("declared");
+        let mut ledger = JuulLedger::from_genesis(&genesis);
+        let before = ledger.total_in_circulation();
+
+        let out = settle(
+            &mut ledger,
+            "ada",
+            &Licence::Royalty { per_mille: 100, payee: "ada".into() },
+            1_000,
+            RevenueType::Access,
+            &Recipients::new("ada", "treasury"),
+        );
+
+        let Settlement::Settled { total, shares } = &out else { panic!("expected a settlement") };
+        assert_eq!(*total, 100);
+        // Ada's own share is reported at its full size.
+        let ada = shares.iter().find(|s| s.recipient == "ada").expect("a contributor share");
+        assert!(ada.amount > 0);
+        // ★★ And circulation is unchanged, as it is for every settlement.
+        assert_eq!(ledger.total_in_circulation(), before);
+        // Only the part genuinely owed elsewhere left Ada's balance.
+        let elsewhere: u64 = shares.iter().filter(|s| s.recipient != "ada").map(|s| s.amount).sum();
+        assert_eq!(ledger.balance_of("ada"), 1_000.0 - elsewhere as f64);
+    }
 
     fn recipients_all() -> Recipients {
         Recipients::new("ada", "treasury")

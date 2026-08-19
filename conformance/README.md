@@ -3137,3 +3137,41 @@ its stronger promise, *never erase the node*, belongs to the value CRDTs in
 about this, because it has no merge at all. It is recorded here rather than in
 a vector file because **a future value-CRDT state model would change this
 number**, and whoever makes that change should find this note first.
+
+
+### the arena — **parity on the record, spec on everything that matters**
+
+★★★ **The reference's arena is a catalogue, not a registry**, and the
+difference is not a detail. Read directly from `apps/api/sustena/api/routes/arena.py`
+and `db/schema.py`:
+
+- `spec_json` is stored **unvalidated** at publish and **never read back**.
+- There is **no install endpoint**. `download_count` is a column nothing
+  increments.
+- `trust_score` is written as `0.0` on publish, updated by nothing, and used as
+  the catalogue's sort key (`ORDER BY trust_score DESC`).
+- There is no content hash and no signature; `author_id` is a user row id.
+
+So a vector file comparing the two engines could only cover the **record shape**
+(kind, name, version, tags, description, author, created) and the browse/publish
+routes. Everything the slice is actually about — publish-time typechecking,
+install, integrity, authenticity, and the no-bypass property — has no
+counterpart to be at parity with, and is **R2 SPEC** work authored from the
+ARENA article. That is the same call `authorization.json` and the peer transport
+recorded.
+
+★★ **The kinds diverge, deliberately.** The reference has
+`operative | operator | spore | widget`. This build has **no `spore`** and no
+mechanism one would name; an operative's publishable part is its `Π`, which is
+a **strategy** here; and **`definition`** — the one artifact this node can
+genuinely install and instantiate from — the reference has no kind for at all.
+`Kind::parse` returns `None` for `"spore"` rather than falling back to something
+it does know, and a test asserts exactly that.
+
+★ **A recorded core fix, because the number could have been wrong rather than
+absent:** `royalty::settle` panicked when the payer was also a recipient
+(`JuulLedger::transfer` refuses `from == to`, and `settle` had a
+`debug_assert!`). A contributor installing their own package is an ordinary
+case. The share is now skipped as a movement and still reported, so the split
+is unchanged and circulation is still provably conserved — which is what the
+existing royalty vectors check, and they pass unchanged.

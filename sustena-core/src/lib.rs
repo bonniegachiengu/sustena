@@ -173,6 +173,7 @@ pub mod schema;
 pub mod semantic;
 pub mod stranding;
 pub mod signal;
+pub mod package;
 pub mod state;
 pub mod sync;
 pub mod strategy;
@@ -374,6 +375,10 @@ pub use router::{
 };
 pub use schema::{bind, preserves_shape, validate, DimType, Schema};
 pub use state::State;
+pub use package::{
+    definition_installs, operator_installs, strategy_installs, widget_installs, Admitted,
+    Authenticity, Integrity, InstallVerdict, Kind, Origin, PackageProvenance,
+};
 pub use sync::{
     reconcile, Concurrent, LogEntry, Reconciliation, Replayable, Replica,
 };

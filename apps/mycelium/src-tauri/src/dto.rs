@@ -1103,3 +1103,89 @@ pub struct SyncDto {
     /// One line, in the engine's own words.
     pub summary: String,
 }
+
+// ---------------------------------------------------------------------------
+// The arena
+// ---------------------------------------------------------------------------
+
+/// One published package, as a screen sees it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageDto {
+    pub id: String,
+    pub name: String,
+    /// `definition` | `widget` | `operator` | `strategy`.
+    pub kind: String,
+    pub version: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    /// The author's key, and the label they chose beside it. ★ The key is the
+    /// identity; the handle is a label and the surface says so.
+    pub author: String,
+    pub author_handle: String,
+    pub content_hash: String,
+    /// ★★★ The three questions, kept apart all the way to the screen.
+    pub integrity: String,
+    pub authenticity: String,
+    pub origin: String,
+    /// One line, in the engine's own words.
+    pub provenance: String,
+    /// Royalty in **juul** per mille — the internal unit, never money.
+    pub per_mille: u32,
+    /// Whether this node has installed it, and into what.
+    pub installed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installed_into: Option<String>,
+    /// ★★ What the gate says about installing it **right now** — recomputed,
+    /// not remembered. A package that was fine yesterday can be refused today
+    /// because a live instance moved.
+    pub verdict: String,
+    pub installable: bool,
+}
+
+/// The registry, and what this node could publish into it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryDto {
+    pub packages: Vec<PackageDto>,
+    /// Definitions authored here that are not published yet.
+    pub publishable: Vec<(String, String)>,
+    /// Sustains a widget could be installed into.
+    pub targets: Vec<(String, String)>,
+    /// ★ A locked node cannot sign, so it cannot publish. Said rather than
+    /// shown as an idle button.
+    pub unlocked: bool,
+}
+
+/// What one install attempt did.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallDto {
+    /// `admitted` | `refused` | `not_here`.
+    pub outcome: String,
+    /// The gate that refused, by its own name. Empty when admitted.
+    pub rule: String,
+    /// The gate's own words.
+    pub errors: Vec<String>,
+    pub provenance: String,
+    /// The artifact's id once applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub applied: Option<String>,
+    pub summary: String,
+}
+
+/// What a royalty moved. ★★★ In **juul**, always.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RoyaltyDto {
+    /// `settled` | `no_royalty` | `insufficient`.
+    pub outcome: String,
+    pub transferred: u32,
+    /// `(role, recipient, amount)` — every share, including the ones that
+    /// stayed put.
+    pub shares: Vec<(String, String, u32)>,
+    /// ★★★ Total juul across every balance, before and after. Equal, always:
+    /// a royalty transfers and never mints.
+    pub circulation_before: String,
+    pub circulation_after: String,
+}

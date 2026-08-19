@@ -31,6 +31,11 @@ import {
   type NetworkDto,
   type PeerDto,
   type SyncDto,
+  type LibraryDto,
+  type PackageDto,
+  type InstallDto,
+  type RoyaltyDto,
+  type Publication,
   type MessageDto,
   type FeedDto,
   type InferenceDto,
@@ -65,6 +70,11 @@ export type {
   NetworkDto,
   PeerDto,
   SyncDto,
+  LibraryDto,
+  PackageDto,
+  InstallDto,
+  RoyaltyDto,
+  Publication,
   MessageDto,
   FeedDto,
   InferenceDto,
@@ -225,6 +235,20 @@ export const engine = {
   /** Converge one Sustain with one peer, both directions, in one session. */
   syncWith: async (address: string, sustainId: string): Promise<SyncDto> =>
     unwrap(await commands.syncWithPeer(address, sustainId)),
+
+  // ── the arena ───────────────────────────────────────────────────
+  /** Every package, judged **now** against the given install target. */
+  library: async (into: string | null): Promise<LibraryDto> =>
+    await commands.getLibrary(into),
+  /** Stamp, gate, then store. A package that fails its typecheck is refused. */
+  publish: async (request: Publication): Promise<InstallDto> =>
+    unwrap(await commands.publishPackage(request)),
+  /** Install through the same gate a locally-authored artifact faces. */
+  install: async (packageId: string, into: string | null): Promise<InstallDto> =>
+    unwrap(await commands.installPackage(packageId, into)),
+  /** Pay a royalty in juul. Internal credit; never money. */
+  payRoyalty: async (packageId: string, amount: number): Promise<RoyaltyDto> =>
+    unwrap(await commands.payRoyalty(packageId, amount)),
 };
 
 /* ── reading real state, honestly ─────────────────────────────────────────

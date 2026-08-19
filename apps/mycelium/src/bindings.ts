@@ -420,6 +420,45 @@ async syncWithPeer(address: string, sustainId: string) : Promise<Result<SyncDto,
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * The registry: every package, judged **now**.
+ */
+async getLibrary(into: string | null) : Promise<LibraryDto> {
+    return await TAURI_INVOKE("get_library", { into });
+},
+/**
+ * Publish an artifact. ★★★ The gate runs before the write.
+ */
+async publishPackage(request: Publication) : Promise<Result<InstallDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("publish_package", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Install a package, through the same gate a local artifact faces.
+ */
+async installPackage(packageId: string, into: string | null) : Promise<Result<InstallDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("install_package", { packageId, into }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Pay a package's royalty, in juul. ★★★ Internal credit. Never money.
+ */
+async payRoyalty(packageId: string, amount: number) : Promise<Result<RoyaltyDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("pay_royalty", { packageId, amount }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -794,6 +833,26 @@ export type IngestDto = { messages: MessageDto[]; sources: SourceDto[]; rules: R
  */
 rejected: number; needsAttention: number }
 /**
+ * What one install attempt did.
+ */
+export type InstallDto = { 
+/**
+ * `admitted` | `refused` | `not_here`.
+ */
+outcome: string; 
+/**
+ * The gate that refused, by its own name. Empty when admitted.
+ */
+rule: string; 
+/**
+ * The gate's own words.
+ */
+errors: string[]; provenance: string; 
+/**
+ * The artifact's id once applied.
+ */
+applied?: string | null; summary: string }
+/**
  * One rule a person declared.
  */
 export type InvariantDecl = { id: string; expression: string }
@@ -823,6 +882,23 @@ authority: string;
  * Its effect on total circulation — `+` for a mint, `-` for a debit, `0` for a transfer.
  */
 circulationDelta: number }
+/**
+ * The registry, and what this node could publish into it.
+ */
+export type LibraryDto = { packages: PackageDto[]; 
+/**
+ * Definitions authored here that are not published yet.
+ */
+publishable: ([string, string])[]; 
+/**
+ * Sustains a widget could be installed into.
+ */
+targets: ([string, string])[]; 
+/**
+ * ★ A locked node cannot sign, so it cannot publish. Said rather than
+ * shown as an idle button.
+ */
+unlocked: boolean }
 /**
  * One line of the persisted log, as a person reads it.
  */
@@ -922,6 +998,41 @@ declaredPawa: number;
  */
 measured: MeasuredPawa | null; sideEffects: string[] }
 /**
+ * One published package, as a screen sees it.
+ */
+export type PackageDto = { id: string; name: string; 
+/**
+ * `definition` | `widget` | `operator` | `strategy`.
+ */
+kind: string; version: string; description: string; tags: string[]; 
+/**
+ * The author's key, and the label they chose beside it. ★ The key is the
+ * identity; the handle is a label and the surface says so.
+ */
+author: string; authorHandle: string; contentHash: string; 
+/**
+ * ★★★ The three questions, kept apart all the way to the screen.
+ */
+integrity: string; authenticity: string; origin: string; 
+/**
+ * One line, in the engine's own words.
+ */
+provenance: string; 
+/**
+ * Royalty in **juul** per mille — the internal unit, never money.
+ */
+perMille: number; 
+/**
+ * Whether this node has installed it, and into what.
+ */
+installed: boolean; installedInto?: string | null; 
+/**
+ * ★★ What the gate says about installing it **right now** — recomputed,
+ * not remembered. A package that was fine yesterday can be refused today
+ * because a live instance moved.
+ */
+verdict: string; installable: boolean }
+/**
  * One parameter an operator declares.
  * 
  * ★★ **Declared by the operator, not guessed by the UI.** `ParamDecl` carries
@@ -979,6 +1090,29 @@ lastSynced: string | null; lastError: string | null }
  * vitals reading needs and not the document they came from.
  */
 export type PocketSummary = { name: string; allocated: number; spent: number }
+/**
+ * What a person is asking to publish, before it is stamped or judged.
+ * 
+ * ★ One struct rather than nine parameters: the metadata travels together
+ * everywhere it goes — the form, the command, the store — so it may as well
+ * be one thing.
+ */
+export type Publication = { name: string; 
+/**
+ * ★ A string at the boundary, parsed by `Kind::parse` — `Kind` is a core
+ * type and specta is a host dependency, so the enum cannot cross as
+ * itself. An unknown kind is refused rather than defaulted.
+ */
+kind: string; version: string; description?: string; tags?: string[]; spec: JsonValue; 
+/**
+ * The royalty rate in **juul** per mille. `0` is [`Licence::Free`].
+ */
+perMille?: number; 
+/**
+ * The Sustain a widget would join. Required for a widget, meaningless
+ * for a definition — see `World::judge`.
+ */
+into?: string | null }
 /**
  * A card that withdrew before ranking.
  * 
@@ -1041,6 +1175,24 @@ export type RollupDto = { sustainId: string; aggregates: AggregateDto[];
  * Linked children, and whether each was readable at all.
  */
 children: ChildStatusDto[] }
+/**
+ * What a royalty moved. ★★★ In **juul**, always.
+ */
+export type RoyaltyDto = { 
+/**
+ * `settled` | `no_royalty` | `insufficient`.
+ */
+outcome: string; transferred: number; 
+/**
+ * `(role, recipient, amount)` — every share, including the ones that
+ * stayed put.
+ */
+shares: ([string, string, number])[]; 
+/**
+ * ★★★ Total juul across every balance, before and after. Equal, always:
+ * a royalty transfers and never mints.
+ */
+circulationBefore: string; circulationAfter: string }
 /**
  * One declared parse rule, for the library view.
  */

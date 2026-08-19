@@ -224,9 +224,18 @@ pub fn feed(
     unclassified: usize,
     recent: &[Event],
     query: Option<&str>,
+    installed: Vec<WidgetDecl>,
 ) -> Result<(Value, View), Vec<String>> {
     let definition = view_definition();
-    let widgets = WidgetSet::load(widget_declarations(), &definition, registry)
+    // ★★★ Installed cards face **exactly** the load gate the built-in set
+    //     faces — the same `WidgetSet::load`, in the same call, against the
+    //     same definition. An installed widget therefore cannot read a
+    //     dimension a built-in could not, and a broken one takes the whole set
+    //     down rather than degrading silently: `WidgetSet::load`'s own
+    //     all-or-nothing rule, not a new policy invented for packages.
+    let mut decls = widget_declarations();
+    decls.extend(installed);
+    let widgets = WidgetSet::load(decls, &definition, registry)
         .map_err(|errors| errors.iter().map(|e| format!("{e}")).collect::<Vec<_>>())?;
 
     let reading = reading_of(state, unclassified);
@@ -252,7 +261,7 @@ mod tests {
     }
 
     fn compose(s: &Value, unclassified: usize, recent: &[Event], q: Option<&str>) -> View {
-        feed(&Registry::default(), s, unclassified, recent, q).expect("composed").1
+        feed(&Registry::default(), s, unclassified, recent, q, Vec::new()).expect("composed").1
     }
 
     fn card<'a>(v: &'a View, id: &str) -> Option<&'a sustena_core::WidgetCandidate> {
