@@ -26,6 +26,10 @@ service-account*.json
 
 # Database
 *.db
+# SQLite scratch that lives beside a *.db and is not itself one.
+*.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 
