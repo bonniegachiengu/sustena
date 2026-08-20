@@ -84,6 +84,18 @@ function Clock() {
   return <span class={S.caption}>{now().toLocaleTimeString(undefined, { hour12: false })} local</span>;
 }
 
+/// Is this a touch-first device?
+///
+/// ★★ Asked of the DEVICE, not of the build. A Tauri Android build and a
+/// phone browser hitting the dev server should behave the same way, and a
+/// desktop window narrowed to phone width should not suddenly change face —
+/// so this reads the pointer, which is the thing that actually differs, rather
+/// than the viewport, which is the thing that merely correlates.
+function isTouchFirst(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return window.matchMedia("(pointer: coarse)").matches;
+}
+
 export default function App() {
   const [panel, setPanel] = createSignal<Panel>("constellation");
   /**
@@ -91,7 +103,14 @@ export default function App() {
    * curated surface. Same engine, same gate, same unlocked identity — a
    * different question, so a different arrangement of the same primitives.
    */
-  const [face, setFace] = createSignal<"mycelium" | "orchie">("mycelium");
+  /// ★★★ **On a phone the app opens to Orchie, and the toggle stays.** The
+  /// two faces are one app, so this is a default rather than a fork: a
+  /// touch-first device gets the curated surface first because that is the
+  /// question it is usually being asked, and the cockpit is one tap away.
+  /// Desktop opens to Mycelium for exactly the same reason in reverse.
+  const [face, setFace] = createSignal<"mycelium" | "orchie">(
+    isTouchFirst() ? "orchie" : "mycelium",
+  );
   const [busy, setBusy] = createSignal(false);
 
   /**
