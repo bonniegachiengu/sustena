@@ -1142,6 +1142,17 @@ pub struct PackageDto {
     pub installed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_into: Option<String>,
+    /// ★★★ The trust band: `unrated` | `repudiated` | `thin` |
+    /// `corroborated` | `first-hand`. **`unrated` is not a low score** — it
+    /// means nothing is known, and a surface must not render it on the same
+    /// scale as the others.
+    pub trust: String,
+    /// Whether `trust` may be shown as a reading at all. `false` for
+    /// `unrated`.
+    pub trust_is_a_reading: bool,
+    /// The facts the band was composed from, each in its own words. ★ A band
+    /// without its reasons is the reference's float with a nicer name.
+    pub trust_signals: Vec<String>,
     /// ★★ What the gate says about installing it **right now** — recomputed,
     /// not remembered. A package that was fine yesterday can be refused today
     /// because a live instance moved.
@@ -1263,4 +1274,21 @@ pub struct PeerShelfDto {
     /// it does not appear as a peer with nothing to offer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unreachable: Option<String>,
+}
+
+/// One acquisition. ★★★ `paid` is **juul**, this host's internal unit —
+/// never money, never off this host, never a rail.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderDto {
+    pub reference: String,
+    pub package_id: String,
+    pub package_name: String,
+    pub by: String,
+    pub paid: u32,
+    pub per_mille: u32,
+    /// `(role, recipient, amount)` — every share, including ones that stayed
+    /// where they already were.
+    pub shares: Vec<(String, String, u32)>,
+    pub placed_at: String,
 }

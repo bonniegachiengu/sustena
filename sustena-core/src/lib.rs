@@ -176,6 +176,7 @@ pub mod signal;
 pub mod package;
 pub mod state;
 pub mod sync;
+pub mod trust;
 pub mod strategy;
 pub mod tenet;
 pub mod transducer;
@@ -379,6 +380,7 @@ pub use package::{
     definition_installs, operator_installs, strategy_installs, widget_installs, Admitted,
     Authenticity, Integrity, InstallVerdict, Kind, Origin, PackageProvenance,
 };
+pub use trust::{PackageTrust, TrustSignal, TrustStanding};
 pub use sync::{
     reconcile, Concurrent, LogEntry, Reconciliation, Replayable, Replica,
 };

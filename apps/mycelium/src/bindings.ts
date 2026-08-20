@@ -497,6 +497,26 @@ async fetchPackage(address: string, contentHash: string) : Promise<Result<string
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * What this node has acquired.
+ */
+async getOrders() : Promise<OrderDto[]> {
+    return await TAURI_INVOKE("get_orders");
+},
+/**
+ * Acquire a package: settle its royalty in **juul** and record the order.
+ * 
+ * ★★★ Internal credit only. Circulation is unchanged by construction —
+ * `settle` transfers and never mints — and no part of this touches money.
+ */
+async placeOrder(packageId: string, on: number) : Promise<Result<OrderDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("place_order", { packageId, on }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -1097,6 +1117,16 @@ declaredPawa: number;
  */
 measured: MeasuredPawa | null; sideEffects: string[] }
 /**
+ * One acquisition. ★★★ `paid` is **juul**, this host's internal unit —
+ * never money, never off this host, never a rail.
+ */
+export type OrderDto = { reference: string; packageId: string; packageName: string; by: string; paid: number; perMille: number; 
+/**
+ * `(role, recipient, amount)` — every share, including ones that stayed
+ * where they already were.
+ */
+shares: ([string, string, number])[]; placedAt: string }
+/**
  * One published package, as a screen sees it.
  */
 export type PackageDto = { id: string; name: string; 
@@ -1125,6 +1155,23 @@ perMille: number;
  * Whether this node has installed it, and into what.
  */
 installed: boolean; installedInto?: string | null; 
+/**
+ * ★★★ The trust band: `unrated` | `repudiated` | `thin` |
+ * `corroborated` | `first-hand`. **`unrated` is not a low score** — it
+ * means nothing is known, and a surface must not render it on the same
+ * scale as the others.
+ */
+trust: string; 
+/**
+ * Whether `trust` may be shown as a reading at all. `false` for
+ * `unrated`.
+ */
+trustIsAReading: boolean; 
+/**
+ * The facts the band was composed from, each in its own words. ★ A band
+ * without its reasons is the reference's float with a nicer name.
+ */
+trustSignals: string[]; 
 /**
  * ★★ What the gate says about installing it **right now** — recomputed,
  * not remembered. A package that was fine yesterday can be refused today

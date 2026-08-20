@@ -55,7 +55,10 @@ use sustena_core::package::{
 };
 use sustena_core::royalty::{settle, Licence, Recipients, RevenueType, Settlement};
 use crate::arena::content_hash as content_hash_of;
+use crate::arena::Order;
+use crate::peers::Standing;
 use crate::wire::PackageOffer;
+use sustena_core::trust::{PackageTrust, TrustSignal};
 use sustena_core::package::{Authenticity, Integrity};
 use crate::quorum::{Agreement, Slot, Write};
 use sustena_core::consensus::{
@@ -118,6 +121,11 @@ pub struct Installed {
     /// The artifact's id once applied. `None` for anything refused, and also
     /// for a strategy — which was not refused and did not apply either.
     pub applied: Option<String>,
+}
+
+/// A key is 64 hex characters; a reading needs the first few.
+fn short_key(key: &str) -> String {
+    key.chars().take(8).collect()
 }
 
 /// The commons this host's treasury share lands in.
@@ -1121,6 +1129,106 @@ impl World {
             })
             .collect();
         self.peering.set_offers(offers);
+    }
+
+    /// ★★★ **The trust reading for one package, out of signals this node
+    ///     actually holds.** Nothing here is invented: every signal is
+    ///     something checkable on this machine right now.
+    ///
+    /// ★★ `peer_holdings` is *what your peers offered when you last looked* —
+    /// pass an empty slice if you have not looked, and the reading will say
+    /// *held by 0 of the 0 peers you asked*, which is honestly different from
+    /// *nobody has it*.
+    pub fn trust_in(&self, package: &Package, peer_holdings: &[(String, Vec<String>)]) -> PackageTrust {
+        let mut signals = Vec::new();
+        let me = self.node_id().unwrap_or_default();
+
+        match package.provenance().authenticity {
+            Authenticity::Signed => signals.push(TrustSignal::Signed),
+            Authenticity::Unsigned => signals.push(TrustSignal::Unsigned),
+            Authenticity::Forged => signals.push(TrustSignal::Forged),
+        }
+
+        if package.author == me {
+            signals.push(TrustSignal::AuthoredHere);
+        } else {
+            let book = self.peering.book();
+            match book.get(&package.author) {
+                // ★ A peer you TRUSTED. Merely having met them is not a
+                //   recommendation, so `Pending` and `Blocked` do not count.
+                Some(p) if p.standing == Standing::Trusted => {
+                    signals.push(TrustSignal::AuthorIsATrustedPeer { handle: p.handle.clone() })
+                }
+                _ => signals.push(TrustSignal::AuthorUnknown),
+            }
+        }
+
+        if let Origin::FromPeer { peer } = &package.origin {
+            signals.push(TrustSignal::ImportedFrom { peer: short_key(peer) });
+        }
+
+        if !peer_holdings.is_empty() {
+            let count = peer_holdings
+                .iter()
+                .filter(|(_, hashes)| hashes.contains(&package.content_hash))
+                .count();
+            signals.push(TrustSignal::HeldByPeers { count, of: peer_holdings.len() });
+        }
+
+        if self.arena.installs().iter().any(|i| i.package_id == package.id) {
+            signals.push(TrustSignal::InstalledHere);
+        }
+
+        PackageTrust::from_signals(signals)
+    }
+
+    /// Acquire a package: settle its royalty in **juul** and record the order.
+    ///
+    /// ★★★ **An order moves internal credit and nothing else.** `settle` only
+    /// ever calls `JuulLedger::transfer`, so circulation is unchanged by
+    /// construction — nothing is minted, nothing leaves this host, and no part
+    /// of this touches money. ADR-0001 D5, and the panel says it too.
+    ///
+    /// ★★ Ordering is **not** installing. A package you have paid for still
+    /// faces the whole gate, and one you have not paid for is not blocked from
+    /// it — the royalty is a contribution, not a licence check.
+    pub fn place_order(&self, package_id: &str, on: u64) -> Result<Order, String> {
+        let Some(package) = self.arena.get(package_id) else {
+            return Err(format!("no such package: {package_id}"));
+        };
+        let by = self.principal().ok_or_else(|| "this node is locked".to_string())?;
+        let settlement = self.pay_royalty(package_id, on)?;
+
+        let (paid, shares) = match &settlement {
+            Settlement::Settled { shares, .. } => (
+                settlement.transferred(),
+                shares
+                    .iter()
+                    .map(|x| (x.role.name().to_string(), x.recipient.clone(), x.amount))
+                    .collect(),
+            ),
+            // ★ A free package orders at zero, and that is a real order rather
+            //   than a refusal: it records that you took it.
+            Settlement::NoRoyalty => (0, Vec::new()),
+            Settlement::Insufficient { required, balance } => {
+                return Err(format!(
+                    "the royalty is {required} juul and this node holds {balance:.0} —                      nothing moved, and nothing was ordered"
+                ))
+            }
+        };
+
+        let order = Order {
+            reference: format!("SXI-{}", package.content_hash[..6].to_uppercase()),
+            package_id: package.id.clone(),
+            package_name: package.name.clone(),
+            by,
+            paid,
+            shares,
+            per_mille: package.per_mille,
+            placed_at: now_secs(),
+        };
+        self.arena.record_order(order.clone())?;
+        Ok(order)
     }
 
     /// What a peer is offering. ★ A listing; nothing is fetched or installed.

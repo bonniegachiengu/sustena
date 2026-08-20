@@ -17,7 +17,7 @@ use crate::dto::{
     AttentionDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
     InferenceDto, IngestDto, MessageDto, QuietDto, RuleDto, SourceDto,
     BodyDto, CoOwnerDto, InstallDto, LibraryDto, NetworkDto, OfferDto, PackageDto,
-    PeerDto, PeerShelfDto,
+    OrderDto, PeerDto, PeerShelfDto,
     RoyaltyDto, SupersededDto,
     SyncDto,
     TransferLegDto, TransferResult, Verdict, WorldDto,
@@ -1442,6 +1442,10 @@ fn verdict_words(v: &InstallVerdict) -> (String, String, Vec<String>) {
 #[specta::specta]
 pub fn get_library(world: State<'_, World>, into: Option<String>) -> LibraryDto {
     let installs = world.arena().installs();
+    // ★★ The holdings this node has actually SEEN. Empty unless a peer shelf
+    //    was listed this session — which the reading reports as *nobody was
+    //    asked*, honestly distinct from *nobody has it*.
+    let holdings: Vec<(String, Vec<String>)> = Vec::new();
     let packages = world
         .arena()
         .all()
@@ -1453,7 +1457,11 @@ pub fn get_library(world: State<'_, World>, into: Option<String>) -> LibraryDto 
             let verdict = world.judge(&p, into.as_deref());
             let (outcome, _, _) = verdict_words(&verdict);
             let install = installs.iter().find(|i| i.package_id == p.id);
+            let trust = world.trust_in(&p, &holdings);
             PackageDto {
+                trust: trust.standing.label().to_string(),
+                trust_is_a_reading: trust.standing.is_a_reading(),
+                trust_signals: trust.signals.iter().map(|s| s.describe()).collect(),
                 id: p.id.clone(),
                 name: p.name.clone(),
                 kind: p.kind.label().to_string(),
@@ -1711,4 +1719,44 @@ pub fn fetch_package(
     let package = world.fetch_package(&address, &content_hash)?;
     trace!("fetched {} from {address}", package.name);
     Ok(package.id)
+}
+
+fn order_dto(o: &crate::arena::Order) -> OrderDto {
+    OrderDto {
+        reference: o.reference.clone(),
+        package_id: o.package_id.clone(),
+        package_name: o.package_name.clone(),
+        by: o.by.clone(),
+        paid: o.paid as u32,
+        per_mille: o.per_mille,
+        shares: o
+            .shares
+            .iter()
+            .map(|(role, to, amount)| (role.clone(), to.clone(), *amount as u32))
+            .collect(),
+        placed_at: o.placed_at.to_string(),
+    }
+}
+
+/// What this node has acquired.
+#[tauri::command]
+#[specta::specta]
+pub fn get_orders(world: State<'_, World>) -> Vec<OrderDto> {
+    world.arena().orders().iter().map(order_dto).collect()
+}
+
+/// Acquire a package: settle its royalty in **juul** and record the order.
+///
+/// ★★★ Internal credit only. Circulation is unchanged by construction —
+/// `settle` transfers and never mints — and no part of this touches money.
+#[tauri::command]
+#[specta::specta]
+pub fn place_order(
+    world: State<'_, World>,
+    package_id: String,
+    on: u32,
+) -> Result<OrderDto, String> {
+    let order = world.place_order(&package_id, u64::from(on))?;
+    trace!("order {} · {} juul", order.reference, order.paid);
+    Ok(order_dto(&order))
 }

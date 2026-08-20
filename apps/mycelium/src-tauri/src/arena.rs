@@ -166,6 +166,38 @@ pub struct Install {
     pub installed_at: u64,
 }
 
+/// An acquisition: who took which package, when, and what it cost in **juul**.
+///
+/// ★★★ **Parity on the record shape, and deliberately NOT on half of it.**
+/// The reference's `arena_orders` carries `delivery_addr`, `pay_method` and
+/// `product_total` — real-world commerce for physical goods sold through the
+/// same table. Importing those fields would put a payment method one struct
+/// away from a package install, and ADR-0001 D5 exists precisely to keep that
+/// distance infinite. What is kept is the half that describes an acquisition:
+/// a reference, who, what, when, and the licence terms that applied.
+///
+/// ★★ `paid` is **juul** — this host's internal accounting unit. Never money,
+/// never transferable off this host, never a rail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Order {
+    /// A short human reference, the reference's own `SXI-` shape.
+    pub reference: String,
+    pub package_id: String,
+    pub package_name: String,
+    /// The acquiring principal's handle.
+    pub by: String,
+    /// Juul actually transferred. `0` for a free package — free of royalty,
+    /// never free of the work it causes.
+    pub paid: u64,
+    /// `(role, recipient, amount)` for every share, including ones that stayed
+    /// where they were.
+    #[serde(default)]
+    pub shares: Vec<(String, String, u64)>,
+    /// The licence rate that applied, in juul per mille.
+    pub per_mille: u32,
+    pub placed_at: u64,
+}
+
 // ---------------------------------------------------------------------------
 // Hashing
 // ---------------------------------------------------------------------------
@@ -209,6 +241,7 @@ pub struct Arena {
     root: PathBuf,
     packages: Mutex<Vec<Package>>,
     installs: Mutex<Vec<Install>>,
+    orders: Mutex<Vec<Order>>,
 }
 
 impl Arena {
@@ -217,9 +250,11 @@ impl Arena {
             root: root.to_path_buf(),
             packages: Mutex::new(Vec::new()),
             installs: Mutex::new(Vec::new()),
+            orders: Mutex::new(Vec::new()),
         };
         *arena.packages.lock().expect("packages lock") = read_lines(&arena.packages_path());
         *arena.installs.lock().expect("installs lock") = read_lines(&arena.installs_path());
+        *arena.orders.lock().expect("orders lock") = read_lines(&arena.orders_path());
         arena
     }
 
@@ -229,6 +264,20 @@ impl Arena {
 
     fn installs_path(&self) -> PathBuf {
         self.root.join("installs.jsonl")
+    }
+
+    fn orders_path(&self) -> PathBuf {
+        self.root.join("orders.jsonl")
+    }
+
+    pub fn orders(&self) -> Vec<Order> {
+        self.orders.lock().expect("orders lock").clone()
+    }
+
+    pub fn record_order(&self, order: Order) -> Result<(), String> {
+        append(&self.orders_path(), &order)?;
+        self.orders.lock().expect("orders lock").push(order);
+        Ok(())
     }
 
     pub fn all(&self) -> Vec<Package> {

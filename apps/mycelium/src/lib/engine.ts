@@ -40,6 +40,7 @@ import {
   type CoOwnerDto,
   type OfferDto,
   type PeerShelfDto,
+  type OrderDto,
   type MessageDto,
   type FeedDto,
   type InferenceDto,
@@ -83,6 +84,7 @@ export type {
   CoOwnerDto,
   OfferDto,
   PeerShelfDto,
+  OrderDto,
   MessageDto,
   FeedDto,
   InferenceDto,
@@ -271,6 +273,13 @@ export const engine = {
   /** Fetch one package by content hash. Records it; does not install it. */
   fetchPackage: async (address: string, contentHash: string): Promise<string> =>
     unwrap(await commands.fetchPackage(address, contentHash)),
+
+  // ── orders ────────────────────────────────────────────────────
+  /** What this node has acquired. */
+  orders: async (): Promise<OrderDto[]> => await commands.getOrders(),
+  /** Acquire a package — settles its royalty in juul. Never money. */
+  order: async (packageId: string, on: number): Promise<OrderDto> =>
+    unwrap(await commands.placeOrder(packageId, on)),
 };
 
 /* ── reading real state, honestly ─────────────────────────────────────────

@@ -42,6 +42,7 @@ import {
   type InstallDto,
   type PackageDto,
   type PeerShelfDto,
+  type OrderDto,
   type RoyaltyDto,
 } from "../lib/engine";
 
@@ -59,6 +60,7 @@ export function Library() {
   const [failure, setFailure] = createSignal<string | null>(null);
   const [last, setLast] = createSignal<InstallDto | null>(null);
   const [paid, setPaid] = createSignal<RoyaltyDto | null>(null);
+  const [orders, { refetch: refetchOrders }] = createResource(() => engine.orders());
 
   const run = async (what: string, f: () => Promise<unknown>) => {
     setBusy(what);
@@ -66,6 +68,7 @@ export function Library() {
     try {
       await f();
       await refetch();
+      await refetchOrders();
     } catch (e) {
       setFailure(String(e).replace(/^Error:\s*/, ""));
     } finally {
@@ -225,6 +228,44 @@ export function Library() {
             <Show when={last()}>{(r) => <Outcome result={r()} />}</Show>
             <Show when={paid()}>{(r) => <Royalty result={r()} />}</Show>
 
+            {/* ── what you have acquired ──────────────────────────── */}
+            <Show when={(orders() ?? []).length > 0}>
+              <Card title="acquired" right={<Meta>{`${(orders() ?? []).length}`}</Meta>}>
+                <For each={orders() ?? []}>
+                  {(o) => (
+                    <Note>
+                      <Row>
+                        <Value>{o.packageName}</Value>
+                        <Meta>{o.reference}</Meta>
+                        <Spacer />
+                        <Meta>{o.paid > 0 ? `${o.paid} juul` : "free"}</Meta>
+                      </Row>
+                      <Show when={o.shares.length > 0}>
+                        <For each={o.shares}>
+                          {([role, to, amount]) => (
+                            <Row>
+                              <Meta>{role}</Meta>
+                              <Meta>{to}</Meta>
+                              <Spacer />
+                              <Meta>{String(amount)}</Meta>
+                            </Row>
+                          )}
+                        </For>
+                      </Show>
+                    </Note>
+                  )}
+                </For>
+                <Caption>
+                  Acquiring settles the author's share in <strong>juul</strong> — this
+                  host's internal accounting unit. It is a transfer between balances on
+                  this machine, so total circulation is unchanged: nothing is minted and
+                  nothing leaves. <strong>No money is involved at any point</strong>, and
+                  acquiring is not installing — a package you acquired still faces the
+                  whole gate, and one you did not is not blocked from it.
+                </Caption>
+              </Card>
+            </Show>
+
             {/* ── publish ────────────────────────────────────────────────── */}
             <Show
               when={l().unlocked}
@@ -268,8 +309,18 @@ export function Library() {
                 <strong>Pull, from peers you chose.</strong> A package travels when you
                 ask for it by content hash — a peer never sends an artifact unsolicited,
                 because an unsolicited-artifact channel is an unsolicited-code channel.
-                What is <strong>not</strong> here: discovery of packages across a mesh, a
-                trust score with anything behind it, and orders.
+                What is <strong>not</strong> here: discovery of packages across a mesh.
+              </Caption>
+              <Caption>
+                <strong>Trust is what you can verify, and nothing else.</strong> Whether a
+                package is signed, whether its author is you or a peer you trusted, how
+                many of the peers <em>you asked</em> are holding it, and whether you have
+                installed it. There is no global rating, no stars and no download count —
+                this node cannot see a network like that, so it does not pretend to. A
+                package nobody can say anything about reads <strong>unrated</strong>, which
+                is not a low score: nobody scored it. And trust never decides admission —
+                a well-regarded package that does not typecheck is still refused, and an
+                unrated one still installs if you choose it.
               </Caption>
             </Card>
           </>
@@ -330,6 +381,20 @@ function PackageRow(props: {
         <Caption>{p().description}</Caption>
       </Show>
 
+      {/* ★★★ The trust reading, and `unrated` is NOT rendered as a score.
+          There is no bar, no stars and no number — because nobody produced
+          one. */}
+      <Row>
+        <Show
+          when={p().trustIsAReading}
+          fallback={<Meta>unrated · nothing is known about this one</Meta>}
+        >
+          <Badge tone={p().trust === "repudiated" ? "danger" : "quiet"}>{p().trust}</Badge>
+        </Show>
+        <Spacer />
+        <Meta>{p().trustSignals.join(" · ")}</Meta>
+      </Row>
+
       {/* ★★ The gate's answer, recomputed on every read. */}
       <Caption>{p().verdict}</Caption>
 
@@ -365,6 +430,19 @@ function PackageRow(props: {
             >
               {props.busy === `install-${p().id}` ? "asking the gate…" : "install"}
             </Button>
+            <Chip
+              onClick={() =>
+                void props.onRun(`order-${p().id}`, async () => {
+                  await engine.order(p().id, 1000);
+                })
+              }
+            >
+              {props.busy === `order-${p().id}`
+                ? "settling…"
+                : p().perMille > 0
+                  ? `acquire · ${p().perMille}‰ of 1,000 juul`
+                  : "acquire · free"}
+            </Chip>
             <Show when={p().perMille > 0}>
               <Chip
                 onClick={() =>
@@ -374,7 +452,7 @@ function PackageRow(props: {
                   })
                 }
               >
-                pay its royalty on 1,000 juul
+                royalty only
               </Chip>
             </Show>
           </Cluster>

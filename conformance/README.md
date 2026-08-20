@@ -3256,3 +3256,26 @@ proves nothing changed *in flight*; the content hash proves the sender held
 what it claimed. They catch different things: a package mangled at rest on the
 sender's disk passes the AEAD perfectly. Merging them into one "verified" flag
 would have hidden exactly that case.
+
+
+### trust — **parity would have meant copying a dead float**
+
+★★★ The reference's `trust_score` is a `Float`, written `0.0` on publish,
+**updated by no code path**, and used as `ORDER BY trust_score DESC`. Matching
+it exactly was possible and would have been worthless: the parity would have
+been *this number is also always zero*.
+
+★★ So this is R2 spec, and the spec question was *what could that number
+honestly be made of on a node like this one*. The answer is a closed list of
+verifiable signals — signed, author known to you, held by peers you asked,
+imported from a named peer, installed here — and a **band** rather than a
+number, because a number invites *out of what?* and the honest answer would be
+*out of nothing anyone agreed on*.
+
+★★★ **The one recorded refusal-to-port:** `arena_orders` in the reference
+carries `delivery_addr`, `pay_method` and `product_total`, because the same
+table sells physical goods. Those three fields are not ported and will not be.
+ADR-0001 D5 draws the line at *juul is internal accounting on a single host*,
+and a payment method sitting one struct away from a package install is exactly
+the adjacency the line exists to prevent. The acquisition half of the record —
+reference, who, what, when, licence, shares — is at parity.
