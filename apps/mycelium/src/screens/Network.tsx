@@ -37,7 +37,7 @@ import {
   Value,
   sx as S,
 } from "../ui";
-import { engine, type PeerDto, type SyncDto } from "../lib/engine";
+import { engine, type BodyDto, type PeerDto, type SyncDto } from "../lib/engine";
 
 /** A key is 64 hex characters. A person needs the ends, not the middle. */
 const short = (key: string) => (key.length > 16 ? `${key.slice(0, 8)}…${key.slice(-4)}` : key);
@@ -51,6 +51,7 @@ const when = (secs: string | null) => {
 
 export function Network() {
   const [net, { refetch }] = createResource(() => engine.network());
+  const [bodies, { refetch: refetchBodies }] = createResource(() => engine.bodies());
   const [busy, setBusy] = createSignal<string | null>(null);
   const [failure, setFailure] = createSignal<string | null>(null);
   const [last, setLast] = createSignal<SyncDto | null>(null);
@@ -61,6 +62,7 @@ export function Network() {
     try {
       await f();
       await refetch();
+      await refetchBodies();
     } catch (e) {
       setFailure(String(e).replace(/^Error:\s*/, ""));
     } finally {
@@ -155,6 +157,19 @@ export function Network() {
                 </For>
               </Show>
             </Card>
+
+            {/* ── shared Sustains ────────────────────────────────────────── */}
+            <Show when={(bodies() ?? []).length > 0}>
+              <Card title="shared sustains · quorum">
+                <Caption>
+                  A Sustain with declared co-owners agrees <strong>before</strong> it
+                  appends, so two people writing at once are ordered rather than one
+                  quietly overwriting the other. Everything else on this node writes
+                  locally with no round at all.
+                </Caption>
+                <For each={bodies() ?? []}>{(b) => <BodyRow body={b} />}</For>
+              </Card>
+            </Show>
 
             <AddPeer busy={busy()} onRun={run} />
 
@@ -299,6 +314,65 @@ function PeerRow(props: {
           </Show>
         </Note>
       </Show>
+    </Note>
+  );
+}
+
+/* ── one shared Sustain ──────────────────────────────────────── */
+
+function BodyRow(props: { body: BodyDto }) {
+  const b = () => props.body;
+  return (
+    <Note>
+      <Row>
+        <Value>{b().label}</Value>
+        <Spacer />
+        <Badge tone={b().canWrite ? "ok" : "danger"}>
+          {b().reachable} of {b().quorum} needed
+        </Badge>
+      </Row>
+
+      <For each={b().owners}>
+        {(o) => (
+          <Row>
+            <Meta>{o.isSelf ? "this node" : o.handle}</Meta>
+            <Meta>{short(o.key)}</Meta>
+            <Spacer />
+            <Meta>{o.reachable ? "reachable" : "no address"}</Meta>
+          </Row>
+        )}
+      </For>
+
+      {/* ★★★ The honest state, not a silent degradation. */}
+      <Show
+        when={b().canWrite}
+        fallback={
+          <Caption>
+            <strong>Writes to this Sustain are refused right now.</strong> Not queued and
+            not applied locally — a minority cannot write, because the others would never
+            accept a history they did not agree to. It comes back the moment enough
+            co-owners are reachable.
+          </Caption>
+        }
+      >
+        <Caption>
+          Enough co-owners are reachable for a round to be attempted. That is not a
+          promise a round will succeed — a peer can still be gone by the time it is
+          asked, and the refusal then says so.
+        </Caption>
+      </Show>
+
+      <Row>
+        <Meta>
+          {/* ★ A two-node body tolerates ZERO traitors, and a person should know. */}
+          tolerates {b().toleratesTraitors ?? 0} traitor
+          {(b().toleratesTraitors ?? 0) === 1 ? "" : "s"}
+        </Meta>
+        <Spacer />
+        <Meta>
+          {b().lastAgreed !== null ? `last agreed slot ${b().lastAgreed}` : "nothing agreed yet"}
+        </Meta>
+      </Row>
     </Note>
   );
 }

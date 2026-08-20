@@ -83,6 +83,23 @@ pub struct LoggedEvent {
     /// rewrite of anyone's history.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lamport: Option<u64>,
+    /// What the writer had **seen** when it wrote this line.
+    ///
+    /// ★★★ **Persisted, because reconstructing it was wrong.** Slice 6 stored
+    /// only `(origin, seq)` and rebuilt a one-component clock from them — so
+    /// every pair of entries from different nodes compared as CONCURRENT, even
+    /// when one demonstrably happened after the other. `Reconciliation`'s
+    /// `concurrent` and `superseded` lists were therefore over-reporting:
+    /// they named real overwrites correctly and also named ordinary
+    /// sequential edits, which is the kind of report that teaches a person to
+    /// stop reading it. Found by a quorum test asserting the superseded list
+    /// should be EMPTY once writes are agreed one at a time.
+    ///
+    /// ★ `None` on a legacy line, which falls back to the old reconstruction —
+    /// honest for a single-node history, where every entry is causally ordered
+    /// anyway and there is no second node to be concurrent with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock: Option<VectorClock>,
 }
 
 impl Replayable for LoggedEvent {
@@ -103,6 +120,7 @@ impl LoggedEvent {
             mutations: vec![Mutation::ReplaceRoot { value: state.clone() }],
             origin: None,
             lamport: None,
+            clock: None,
         }
     }
 
@@ -114,6 +132,7 @@ impl LoggedEvent {
             mutations: x.mutations.clone(),
             origin: None,
             lamport: None,
+            clock: None,
         }
     }
 
@@ -122,10 +141,18 @@ impl LoggedEvent {
     /// ★ A builder rather than two more constructor arguments: `genesis` and
     /// `of` are called from places that do not all know the clock yet, and a
     /// half-filled stamp would be worse than a clearly unstamped one.
-    pub fn written_by(mut self, node: &str, seq: u64, lamport: u64) -> Self {
+    pub fn written_by(
+        mut self,
+        node: &str,
+        seq: u64,
+        lamport: u64,
+        seen: VectorClock,
+    ) -> Self {
         self.origin = Some(node.to_string());
         self.seq = seq;
         self.lamport = Some(lamport);
+        // ★ Everything this node had seen, plus its own new position.
+        self.clock = Some(seen.at(node, seq + 1));
         self
     }
 }
@@ -175,6 +202,23 @@ pub struct SustainRecord {
     /// habitats whose members have no identity on this machine yet.
     #[serde(default)]
     pub owner: Option<String>,
+    /// ★★★ **The co-owners' node keys — the consensus body.**
+    ///
+    /// Empty (the default, and every record written before this existed) means
+    /// **single-owner**: this Sustain writes locally with no round and no
+    /// reachability requirement, exactly as it always has. A household on one
+    /// device never pays for a distributed protocol it is not using.
+    ///
+    /// ★★ Non-empty means every state-changing write must be **agreed before
+    /// it is appended** — which is the only way to stop two concurrent writes
+    /// becoming a supersession, since merging afterwards cannot recover an
+    /// intent that was overwritten.
+    ///
+    /// ★ Distinct from `owner`, which is a HANDLE holding authority in the
+    /// membership graph. These are NODE KEYS, and the two answer different
+    /// questions: *who may decide* versus *whose machines must agree*.
+    #[serde(default)]
+    pub owners: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -620,7 +664,11 @@ fn entry_of(line: LoggedEvent, this_node: &str) -> LogEntry<LoggedEvent> {
     //     real nodes syncing and one of them receiving nothing.
     let counter = line.seq + 1;
     let lamport = line.lamport.unwrap_or(line.seq + 1);
-    let clock = VectorClock::new().at(&origin, counter);
+    // ★★ The writer's own clock when it has one. The fallback is the old
+    //    one-component reconstruction, which is correct for a single-node
+    //    history and over-reports concurrency across nodes — see
+    //    `LoggedEvent::clock`.
+    let clock = line.clock.clone().unwrap_or_else(|| VectorClock::new().at(&origin, counter));
     LogEntry {
         stamp: CausalStamp { counter, node: origin },
         lamport,

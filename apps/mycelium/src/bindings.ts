@@ -459,6 +459,23 @@ async payRoyalty(packageId: string, amount: number) : Promise<Result<RoyaltyDto,
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Every shared Sustain's body, and whether it could be written to now.
+ */
+async getBodies() : Promise<BodyDto[]> {
+    return await TAURI_INVOKE("get_bodies");
+},
+/**
+ * Declare a Sustain co-owned by a set of node keys.
+ */
+async shareOwnership(sustainId: string, owners: string[]) : Promise<Result<string[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("share_ownership", { sustainId, owners }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -530,6 +547,34 @@ export type AuthoredDefinition = { id: string; label: string; dimensions: DimDec
  */
 openingState: JsonValue }
 /**
+ * A shared Sustain's body, as the Network screen sees it.
+ */
+export type BodyDto = { sustainId: string; label: string; owners: CoOwnerDto[]; 
+/**
+ * How many must agree. Majority of the body.
+ */
+quorum: number; 
+/**
+ * How many are reachable right now, this node included.
+ */
+reachable: number; 
+/**
+ * ★★★ Whether a write could even be attempted. `false` means writes are
+ * **refused**, not queued and not applied locally — the honest state
+ * rather than a silent degradation.
+ */
+canWrite: boolean; 
+/**
+ * ★ The Byzantine bound for this body size, reported because a two-node
+ * body tolerates **zero** traitors and a person should know that.
+ */
+toleratesTraitors: number; 
+/**
+ * The highest log position this node has agreed anything for. `None` when
+ * nothing has been agreed — which is not slot zero.
+ */
+lastAgreed: number | null }
+/**
  * A whole hypothetical branch.
  */
 export type Branch = { sustainId: string; steps: BranchStep[]; 
@@ -593,6 +638,16 @@ eligibility: string;
 emits: string[] }
 export type ChildStatusDto = { sustainId: string; label: string; readable: boolean }
 export type ChoiceDto = { value: string; label: string }
+/**
+ * One co-owner of a shared Sustain, and whether this node can reach it.
+ */
+export type CoOwnerDto = { key: string; handle: string; 
+/**
+ * ★★ Reachable means *there is an address and the peer is trusted* — not
+ * that a round would succeed. A surface must not promise liveness it has
+ * not tested.
+ */
+reachable: boolean; isSelf: boolean }
 /**
  * ★★★ **A committed change, pushed.** One message per real change.
  * 

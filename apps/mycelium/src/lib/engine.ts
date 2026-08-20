@@ -36,6 +36,8 @@ import {
   type InstallDto,
   type RoyaltyDto,
   type Publication,
+  type BodyDto,
+  type CoOwnerDto,
   type MessageDto,
   type FeedDto,
   type InferenceDto,
@@ -75,6 +77,8 @@ export type {
   InstallDto,
   RoyaltyDto,
   Publication,
+  BodyDto,
+  CoOwnerDto,
   MessageDto,
   FeedDto,
   InferenceDto,
@@ -249,6 +253,13 @@ export const engine = {
   /** Pay a royalty in juul. Internal credit; never money. */
   payRoyalty: async (packageId: string, amount: number): Promise<RoyaltyDto> =>
     unwrap(await commands.payRoyalty(packageId, amount)),
+
+  // ── quorum ──────────────────────────────────────────────────────────
+  /** Every shared Sustain's body, and whether it could be written to now. */
+  bodies: async (): Promise<BodyDto[]> => await commands.getBodies(),
+  /** Declare a Sustain co-owned by these node keys. */
+  shareOwnership: async (sustainId: string, withKeys: string[]): Promise<string[]> =>
+    unwrap(await commands.shareOwnership(sustainId, withKeys)),
 };
 
 /* ── reading real state, honestly ─────────────────────────────────────────

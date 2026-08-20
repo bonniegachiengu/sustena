@@ -51,6 +51,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sustena_core::consensus::{Accepted, Promise, ProposalNumber};
 use sustena_core::VectorClock;
 
 use crate::identity::{verify, Unlocked};
@@ -111,6 +112,19 @@ pub enum Frame {
     /// The reply: `(sustain_id, label)` pairs this node is willing to share
     /// **with this peer**. Never the whole registry.
     Shared { sustains: Vec<(String, String)> },
+    /// §V phase 1 — *promise not to accept anything below `n` for this slot.*
+    ///
+    /// ★★★ The slot is part of the message because Paxos decides **one**
+    /// value; a log needs a decision per position. Without it the body would
+    /// re-choose its first agreed write forever.
+    Prepare { sustain_id: String, slot: u64, number: ProposalNumber },
+    /// The reply to [`Frame::Prepare`].
+    Promised { promise: Promise },
+    /// §V phase 2 — *take this value for this slot unless something higher
+    /// has been promised since.*
+    Accept { sustain_id: String, slot: u64, number: ProposalNumber, value: Value },
+    /// The reply to [`Frame::Accept`].
+    Voted { accepted: Accepted },
     /// A refusal, always with a reason a person can read.
     ///
     /// ★ `rule` is an owned `String` rather than the `&'static str` the gate's

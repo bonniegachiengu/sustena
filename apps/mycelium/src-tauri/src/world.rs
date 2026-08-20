@@ -11,7 +11,7 @@
 //! is only ever written from a committed `Execution` — the same value the fold
 //! would produce — and a relaunch rebuilds it from the log alone.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value};
@@ -52,6 +52,10 @@ use sustena_core::package::{
     Kind, Origin, PackageProvenance,
 };
 use sustena_core::royalty::{settle, Licence, Recipients, RevenueType, Settlement};
+use crate::quorum::{Agreement, Slot, Write};
+use sustena_core::consensus::{
+    accepted_count, adopt, granted, Accepted, Body, Promise, ProposalNumber,
+};
 use crate::peers::{Peering, SyncOutcome};
 use crate::wire::SharedSpec;
 use crate::store::{LoggedEvent, Registry as Records, Store, StoreError, StoreResult, SustainRecord};
@@ -85,6 +89,22 @@ pub struct Sustain {
 }
 
 /// Everything the cockpit can look at.
+/// A refusal that never reached the operator, in the shape every other
+/// refusal has.
+///
+/// ★ `state: Value::Null` and no mutations: this is not a failed run, it is a
+/// run that did not happen. A caller reading `committed()` sees false either
+/// way, and a caller reading the reason learns which.
+fn refusal(operator: &str, reason: &str, rule: &'static str) -> Execution {
+    let _ = operator;
+    Execution {
+        result: OperatorResult::fail(reason.to_string(), rule),
+        mutations: vec![],
+        events: vec![],
+        state: Value::Null,
+    }
+}
+
 /// What an install attempt did.
 #[derive(Debug, Clone)]
 pub struct Installed {
@@ -254,6 +274,7 @@ impl World {
         // ★ A Sustain created after the listener started is describable
         //   without restarting anything.
         self.install_specs();
+        self.install_bodies();
         Ok(true)
     }
 
@@ -323,6 +344,7 @@ impl World {
             custom: custom.map(str::to_string),
             parent: parent.map(str::to_string),
             owner: owner.map(str::to_string),
+            owners: Vec::new(),
         };
         let enforcement = enforcement_of(&definition);
 
@@ -339,6 +361,7 @@ impl World {
         // ★ A Sustain created after the listener started is describable
         //   without restarting anything.
         self.install_specs();
+        self.install_bodies();
         Ok(true)
     }
 
@@ -404,6 +427,34 @@ impl World {
                 0,
             )));
         };
+        // ★★★ **AGREEMENT BEFORE THE APPEND, for a shared Sustain only.**
+        //
+        // A Sustain with declared co-owners cannot tolerate a supersession —
+        // that is what declaring them means — so the body agrees which write
+        // takes the next slot BEFORE anything is applied here. A single-owner
+        // Sustain skips this entirely: `owners_of` is empty, there is no round,
+        // no socket and no reachability requirement.
+        //
+        // ★★ Deliberately placed BEFORE the gate rather than after. A write
+        //    that lost its round was never this node's to make, so running the
+        //    gate on it would meter pawa and evaluate invariants for a move
+        //    that cannot land. The gate still runs on everything that wins.
+        if !self.owners_of(sustain_id).is_empty() {
+            match self.propose_write(sustain_id, operator, params) {
+                Err(e) => {
+                    return Ok(Some((
+                        refusal(operator, &format!("consensus could not run: {e}"), "no_quorum"),
+                        0,
+                    )))
+                }
+                Ok(agreement) if !agreement.won() => {
+                    let rule = agreement.rule().unwrap_or("no_quorum");
+                    return Ok(Some((refusal(operator, &agreement.describe(), rule), 0)));
+                }
+                Ok(_) => {}
+            }
+        }
+
         let path = self.authority_path(sustain_id);
         let memberships = self.memberships_for(&principal);
         let skins = SkinRegistry::empty();
@@ -790,6 +841,203 @@ impl World {
         &self.peering
     }
 
+    // ── quorum ───────────────────────────────────────────────────────
+
+    /// Declare a Sustain co-owned by a set of node keys.
+    ///
+    /// ★★ The declaring node is always included — a body you are not in is
+    /// not a body you can write to, and silently excluding yourself would
+    /// produce a Sustain this node could never change again.
+    pub fn share_ownership(&self, sustain_id: &str, with: &[String]) -> Result<Vec<String>, String> {
+        let me = self.node_id().ok_or_else(|| "no identity on this machine".to_string())?;
+        let mut owners: BTreeSet<String> = with.iter().cloned().collect();
+        owners.insert(me);
+        let owners: Vec<String> = owners.into_iter().collect();
+
+        let mut inner = self.inner.lock().expect("world lock");
+        let Some(su) = inner.sustains.get_mut(sustain_id) else {
+            return Err(format!("no such Sustain: {sustain_id}"));
+        };
+        su.record.owners = owners.clone();
+        self.persist_registry(&inner).map_err(|e| e.to_string())?;
+        drop(inner);
+        self.install_bodies();
+        Ok(owners)
+    }
+
+    /// Push the co-ownership map to the peering, so the listener can vote.
+    fn install_bodies(&self) {
+        let bodies = self.with(|i| {
+            i.order()
+                .iter()
+                .filter_map(|id| {
+                    let s = i.get(id)?;
+                    if s.record.owners.is_empty() {
+                        return None;
+                    }
+                    Some((id.clone(), s.record.owners.clone()))
+                })
+                .collect()
+        });
+        self.peering.set_bodies(bodies);
+    }
+
+    /// The highest slot this node has accepted anything for.
+    ///
+    /// ★ `None` means **nothing has been agreed**, which is not slot zero —
+    /// slot zero is a real position a real write can hold.
+    pub fn last_agreed(&self, sustain_id: &str) -> Option<u64> {
+        let mut highest = None;
+        for slot in 0..64u64 {
+            if self.peering.acceptors().accepted(&Slot::new(sustain_id, slot)).is_some() {
+                highest = Some(slot);
+            }
+        }
+        highest
+    }
+
+    /// The co-owners of a Sustain, or empty for a single-owner one.
+    pub fn owners_of(&self, sustain_id: &str) -> Vec<String> {
+        self.with(|i| i.get(sustain_id).map(|s| s.record.owners.clone()).unwrap_or_default())
+    }
+
+    /// ★★★ **Agree on who gets this slot, before anything is written.**
+    ///
+    /// §V's two phases, driven over slice 6's real transport: this node's own
+    /// acceptor answers in-process, every other co-owner answers over a
+    /// socket. The adoption rule (*highest-numbered accepted value seen, else
+    /// own*) is `consensus::adopt` — the **same function** the in-process
+    /// `propose` uses, so the distributed proposer cannot drift from the
+    /// simulation on the one line safety rests on.
+    ///
+    /// ★★ An unreachable co-owner is simply **not a grant**. It is not an
+    /// error to be propagated and not a retry to be hidden: it is one fewer
+    /// vote, which is what makes a minority unable to write.
+    pub fn propose_write(
+        &self,
+        sustain_id: &str,
+        operator: &str,
+        params: &Map<String, Value>,
+    ) -> Result<Agreement, String> {
+        let me = self
+            .identity
+            .lock()
+            .expect("identity lock")
+            .clone()
+            .ok_or_else(|| "this node is locked".to_string())?;
+        let my_key = me.public_key();
+        let owners = self.owners_of(sustain_id);
+
+        let body = Body::majority(owners.clone()).map_err(|e| e.to_string())?;
+        let quorum = body.quorum_size();
+
+        // ★★★ **The slot is the LOG's next position, not this node's next
+        //     sequence.** Found by the two-node test: `next_seq` is a
+        //     PER-NODE counter (slice 6 made it so deliberately, precisely
+        //     because two nodes must not share a counter), so Alice proposed
+        //     slot 1 while Bob proposed slot 0 — two different Paxos instances,
+        //     and both won. A body has to be agreeing about the same position
+        //     or it is not agreeing about anything.
+        //
+        // ★★ The log's length is a genuinely shared quantity: both nodes
+        //    holding the same entries see the same number. A node that is
+        //    BEHIND proposes a lower slot, which has already been decided —
+        //    and PREPARE hands it the accepted value, so it adopts, loses, and
+        //    is told to retry. That is recovery, not a special case.
+        let slot = self.store.read_replica(sustain_id, &my_key).map_err(|e| e.to_string())?.len()
+            as u64;
+        let mine = Write {
+            operator: operator.to_string(),
+            params: params.clone(),
+            by: my_key.clone(),
+        };
+        let number = ProposalNumber::new(now_secs(), &my_key);
+        let slot_key = Slot::new(sustain_id, slot);
+
+        // ── PREPARE ─────────────────────────────────────────────────────────
+        let book = self.peering.book();
+        let mut promises: Vec<Promise> = Vec::new();
+        let mut unreachable: Vec<String> = Vec::new();
+
+        // This node's own acceptor, in-process. ★ It votes like any other: a
+        // proposer that exempted itself would be a body of one wearing a
+        // quorum's name.
+        promises.push(
+            self.peering.acceptors().on_prepare(&slot_key, &number)?,
+        );
+
+        let mut reachable: Vec<(String, String)> = Vec::new();
+        for owner in owners.iter().filter(|o| **o != my_key) {
+            match book.get(owner).and_then(|p| p.address.clone()) {
+                Some(address) => reachable.push((owner.clone(), address)),
+                None => unreachable.push(owner.clone()),
+            }
+        }
+
+        let mut accepts: Vec<(String, String, Accepted)> = Vec::new();
+        let mut round_promises: Vec<(String, String, Promise)> = Vec::new();
+        for (owner, address) in reachable {
+            // ★ Both phases in one connection: see `Peering::round_with` on
+            //   why a held session would hide a co-owner going away.
+            match self.peering.round_with(
+                &address,
+                &me,
+                sustain_id,
+                slot,
+                &number,
+                &mine.value(),
+            ) {
+                Ok((promise, accepted)) => {
+                    round_promises.push((owner.clone(), address.clone(), promise));
+                    if let Some(a) = accepted {
+                        accepts.push((owner, address, a));
+                    }
+                }
+                Err(_) => unreachable.push(owner),
+            }
+        }
+        promises.extend(round_promises.iter().map(|(_, _, p)| p.clone()));
+
+        if granted(&promises) < quorum {
+            return Ok(Agreement::NoQuorum {
+                slot,
+                reached: granted(&promises),
+                needed: quorum,
+                unreachable,
+            });
+        }
+
+        // ── the adoption rule, shared with the in-process proposer ──────────
+        let value = adopt(&promises, &mine.value());
+
+        // ── ACCEPT ──────────────────────────────────────────────────────────
+        // ★ This node's own acceptor takes the ADOPTED value, which may not be
+        //   the one it proposed — that is the rule working, not a bug.
+        let mut votes: Vec<Accepted> =
+            vec![self.peering.acceptors().on_accept(&slot_key, &number, &value)?];
+        votes.extend(accepts.iter().map(|(_, _, a)| a.clone()));
+
+        if accepted_count(&votes) < quorum {
+            return Ok(Agreement::NoQuorum {
+                slot,
+                reached: accepted_count(&votes),
+                needed: quorum,
+                unreachable,
+            });
+        }
+
+        // ── chosen ──────────────────────────────────────────────────────────
+        let chosen = Write::from_value(&value)
+            .ok_or_else(|| "the body agreed on something that is not a write".to_string())?;
+        if chosen.by == my_key && chosen.operator == mine.operator {
+            Ok(Agreement::Won { number, slot })
+        } else {
+            // ★★ Someone else's write holds this slot. Nothing was applied
+            //    here; the caller retries against the state that write leaves.
+            Ok(Agreement::Lost { slot, to: chosen.by.clone(), chose: Box::new(chosen) })
+        }
+    }
+
     // ── the arena ──────────────────────────────────────────────────────
 
     pub fn arena(&self) -> &Arena {
@@ -1068,12 +1316,11 @@ impl World {
         let Some(node) = self.node_id() else {
             return line;
         };
-        let lamport = self
-            .store
-            .read_replica(sustain_id, &node)
-            .map(|r| r.next_write(&node).1)
-            .unwrap_or(seq + 1);
-        line.written_by(&node, seq, lamport)
+        let Ok(replica) = self.store.read_replica(sustain_id, &node) else {
+            return line;
+        };
+        let lamport = replica.next_write(&node).1;
+        line.written_by(&node, seq, lamport, replica.frontier())
     }
 
     /// This node's own network identity — its public key — readable while
@@ -1160,6 +1407,7 @@ impl World {
             custom: None,
             parent: None,
             owner: spec.owner.clone(),
+            owners: Vec::new(),
         };
         inner.order.push(id.to_string());
         inner.sustains.insert(
@@ -1605,6 +1853,7 @@ fn leg_line(seq: u64, leg: &Leg) -> LoggedEvent {
         mutations: leg.mutations().to_vec(),
         origin: None,
         lamport: None,
+        clock: None,
     }
 }
 

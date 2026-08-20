@@ -32,7 +32,10 @@ use sustena_core::VectorClock;
 
 use crate::identity::Unlocked;
 use crate::store::{LoggedEvent, Store};
+use crate::quorum::{Acceptors, Slot};
 use crate::wire::{self, Frame, Handshake, SharedSpec, WireError, WireResult};
+use serde_json::Value;
+use sustena_core::consensus::{Accepted, Promise, ProposalNumber};
 
 // ---------------------------------------------------------------------------
 // The book
@@ -215,6 +218,13 @@ pub struct Peering {
     path: PathBuf,
     store: Store,
     listening: Mutex<Option<u16>>,
+    /// This node's acceptors. ★★★ A co-owner asking to write must be
+    /// answered even while nothing local is happening — that is what being
+    /// part of a body means — so the listener owns them directly.
+    acceptors: Arc<Acceptors>,
+    /// Which Sustains this node co-owns, and with whom. A slot is only
+    /// answered for a Sustain in here, by a key that co-owns it.
+    bodies: Mutex<BTreeMap<String, Vec<String>>>,
     /// How the peering answers *what is this Sustain*.
     ///
     /// ★★ A SNAPSHOT the world refreshes, not a handle back into the world.
@@ -245,7 +255,34 @@ impl Peering {
             listening: Mutex::new(None),
             identity: Mutex::new(None),
             specs: Mutex::new(BTreeMap::new()),
+            acceptors: Arc::new(Acceptors::at(root)),
+            bodies: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    pub fn acceptors(&self) -> &Arc<Acceptors> {
+        &self.acceptors
+    }
+
+    /// Tell the peering which Sustains are co-owned, and by which keys.
+    ///
+    /// ★★ A snapshot the world refreshes, for the same reason `set_specs` is
+    /// one: a listener thread reaching into the live registry would hold the
+    /// lock every operator call needs.
+    pub fn set_bodies(&self, bodies: BTreeMap<String, Vec<String>>) {
+        *self.bodies.lock().expect("bodies lock") = bodies;
+    }
+
+    /// ★★★ **May this key ask this node to vote on this Sustain?** Being an
+    /// authenticated peer is not enough and neither is being shared with —
+    /// only a declared **co-owner** takes part in the body. The same
+    /// authenticated-is-not-authorised split, one layer further in.
+    fn co_owns(&self, key: &str, sustain_id: &str) -> bool {
+        self.bodies
+            .lock()
+            .expect("bodies lock")
+            .get(sustain_id)
+            .is_some_and(|owners| owners.iter().any(|o| o == key))
     }
 
     /// Tell the peering how to describe the Sustains it may be asked for.
@@ -359,6 +396,46 @@ impl Peering {
                 }
                 Frame::Give { sustain_id, entries, .. } => {
                     self.accept_give(stream, &peer, &sustain_id, entries, &public_key)?;
+                }
+                Frame::Prepare { sustain_id, slot, number } => {
+                    if !self.co_owns(peer.public_key(), &sustain_id) {
+                        wire::send(
+                            stream,
+                            &Frame::Refused {
+                                rule: "co_owner".into(),
+                                reason: format!(
+                                    "{} does not co-own {sustain_id}, so it has no vote here",
+                                    peer.handle()
+                                ),
+                            },
+                        )?;
+                        continue;
+                    }
+                    let promise = self
+                        .acceptors
+                        .on_prepare(&Slot::new(&sustain_id, slot), &number)
+                        .map_err(WireError::Io)?;
+                    wire::send(stream, &Frame::Promised { promise })?;
+                }
+                Frame::Accept { sustain_id, slot, number, value } => {
+                    if !self.co_owns(peer.public_key(), &sustain_id) {
+                        wire::send(
+                            stream,
+                            &Frame::Refused {
+                                rule: "co_owner".into(),
+                                reason: format!(
+                                    "{} does not co-own {sustain_id}, so it has no vote here",
+                                    peer.handle()
+                                ),
+                            },
+                        )?;
+                        continue;
+                    }
+                    let accepted = self
+                        .acceptors
+                        .on_accept(&Slot::new(&sustain_id, slot), &number, &value)
+                        .map_err(WireError::Io)?;
+                    wire::send(stream, &Frame::Voted { accepted })?;
                 }
                 other => {
                     return Err(WireError::Protocol(format!("unexpected frame: {other:?}")));
@@ -539,6 +616,65 @@ impl Peering {
             sent,
             spec,
         })
+    }
+}
+
+impl Peering {
+    /// Run §V's two phases against **one** co-owner over a real socket.
+    ///
+    /// ★★ One connection per round rather than a held session: a co-owner
+    /// that went away between phases must show up as a missing grant, and a
+    /// stale socket would hide that as a protocol error instead.
+    pub fn round_with(
+        &self,
+        address: &str,
+        me: &Unlocked,
+        sustain_id: &str,
+        slot: u64,
+        number: &ProposalNumber,
+        value: &Value,
+    ) -> Result<(Promise, Option<Accepted>), String> {
+        let mut stream =
+            TcpStream::connect(address).map_err(|e| format!("cannot reach {address}: {e}"))?;
+        wire::set_timeouts(&stream).map_err(|e| e.to_string())?;
+        wire::handshake(&mut stream, me, true).map_err(|e| e.to_string())?;
+
+        wire::send(
+            &mut stream,
+            &Frame::Prepare {
+                sustain_id: sustain_id.to_string(),
+                slot,
+                number: number.clone(),
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let promise = match wire::recv(&mut stream).map_err(|e| e.to_string())? {
+            Frame::Promised { promise } => promise,
+            Frame::Refused { rule, reason } => return Err(format!("{reason} [{rule}]")),
+            other => return Err(format!("unexpected reply to PREPARE: {other:?}")),
+        };
+        // ★ A refused promise ends the round with this acceptor; there is
+        //   nothing to accept against a higher promise.
+        if matches!(promise, Promise::Refused { .. }) {
+            return Ok((promise, None));
+        }
+
+        wire::send(
+            &mut stream,
+            &Frame::Accept {
+                sustain_id: sustain_id.to_string(),
+                slot,
+                number: number.clone(),
+                value: value.clone(),
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let accepted = match wire::recv(&mut stream).map_err(|e| e.to_string())? {
+            Frame::Voted { accepted } => accepted,
+            Frame::Refused { rule, reason } => return Err(format!("{reason} [{rule}]")),
+            other => return Err(format!("unexpected reply to ACCEPT: {other:?}")),
+        };
+        Ok((promise, Some(accepted)))
     }
 }
 

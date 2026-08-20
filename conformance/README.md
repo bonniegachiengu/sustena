@@ -3175,3 +3175,36 @@ absent:** `royalty::settle` panicked when the payer was also a recipient
 case. The share is now skipped as a movement and still reported, so the split
 is unchanged and circulation is still provably conserved — which is what the
 existing royalty vectors check, and they pass unchanged.
+
+
+### quorum-gated writes — **the simulation stays, the wire is new**
+
+★★★ **`Ledger` is untouched, and that is deliberate.** Every recorded
+consensus vector drives the in-process body — one process holding every
+acceptor — and those still pass unchanged. What was added is the *other* half:
+`Acceptor::on_prepare` / `on_accept`, one per node, driven over a real socket.
+
+★★ **`Ledger` now DELEGATES to `Acceptor`**, so there is exactly one
+definition of the two acceptor rules. Before this, a distributed proposer would
+have had to reimplement them, and two copies of a safety rule are two chances
+to get it wrong. The same applies to the proposer's own subtle line: `adopt`
+(*highest-numbered accepted value seen, else own*) is extracted and called by
+both paths.
+
+★ **No new vectors, and the reason is the same as the peer transport's.** The
+reference has no consensus of any kind — there is nothing to be at parity
+*with*. The proof is 14 two-node tests over two data directories and two real
+sockets, and the property under test is the one slice 6 could only name: two
+concurrent incomes of 300 and 700 totalling **1000**, with `Reconciliation`'s
+`superseded` list **empty** because agreement removed the concurrency rather
+than the merge resolving it.
+
+★★★ **A correction to a slice-6 claim, recorded rather than quietly fixed.**
+`Reconciliation::superseded` and `concurrent` were **over-reporting**: the
+host stored only `(origin, seq)` per line and `entry_of` rebuilt a
+one-component vector clock from them, so any two entries from different nodes
+compared as concurrent — including a pair where one plainly happened after the
+other. Slice 6's tests only ever asserted that concurrency *is* reported, never
+that a causal pair is *not*, so it survived. The writer's clock is now
+persisted. Anything read from that slice's notes about how many supersessions
+a merge produced should be read with this correction attached.

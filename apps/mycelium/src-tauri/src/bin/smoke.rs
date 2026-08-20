@@ -950,6 +950,7 @@ fn line(seq: u64, leg: &Leg) -> LoggedEvent {
         mutations: leg.mutations().to_vec(),
         origin: None,
         lamport: None,
+        clock: None,
     }
 }
 

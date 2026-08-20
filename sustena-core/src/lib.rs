@@ -200,8 +200,8 @@ pub use compose::{
     Rejected, Step, WpResult,
 };
 pub use consensus::{
-    propose, Accepted, Body, ByzantineBound, ConsensusError, Decision, Ledger, Promise,
-    ProposalNumber, Round, RoundOutcome, RoundPhase,
+    accepted_count, adopt, granted, propose, Accepted, Acceptor, Body, ByzantineBound,
+    ConsensusError, Decision, Ledger, Promise, ProposalNumber, Round, RoundOutcome, RoundPhase,
 };
 pub use controller::{
     compute_urgency, is_stable_intervention, route, should_rollback, AutomationTable,

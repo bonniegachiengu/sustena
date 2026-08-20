@@ -79,6 +79,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -186,7 +187,7 @@ impl Body {
 /// The proposer's id breaks ties, so two proposers cannot mint the same number
 /// in the same round. Ordering is `(round, proposer)`, which is what lets
 /// "highest-numbered accepted value seen" be a well-defined phrase.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ProposalNumber {
     pub round: u64,
     pub proposer: String,
@@ -198,15 +199,78 @@ impl ProposalNumber {
     }
 }
 
-/// One acceptor's state.
-#[derive(Debug, Clone, PartialEq, Default)]
-struct Acceptor {
+/// One acceptor's state — **one node's half of the protocol**.
+///
+/// ★★★ **Public, and separately drivable, because a real body is not one
+/// process.** [`Ledger`] holds every acceptor in a map and is a faithful
+/// single-process simulation of a body — which is what every conformance
+/// vector here exercises, and it stays exactly as it was. But a body spread
+/// across machines has *one* of these per node, and the two phases arrive as
+/// messages. [`Acceptor::on_prepare`] and [`Acceptor::on_accept`] are that
+/// half: no network, no knowledge of the body, just the two answers this node
+/// owes.
+///
+/// ★★ **`Ledger` now delegates to these**, so the in-process simulation and a
+/// distributed run cannot diverge on what an acceptor does. Two copies of
+/// Paxos's acceptor rules would be two chances to get safety wrong.
+///
+/// ★★★ **Persistence is the caller's, and it is not optional.** An acceptor
+/// that forgets a promise across a restart can accept two different values for
+/// one slot, which is exactly the thing quorum overlap exists to prevent. This
+/// type is `Serialize`/`Deserialize` so a host can write it down; nothing here
+/// can force it to.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Acceptor {
     promised: Option<ProposalNumber>,
     accepted: Option<(ProposalNumber, Value)>,
 }
 
+impl Acceptor {
+    pub fn new() -> Acceptor {
+        Acceptor::default()
+    }
+
+    /// The highest number this acceptor has promised not to go below.
+    pub fn promised(&self) -> Option<&ProposalNumber> {
+        self.promised.as_ref()
+    }
+
+    /// What it has accepted, if anything.
+    pub fn accepted(&self) -> Option<&(ProposalNumber, Value)> {
+        self.accepted.as_ref()
+    }
+
+    /// `PREPARE(n)` — *promise not to accept anything below `n`, and tell the
+    /// proposer what you have already accepted.*
+    ///
+    /// ★ Refuses on `promised >= n`, so an equal number from a second proposer
+    /// does not get a free second promise.
+    pub fn on_prepare(&mut self, n: &ProposalNumber) -> Promise {
+        match &self.promised {
+            Some(p) if p >= n => Promise::Refused { promised: p.clone() },
+            _ => {
+                self.promised = Some(n.clone());
+                Promise::Granted { accepted: self.accepted.clone() }
+            }
+        }
+    }
+
+    /// `ACCEPT(n, v)` — *take this value unless something higher has been
+    /// promised since.*
+    pub fn on_accept(&mut self, n: &ProposalNumber, v: &Value) -> Accepted {
+        match &self.promised {
+            Some(p) if p > n => Accepted::Refused { promised: p.clone() },
+            _ => {
+                self.promised = Some(n.clone());
+                self.accepted = Some((n.clone(), v.clone()));
+                Accepted::Ok
+            }
+        }
+    }
+}
+
 /// The reply to `PREPARE(n)`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Promise {
     /// Granted, carrying whatever this acceptor has already accepted.
     Granted { accepted: Option<(ProposalNumber, Value)> },
@@ -215,7 +279,7 @@ pub enum Promise {
 }
 
 /// The reply to `ACCEPT(n, v)`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Accepted {
     Ok,
     Refused { promised: ProposalNumber },
@@ -299,15 +363,8 @@ impl Ledger {
                 .acceptors
                 .get_mut(*id)
                 .ok_or_else(|| ConsensusError::NotAMember((*id).to_string()))?;
-            match &a.promised {
-                Some(p) if p >= n => {
-                    out.push(((*id).to_string(), Promise::Refused { promised: p.clone() }))
-                }
-                _ => {
-                    a.promised = Some(n.clone());
-                    out.push(((*id).to_string(), Promise::Granted { accepted: a.accepted.clone() }))
-                }
-            }
+            // ★ The one definition of the rule, shared with the distributed path.
+            out.push(((*id).to_string(), a.on_prepare(n)));
         }
         Ok(out)
     }
@@ -325,16 +382,7 @@ impl Ledger {
                 .acceptors
                 .get_mut(*id)
                 .ok_or_else(|| ConsensusError::NotAMember((*id).to_string()))?;
-            match &a.promised {
-                Some(p) if p > n => {
-                    out.push(((*id).to_string(), Accepted::Refused { promised: p.clone() }))
-                }
-                _ => {
-                    a.promised = Some(n.clone());
-                    a.accepted = Some((n.clone(), v.clone()));
-                    out.push(((*id).to_string(), Accepted::Ok))
-                }
-            }
+            out.push(((*id).to_string(), a.on_accept(n, v)));
         }
         Ok(out)
     }
@@ -428,6 +476,41 @@ impl Round {
     }
 }
 
+/// *"v = highest-numbered accepted value seen, else own value"* — §V's one
+/// subtle line, as a function.
+///
+/// ★★★ **Extracted so the in-process and the distributed proposer share it.**
+/// This is the rule that makes Paxos safe: a proposer that ignored an
+/// already-accepted value could ratify a second, different one for the same
+/// slot. A host driving acceptors over a socket must apply the identical rule,
+/// and now it calls the identical code rather than reimplementing a sentence.
+pub fn adopt<'a>(
+    promises: impl IntoIterator<Item = &'a Promise>,
+    own: &Value,
+) -> Value {
+    let mut best: Option<(&ProposalNumber, &Value)> = None;
+    for p in promises {
+        if let Promise::Granted { accepted: Some((n, v)) } = p {
+            if best.as_ref().is_none_or(|(bn, _)| n > *bn) {
+                best = Some((n, v));
+            }
+        }
+    }
+    best.map(|(_, v)| v.clone()).unwrap_or_else(|| own.clone())
+}
+
+/// How many replies were grants. ★ A refusal and an unreachable node are
+/// **both** *not a grant*, and neither is counted — which is what makes a
+/// minority partition unable to write.
+pub fn granted<'a>(promises: impl IntoIterator<Item = &'a Promise>) -> usize {
+    promises.into_iter().filter(|p| matches!(p, Promise::Granted { .. })).count()
+}
+
+/// How many replies accepted.
+pub fn accepted_count<'a>(replies: impl IntoIterator<Item = &'a Accepted>) -> usize {
+    replies.into_iter().filter(|a| **a == Accepted::Ok).count()
+}
+
 /// Run one proposer's round against a quorum (§V's protocol, exactly).
 pub fn propose(
     ledger: &mut Ledger,
@@ -464,15 +547,7 @@ pub fn propose(
     }
 
     // v = highest-numbered accepted value seen, else own value.
-    let mut best: Option<(ProposalNumber, Value)> = None;
-    for (_, p) in &promises {
-        if let Promise::Granted { accepted: Some((n, v)) } = p {
-            if best.as_ref().is_none_or(|(bn, _)| n > bn) {
-                best = Some((n.clone(), v.clone()));
-            }
-        }
-    }
-    let value = best.map(|(_, v)| v).unwrap_or_else(|| own_value.clone());
+    let value = adopt(promises.iter().map(|(_, p)| p), &own_value);
 
     // ── ACCEPT(n, v) ────────────────────────────────────────────────────────
     let accepts = ledger.accept(&number, &value, quorum)?;
@@ -515,6 +590,82 @@ pub enum ConsensusError {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // ── the per-node acceptor ─────────────────────────────────────────
+
+    #[test]
+    fn an_acceptor_answers_the_two_questions_it_owes() {
+        let mut a = Acceptor::new();
+        let n1 = ProposalNumber::new(1, "alice");
+
+        assert_eq!(a.on_prepare(&n1), Promise::Granted { accepted: None });
+        assert_eq!(a.promised(), Some(&n1));
+        assert_eq!(a.on_accept(&n1, &json!("x")), Accepted::Ok);
+        assert_eq!(a.accepted(), Some(&(n1.clone(), json!("x"))));
+
+        // A later prepare learns what was accepted — the line the safety of
+        // the whole protocol rests on.
+        let n2 = ProposalNumber::new(2, "bob");
+        assert_eq!(a.on_prepare(&n2), Promise::Granted { accepted: Some((n1, json!("x"))) });
+    }
+
+    #[test]
+    fn an_equal_number_gets_no_second_promise() {
+        // ★ `>=`, not `>`: two proposers minting the same round would
+        //   otherwise each believe they held the promise.
+        let mut a = Acceptor::new();
+        let n = ProposalNumber::new(1, "alice");
+        assert!(matches!(a.on_prepare(&n), Promise::Granted { .. }));
+        assert_eq!(a.on_prepare(&n), Promise::Refused { promised: n });
+    }
+
+    #[test]
+    fn an_acceptor_survives_a_round_trip_through_json() {
+        // ★★★ A promise that does not survive a restart is a promise that can
+        //     be broken, and a broken promise here means two values chosen for
+        //     one slot. The type has to be writable down.
+        let mut a = Acceptor::new();
+        let n = ProposalNumber::new(3, "alice");
+        a.on_prepare(&n);
+        a.on_accept(&n, &json!({"op": "spend"}));
+
+        let text = serde_json::to_string(&a).expect("serialises");
+        let back: Acceptor = serde_json::from_str(&text).expect("round trips");
+        assert_eq!(back, a);
+        // And the restored acceptor still refuses what it promised against.
+        let mut back = back;
+        assert!(matches!(back.on_prepare(&ProposalNumber::new(2, "bob")), Promise::Refused { .. }));
+    }
+
+    #[test]
+    fn adopt_is_the_rule_both_proposers_use() {
+        let own = json!("mine");
+        assert_eq!(adopt(std::iter::empty(), &own), own, "nothing accepted → my value");
+
+        let low = Promise::Granted {
+            accepted: Some((ProposalNumber::new(1, "a"), json!("low"))),
+        };
+        let high = Promise::Granted {
+            accepted: Some((ProposalNumber::new(9, "a"), json!("high"))),
+        };
+        let refused = Promise::Refused { promised: ProposalNumber::new(99, "z") };
+        // ★★ The HIGHEST accepted wins, and a refusal carries nothing to adopt.
+        assert_eq!(adopt([&low, &high, &refused], &own), json!("high"));
+        assert_eq!(granted([&low, &high, &refused]), 2);
+    }
+
+    #[test]
+    fn an_unreachable_node_is_not_a_grant() {
+        // ★★★ A minority partition cannot write, and this is why: a node that
+        //     never answers contributes nothing to count. That is correctness,
+        //     not a limitation — the alternative is two halves each deciding.
+        let granted_only = [Promise::Granted { accepted: None }];
+        assert_eq!(granted(&granted_only), 1);
+        // Three-node body, quorum 2, one grant and one silence.
+        assert!(granted(&granted_only) < Body::majority(vec!["a".into(), "b".into(), "c".into()])
+            .expect("body")
+            .quorum_size());
+    }
 
     fn five() -> Body {
         Body::majority(

@@ -16,6 +16,9 @@ pub mod identity;
 pub mod ingest;
 pub mod orchie;
 pub mod peers;
+pub mod quorum;
+#[cfg(test)]
+mod quorum_test;
 #[cfg(test)]
 mod peers_test;
 pub mod store;
@@ -75,6 +78,8 @@ pub fn specta_builder() -> Builder {
         commands::publish_package,
         commands::install_package,
         commands::pay_royalty,
+        commands::get_bodies,
+        commands::share_ownership,
     ])
     // ★★★ The push channel, typed from the same Rust as the commands — so a
     //   listener the UI writes for an event that does not exist will not

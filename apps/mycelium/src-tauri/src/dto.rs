@@ -1189,3 +1189,39 @@ pub struct RoyaltyDto {
     pub circulation_before: String,
     pub circulation_after: String,
 }
+
+/// One co-owner of a shared Sustain, and whether this node can reach it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CoOwnerDto {
+    pub key: String,
+    pub handle: String,
+    /// ★★ Reachable means *there is an address and the peer is trusted* — not
+    /// that a round would succeed. A surface must not promise liveness it has
+    /// not tested.
+    pub reachable: bool,
+    pub is_self: bool,
+}
+
+/// A shared Sustain's body, as the Network screen sees it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct BodyDto {
+    pub sustain_id: String,
+    pub label: String,
+    pub owners: Vec<CoOwnerDto>,
+    /// How many must agree. Majority of the body.
+    pub quorum: u32,
+    /// How many are reachable right now, this node included.
+    pub reachable: u32,
+    /// ★★★ Whether a write could even be attempted. `false` means writes are
+    /// **refused**, not queued and not applied locally — the honest state
+    /// rather than a silent degradation.
+    pub can_write: bool,
+    /// ★ The Byzantine bound for this body size, reported because a two-node
+    /// body tolerates **zero** traitors and a person should know that.
+    pub tolerates_traitors: u32,
+    /// The highest log position this node has agreed anything for. `None` when
+    /// nothing has been agreed — which is not slot zero.
+    pub last_agreed: Option<u32>,
+}

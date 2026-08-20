@@ -16,7 +16,8 @@ use crate::dto::{
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
     AttentionDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
     InferenceDto, IngestDto, MessageDto, QuietDto, RuleDto, SourceDto,
-    InstallDto, LibraryDto, NetworkDto, PackageDto, PeerDto, RoyaltyDto, SupersededDto,
+    BodyDto, CoOwnerDto, InstallDto, LibraryDto, NetworkDto, PackageDto, PeerDto,
+    RoyaltyDto, SupersededDto,
     SyncDto,
     TransferLegDto, TransferResult, Verdict, WorldDto,
 };
@@ -1566,4 +1567,78 @@ pub fn pay_royalty(
         circulation_before: format!("{before:.0}"),
         circulation_after: format!("{after:.0}"),
     })
+}
+
+/// Every shared Sustain's body, and whether it could be written to now.
+#[tauri::command]
+#[specta::specta]
+pub fn get_bodies(world: State<'_, World>) -> Vec<BodyDto> {
+    let me = world.node_id().unwrap_or_default();
+    let book = world.peering().book();
+    let ids: Vec<(String, String, Vec<String>)> = world.with(|i| {
+        i.order()
+            .iter()
+            .filter_map(|id| {
+                let s = i.get(id)?;
+                if s.record.owners.is_empty() {
+                    return None;
+                }
+                Some((id.clone(), s.record.label.clone(), s.record.owners.clone()))
+            })
+            .collect()
+    });
+
+    ids.into_iter()
+        .map(|(sustain_id, label, owners)| {
+            let quorum = owners.len() / 2 + 1;
+            let dtos: Vec<CoOwnerDto> = owners
+                .iter()
+                .map(|key| {
+                    let is_self = *key == me;
+                    let peer = book.get(key);
+                    CoOwnerDto {
+                        key: key.clone(),
+                        handle: peer
+                            .map(|p| p.handle.clone())
+                            .unwrap_or_else(|| if is_self { "this node".into() } else { "unknown".into() }),
+                        // ★ This node is always reachable to itself; a peer needs
+                        //   an address AND trust before a round could even start.
+                        reachable: is_self
+                            || peer.is_some_and(|p| {
+                                p.address.is_some() && p.standing == Standing::Trusted
+                            }),
+                        is_self,
+                    }
+                })
+                .collect();
+            let reachable = dtos.iter().filter(|o| o.reachable).count();
+            let last_agreed = world.last_agreed(&sustain_id).map(|n| n as u32);
+            BodyDto {
+                sustain_id,
+                label,
+                owners: dtos,
+                quorum: quorum as u32,
+                reachable: reachable as u32,
+                can_write: reachable >= quorum,
+                tolerates_traitors: ((owners.len().saturating_sub(1)) / 3) as u32,
+                last_agreed,
+            }
+        })
+        .collect()
+}
+
+/// Declare a Sustain co-owned by a set of node keys.
+#[tauri::command]
+#[specta::specta]
+pub fn share_ownership(
+    world: State<'_, World>,
+    sustain_id: String,
+    // ★ Named `owners`, not `with`: `with` is a reserved word in strict-mode
+    //   TypeScript, so the generated binding would not parse. The typed
+    //   boundary caught it at `tsc`, which is what it is for.
+    owners: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let owners = world.share_ownership(&sustain_id, &owners)?;
+    trace!("{sustain_id} is now co-owned by {} node(s)", owners.len());
+    Ok(owners)
 }
