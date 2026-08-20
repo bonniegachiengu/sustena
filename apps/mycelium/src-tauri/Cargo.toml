@@ -59,6 +59,13 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac", "sha2"] }
 sha2 = "0.10"
 chacha20poly1305 = "0.10"
+# ★★★ The session layer. `x25519` for the ephemeral key exchange and `hkdf`
+# to turn its output into directional keys — both RustCrypto, both small, and
+# `curve25519-dalek` is already in the tree via `ed25519-dalek`. Deliberately
+# NOT a Noise framework: the pattern needed here is one round of signed
+# ephemerals, and a framework would be more surface than protocol.
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+hkdf = "0.12"
 rand_core = { version = "0.6", features = ["getrandom"] }
 getrandom = "0.2"
 

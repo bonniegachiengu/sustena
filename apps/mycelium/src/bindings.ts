@@ -1022,6 +1022,16 @@ listening: number | null;
  */
 unlocked: boolean; peers: PeerDto[]; 
 /**
+ * The wire protocol this node speaks. ★★★ Reported rather than a padlock:
+ * a version is checkable, and a padlock that is always green regardless
+ * is worse than none.
+ */
+protocol: number; 
+/**
+ * What a session actually provides, in the words of what was built.
+ */
+session: string; 
+/**
  * Sustains this node could offer — `(id, label)`. An authored definition
  * is absent, because v1 shares built-in templates only.
  */

@@ -33,7 +33,7 @@ use sustena_core::VectorClock;
 use crate::identity::Unlocked;
 use crate::store::{LoggedEvent, Store};
 use crate::quorum::{Acceptors, Slot};
-use crate::wire::{self, Frame, Handshake, SharedSpec, WireError, WireResult};
+use crate::wire::{self, Frame, Handshake, Session, SharedSpec, WireError, WireResult};
 use serde_json::Value;
 use sustena_core::consensus::{Accepted, Promise, ProposalNumber};
 
@@ -374,12 +374,16 @@ impl Peering {
             return Err(WireError::Locked);
         };
         let public_key = me.public_key();
-        let peer = wire::handshake(stream, &me, false)?;
+        // ★★★ The handshake now yields a SESSION, not a name. Everything below
+        //     reads and writes through it, so there is no code path on this
+        //     side that can speak cleartext to a peer.
+        let mut session = wire::handshake(stream, &me, false)?;
+        let peer = session.peer().clone();
         // ★★ Authenticated. Recorded, and still not trusted.
         let _ = self.edit(|b| b.seen(peer.public_key(), peer.handle(), None));
 
         loop {
-            let frame = match wire::recv(stream) {
+            let frame = match session.recv(stream) {
                 Ok(f) => f,
                 // A closed connection is how a session ends, not a failure.
                 Err(WireError::Io(_)) => return Ok(()),
@@ -389,17 +393,17 @@ impl Peering {
                 Frame::Catalogue => {
                     let shared = self.book().shared_with(peer.public_key());
                     let sustains = shared.into_iter().map(|id| (id.clone(), id)).collect();
-                    wire::send(stream, &Frame::Shared { sustains })?;
+                    session.send(stream, &Frame::Shared { sustains })?;
                 }
                 Frame::Want { sustain_id, have } => {
-                    self.answer_want(stream, &peer, &sustain_id, &have, &public_key)?;
+                    self.answer_want(&mut session, stream, &peer, &sustain_id, &have, &public_key)?;
                 }
                 Frame::Give { sustain_id, entries, .. } => {
-                    self.accept_give(stream, &peer, &sustain_id, entries, &public_key)?;
+                    self.accept_give(&mut session, stream, &peer, &sustain_id, entries, &public_key)?;
                 }
                 Frame::Prepare { sustain_id, slot, number } => {
                     if !self.co_owns(peer.public_key(), &sustain_id) {
-                        wire::send(
+                        session.send(
                             stream,
                             &Frame::Refused {
                                 rule: "co_owner".into(),
@@ -415,11 +419,11 @@ impl Peering {
                         .acceptors
                         .on_prepare(&Slot::new(&sustain_id, slot), &number)
                         .map_err(WireError::Io)?;
-                    wire::send(stream, &Frame::Promised { promise })?;
+                    session.send(stream, &Frame::Promised { promise })?;
                 }
                 Frame::Accept { sustain_id, slot, number, value } => {
                     if !self.co_owns(peer.public_key(), &sustain_id) {
-                        wire::send(
+                        session.send(
                             stream,
                             &Frame::Refused {
                                 rule: "co_owner".into(),
@@ -435,7 +439,7 @@ impl Peering {
                         .acceptors
                         .on_accept(&Slot::new(&sustain_id, slot), &number, &value)
                         .map_err(WireError::Io)?;
-                    wire::send(stream, &Frame::Voted { accepted })?;
+                    session.send(stream, &Frame::Voted { accepted })?;
                 }
                 other => {
                     return Err(WireError::Protocol(format!("unexpected frame: {other:?}")));
@@ -446,6 +450,7 @@ impl Peering {
 
     fn answer_want(
         &self,
+        session: &mut Session,
         stream: &mut TcpStream,
         peer: &Handshake,
         sustain_id: &str,
@@ -455,7 +460,7 @@ impl Peering {
         if !self.book().may_have(peer.public_key(), sustain_id) {
             // ★★★ Authenticated, and refused anyway. The second conjunct,
             //     visible on the wire.
-            return wire::send(
+            return session.send(
                 stream,
                 &Frame::Refused {
                     rule: "permitted".into(),
@@ -472,7 +477,7 @@ impl Peering {
             .into_iter()
             .filter_map(|e| serde_json::to_value(e).ok())
             .collect();
-        wire::send(
+        session.send(
             stream,
             &Frame::Give {
                 sustain_id: sustain_id.to_string(),
@@ -485,6 +490,7 @@ impl Peering {
 
     fn accept_give(
         &self,
+        session: &mut Session,
         stream: &mut TcpStream,
         peer: &Handshake,
         sustain_id: &str,
@@ -492,7 +498,7 @@ impl Peering {
         me: &str,
     ) -> WireResult<()> {
         if !self.book().may_have(peer.public_key(), sustain_id) {
-            return wire::send(
+            return session.send(
                 stream,
                 &Frame::Refused {
                     rule: "permitted".into(),
@@ -511,7 +517,7 @@ impl Peering {
             .read_replica(sustain_id, me)
             .map_err(|e| WireError::Io(e.to_string()))?;
         eprintln!("[peer] {} gave {} new entrie(s) for {sustain_id}", peer.handle(), written.len());
-        wire::send(
+        session.send(
             stream,
             &Frame::Give {
                 sustain_id: sustain_id.to_string(),
@@ -537,7 +543,8 @@ impl Peering {
     ) -> Result<SyncOutcome, String> {
         let mut stream = TcpStream::connect(address).map_err(|e| format!("cannot reach {address}: {e}"))?;
         wire::set_timeouts(&stream).map_err(|e| e.to_string())?;
-        let peer = wire::handshake(&mut stream, me, true).map_err(|e| e.to_string())?;
+        let mut session = wire::handshake(&mut stream, me, true).map_err(|e| e.to_string())?;
+        let peer = session.peer().clone();
         let key = peer.public_key().to_string();
 
         self.edit(|b| b.seen(&key, peer.handle(), Some(address.to_string())))?;
@@ -557,12 +564,13 @@ impl Peering {
             .map_err(|e| e.to_string())?;
 
         // ── pull ────────────────────────────────────────────────────────────
-        wire::send(
-            &mut stream,
-            &Frame::Want { sustain_id: sustain_id.to_string(), have: mine.frontier() },
-        )
-        .map_err(|e| e.to_string())?;
-        let reply = wire::recv(&mut stream).map_err(|e| e.to_string())?;
+        session
+            .send(
+                &mut stream,
+                &Frame::Want { sustain_id: sustain_id.to_string(), have: mine.frontier() },
+            )
+            .map_err(|e| e.to_string())?;
+        let reply = session.recv(&mut stream).map_err(|e| e.to_string())?;
         let (entries, theirs, spec) = match reply {
             Frame::Give { entries, frontier, spec, .. } => (entries, frontier, spec),
             Frame::Refused { rule, reason } => {
@@ -591,17 +599,18 @@ impl Peering {
             .filter_map(|e| serde_json::to_value(e).ok())
             .collect();
         let sent = outgoing.len();
-        wire::send(
-            &mut stream,
-            &Frame::Give {
-                sustain_id: sustain_id.to_string(),
-                entries: outgoing,
-                frontier: mine.frontier(),
-                spec: None,
-            },
-        )
-        .map_err(|e| e.to_string())?;
-        let ack = wire::recv(&mut stream).map_err(|e| e.to_string())?;
+        session
+            .send(
+                &mut stream,
+                &Frame::Give {
+                    sustain_id: sustain_id.to_string(),
+                    entries: outgoing,
+                    frontier: mine.frontier(),
+                    spec: None,
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        let ack = session.recv(&mut stream).map_err(|e| e.to_string())?;
         if let Frame::Refused { rule, reason } = ack {
             let why = format!("{reason} [{rule}]");
             self.edit(|b| b.note_error(&key, &why))?;
@@ -637,9 +646,9 @@ impl Peering {
         let mut stream =
             TcpStream::connect(address).map_err(|e| format!("cannot reach {address}: {e}"))?;
         wire::set_timeouts(&stream).map_err(|e| e.to_string())?;
-        wire::handshake(&mut stream, me, true).map_err(|e| e.to_string())?;
+        let mut session = wire::handshake(&mut stream, me, true).map_err(|e| e.to_string())?;
 
-        wire::send(
+        session.send(
             &mut stream,
             &Frame::Prepare {
                 sustain_id: sustain_id.to_string(),
@@ -648,7 +657,7 @@ impl Peering {
             },
         )
         .map_err(|e| e.to_string())?;
-        let promise = match wire::recv(&mut stream).map_err(|e| e.to_string())? {
+        let promise = match session.recv(&mut stream).map_err(|e| e.to_string())? {
             Frame::Promised { promise } => promise,
             Frame::Refused { rule, reason } => return Err(format!("{reason} [{rule}]")),
             other => return Err(format!("unexpected reply to PREPARE: {other:?}")),
@@ -659,7 +668,7 @@ impl Peering {
             return Ok((promise, None));
         }
 
-        wire::send(
+        session.send(
             &mut stream,
             &Frame::Accept {
                 sustain_id: sustain_id.to_string(),
@@ -669,7 +678,7 @@ impl Peering {
             },
         )
         .map_err(|e| e.to_string())?;
-        let accepted = match wire::recv(&mut stream).map_err(|e| e.to_string())? {
+        let accepted = match session.recv(&mut stream).map_err(|e| e.to_string())? {
             Frame::Voted { accepted } => accepted,
             Frame::Refused { rule, reason } => return Err(format!("{reason} [{rule}]")),
             other => return Err(format!("unexpected reply to ACCEPT: {other:?}")),

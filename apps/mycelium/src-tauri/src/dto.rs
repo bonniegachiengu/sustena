@@ -1064,6 +1064,12 @@ pub struct NetworkDto {
     /// The screen says which, rather than showing an idle network.
     pub unlocked: bool,
     pub peers: Vec<PeerDto>,
+    /// The wire protocol this node speaks. ★★★ Reported rather than a padlock:
+    /// a version is checkable, and a padlock that is always green regardless
+    /// is worse than none.
+    pub protocol: u32,
+    /// What a session actually provides, in the words of what was built.
+    pub session: String,
     /// Sustains this node could offer — `(id, label)`. An authored definition
     /// is absent, because v1 shares built-in templates only.
     pub shareable: Vec<(String, String)>,

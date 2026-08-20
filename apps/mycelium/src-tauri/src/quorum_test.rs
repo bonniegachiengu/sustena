@@ -134,12 +134,28 @@ fn two_concurrent_incomes_both_land_and_the_total_is_preserved() {
     // The loser was told which kind of refusal it was, and can retry.
     let (loser, winner, amount) = if a_ok { (&b, &a, 700.0) } else { (&a, &b, 300.0) };
     let why = if a_ok { b_why } else { a_why };
-    assert!(why.contains("slot"), "the refusal names the slot it lost: {why}");
+    // ★★ Either loss shape names the slot: the body chose someone else's write
+    //    (`lost_the_round`), or a higher number held the slot mid-round
+    //    (`outbid`). Both are retryable and neither is a reachability problem.
+    assert!(why.contains("slot"), "the refusal names the slot: {why}");
+    assert!(!why.contains("NOT applied"), "and is not a quorum failure: {why}");
 
     // Retry: sync first, so the loser recomputes against what actually landed.
     loser.world.sync_peer(&winner.address(), &id).expect("sync");
-    let (retried, retry_why) = loser.try_income(&id, amount, "retry");
-    assert!(retried, "the retry lands on the next slot: {retry_why}");
+    let mut retried = false;
+    let mut retry_why = String::new();
+    // ★ Up to three attempts: an `outbid` retry must mint a higher number, and
+    //   a competitor mid-round is a real race rather than a failure.
+    for _ in 0..3 {
+        let (ok, why) = loser.try_income(&id, amount, "retry");
+        retry_why = why;
+        if ok {
+            retried = true;
+            break;
+        }
+        loser.world.sync_peer(&winner.address(), &id).expect("sync");
+    }
+    assert!(retried, "the retry lands on a slot of its own: {retry_why}");
 
     // ★★★ Both sides, both writes, and the sum of the two intents.
     winner.world.sync_peer(&loser.address(), &id).expect("sync back");

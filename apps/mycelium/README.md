@@ -559,6 +559,26 @@ out of the transform and a title can be uppercase and still say `ρ`.
 reference and is not touched by anything here.
 
 
+## The wire
+
+Peers connect over TCP on the local network, added by hand — there is no
+discovery and no NAT traversal.
+
+★★★ **Every frame after the handshake is encrypted.** Each side sends an
+ephemeral X25519 public key inside its `Hello`, and the identity signature both
+sides already owed covers the **whole transcript** — protocol version, both
+nonces, both identity keys, both ephemerals. So the session key is agreed by
+ECDH, forward-secret (the ephemeral secret is consumed by the exchange and
+never written down), and bound to identities that were actually proved.
+
+There is **no unencrypted mode**. `handshake` returns a session or an error, the
+protocol version is inside the signed transcript so it cannot be rolled back,
+and a frame that arrives unsealed on a live session is dropped rather than read.
+
+Covered: confidentiality, tamper-detection, forward secrecy, authenticated
+peers. **Not covered:** post-quantum key exchange, a formal proof of the
+pattern, and rekeying on long-lived sessions.
+
 ## Packaging
 
 ```bash

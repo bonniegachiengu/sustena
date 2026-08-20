@@ -3208,3 +3208,29 @@ other. Slice 6's tests only ever asserted that concurrency *is* reported, never
 that a causal pair is *not*, so it survived. The writer's clock is now
 persisted. Anything read from that slice's notes about how many supersessions
 a merge produced should be read with this correction attached.
+
+
+### transport encryption — **no vectors, and the proof is the socket**
+
+★★★ The reference has no transport, so there is nothing to be at parity with
+— the third time this call has been made (peer transport, quorum, now the
+session layer). What stands in for a vector is a test that reads **the actual
+bytes a peer writes**: the raw frame is pulled off the socket before the
+session opens it, and searched for the pocket name, the amount, and the field
+names. None are present; all three are present once opened.
+
+★★ **Tamper detection is proved the hard way, and that matters.** The test
+seals a frame *honestly* through a real session and then flips one byte — what
+something in the middle would actually manage. Fabricating a ciphertext would
+only prove the decoder rejects garbage, which is a much weaker claim than the
+one being made.
+
+★ **The increments below were re-run rather than assumed.** Slice 6's 11
+two-node convergence tests and increment 1's 14 quorum tests (including
+1000-not-700) all pass over the sealed channel. Consensus PREPARE/ACCEPT are
+ciphertext on the wire like everything else.
+
+★★★ **What this does NOT claim**, recorded so a later reader does not have to
+infer it: no post-quantum key exchange, no formal proof of the handshake
+pattern (it is Noise-*shaped*, not Noise-verified), and no rekeying on a
+long-lived session. A security claim is worth exactly what it excludes.

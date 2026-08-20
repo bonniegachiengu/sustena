@@ -12,6 +12,8 @@
 //! would produce — and a relaunch rebuilds it from the log alone.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::SeqCst;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value};
@@ -150,6 +152,9 @@ pub struct World {
     identity: Mutex<Option<Unlocked>>,
     /// Where the keypair lives on disk.
     identities: IdentityStore,
+    /// ★ A monotonic proposal round, seeded from the clock at first use. See
+    /// `propose_write` on why a retry must outbid its own previous attempt.
+    round: AtomicU64,
     /// The package registry. ★ Its own store beside the logs, like the ingest
     /// queue: a package is not state, it is a thing that MIGHT become state
     /// once a gate says it may.
@@ -214,11 +219,13 @@ impl World {
 
         let peering = Arc::new(Peering::at(&store_root, store.clone()));
         let arena = Arena::at(&store_root);
+        let round = AtomicU64::new(0);
 
         Ok(World {
             operators: Registry::default(),
             peering,
             arena,
+            round,
             inner: Mutex::new(Inner { sustains, order, selected }),
             store,
             economy: Mutex::new(Economy::open(DEFAULT_HANDLE)),
@@ -951,7 +958,16 @@ impl World {
             params: params.clone(),
             by: my_key.clone(),
         };
-        let number = ProposalNumber::new(now_secs(), &my_key);
+        // ★★ Monotonic per node, seeded from the clock. A retry after being
+        //    outbid must mint a HIGHER number than its own last attempt — two
+        //    attempts inside one second would otherwise tie, and the retry
+        //    would lose to the same competitor forever.
+        let round = self
+            .round
+            .fetch_update(SeqCst, SeqCst, |prev| Some(now_secs().max(prev + 1)))
+            .map(|prev| now_secs().max(prev + 1))
+            .unwrap_or_else(|_| now_secs());
+        let number = ProposalNumber::new(round, &my_key);
         let slot_key = Slot::new(sustain_id, slot);
 
         // ── PREPARE ─────────────────────────────────────────────────────────
@@ -999,11 +1015,22 @@ impl World {
         promises.extend(round_promises.iter().map(|(_, _, p)| p.clone()));
 
         if granted(&promises) < quorum {
-            return Ok(Agreement::NoQuorum {
-                slot,
-                reached: granted(&promises),
-                needed: quorum,
-                unreachable,
+            // ★★★ **Refused is not absent.** If anyone answered with a higher
+            //     promise, this round was OUTBID — a live competitor, not an
+            //     offline family. Collapsing the two produced the
+            //     self-contradicting *"0 of 2 answered · unreachable: none"*.
+            let outbid = promises.iter().find_map(|p| match p {
+                Promise::Refused { promised } => Some(promised.clone()),
+                Promise::Granted { .. } => None,
+            });
+            return Ok(match outbid {
+                Some(by) => Agreement::Outbid { slot, by },
+                None => Agreement::NoQuorum {
+                    slot,
+                    reached: granted(&promises),
+                    needed: quorum,
+                    unreachable,
+                },
             });
         }
 
@@ -1018,11 +1045,18 @@ impl World {
         votes.extend(accepts.iter().map(|(_, _, a)| a.clone()));
 
         if accepted_count(&votes) < quorum {
-            return Ok(Agreement::NoQuorum {
-                slot,
-                reached: accepted_count(&votes),
-                needed: quorum,
-                unreachable,
+            let outbid = votes.iter().find_map(|a| match a {
+                Accepted::Refused { promised } => Some(promised.clone()),
+                Accepted::Ok => None,
+            });
+            return Ok(match outbid {
+                Some(by) => Agreement::Outbid { slot, by },
+                None => Agreement::NoQuorum {
+                    slot,
+                    reached: accepted_count(&votes),
+                    needed: quorum,
+                    unreachable,
+                },
             });
         }
 

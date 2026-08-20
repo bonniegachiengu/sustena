@@ -1306,6 +1306,12 @@ pub fn get_network(world: State<'_, World>) -> NetworkDto {
         listening: world.peering().port(),
         unlocked: world.is_unlocked(),
         peers: book.all().into_iter().map(peer_dto).collect(),
+        protocol: crate::wire::PROTOCOL,
+        // ★★ The claim is exactly what the code does and no more — no
+        //    post-quantum, no formal proof, no rekeying. Overclaiming here
+        //    would be the one place it really matters.
+        session: "X25519 ephemeral · signed by both identity keys ·                   XChaCha20-Poly1305 per direction"
+            .to_string(),
         shareable,
     }
 }

@@ -131,6 +131,37 @@ export function Network() {
                   </Note>
                 )}
               </Show>
+
+              {/* ★★★ What a session actually provides, named — not a padlock
+                  that is green whatever happened. */}
+              <Note>
+                <Row>
+                  <Label>every session</Label>
+                  <Spacer />
+                  <Badge tone="ok">encrypted · wire v{n().protocol}</Badge>
+                </Row>
+                <Caption>{n().session}</Caption>
+                <Caption>
+                  Each connection agrees a fresh key by X25519, and both sides sign the
+                  whole transcript with their identity keys — so the key is{" "}
+                  <strong>bound to who you are talking to</strong> and a middle cannot
+                  substitute its own. The ephemeral secret is never written down, so a key
+                  recovered later cannot open a conversation already had.
+                </Caption>
+                <Caption>
+                  <strong>There is no unencrypted mode to fall back to.</strong> A peer
+                  speaking the older cleartext protocol is refused before any key material
+                  is exchanged, and a frame that arrives unsealed on a live session is
+                  dropped rather than read.
+                </Caption>
+                <Caption>
+                  Covered: confidentiality, tamper-detection (a changed byte fails its tag
+                  and the frame is dropped), forward secrecy, and authenticated peers.{" "}
+                  <strong>Not covered:</strong> post-quantum key exchange, a formal proof
+                  of the pattern, and rekeying on a long-lived session — named because a
+                  security claim is worth exactly what it excludes.
+                </Caption>
+              </Note>
             </Card>
 
             {/* ── the peers ──────────────────────────────────────────────── */}

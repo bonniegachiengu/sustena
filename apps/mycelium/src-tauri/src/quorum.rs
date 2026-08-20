@@ -103,6 +103,17 @@ pub enum Agreement {
     /// The body chose a **different** write for this slot. Nothing was
     /// applied. ★ Retryable, against the state that write produces.
     Lost { slot: u64, to: String, chose: Box<Write> },
+    /// ★★★ The promise phase was **refused** because a higher proposal number
+    /// already holds this slot — someone else is mid-round. Nothing was
+    /// applied, and this is **not** a reachability problem: the co-owners
+    /// answered, they just answered *no, somebody outbid you*.
+    ///
+    /// ★★ Found by the suite under parallel load, where two proposers minted
+    /// numbers in the same second and the key tie-break decided. Reporting it
+    /// as `NoQuorum` produced the honestly-confusing *"0 of 2 answered —
+    /// unreachable: none named"*, which is the report telling on itself. A
+    /// refused promise and an absent one are different facts.
+    Outbid { slot: u64, by: ProposalNumber },
     /// Not enough co-owners answered. ★★ Nothing was applied, and nothing was
     /// half-applied: the round is abandoned before any local write.
     NoQuorum { slot: u64, reached: usize, needed: usize, unreachable: Vec<String> },
@@ -118,6 +129,7 @@ impl Agreement {
         match self {
             Agreement::Won { .. } => None,
             Agreement::Lost { .. } => Some("lost_the_round"),
+            Agreement::Outbid { .. } => Some("outbid"),
             Agreement::NoQuorum { .. } => Some("no_quorum"),
         }
     }
@@ -129,6 +141,10 @@ impl Agreement {
                 "slot {slot} went to {}'s {} — nothing here was applied; retry against the state that leaves",
                 short(to),
                 chose.operator
+            ),
+            Agreement::Outbid { slot, by } => format!(
+                "slot {slot} is mid-round for a higher proposal from {} — nothing here was                  applied; retry, and this node will outbid it in turn",
+                short(&by.proposer)
             ),
             Agreement::NoQuorum { reached, needed, unreachable, .. } => format!(
                 "{reached} of {needed} co-owners answered — this write was NOT applied. \
@@ -302,6 +318,15 @@ mod tests {
                 by: "bb".repeat(32),
             }),
         };
+        let outbid = Agreement::Outbid {
+            slot: 3,
+            by: ProposalNumber::new(9, "cc".repeat(32).as_str()),
+        };
+        assert_eq!(outbid.rule(), Some("outbid"));
+        assert!(outbid.describe().contains("retry"));
+        assert!(!outbid.describe().contains("NOT applied"), "not a reachability problem");
+        assert!(!outbid.won());
+
         let none = Agreement::NoQuorum {
             slot: 3,
             reached: 1,
