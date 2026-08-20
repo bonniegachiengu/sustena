@@ -38,6 +38,8 @@ import {
   type Publication,
   type BodyDto,
   type CoOwnerDto,
+  type OfferDto,
+  type PeerShelfDto,
   type MessageDto,
   type FeedDto,
   type InferenceDto,
@@ -79,6 +81,8 @@ export type {
   Publication,
   BodyDto,
   CoOwnerDto,
+  OfferDto,
+  PeerShelfDto,
   MessageDto,
   FeedDto,
   InferenceDto,
@@ -260,6 +264,13 @@ export const engine = {
   /** Declare a Sustain co-owned by these node keys. */
   shareOwnership: async (sustainId: string, withKeys: string[]): Promise<string[]> =>
     unwrap(await commands.shareOwnership(sustainId, withKeys)),
+
+  // ── packages over the wire ────────────────────────────────────────
+  /** What each connected peer is offering. Only peers you chose to add. */
+  shelves: async (): Promise<PeerShelfDto[]> => await commands.getPeerShelves(),
+  /** Fetch one package by content hash. Records it; does not install it. */
+  fetchPackage: async (address: string, contentHash: string): Promise<string> =>
+    unwrap(await commands.fetchPackage(address, contentHash)),
 };
 
 /* ── reading real state, honestly ─────────────────────────────────────────

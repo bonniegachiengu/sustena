@@ -54,6 +54,9 @@ use sustena_core::package::{
     Kind, Origin, PackageProvenance,
 };
 use sustena_core::royalty::{settle, Licence, Recipients, RevenueType, Settlement};
+use crate::arena::content_hash as content_hash_of;
+use crate::wire::PackageOffer;
+use sustena_core::package::{Authenticity, Integrity};
 use crate::quorum::{Agreement, Slot, Write};
 use sustena_core::consensus::{
     accepted_count, adopt, granted, Accepted, Body, Promise, ProposalNumber,
@@ -1078,6 +1081,122 @@ impl World {
         &self.arena
     }
 
+    /// Push this node's catalogue to the peering, so a peer can browse it.
+    ///
+    /// ★★ Only packages whose bytes are **intact** are offered. A record that
+    /// no longer matches its own hash is this node's problem to notice, not
+    /// something to hand to somebody else and let them discover.
+    /// Re-read the catalogue this node offers.
+    ///
+    /// ★ Public because the arena can change under the world — a package
+    /// edited on disk, or recorded through `arena()` directly — and a stale
+    /// offer list would advertise something this node no longer has. `publish`
+    /// and `fetch_package` call it for you; this is for everything else.
+    pub fn refresh_offers(&self) {
+        self.install_offers();
+    }
+
+    fn install_offers(&self) {
+        let offers = self
+            .arena
+            .all()
+            .into_iter()
+            .filter(|p| p.provenance().integrity == Integrity::Intact)
+            .filter_map(|p| {
+                let value = serde_json::to_value(&p).ok()?;
+                Some((
+                    PackageOffer {
+                        id: p.id.clone(),
+                        name: p.name.clone(),
+                        kind: p.kind.label().to_string(),
+                        version: p.version.clone(),
+                        description: p.description.clone(),
+                        author: p.author.clone(),
+                        author_handle: p.author_handle.clone(),
+                        content_hash: p.content_hash.clone(),
+                        signed: p.signature.is_some(),
+                    },
+                    value,
+                ))
+            })
+            .collect();
+        self.peering.set_offers(offers);
+    }
+
+    /// What a peer is offering. ★ A listing; nothing is fetched or installed.
+    pub fn peer_offers(&self, address: &str) -> Result<(String, Vec<PackageOffer>), String> {
+        let me = self
+            .identity
+            .lock()
+            .expect("identity lock")
+            .clone()
+            .ok_or_else(|| "this node is locked".to_string())?;
+        self.peering.offers_from(address, &me)
+    }
+
+    /// Fetch one package from a peer and record it locally.
+    ///
+    /// ★★★ **This does NOT install it, and that separation is the point.**
+    /// Arriving is not installing; a fetched package lands in the local arena
+    /// exactly like a locally-published one and then faces
+    /// [`World::install`] — **the same function, unmodified**. There is no
+    /// wire-specific install path, so `Admitted`'s no-public-constructor
+    /// property holds for a peer's package identically.
+    ///
+    /// ★★★ **Two different tampering questions, both asked.** The session's
+    /// AEAD already proves nothing changed **in flight** — that is increment 2
+    /// and it is not re-litigated here. This checks the other one: that the
+    /// bytes the sender actually held hash to what was asked for. A package
+    /// mangled at rest on the sender's disk passes the AEAD perfectly and is
+    /// caught here.
+    pub fn fetch_package(&self, address: &str, content_hash: &str) -> Result<Package, String> {
+        let me = self
+            .identity
+            .lock()
+            .expect("identity lock")
+            .clone()
+            .ok_or_else(|| "this node is locked".to_string())?;
+        let (peer, value) = self.peering.fetch_from(address, &me, content_hash)?;
+
+        let mut package: Package = serde_json::from_value(value)
+            .map_err(|e| format!("that is not a package: {e}"))?;
+
+        // ★★★ Hashed here, from the bytes that arrived — never trusted from
+        //     the record, which is the field an attacker would edit.
+        let actual = content_hash_of(&package.spec);
+        if actual != content_hash {
+            return Err(format!(
+                "refused on arrival: asked for {content_hash}, the bytes hash to {actual} —                  this is not the package that was requested"
+            ));
+        }
+        if package.content_hash != actual {
+            return Err(format!(
+                "refused on arrival: the package claims hash {} but its bytes hash to {actual}",
+                package.content_hash
+            ));
+        }
+
+        // ★★ The origin is rewritten to what it actually is. A package cannot
+        //    arrive claiming to have been written here — `MemeProvenance`'s rule
+        //    (*an import can never read as native*), enforced at the boundary.
+        package.origin = Origin::FromPeer { peer };
+
+        // ★ Authenticity is checked by `provenance()` on every read, so a
+        //   forged signature does not need catching twice — but a package that
+        //   arrives already forged is worth refusing at the door rather than
+        //   storing and refusing later.
+        if package.provenance().authenticity == Authenticity::Forged {
+            return Err(format!(
+                "refused on arrival: {} does not verify against the author key it names",
+                package.name
+            ));
+        }
+
+        self.arena.record(package.clone())?;
+        self.install_offers();
+        Ok(package)
+    }
+
     /// Every juul this host has, across every balance.
     ///
     /// ★★★ The number a royalty must not change. `settle` only transfers,
@@ -1217,6 +1336,7 @@ impl World {
             //    it cannot itself consume.
             _ => {
                 self.arena.record(package.clone())?;
+                self.install_offers();
                 Ok((package, verdict))
             }
         }

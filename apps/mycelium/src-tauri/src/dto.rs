@@ -1231,3 +1231,36 @@ pub struct BodyDto {
     /// nothing has been agreed — which is not slot zero.
     pub last_agreed: Option<u32>,
 }
+
+/// One package a peer says it holds. ★ A listing, never the artifact.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OfferDto {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub version: String,
+    pub description: String,
+    pub author: String,
+    pub author_handle: String,
+    pub content_hash: String,
+    /// ★★ Shown **before** fetching, so authorship is a thing you decide on
+    /// rather than discover afterwards.
+    pub signed: bool,
+    /// Whether this node already holds these exact bytes.
+    pub already_here: bool,
+}
+
+/// What one peer is offering, or why nothing could be listed.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerShelfDto {
+    pub peer: String,
+    pub handle: String,
+    pub address: String,
+    pub packages: Vec<OfferDto>,
+    /// ★★★ The honest failure. A peer that could not be reached says so;
+    /// it does not appear as a peer with nothing to offer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unreachable: Option<String>,
+}

@@ -37,7 +37,13 @@ import {
   Value,
   sx as S,
 } from "../ui";
-import { engine, type InstallDto, type PackageDto, type RoyaltyDto } from "../lib/engine";
+import {
+  engine,
+  type InstallDto,
+  type PackageDto,
+  type PeerShelfDto,
+  type RoyaltyDto,
+} from "../lib/engine";
 
 const KINDS = ["definition", "widget", "operator", "strategy"] as const;
 
@@ -46,6 +52,9 @@ const short = (h: string) => (h.length > 16 ? `${h.slice(0, 10)}…` : h);
 export function Library() {
   const [target, setTarget] = createSignal<string | null>(null);
   const [lib, { refetch }] = createResource(target, (t) => engine.library(t));
+  // ★ Not fetched on mount: listing a peer opens a real socket to it, and a
+  //   screen should not go knocking on the network because it was rendered.
+  const [shelves, setShelves] = createSignal<PeerShelfDto[] | null>(null);
   const [busy, setBusy] = createSignal<string | null>(null);
   const [failure, setFailure] = createSignal<string | null>(null);
   const [last, setLast] = createSignal<InstallDto | null>(null);
@@ -121,6 +130,98 @@ export function Library() {
               </Show>
             </Card>
 
+            {/* ── from peers ───────────────────────────────────── */}
+            <Card
+              title="from peers"
+              right={
+                <Chip
+                  onClick={() =>
+                    void run("shelves", async () => setShelves(await engine.shelves()))
+                  }
+                >
+                  {busy() === "shelves" ? "asking…" : "look"}
+                </Chip>
+              }
+            >
+              <Caption>
+                Only the peers you added and trusted — there is no index, no mesh search
+                and no global catalogue. Looking opens a real connection to each of them
+                over the encrypted session; nothing is transferred by looking.
+              </Caption>
+
+              <Show when={shelves()}>
+                {(list) => (
+                  <Show
+                    when={list().length > 0}
+                    fallback={
+                      <Empty>
+                        no trusted peers with an address · add one on the Network screen
+                      </Empty>
+                    }
+                  >
+                    <For each={list()}>
+                      {(shelf) => (
+                        <Note>
+                          <Row>
+                            <Value>{shelf.handle}</Value>
+                            <Meta>{short(shelf.peer)}</Meta>
+                            <Spacer />
+                            <Meta>{shelf.address}</Meta>
+                          </Row>
+                          {/* ★★★ Unreachable is said, not shown as an empty shelf. */}
+                          <Show
+                            when={!shelf.unreachable}
+                            fallback={<Caption>could not be reached · {shelf.unreachable}</Caption>}
+                          >
+                            <Show
+                              when={shelf.packages.length > 0}
+                              fallback={<Caption>reachable, and offering nothing</Caption>}
+                            >
+                              <For each={shelf.packages}>
+                                {(o) => (
+                                  <Row>
+                                    <Value>{o.name}</Value>
+                                    <Meta>{o.kind}</Meta>
+                                    <Badge tone={o.signed ? "ok" : "quiet"}>
+                                      {o.signed ? "signed" : "unsigned"}
+                                    </Badge>
+                                    <Spacer />
+                                    <Show
+                                      when={!o.alreadyHere}
+                                      fallback={<Meta>already here</Meta>}
+                                    >
+                                      <Chip
+                                        onClick={() =>
+                                          void run(`fetch-${o.contentHash}`, async () => {
+                                            await engine.fetchPackage(
+                                              shelf.address,
+                                              o.contentHash,
+                                            );
+                                            setShelves(await engine.shelves());
+                                          })
+                                        }
+                                      >
+                                        {busy() === `fetch-${o.contentHash}` ? "fetching…" : "fetch"}
+                                      </Chip>
+                                    </Show>
+                                  </Row>
+                                )}
+                              </For>
+                              <Caption>
+                                Fetching copies it here. It is <strong>not installed</strong> by
+                                arriving — it joins the shelf above and faces exactly the gate a
+                                package written on this machine faces.
+                              </Caption>
+                            </Show>
+                          </Show>
+                        </Note>
+                      )}
+                    </For>
+                  </Show>
+                )}
+              </Show>
+            </Card>
+
             <Show when={last()}>{(r) => <Outcome result={r()} />}</Show>
             <Show when={paid()}>{(r) => <Royalty result={r()} />}</Show>
 
@@ -164,11 +265,11 @@ export function Library() {
                 unchanged by construction — nothing is minted and nothing leaves.
               </Caption>
               <Caption>
-                <strong>Local registry only.</strong> Publish, browse and install happen on
-                this node. Packages can ride the peer transport, and that increment is not
-                built — it needs a frame on the wire and a decision about whether a peer's
-                catalogue is pulled or pushed, which is a design question rather than a
-                missing line.
+                <strong>Pull, from peers you chose.</strong> A package travels when you
+                ask for it by content hash — a peer never sends an artifact unsolicited,
+                because an unsolicited-artifact channel is an unsolicited-code channel.
+                What is <strong>not</strong> here: discovery of packages across a mesh, a
+                trust score with anything behind it, and orders.
               </Caption>
             </Card>
           </>

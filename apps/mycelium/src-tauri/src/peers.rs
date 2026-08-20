@@ -218,6 +218,12 @@ pub struct Peering {
     path: PathBuf,
     store: Store,
     listening: Mutex<Option<u16>>,
+    /// What this node will offer a peer, and hand over on request.
+    ///
+    /// ★★ A snapshot the world refreshes, for the same reason `set_specs` and
+    /// `set_bodies` are: the listener must not hold the lock every operator
+    /// call needs.
+    offers: Mutex<Vec<(crate::wire::PackageOffer, Value)>>,
     /// This node's acceptors. ★★★ A co-owner asking to write must be
     /// answered even while nothing local is happening — that is what being
     /// part of a body means — so the listener owns them directly.
@@ -255,9 +261,15 @@ impl Peering {
             listening: Mutex::new(None),
             identity: Mutex::new(None),
             specs: Mutex::new(BTreeMap::new()),
+            offers: Mutex::new(Vec::new()),
             acceptors: Arc::new(Acceptors::at(root)),
             bodies: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Tell the peering what it may offer. `(listing, the artifact itself)`.
+    pub fn set_offers(&self, offers: Vec<(crate::wire::PackageOffer, Value)>) {
+        *self.offers.lock().expect("offers lock") = offers;
     }
 
     pub fn acceptors(&self) -> &Arc<Acceptors> {
@@ -400,6 +412,40 @@ impl Peering {
                 }
                 Frame::Give { sustain_id, entries, .. } => {
                     self.accept_give(&mut session, stream, &peer, &sustain_id, entries, &public_key)?;
+                }
+                Frame::Offered => {
+                    // ★★ Every authenticated peer may SEE the catalogue. Seeing
+                    //    is not having: the artifact only moves on an explicit
+                    //    fetch, and installing it still faces the whole gate.
+                    let packages = self
+                        .offers
+                        .lock()
+                        .expect("offers lock")
+                        .iter()
+                        .map(|(offer, _)| offer.clone())
+                        .collect();
+                    session.send(stream, &Frame::Offers { packages })?;
+                }
+                Frame::Fetch { content_hash } => {
+                    let found = self
+                        .offers
+                        .lock()
+                        .expect("offers lock")
+                        .iter()
+                        .find(|(offer, _)| offer.content_hash == content_hash)
+                        .map(|(_, package)| package.clone());
+                    match found {
+                        Some(package) => session.send(stream, &Frame::Delivery { package })?,
+                        None => session.send(
+                            stream,
+                            &Frame::Refused {
+                                rule: "not_offered".into(),
+                                reason: format!(
+                                    "this node holds no package with content hash {content_hash}"
+                                ),
+                            },
+                        )?,
+                    }
                 }
                 Frame::Prepare { sustain_id, slot, number } => {
                     if !self.co_owns(peer.public_key(), &sustain_id) {
@@ -629,6 +675,59 @@ impl Peering {
 }
 
 impl Peering {
+    /// Ask a peer what it offers.
+    ///
+    /// ★ A listing, not a transfer. Nothing is fetched and nothing is
+    /// installed by looking.
+    pub fn offers_from(
+        &self,
+        address: &str,
+        me: &Unlocked,
+    ) -> Result<(String, Vec<crate::wire::PackageOffer>), String> {
+        let mut stream =
+            TcpStream::connect(address).map_err(|e| format!("cannot reach {address}: {e}"))?;
+        wire::set_timeouts(&stream).map_err(|e| e.to_string())?;
+        let mut session = wire::handshake(&mut stream, me, true).map_err(|e| e.to_string())?;
+        let peer = session.peer().public_key().to_string();
+
+        session.send(&mut stream, &Frame::Offered).map_err(|e| e.to_string())?;
+        match session.recv(&mut stream).map_err(|e| e.to_string())? {
+            Frame::Offers { packages } => Ok((peer, packages)),
+            Frame::Refused { rule, reason } => Err(format!("{reason} [{rule}]")),
+            other => Err(format!("unexpected reply: {other:?}")),
+        }
+    }
+
+    /// Fetch one package **by content hash**.
+    ///
+    /// ★★★ The hash is the request AND the check. What comes back is hashed
+    /// again here and compared to what was asked for — so a peer cannot answer
+    /// a request for one artifact with a different one, whether by mistake or
+    /// otherwise. The session's AEAD already proves nothing changed **in
+    /// flight**; this proves the sender had the artifact it claimed, which is
+    /// a different thing and needs its own check.
+    pub fn fetch_from(
+        &self,
+        address: &str,
+        me: &Unlocked,
+        content_hash: &str,
+    ) -> Result<(String, Value), String> {
+        let mut stream =
+            TcpStream::connect(address).map_err(|e| format!("cannot reach {address}: {e}"))?;
+        wire::set_timeouts(&stream).map_err(|e| e.to_string())?;
+        let mut session = wire::handshake(&mut stream, me, true).map_err(|e| e.to_string())?;
+        let peer = session.peer().public_key().to_string();
+
+        session
+            .send(&mut stream, &Frame::Fetch { content_hash: content_hash.to_string() })
+            .map_err(|e| e.to_string())?;
+        match session.recv(&mut stream).map_err(|e| e.to_string())? {
+            Frame::Delivery { package } => Ok((peer, package)),
+            Frame::Refused { rule, reason } => Err(format!("{reason} [{rule}]")),
+            other => Err(format!("unexpected reply: {other:?}")),
+        }
+    }
+
     /// Run §V's two phases against **one** co-owner over a real socket.
     ///
     /// ★★ One connection per round rather than a held session: a co-owner

@@ -156,6 +156,25 @@ pub enum Frame {
     Accept { sustain_id: String, slot: u64, number: ProposalNumber, value: Value },
     /// The reply to [`Frame::Accept`].
     Voted { accepted: Accepted },
+    /// *What packages would you let me have?*
+    ///
+    /// ★★★ **PULL, not push.** A node asks; a peer never sends an artifact
+    /// unsolicited. Three reasons, and the first is the one that matters: an
+    /// unsolicited-artifact channel is an unsolicited-**code** channel, and
+    /// there is no version of that worth having. It also keeps installing
+    /// intentional — you receive what you asked for — and it runs with the
+    /// trust direction rather than against it, since you already chose to
+    /// peer with them. Push has no justification here that pull does not
+    /// already cover.
+    Offered,
+    /// The reply: what this node is willing to hand over. ★ Metadata only —
+    /// enough to decide, never the artifact itself.
+    Offers { packages: Vec<PackageOffer> },
+    /// *Give me this one.* Identified by **content hash**, not by id: an id is
+    /// a label, and a hash is what the bytes actually are.
+    Fetch { content_hash: String },
+    /// The artifact, as the sender holds it.
+    Delivery { package: Value },
     /// One sealed frame. ★ The ciphertext is opaque here on purpose: the
     /// session, not the protocol, decides what it says.
     Sealed { ciphertext: String },
@@ -191,6 +210,28 @@ pub struct SharedSpec {
 /// version is inside the signed transcript. A peer speaking `1` expects
 /// cleartext after the handshake and is refused before any key material is
 /// exchanged — which is the downgrade defence, not a courtesy.
+/// What a peer says it holds, before anything is transferred.
+///
+/// ★★ Deliberately not the `Package` itself: a listing is for deciding, and
+/// handing over the artifact to answer *what do you have* would make browsing
+/// indistinguishable from installing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PackageOffer {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub version: String,
+    pub description: String,
+    /// The author's key — the identity. ★ Shown so a person can decide
+    /// *before* fetching, rather than discovering the author afterwards.
+    pub author: String,
+    pub author_handle: String,
+    /// ★★★ What to ask for. The fetch is by hash, so what arrives can be
+    /// checked against what was asked for.
+    pub content_hash: String,
+    pub signed: bool,
+}
+
 pub const PROTOCOL: u32 = 2;
 
 // ---------------------------------------------------------------------------

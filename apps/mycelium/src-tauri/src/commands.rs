@@ -16,7 +16,8 @@ use crate::dto::{
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
     AttentionDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
     InferenceDto, IngestDto, MessageDto, QuietDto, RuleDto, SourceDto,
-    BodyDto, CoOwnerDto, InstallDto, LibraryDto, NetworkDto, PackageDto, PeerDto,
+    BodyDto, CoOwnerDto, InstallDto, LibraryDto, NetworkDto, OfferDto, PackageDto,
+    PeerDto, PeerShelfDto,
     RoyaltyDto, SupersededDto,
     SyncDto,
     TransferLegDto, TransferResult, Verdict, WorldDto,
@@ -1647,4 +1648,67 @@ pub fn share_ownership(
     let owners = world.share_ownership(&sustain_id, &owners)?;
     trace!("{sustain_id} is now co-owned by {} node(s)", owners.len());
     Ok(owners)
+}
+
+/// What every trusted, addressable peer is offering.
+///
+/// ★★★ **Only peers you are connected to.** There is no index, no mesh
+/// search and no global catalogue — this is exactly the list of nodes you
+/// chose to peer with, and the screen says so rather than implying a market.
+#[tauri::command]
+#[specta::specta]
+pub fn get_peer_shelves(world: State<'_, World>) -> Vec<PeerShelfDto> {
+    let here: Vec<String> =
+        world.arena().all().into_iter().map(|p| p.content_hash).collect();
+    world
+        .peering()
+        .book()
+        .all()
+        .into_iter()
+        .filter(|p| p.standing == Standing::Trusted)
+        .filter_map(|p| p.address.clone().map(|a| (p.clone(), a)))
+        .map(|(peer, address)| match world.peer_offers(&address) {
+            Ok((_, offers)) => PeerShelfDto {
+                peer: peer.public_key.clone(),
+                handle: peer.handle.clone(),
+                address,
+                packages: offers
+                    .into_iter()
+                    .map(|o| OfferDto {
+                        already_here: here.contains(&o.content_hash),
+                        id: o.id,
+                        name: o.name,
+                        kind: o.kind,
+                        version: o.version,
+                        description: o.description,
+                        author: o.author,
+                        author_handle: o.author_handle,
+                        content_hash: o.content_hash,
+                        signed: o.signed,
+                    })
+                    .collect(),
+                unreachable: None,
+            },
+            Err(why) => PeerShelfDto {
+                peer: peer.public_key.clone(),
+                handle: peer.handle.clone(),
+                address,
+                packages: vec![],
+                unreachable: Some(why),
+            },
+        })
+        .collect()
+}
+
+/// Fetch one package from a peer. ★★ Records it; does **not** install it.
+#[tauri::command]
+#[specta::specta]
+pub fn fetch_package(
+    world: State<'_, World>,
+    address: String,
+    content_hash: String,
+) -> Result<String, String> {
+    let package = world.fetch_package(&address, &content_hash)?;
+    trace!("fetched {} from {address}", package.name);
+    Ok(package.id)
 }

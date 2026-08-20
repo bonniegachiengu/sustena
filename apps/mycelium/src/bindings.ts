@@ -476,6 +476,27 @@ async shareOwnership(sustainId: string, owners: string[]) : Promise<Result<strin
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * What every trusted, addressable peer is offering.
+ * 
+ * ★★★ **Only peers you are connected to.** There is no index, no mesh
+ * search and no global catalogue — this is exactly the list of nodes you
+ * chose to peer with, and the screen says so rather than implying a market.
+ */
+async getPeerShelves() : Promise<PeerShelfDto[]> {
+    return await TAURI_INVOKE("get_peer_shelves");
+},
+/**
+ * Fetch one package from a peer. ★★ Records it; does **not** install it.
+ */
+async fetchPackage(address: string, contentHash: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("fetch_package", { address, contentHash }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -1037,6 +1058,19 @@ session: string;
  */
 shareable: ([string, string])[] }
 /**
+ * One package a peer says it holds. ★ A listing, never the artifact.
+ */
+export type OfferDto = { id: string; name: string; kind: string; version: string; description: string; author: string; authorHandle: string; contentHash: string; 
+/**
+ * ★★ Shown **before** fetching, so authorship is a thing you decide on
+ * rather than discover afterwards.
+ */
+signed: boolean; 
+/**
+ * Whether this node already holds these exact bytes.
+ */
+alreadyHere: boolean }
+/**
  * Whether the principal may run one operator, as the engine judges it.
  */
 export type OperatorAccessDto = { operator: string; 
@@ -1147,6 +1181,15 @@ shares: string[];
  * `None` means **never synced**, which is not zero.
  */
 lastSynced: string | null; lastError: string | null }
+/**
+ * What one peer is offering, or why nothing could be listed.
+ */
+export type PeerShelfDto = { peer: string; handle: string; address: string; packages: OfferDto[]; 
+/**
+ * ★★★ The honest failure. A peer that could not be reached says so;
+ * it does not appear as a peer with nothing to offer.
+ */
+unreachable?: string | null }
 /**
  * A pocket, at summary scale.
  * 

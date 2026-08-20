@@ -3234,3 +3234,25 @@ ciphertext on the wire like everything else.
 infer it: no post-quantum key exchange, no formal proof of the handshake
 pattern (it is Noise-*shaped*, not Noise-verified), and no rekeying on a
 long-lived session. A security claim is worth exactly what it excludes.
+
+
+### packages over the transport — **the no-bypass property, across a wire**
+
+★★★ The reference has publish and browse and **no install and no transport**,
+so once again there is nothing to be at parity with — R2 spec, the fourth time
+this call has been recorded (peer transport, quorum, session, now this).
+
+★★★ **What is actually asserted is a structural property rather than a
+behaviour**: a package that arrived over a wire is *recorded* and then passed to
+`World::install`, the same function a locally-published package goes through.
+There is no second install path to audit, which is why slice 7's
+`Admitted`-has-no-public-constructor guarantee carries across the network for
+free. The test that matters shows a **broken** package transferring perfectly
+and then being refused by `editing::typecheck` in the gate's own words — coming
+from a peer bought it visibility and nothing else.
+
+★★ **Two tampering checks, deliberately not merged.** Increment 2's AEAD
+proves nothing changed *in flight*; the content hash proves the sender held
+what it claimed. They catch different things: a package mangled at rest on the
+sender's disk passes the AEAD perfectly. Merging them into one "verified" flag
+would have hidden exactly that case.

@@ -8,6 +8,8 @@
 pub mod arena;
 #[cfg(test)]
 mod arena_test;
+#[cfg(test)]
+mod arena_wire_test;
 pub mod commands;
 pub mod dto;
 pub mod definitions;
@@ -80,6 +82,8 @@ pub fn specta_builder() -> Builder {
         commands::pay_royalty,
         commands::get_bodies,
         commands::share_ownership,
+        commands::get_peer_shelves,
+        commands::fetch_package,
     ])
     // ★★★ The push channel, typed from the same Rust as the commands — so a
     //   listener the UI writes for an event that does not exist will not
