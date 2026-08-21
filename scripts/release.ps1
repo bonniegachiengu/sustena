@@ -145,11 +145,17 @@ Ok "tag $tag is free"
 # So: exit code is the truth, stderr text is not. EAP is lowered for the call
 # and restored immediately after.
 # ---------------------------------------------------------------------------
+# ★ `| Out-Host` is load-bearing, not decoration. Without it the tool's own
+#   output goes to the PIPELINE, so this function returns an array of
+#   [every line it printed..., the exit code] and the caller's `-ne 0` test is
+#   comparing against a list. That produced a refusal reading
+#   "tests failed (exit  running 1288 tests". Out-Host sends the output to the
+#   console where it belongs and leaves the pipeline clean for the exit code.
 function Native([scriptblock]$cmd) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $cmd
+        & $cmd | Out-Host
         return $LASTEXITCODE
     }
     finally { $ErrorActionPreference = $prev }
