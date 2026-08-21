@@ -1,13 +1,30 @@
 # Changelog
 
 Every released version of Sustena, newest first. Versions are `MAJOR.MINOR.PATCH`
-and the single source of truth is the `VERSION` file at the repo root — running
+and the single source of truth is the `VERSION` file at the repo root â€” running
 `scripts/release.ps1` is the only thing that should change it.
 
 While the version starts with `0.`, the shape of things is still allowed to
-move: a **minor** bump (0.1 → 0.2) is where new capability lands and where
-something may change how it behaves, and a **patch** bump (0.2.0 → 0.2.1) is a
+move: a **minor** bump (0.1 â†’ 0.2) is where new capability lands and where
+something may change how it behaves, and a **patch** bump (0.2.0 â†’ 0.2.1) is a
 fix that does not add anything.
+
+## v0.2.0 - 2026-08-21
+
+Working channels, one-command releases, and CI that finally covers the live Rust build.
+Peer transport with quorum-gated writes and encrypted sessions; packages over the wire; a trust reading with real signals behind it; Orchie on Android; the panel-scroll and Android-launch fixes.
+
+- fix(devops): keep the tool's output out of the exit code
+- fix(devops): exit codes decide, not stderr text
+- chore(devops): working channels, one version, one release command
+- fix(mycelium): the debug APK aborted before its first frame; gate the bindings export to desktop
+- fix(mycelium): a panel taller than the view scrolls, as a layout primitive
+- feat(android): Orchie on a phone — debug APK, engine embedded
+- feat(trust,orders): a reading with something behind it, and juul orders
+- feat(arena): packages over the transport, with no wire-specific install
+- feat(wire): authenticated, encrypted, forward-secret sessions
+- chore(repo): untrack a stray SQLite journal
+- feat(quorum): agreement before the append — 1000, not 700
 
 ## v0.1.0 - 2026-08-19
 
@@ -17,11 +34,11 @@ produced them, so the history is honest about what shipped when._
 
 The first Sustena you can install. Phase B's Rust engine (`sustena-core`) and
 the Mycelium cockpit, packaged as real Windows installers with the engine
-compiled in — no server, no runtime to install alongside it.
+compiled in â€” no server, no runtime to install alongside it.
 
 - **The engine.** `state = fold(events)`, the admission gate, typed predicates,
   composition and roll-up, the simulator, the curated feed, and the operative
-  layer — ported slice by slice from the Python reference and measured against
+  layer â€” ported slice by slice from the Python reference and measured against
   it with shared conformance vectors, with every divergence recorded rather
   than smoothed over.
 - **Mycelium**, the cockpit: Monitor, Console, Composition, Constellation,

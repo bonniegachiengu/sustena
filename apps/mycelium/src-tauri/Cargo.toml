@@ -1,13 +1,13 @@
 [package]
 name = "mycelium"
-version = "0.1.0"
-description = "Mycelium — the Sustena cockpit. A Tauri v2 host with sustena-core compiled in."
+version = "0.2.0"
+description = "Mycelium â€” the Sustena cockpit. A Tauri v2 host with sustena-core compiled in."
 edition = "2021"
 rust-version = "1.82"
 
 [lib]
 name = "mycelium_lib"
-# ★★★ **The mobile crate-types are back, and the note that removed them was
+# â˜…â˜…â˜… **The mobile crate-types are back, and the note that removed them was
 #     re-tested rather than inherited.** An earlier slice recorded that
 #     `cdylib`/`staticlib` made a Windows integration-test binary fail to load
 #     with STATUS_ENTRYPOINT_NOT_FOUND -- a real observation at the time, and
@@ -16,15 +16,15 @@ name = "mycelium_lib"
 #     host suite was re-run with all three on. See the commit for the result.
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-# ★★★ **The helper bins are gated, and the reason is what the installer
+# â˜…â˜…â˜… **The helper bins are gated, and the reason is what the installer
 #     shipped.** `src/bin/` is auto-discovered, so a release build produced
-#     `export_bindings.exe` and `smoke.exe` alongside the app — and Tauri
+#     `export_bindings.exe` and `smoke.exe` alongside the app â€” and Tauri
 #     bundles what it finds in `target/release`, so the first NSIS package
 #     genuinely installed a bindings generator onto a person's machine.
 #     Declaring them with `required-features` keeps them out of a default
 #     build; they are still one flag away for the two things that need them.
 #
-# ★ `smoke` in particular writes to a scratch store and prints an engine
+# â˜… `smoke` in particular writes to a scratch store and prints an engine
 #   walkthrough. It is a proof, not a product, and it has no business in a
 #   Start menu.
 [[bin]]
@@ -45,15 +45,15 @@ required-features = ["dev-bins"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# ★★★ The engine, compiled straight into the host. Not a network hop, not a
-# server — the same crate `examples/household_run.rs` drives, linked in.
+# â˜…â˜…â˜… The engine, compiled straight into the host. Not a network hop, not a
+# server â€” the same crate `examples/household_run.rs` drives, linked in.
 sustena-core = { path = "../../../sustena-core" }
 
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 
-# ★★ The typed boundary. See `dto.rs` for why these live HERE and not in the
+# â˜…â˜… The typed boundary. See `dto.rs` for why these live HERE and not in the
 # core: ADR-0001 fixes the core's dependencies at serde/serde_json/thiserror.
 specta = { version = "=2.0.0-rc.22", features = ["serde_json"] }
 specta-typescript = "=0.0.9"
@@ -62,8 +62,8 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac", "sha2"] }
 sha2 = "0.10"
 chacha20poly1305 = "0.10"
-# ★★★ The session layer. `x25519` for the ephemeral key exchange and `hkdf`
-# to turn its output into directional keys — both RustCrypto, both small, and
+# â˜…â˜…â˜… The session layer. `x25519` for the ephemeral key exchange and `hkdf`
+# to turn its output into directional keys â€” both RustCrypto, both small, and
 # `curve25519-dalek` is already in the tree via `ed25519-dalek`. Deliberately
 # NOT a Noise framework: the pattern needed here is one round of signed
 # ephemerals, and a framework would be more surface than protocol.
