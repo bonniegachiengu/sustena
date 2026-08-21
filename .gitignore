@@ -180,3 +180,6 @@ updater.key*
 # Release signatures produced at bundle time; regenerated every build.
 *.msi.sig
 *.exe.sig
+
+# Transient output of scripts/release.ps1
+release-run.log

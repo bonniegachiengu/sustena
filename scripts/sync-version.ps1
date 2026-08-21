@@ -50,8 +50,11 @@ if ($Version) {
     if ($Version -notmatch '^\d+\.\d+\.\d+$') {
         throw "Version must be MAJOR.MINOR.PATCH (got '$Version')."
     }
-    Set-Content -Path $versionFile -Value $Version -Encoding utf8 -NoNewline
-    Add-Content -Path $versionFile -Value "" -Encoding utf8
+    # NOT Set-Content -Encoding utf8: on PowerShell 5.1 that writes a BOM, and
+    # this file is read by pwsh on Linux in CI and by anything else that wants a
+    # bare version string. A BOM in a one-line data file is a trap waiting for
+    # whichever tool reads it without stripping one.
+    [System.IO.File]::WriteAllText($versionFile, "$Version`n", (New-Object System.Text.UTF8Encoding $false))
 }
 
 if (-not (Test-Path $versionFile)) { throw "No VERSION file at $versionFile" }
