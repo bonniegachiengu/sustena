@@ -1,17 +1,130 @@
 # Badge (add to README.md):
 # ![CI](https://github.com/bonniegachiengu/sustena/actions/workflows/ci.yml/badge.svg)
+#
+# WHAT THIS IS FOR: `main` can never go red. Every push and every pull request
+# runs the whole gate, so a working channel cannot be merged into `main` while
+# it is broken.
+#
+# PARALLELISM: these jobs use the runners' own default -j. The `-j 2` ceiling in
+# scripts/release.ps1 is a property of the LOCAL machine (a cold build there
+# exhausted memory and crashed rustc), not of the project. Runners have their
+# own memory and do not need it.
 
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev, "feat/**", "fix/**", "chore/**"]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
+
+# A newer push to the same branch makes the older run pointless -- cancel it
+# rather than queueing behind it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test-api:
-    name: Backend Tests (pytest)
+  # =========================================================================
+  # PHASE B -- the Rust engine and the Mycelium host. This is the live build,
+  # and until now CI did not cover it at all.
+  # =========================================================================
+  core:
+    name: Engine (sustena-core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sustena-core
+
+      - name: Tests
+        run: cd sustena-core && cargo test --all-targets
+
+      - name: Clippy (warnings are errors)
+        run: cd sustena-core && cargo clippy --all-targets -- -D warnings
+
+  host:
+    name: Host (mycelium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri's Linux build needs these. Without them the host crate fails to
+      # configure and the failure reads like a Rust error, which it is not.
+      - name: System dependencies for Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/mycelium/src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The host crate embeds the frontend at compile time, so dist/ must exist
+      # before cargo runs or the build fails on a missing asset directory.
+      - name: Build frontend (needed before the host compiles)
+        run: cd apps/mycelium && npm ci && npm run build
+
+      - name: Tests
+        run: cd apps/mycelium/src-tauri && cargo test --all-targets
+
+      - name: Clippy (warnings are errors)
+        run: cd apps/mycelium/src-tauri && cargo clippy --all-targets -- -D warnings
+
+  frontend:
+    name: Frontend (TypeScript strict + Vite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/mycelium/package-lock.json
+
+      - run: cd apps/mycelium && npm ci
+
+      - name: Typecheck (strict)
+        run: cd apps/mycelium && npx tsc --noEmit
+
+      - name: Build
+        run: cd apps/mycelium && npm run build
+
+  versions:
+    name: Version fields agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Catches the one mistake the release script exists to prevent: a version
+      # edited by hand in one manifest and not in the others.
+      - name: Check VERSION is propagated
+        shell: pwsh
+        run: ./scripts/sync-version.ps1 -Check
+
+  # =========================================================================
+  # PHASE A -- the frozen Python reference. Kept green because it is the
+  # correctness oracle the engine is measured against (ADR-0001, Decision 1),
+  # not because it is still being developed.
+  # =========================================================================
+  reference-api:
+    name: Reference oracle (pytest, frozen)
     runs-on: ubuntu-latest
     env:
       ENVIRONMENT: development
@@ -38,8 +151,8 @@ jobs:
       - name: Run tests
         run: cd apps/api && python -m pytest tests/ -q --tb=short
 
-  build-web:
-    name: Frontend Build (Vite)
+  reference-web:
+    name: Reference frontend (frozen)
     runs-on: ubuntu-latest
 
     steps:
