@@ -113,6 +113,12 @@ export const card = style({
   background: vars.color.bgSurface,
   borderRadius: vars.radius.md,
   minWidth: 0,
+  // ★★★ **`min-height: 0`, and it is not decoration.** A flex column defaults
+  //     to `min-height: auto`, which refuses to shrink below its content — so
+  //     a `Card scroll` grew to fit its body and the body never scrolled,
+  //     however much overflow there was. The exact `min-width: 0` trap, one
+  //     axis over, and the reason a tall card clipped instead of scrolling.
+  minHeight: 0,
   display: "flex",
   flexDirection: "column",
 });

@@ -49,8 +49,16 @@ export const body = style({
 export const panelSlot = style({
   minWidth: 0,
   minHeight: 0,
+  // ★★ The slot itself never scrolls — the shell chrome (topbar, rail, status
+  //    belt) has to stay put. What scrolls is inside a panel.
   overflow: "hidden",
   display: "grid",
+  // ★★★ **The row is CONSTRAINED, not auto.** A grid's implicit row is
+  //     `auto`, which sizes to its content — so a tall panel grows past the
+  //     slot and is silently clipped by the `hidden` above. `minmax(0, 1fr)`
+  //     pins the row to the slot's own height, which is what gives everything
+  //     inside a definite height to scroll within.
+  gridTemplateRows: "minmax(0, 1fr)",
 });
 
 /* ── Split — the cockpit's two-column panel ─────────────────────────────── */
@@ -60,18 +68,45 @@ export const panelSlot = style({
  * column below `md`. Every panel uses it, which is why they all behave the same
  * way when the window narrows.
  */
+/**
+ * ★★★ **One constrained row — the fix for a real clipping bug, and the reason
+ * every panel can scroll at all.**
+ *
+ * A grid with only `gridTemplateColumns` gets an implicit row of `auto`, which
+ * sizes to its CONTENT. So a tall panel grew past its `overflow: hidden`
+ * parent and the overflow was **silently clipped and unreachable** — no
+ * scrollbar, because nothing in the chain had a definite height to scroll
+ * within. It only showed on a MAXIMISED window, because the constellation
+ * graph is sized to the panel's width: wider window → taller graph → the
+ * summary beneath it fell off the bottom, while the same screen fitted fine in
+ * a smaller window.
+ *
+ * `minmax(0, 1fr)` pins the row to the split's own height instead. The `0`
+ * minimum is the load-bearing half: a bare `1fr` still refuses to shrink below
+ * its content, which is the same trap `min-width: 0` exists for one axis over.
+ */
+const ROW = "minmax(0, 1fr)";
+
+/**
+ * Below `md` the columns stack and the SPLIT is what scrolls, so the row goes
+ * back to `auto` — a constrained row here would clip the stack instead.
+ * ★ Two independent scrollers stacked on a phone is a trap; one is correct.
+ */
+const STACKED = { gridTemplateRows: "auto", overflowY: "auto" } as const;
+
 export const split = styleVariants({
   even: [
     {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
+      gridTemplateRows: ROW,
       gap: vars.space.lg,
       padding: vars.space.lg,
       minHeight: 0,
       minWidth: 0,
       overflow: "hidden",
       "@media": {
-        [bp.md]: { gridTemplateColumns: "1fr", overflowY: "auto", gap: vars.space.md },
+        [bp.md]: { ...STACKED, gridTemplateColumns: "1fr", gap: vars.space.md },
         [bp.sm]: { padding: vars.space.sm },
       },
     },
@@ -81,13 +116,14 @@ export const split = styleVariants({
     {
       display: "grid",
       gridTemplateColumns: "minmax(420px, 1fr) minmax(320px, 420px)",
+      gridTemplateRows: ROW,
       gap: vars.space.lg,
       padding: vars.space.lg,
       minHeight: 0,
       minWidth: 0,
       overflow: "hidden",
       "@media": {
-        [bp.md]: { gridTemplateColumns: "1fr", overflowY: "auto", gap: vars.space.md },
+        [bp.md]: { ...STACKED, gridTemplateColumns: "1fr", gap: vars.space.md },
         [bp.sm]: { padding: vars.space.sm },
       },
     },
@@ -97,13 +133,14 @@ export const split = styleVariants({
     {
       display: "grid",
       gridTemplateColumns: "minmax(300px, 400px) 1fr",
+      gridTemplateRows: ROW,
       gap: vars.space.lg,
       padding: vars.space.lg,
       minHeight: 0,
       minWidth: 0,
       overflow: "hidden",
       "@media": {
-        [bp.md]: { gridTemplateColumns: "1fr", overflowY: "auto", gap: vars.space.md },
+        [bp.md]: { ...STACKED, gridTemplateColumns: "1fr", gap: vars.space.md },
         [bp.sm]: { padding: vars.space.sm },
       },
     },
