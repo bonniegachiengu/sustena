@@ -179,6 +179,10 @@ export default function App() {
           {(id) => (
             <Lock
               identity={id()}
+              /* ★ The door wears the face that is asking. On a phone that is
+                 Orchie's, because this is the first screen anyone sees and it
+                 was the cockpit's technical briefing for everybody. */
+              face={face()}
               onUnlocked={() => {
                 void refreshIdentity().then(() => void openCockpit());
               }}
