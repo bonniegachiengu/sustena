@@ -1440,10 +1440,39 @@ After completing each numbered sprint subtask (e.g. 6.1, 6.2, …):
 
 Do not begin the next subtask until Bonnie replies. One subtask per conversation turn.
 
-### Commits
-Conventional commits, **direct to main** (no feature branches, no PRs).
+### Commits — SUPERSEDED 21 Aug 2026, see `DEVELOPMENT.md`
+
+> **The old rule was: "conventional commits, direct to main (no feature
+> branches, no PRs)."** That was right while Sustena was one person building one
+> thing in one line, and it is wrong now that `main` is the line real installers
+> are cut from. It is replaced by working channels.
+
+**The model now — `main` is protected and always releasable:**
+
+- **`main`** — always stable, always releasable, protected. Releases and tags are
+  cut from here and nowhere else. Nothing lands on it that has not been through CI.
+- **`dev`** — the integration branch. Finished work merges here first, so that
+  independently-built pieces meet each other before they meet `main`.
+- **`feat/<name>` / `fix/<name>` / `chore/<name>`** — working channels, branched
+  off `dev`, developed in parallel, merged back when green, then deleted.
+
+The flow: `feat/x` off `dev` → work → CI green → merge to `dev` → merge `dev` to
+`main` → release from `main`. **Do not commit directly to `main`.**
+
+Conventional commit messages are unchanged and still required. Push after every
+commit, to the channel you are on — the old "push to main after every commit" is
+now "push to your channel after every commit".
+
+**Releases are one command**, never a hand-edited version number:
+`scripts/release.ps1 -Bump patch|minor|major`. The single source of truth for the
+version is the `VERSION` file; four manifests are propagated from it by
+`scripts/sync-version.ps1`, and CI fails if they ever drift apart.
+
+**`DEVELOPMENT.md` is the plain-language version of all of this**, written for
+Bonnie rather than for a tool. If the two ever disagree, `DEVELOPMENT.md` is the
+one he reads, so fix it there first.
+
 **Commit each sprint task before starting the next one.**
-**Push to GitHub (`git push origin main`) immediately after every commit — no exceptions.**
 ```
 feat(scope): description
 fix(scope): description

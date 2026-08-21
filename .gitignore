@@ -163,3 +163,20 @@ desktop.ini
 apps/mycelium/node_modules/
 apps/mycelium/dist/
 apps/mycelium/src-tauri/gen/
+
+# ---------------------------------------------------------------------------
+# Update signing keys. The private half of the updater keypair signs every
+# release; anyone holding it can ship software that installed copies of
+# Mycelium will trust and run. It lives OUTSIDE this repository (the documented
+# home is ~/.sustena/), and these patterns exist as a second line of defence in
+# case one is ever created in here by accident. The .pub half is public and is
+# meant to be committed -- it is deliberately not matched.
+# ---------------------------------------------------------------------------
+*.key
+updater.key*
+.sustena/
+!*.pub
+
+# Release signatures produced at bundle time; regenerated every build.
+*.msi.sig
+*.exe.sig
