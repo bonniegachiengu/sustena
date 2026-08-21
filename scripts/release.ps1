@@ -346,13 +346,38 @@ if (-not $SkipApps) {
     $out = 'C:\Users\DELL\dev\sustena-installers'
     New-Item -ItemType Directory -Force -Path $out | Out-Null
 
-    $msi = Get-ChildItem "$repo\apps\mycelium\src-tauri\target\release\bundle\msi\*.msi" -EA SilentlyContinue | Select-Object -First 1
-    $nsis = Get-ChildItem "$repo\apps\mycelium\src-tauri\target\release\bundle\nsis\*.exe" -EA SilentlyContinue | Select-Object -First 1
+    # ★★★ **Match the VERSION, never "the first one".**
+    #
+    # Tauri does not clean the bundle directory, so every release ever built is
+    # still sitting there. `Select-Object -First 1` picked whichever the
+    # filesystem happened to enumerate first -- and on the v0.3.0 cut that was
+    # the v0.2.0 installer, which got copied out and RENAMED to 0.3.0. It was
+    # caught by its byte size still matching the older build. A wrongly-named
+    # installer is worse than a missing one: it looks like the release and
+    # installs the previous version, and nothing downstream can tell.
+    #
+    # `-like "*$next*"` is matched against the filename, which Tauri builds from
+    # the version, so the file is selected by the thing that makes it correct.
+    # Sorted newest-first only to break a tie deterministically.
+    $bundleRoot = "$repo\apps\mycelium\src-tauri\target\release\bundle"
+    $msi = Get-ChildItem "$bundleRoot\msi\*.msi" -EA SilentlyContinue |
+        Where-Object { $_.Name -like "*$next*" } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $nsis = Get-ChildItem "$bundleRoot\nsis\*.exe" -EA SilentlyContinue |
+        Where-Object { $_.Name -like "*$next*" } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     $apk = "$repo\apps\mycelium\src-tauri\gen\android\app\build\outputs\apk\arm64\debug\app-arm64-debug.apk"
 
-    if ($msi) { Copy-Item -Force $msi.FullName (Join-Path $out "Mycelium-Sustena-$next-x64.msi"); Ok "MSI  -> Mycelium-Sustena-$next-x64.msi" }
-    if ($nsis) { Copy-Item -Force $nsis.FullName (Join-Path $out "Mycelium-Sustena-$next-x64-setup.exe"); Ok "NSIS -> Mycelium-Sustena-$next-x64-setup.exe" }
-    if (Test-Path $apk) { Copy-Item -Force $apk (Join-Path $out "Mycelium-Orchie-$next-arm64-debug.apk"); Ok "APK  -> Mycelium-Orchie-$next-arm64-debug.apk" }
+    # ★ A bundle that was supposed to be built and cannot be found for THIS
+    #   version is a failure, not a thing to pass over quietly.
+    if (-not $msi) { RevertAll "no MSI matching version $next in $bundleRoot\msi -- refusing to stage another version's installer" }
+    if (-not $nsis) { RevertAll "no NSIS installer matching version $next in $bundleRoot\nsis" }
+    if (-not (Test-Path $apk)) { RevertAll "no Android APK at $apk" }
+
+    Copy-Item -Force $msi.FullName (Join-Path $out "Mycelium-Sustena-$next-x64.msi")
+    Ok "MSI  -> Mycelium-Sustena-$next-x64.msi   (from $($msi.Name))"
+    Copy-Item -Force $nsis.FullName (Join-Path $out "Mycelium-Sustena-$next-x64-setup.exe")
+    Ok "NSIS -> Mycelium-Sustena-$next-x64-setup.exe   (from $($nsis.Name))"
+    Copy-Item -Force $apk (Join-Path $out "Mycelium-Orchie-$next-arm64-debug.apk")
+    Ok "APK  -> Mycelium-Orchie-$next-arm64-debug.apk"
 }
 
 # ===========================================================================
