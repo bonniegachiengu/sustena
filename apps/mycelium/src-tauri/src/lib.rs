@@ -97,16 +97,35 @@ pub fn specta_builder() -> Builder {
 
 /// ★★★ Write `src/bindings.ts` from the Rust types.
 ///
-/// Called on every **debug** start, which is tauri-specta's own documented
-/// pattern and has a property a build step would not: the bindings cannot be
-/// stale, because running the app regenerates them. Change a field in
-/// `dto.rs`, run the app, and the TypeScript build breaks until the UI agrees.
+/// Called on every **desktop debug** start, which is tauri-specta's own
+/// documented pattern and has a property a build step would not: the bindings
+/// cannot be stale, because running the app regenerates them. Change a field
+/// in `dto.rs`, run the app, and the TypeScript build breaks until the UI
+/// agrees.
 ///
 /// ★ It is here rather than in an integration test because a test binary that
 /// links the Tauri runtime fails to load on Windows with
 /// `STATUS_ENTRYPOINT_NOT_FOUND`. Named rather than hidden: the export is real
 /// either way, this is only *where* it is triggered from.
-#[cfg(debug_assertions)]
+///
+/// ★★★ **`not(mobile)`, and it is the whole of a real crash.** A debug APK
+/// has `debug_assertions` on, so on a phone this ran and tried to write
+/// `../src/bindings.ts` relative to the process working directory — which is
+/// `/` on Android, and read-only. The `.expect` then aborted the process
+/// before the first frame:
+///
+/// ```text
+/// panicked at src\lib.rs: the TypeScript bindings must generate:
+///   Io(Os { code: 30, kind: ReadOnlyFilesystem })
+/// F libc: Fatal signal 6 (SIGABRT)
+/// ```
+///
+/// ★★ The gate is not a suppressed error. There is no source tree on the
+/// phone, so there is no `bindings.ts` to keep honest — the operation is
+/// meaningless there rather than failing there. On desktop the hard `.expect`
+/// stays exactly as it was, because that is where the staleness it prevents
+/// can actually happen.
+#[cfg(all(debug_assertions, not(mobile)))]
 fn export_bindings(builder: &Builder) {
     use specta_typescript::Typescript;
     builder
@@ -123,7 +142,9 @@ fn export_bindings(builder: &Builder) {
 pub fn run() {
     let builder = specta_builder();
 
-    #[cfg(debug_assertions)]
+    // ★ Desktop only — see `export_bindings`. On a device this wrote to a
+    //   read-only filesystem and aborted the process before the first frame.
+    #[cfg(all(debug_assertions, not(mobile)))]
     export_bindings(&builder);
 
     tauri::Builder::default()
