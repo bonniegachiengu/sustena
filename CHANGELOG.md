@@ -9,6 +9,15 @@ move: a **minor** bump (0.1 → 0.2) is where new capability lands and where
 something may change how it behaves, and a **patch** bump (0.2.0 → 0.2.1) is a
 fix that does not add anything.
 
+## v0.3.0 - 2026-08-21
+
+Orchie is a phone app now, not the cockpit shrunk to fit.
+Bigger everything you tap, the keyboard finally gets out of the way, taps answer instantly, and the classifying job is the first thing on the screen.
+
+- feat(orchie): a phone app, not a cockpit shrunk to fit
+- fix(devops): read the changelog as UTF-8, and repair what was mangled
+- fix(devops): write VERSION without a byte-order mark
+
 ## v0.2.0 - 2026-08-21
 
 Working channels, one-command releases, and CI that finally covers the live Rust build.
