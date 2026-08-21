@@ -130,12 +130,37 @@ Ok "tag $tag is free"
 # ===========================================================================
 # 1. THE GATE -- red anywhere means no release
 # ===========================================================================
+# ---------------------------------------------------------------------------
+# Run a native tool and return its EXIT CODE, which is the only thing that
+# actually says whether it worked.
+#
+# WHY THIS EXISTS. cargo, npx and gradle all write ordinary progress to stderr.
+# Under PowerShell 5.1, when a native command's stderr is redirected, each line
+# comes back wrapped in a NativeCommandError record -- and with
+# $ErrorActionPreference = 'Stop' that is TERMINATING. The script would abort on
+# a tool that exited 0 and printed "Compiling ...". It cost one failed release
+# run to find: clippy produced no output and the script died, while the same
+# clippy passed fine when run unredirected.
+#
+# So: exit code is the truth, stderr text is not. EAP is lowered for the call
+# and restored immediately after.
+# ---------------------------------------------------------------------------
+function Native([scriptblock]$cmd) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $cmd
+        return $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $prev }
+}
+
 function Gate($label, $dir, [scriptblock]$cmd) {
     Say "Gate: $label"
     Push-Location $dir
     try {
-        & $cmd
-        if ($LASTEXITCODE -ne 0) { Die "$label failed (exit $LASTEXITCODE). Nothing has been changed." }
+        $code = Native $cmd
+        if ($code -ne 0) { Die "$label failed (exit $code). Nothing has been changed." }
         Ok "$label green"
     }
     finally { Pop-Location }
@@ -175,15 +200,19 @@ function RevertAll($why) {
     Write-Host "`nBUILD FAILED: $why" -ForegroundColor Red
     Write-Host "Reverting every file this run touched, so the repo is as it was..." -ForegroundColor Yellow
     foreach ($f in $touched) {
-        if (Test-Path (Join-Path $repo $f)) { git checkout -- $f 2>$null }
+        if (Test-Path (Join-Path $repo $f)) { Native { git checkout -- $f } | Out-Null }
     }
     Write-Host "Reverted. No tag written. Nothing shipped." -ForegroundColor Yellow
     exit 1
 }
 
 Say "Bumping to $next"
+# No $LASTEXITCODE check here on purpose: sync-version.ps1 is a PowerShell
+# script, not a native command, so on success it leaves $LASTEXITCODE holding
+# whatever the last native tool set -- checking it would be reading a stale
+# value. It THROWS on every failure, and $ErrorActionPreference is Stop, so a
+# failure propagates on its own.
 & (Join-Path $PSScriptRoot 'sync-version.ps1') -Version $next
-if ($LASTEXITCODE -ne 0) { Die 'version sync failed' }
 
 # ===========================================================================
 # 3. BUILD BOTH APPS
@@ -192,12 +221,9 @@ if (-not $SkipApps) {
 
     Say 'Building desktop (MSI + NSIS)'
     Push-Location 'apps/mycelium'
-    try {
-        npx tauri build
-        if ($LASTEXITCODE -ne 0) { Pop-Location; RevertAll 'desktop build failed' }
-    }
-    catch { Pop-Location; RevertAll "desktop build threw: $_" }
+    $code = Native { npx tauri build }
     Pop-Location
+    if ($code -ne 0) { RevertAll "desktop build failed (exit $code)" }
     Ok 'desktop built'
 
     Say 'Building Android (arm64 debug APK)'
@@ -213,7 +239,10 @@ if (-not $SkipApps) {
     # `npm.bat` and this Node ships `npm.cmd`.
     # ---------------------------------------------------------------------
     Push-Location 'apps/mycelium'
-    npx tauri android build --debug --target aarch64 2>&1 | Tee-Object -Variable androidLog | Out-Host
+    # Its exit code is deliberately NOT checked: the symlink step always fails
+    # here, and that failure is expected and handled below. What matters is
+    # whether the cross-compile produced the .so, which is checked directly.
+    Native { npx tauri android build --debug --target aarch64 } | Out-Null
     Pop-Location
 
     $so = Join-Path $repo 'apps/mycelium/src-tauri/target/aarch64-linux-android/debug/libmycelium_lib.so'
@@ -225,12 +254,9 @@ if (-not $SkipApps) {
     Ok 'copied .so into jniLibs (symlink step needs Developer Mode; copy is identical)'
 
     Push-Location 'apps/mycelium/src-tauri/gen/android'
-    try {
-        & .\gradlew.bat assembleArm64Debug -x rustBuildArm64Debug --console=plain
-        if ($LASTEXITCODE -ne 0) { Pop-Location; RevertAll 'gradle assembleArm64Debug failed' }
-    }
-    catch { Pop-Location; RevertAll "gradle threw: $_" }
+    $code = Native { & .\gradlew.bat assembleArm64Debug -x rustBuildArm64Debug --console=plain }
     Pop-Location
+    if ($code -ne 0) { RevertAll "gradle assembleArm64Debug failed (exit $code)" }
     Ok 'android APK built'
 }
 
@@ -239,7 +265,12 @@ if (-not $SkipApps) {
 # ===========================================================================
 Say 'Writing CHANGELOG.md'
 
-$lastTag = (git describe --tags --abbrev=0 2>$null)
+# `git describe` writes to stderr when there is no tag at all, which is exactly
+# the first-release case -- so it goes through Native like everything else.
+$lastTag = $null
+$prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+$lastTag = (git describe --tags --abbrev=0 2>$null | Select-Object -First 1)
+$ErrorActionPreference = $prevEAP
 $range = if ($lastTag) { "$lastTag..HEAD" } else { 'HEAD' }
 $subjects = git log $range --no-merges --pretty=format:'%s' | Where-Object { $_ -and $_ -notmatch '^chore\(release\)' }
 
@@ -288,11 +319,12 @@ Ok 'changelog updated'
 # 5. COMMIT + TAG
 # ===========================================================================
 Say "Committing and tagging $tag"
-foreach ($f in $touched) { if (Test-Path (Join-Path $repo $f)) { git add $f } }
-git commit -m "chore(release): $tag" | Out-Host
-if ($LASTEXITCODE -ne 0) { Die 'commit failed' }
-git tag -a $tag -m "Sustena $tag" | Out-Host
-if ($LASTEXITCODE -ne 0) { Die 'tag failed' }
+# git is a native command too, and prints plenty to stderr on a good day.
+foreach ($f in $touched) { if (Test-Path (Join-Path $repo $f)) { Native { git add $f } | Out-Null } }
+$code = Native { git commit -m "chore(release): $tag" }
+if ($code -ne 0) { Die "commit failed (exit $code)" }
+$code = Native { git tag -a $tag -m "Sustena $tag" }
+if ($code -ne 0) { Die "tag failed (exit $code)" }
 Ok "committed and tagged $tag"
 
 # ===========================================================================
