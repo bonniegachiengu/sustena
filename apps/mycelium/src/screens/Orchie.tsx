@@ -10,39 +10,38 @@
  * declared policy, and picks what fits the attention budget with a 0/1 knapsack.
  * This file renders what came back, in the order it came back.
  *
- * ★★★ **Every card can say why it is here** — its real urgency, whether that
- * urgency was *measured*, its relevance, its score, and what made it eligible.
- * And what stayed quiet says which kind of quiet it was: **withdrawn** (nothing
- * to say, carries a reason) or **outranked** (considered, carries a score).
- * Those are different facts and the line tells them apart.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ★★★ **WHAT THIS REWRITE IS FOR.** The verdict on the first version was
+ * "clunky and impossible to use, slow, and the keyboard isn't wired". All three
+ * were true and none of them were the engine:
  *
- * ★★ The capture flow asks **one question at a time**, with options that are
- * the household's own pocket names, and stops at a confirmation every time. A
+ *   • It was drawn at the COCKPIT'S scale — 10-11px text, ~22px tap targets —
+ *     on a phone, for people who are not looking for an excuse to squint.
+ *   • Every tap waited on a round trip with nothing but a disabled button to
+ *     show for it, and every refresh replaced the whole screen with the words
+ *     "reading the household…", so the layout was thrown away and rebuilt.
+ *   • Nothing knew the keyboard existed.
+ *
+ * So: Orchie's own scale (`ui/orchie.css.ts`), the keyboard wired for real
+ * (`lib/viewport.ts`), and the classify flow promoted to the top of the screen
+ * and opened on arrival — because THAT is the thing his mum actually does.
+ *
+ * ★★★ **The classifying job comes first, always.** Not because it ranks highest
+ * — the engine decides ranking and this file does not argue — but because a
+ * captured message is the one card that is a JOB rather than a READING.
+ * Everything else on this screen is something to know; this is something to do.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * ★★★ **Every card can still say why it is here** — its real urgency, whether
+ * that urgency was *measured*, its relevance, its score. And what stayed quiet
+ * still says which kind of quiet: **withdrawn** (nothing to say, carries a
+ * reason) or **outranked** (considered, carries a score).
+ *
+ * ★★ The capture flow asks **one question at a time**, with options that are the
+ * household's own pocket names, and stops at a confirmation every time. A
  * history pre-fill saves the tap, never the confirm.
  */
-import { createResource, createSignal, For, Show } from "solid-js";
-import {
-  Badge,
-  Button,
-  Caption,
-  Card,
-  Chip,
-  Cluster,
-  Column,
-  Empty,
-  ErrorState,
-  Label,
-  Meta,
-  Meter,
-  Note,
-  NoteRow,
-  Readout,
-  Row,
-  Spacer,
-  Value,
-  sx as S,
-  layout as L,
-} from "../ui";
+import { createResource, createSignal, For, onMount, Show } from "solid-js";
 import {
   engine,
   fmt,
@@ -52,6 +51,8 @@ import {
   type JsonValue,
 } from "../lib/engine";
 import { world } from "../lib/live";
+import { keyboardAware, watchViewport } from "../lib/viewport";
+import * as O from "../ui/orchie.css";
 
 /** ★ The projection is a JSON value on the wire; read it by name, once. */
 const read = (feed: FeedDto, key: string): JsonValue | undefined => {
@@ -77,133 +78,183 @@ export default function Orchie() {
   const [feed, { refetch }] = createResource(sustain, (id) => engine.feed(id, null));
   const [showQuiet, setShowQuiet] = createSignal(false);
 
-  return (
-    <div class={L.orchieFrame}>
-      <div class={L.orchieColumn}>
-        <Cluster>
-          <span class={S.brand}>ORCHIE</span>
-          <Spacer />
-          <Meta>{feed()?.label ?? "—"}</Meta>
-        </Cluster>
+  onMount(watchViewport);
 
-        <Show
-          when={feed()}
-          fallback={
-            <Show when={feed.error} fallback={<Empty>reading the household…</Empty>}>
-              {(e) => (
-                <ErrorState>
-                  the engine is unreachable — {String(e())}
-                  <br />
-                  nothing is shown rather than something stale.
-                </ErrorState>
-              )}
-            </Show>
-          }
-        >
+  // ★★★ `feed.latest` rather than `feed()`. During a refetch, `feed()` is
+  //     undefined and the whole screen would fall back to a placeholder — which
+  //     is what made every confirmation feel like a stall. `latest` holds the
+  //     previous answer until the new one lands, so the layout never collapses;
+  //     it dims (see `staleWhileRefreshing`) and the numbers change in place.
+  const shown = () => feed.latest;
+
+  /** The messages that need a person. ★ This is the job, and it goes first. */
+  const jobs = () => (shown()?.attention ?? []).filter((a) => a.messageId);
+  /** Everything else that needs attention but is not a classifiable capture. */
+  const notices = () => (shown()?.attention ?? []).filter((a) => !a.messageId);
+
+  return (
+    <div class={O.frame} data-face="orchie">
+      <div class={O.column}>
+        <div class={O.header}>
+          <span class={O.brand}>ORCHIE</span>
+          <span class={O.headerMeta}>{shown()?.label ?? ""}</span>
+        </div>
+
+        {/* first load, and only the first: afterwards `latest` carries us */}
+        <Show when={!shown() && !feed.error}>
+          <FeedSkeleton />
+        </Show>
+
+        <Show when={feed.error && !shown()}>
+          <div class={O.errorBox}>
+            the engine is unreachable — {String(feed.error)}
+            <br />
+            nothing is shown rather than something stale.
+          </div>
+        </Show>
+
+        <Show when={shown()}>
           {(f) => (
-            <>
-              {/* ── the calm read ──────────────────────────────────────── */}
+            <div
+              class={O.stack}
+              classList={{ [O.staleWhileRefreshing]: feed.loading }}
+            >
+              {/* ═══ THE JOB — first, open, and the only amber card ═══════ */}
+              <For each={jobs()}>
+                {(a) => (
+                  <div class={O.cardPrimary}>
+                    <div class={O.cardHead}>
+                      <h2 class={O.cardTitle}>{a.what}</h2>
+                    </div>
+                    <p class={O.caption}>{a.why}</p>
+                    <Classify
+                      sustain={f().sustainId}
+                      messageId={a.messageId!}
+                      autoStart
+                      onDone={() => void refetch()}
+                    />
+                  </div>
+                )}
+              </For>
+
+              {/* ═══ the calm read ═══════════════════════════════════════ */}
               <Summary feed={f()} />
 
-              {/* ── the things that need you ───────────────────────────── */}
-              <Show when={f().attention.length > 0}>
-                <Card title="needs you" right={<Meta>{f().attention.length}</Meta>}>
-                  <For each={f().attention}>
+              {/* ═══ notices that are not a classifiable capture ═════════ */}
+              <Show when={notices().length > 0}>
+                <div class={O.card}>
+                  <h2 class={O.cardTitle}>needs you</h2>
+                  <For each={notices()}>
                     {(a) => (
-                      <NoteRow tone={a.severity === "danger" ? "danger" : "warn"}>
-                        <Value>{a.what}</Value>
-                        <Caption>{a.why}</Caption>
-                        <Show when={a.messageId}>
-                          {(id) => (
-                            <Classify
-                              sustain={f().sustainId}
-                              messageId={id()}
-                              onDone={() => void refetch()}
-                            />
-                          )}
-                        </Show>
-                      </NoteRow>
+                      <div class={O.stack}>
+                        <div class={O.row}>
+                          <span class={O.badge[a.severity === "danger" ? "danger" : "warn"]}>
+                            {a.severity === "danger" ? "urgent" : "soon"}
+                          </span>
+                          <span class={O.body}>{a.what}</span>
+                        </div>
+                        <p class={O.caption}>{a.why}</p>
+                      </div>
                     )}
                   </For>
-                </Card>
+                </div>
               </Show>
 
-              {/* ── the ranked feed ────────────────────────────────────── */}
+              {/* ═══ the ranked feed ═════════════════════════════════════ */}
               <Show
                 when={f().cards.length > 0}
-                fallback={<Empty>nothing needs you right now</Empty>}
+                fallback={
+                  <Show when={jobs().length === 0}>
+                    <p class={O.empty}>nothing needs you right now</p>
+                  </Show>
+                }
               >
                 <For each={f().cards}>
                   {(c) => (
-                    <Card
-                      title={TITLE[c.id] ?? c.id}
-                      right={
+                    <div class={O.card}>
+                      <div class={O.cardHead}>
+                        <h2 class={O.cardTitle}>{TITLE[c.id] ?? c.id}</h2>
+                        <span class={O.spacer} />
                         <Show when={c.urgency > 0}>
-                          <Badge tone={c.urgency > 0.5 ? "danger" : "warn"}>
+                          <span class={O.badge[c.urgency > 0.5 ? "danger" : "warn"]}>
                             {Math.round(c.urgency * 100)}%
-                          </Badge>
+                          </span>
                         </Show>
-                      }
-                    >
-                      <CardBody card={c} feed={f()} onDone={() => void refetch()} />
+                      </div>
+                      <CardBody card={c} feed={f()} />
                       <Why card={c} />
-                    </Card>
+                    </div>
                   )}
                 </For>
               </Show>
 
-              {/* ── what stayed quiet ──────────────────────────────────── */}
+              {/* ═══ narrate anything ════════════════════════════════════ */}
+              <div class={O.card}>
+                <h2 class={O.cardTitle}>something else happened?</h2>
+                <Classify sustain={f().sustainId} messageId={null} onDone={() => void refetch()} />
+              </div>
+
+              {/* ═══ what stayed quiet ═══════════════════════════════════ */}
               <Show when={f().quiet.length > 0}>
-                <Note>
-                  <button class={S.chip} onClick={() => setShowQuiet((q) => !q)}>
-                    {f().quiet.length} other {f().quiet.length === 1 ? "thing" : "things"} stayed
-                    quiet
-                  </button>
-                </Note>
+                <button class={O.linkish} onClick={() => setShowQuiet((q) => !q)}>
+                  {showQuiet() ? "▾" : "▸"} {f().quiet.length} other{" "}
+                  {f().quiet.length === 1 ? "thing" : "things"} stayed quiet
+                </button>
                 <Show when={showQuiet()}>
-                  <Card title="what stayed quiet">
+                  <div class={O.card}>
                     <For each={f().quiet}>
                       {(q) => (
-                        <>
-                          <Row>
-                            <Value>{TITLE[q.id] ?? q.id}</Value>
-                            <Spacer />
+                        <div class={O.stack}>
+                          <div class={O.row}>
+                            <span class={O.body}>{TITLE[q.id] ?? q.id}</span>
+                            <span class={O.spacer} />
                             {/* ★★ Withdrawn and outranked are different facts. */}
-                            <Show
-                              when={q.withdrew}
-                              fallback={<Meta>outranked · score {q.score?.toFixed(2)}</Meta>}
-                            >
-                              <Meta>nothing to say</Meta>
-                            </Show>
-                          </Row>
-                          {/* ★ The engine's own reason, kept where it belongs:
-                              available, but under the plain line rather than
-                              instead of it. */}
+                            <span class={O.badge.quiet}>
+                              {q.withdrew ? "nothing to say" : `outranked · ${q.score?.toFixed(2)}`}
+                            </span>
+                          </div>
                           <Show when={q.reason}>
-                            <Caption>{q.reason}</Caption>
+                            <p class={O.caption}>{q.reason}</p>
                           </Show>
-                        </>
+                        </div>
                       )}
                     </For>
-                    <Note>
-                      <Caption>
-                        A card that <strong>withdrew</strong> had nothing to say and carries a
-                        reason; one that was <strong>outranked</strong> was considered and carries
-                        a score. {f().spent} of {f().budget} attention spent across{" "}
-                        {f().candidatesConsidered} candidates.
-                      </Caption>
-                    </Note>
-                  </Card>
+                    <p class={O.caption}>
+                      A card that <strong>withdrew</strong> had nothing to say and carries a reason;
+                      one that was <strong>outranked</strong> was considered and carries a score.{" "}
+                      {f().spent} of {f().budget} attention spent across {f().candidatesConsidered}{" "}
+                      candidates.
+                    </p>
+                  </div>
                 </Show>
               </Show>
-
-              {/* ── narrate anything ───────────────────────────────────── */}
-              <Card title="what happened?">
-                <Classify sustain={f().sustainId} messageId={null} onDone={() => void refetch()} />
-              </Card>
-            </>
+            </div>
           )}
         </Show>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ★★★ The first-load placeholder, in the SHAPE of the answer.
+ *
+ * Not a spinner. A spinner says "wait" and nothing else; a skeleton says "a
+ * heading, then a number, then two cards" — so the eye is already where the
+ * content will be, and the arrival is a fill rather than a jump.
+ */
+function FeedSkeleton() {
+  return (
+    <div class={O.stack}>
+      <div class={O.card}>
+        <div class={O.skelLine.title} />
+        <div class={O.skelLine.figure} />
+        <div class={O.skelLine.short} />
+      </div>
+      <div class={O.card}>
+        <div class={O.skelLine.title} />
+        <div class={O.skelLine.text} />
+        <div class={O.skelLine.short} />
       </div>
     </div>
   );
@@ -213,86 +264,98 @@ export default function Orchie() {
 function Summary(props: { feed: FeedDto }) {
   const total = () =>
     props.feed.rollup?.aggregates.find((a) => a.childPath === "finances.liquid.balance");
+  const members = () => total()?.included.filter((c) => !c.isHousehold).length ?? 0;
+
   return (
-    <Card title="the household">
-      <Show
-        when={total()?.grounded}
-        fallback={<Readout label="liquid" big>{fmt(props.feed.liquid)}</Readout>}
-      >
-        <Readout label="everything, together" big>
-          {fmt(total()?.value ?? null)}
-        </Readout>
-        <Caption>
-          folded across {total()?.included.filter((c) => !c.isHousehold).length ?? 0} member
-          {(total()?.included.filter((c) => !c.isHousehold).length ?? 0) === 1 ? "" : "s"} and this
-          household's own, fresh — nothing stored
-        </Caption>
+    <div class={O.card}>
+      <span class={O.figureLabel}>
+        {total()?.grounded ? "everything, together" : "liquid"}
+      </span>
+      <span class={O.figure}>
+        {total()?.grounded ? fmt(total()?.value ?? null) : fmt(props.feed.liquid)}
+      </span>
+      <Show when={total()?.grounded}>
+        <p class={O.caption}>
+          folded across {members()} member{members() === 1 ? "" : "s"} and this household's own,
+          fresh — nothing stored
+        </p>
         {/* ★★★ An exclusion is never silent. A figure that quietly counted an
-            unreadable member as zero would read as calm and be wrong; this
-            says who was left out, so the total is read for what it is. */}
+            unreadable member as zero would read as calm and be wrong. */}
         <Show when={(total()?.excluded.length ?? 0) > 0}>
-          <Caption>
+          <p class={O.caption}>
             {total()?.excluded.length} left out, not counted as zero:{" "}
             {total()
               ?.excluded.map((e) => e.label)
               .join(", ")}
-          </Caption>
+          </p>
         </Show>
       </Show>
-    </Card>
+    </div>
   );
 }
 
 /** ★★★ "Why am I seeing this?" — real numbers, never a rationalisation. */
-function Why(props: { card: { urgency: number; measured: boolean; basis: string; relevance: number; score: number; cost: number; eligibility: string } }) {
+function Why(props: {
+  card: {
+    urgency: number;
+    measured: boolean;
+    basis: string;
+    relevance: number;
+    score: number;
+    cost: number;
+    eligibility: string;
+  };
+}) {
   const [open, setOpen] = createSignal(false);
   return (
-    <Note>
-      <button class={S.chip} onClick={() => setOpen((o) => !o)}>
-        why am I seeing this?
+    <>
+      <button class={O.linkish} onClick={() => setOpen((o) => !o)}>
+        {open() ? "▾" : "▸"} why am I seeing this?
       </button>
       <Show when={open()}>
-        <Note gap="sm">
-          <Caption>{props.card.eligibility}</Caption>
-          <Show
-            when={props.card.measured}
-            fallback={
-              /* ★★ A 0 on an undeclared basis is silence, not safety. */
-              <Caption>
-                urgency <strong>not measured</strong> — {props.card.basis}
-              </Caption>
-            }
-          >
-            <Caption>urgency {props.card.urgency.toFixed(2)} · {props.card.basis}</Caption>
-          </Show>
-          <Caption>
+        <div class={O.stack}>
+          <p class={O.caption}>{props.card.eligibility}</p>
+          {/* ★★ A 0 on an undeclared basis is silence, not safety. */}
+          <p class={O.caption}>
+            {props.card.measured
+              ? `urgency ${props.card.urgency.toFixed(2)} · ${props.card.basis}`
+              : `urgency not measured — ${props.card.basis}`}
+          </p>
+          <p class={O.caption}>
             relevance {props.card.relevance.toFixed(2)} · score {props.card.score.toFixed(2)} ·
             costs {props.card.cost} of the attention budget
-          </Caption>
-        </Note>
+          </p>
+        </div>
       </Show>
-    </Note>
+    </>
   );
 }
 
 /** What a card draws. ★ Keyed off its declared `render` tag. */
-function CardBody(props: { card: { id: string; render: string }; feed: FeedDto; onDone: () => void }) {
+function CardBody(props: { card: { id: string; render: string }; feed: FeedDto }) {
+  const fraction = () => {
+    const allocated = num(props.feed, "worst_allocated");
+    return allocated > 0 ? num(props.feed, "worst_spent") / allocated : null;
+  };
+
   return (
     <Show
       when={props.card.render === "pocket_strain"}
       fallback={<PlainCard feed={props.feed} card={props.card} />}
     >
-      <Readout label={str(props.feed, "worst_pocket")}>
-        {fmt(num(props.feed, "worst_spent"))} of {fmt(num(props.feed, "worst_allocated"))}
-      </Readout>
-      <Meter
-        fraction={
-          num(props.feed, "worst_allocated") > 0
-            ? num(props.feed, "worst_spent") / num(props.feed, "worst_allocated")
-            : null
-        }
-      />
-      <Caption>the limit is the one you set for it</Caption>
+      <span class={O.figureLabel}>{str(props.feed, "worst_pocket")}</span>
+      <span class={O.figure}>{fmt(num(props.feed, "worst_spent"))}</span>
+      <p class={O.caption}>of {fmt(num(props.feed, "worst_allocated"))} set aside</p>
+      <div class={O.meter}>
+        <div
+          class={O.meterFill}
+          style={{
+            width: `${Math.min(100, (fraction() ?? 0) * 100)}%`,
+            background: (fraction() ?? 0) > 0.9 ? "#e05050" : "#E8A020",
+          }}
+        />
+      </div>
+      <p class={O.caption}>the limit is the one you set for it</p>
     </Show>
   );
 }
@@ -301,10 +364,16 @@ function PlainCard(props: { feed: FeedDto; card: { id: string } }) {
   return (
     <Show
       when={props.card.id === "classify_capture"}
-      fallback={<Readout label="liquid">{fmt(num(props.feed, "liquid"))}</Readout>}
+      fallback={
+        <>
+          <span class={O.figureLabel}>liquid</span>
+          <span class={O.figure}>{fmt(num(props.feed, "liquid"))}</span>
+        </>
+      }
     >
-      <Readout label="waiting on you">{str(props.feed, "unclassified")}</Readout>
-      <Caption>each one needs a pocket before it can be recorded</Caption>
+      <span class={O.figureLabel}>waiting on you</span>
+      <span class={O.figure}>{str(props.feed, "unclassified")}</span>
+      <p class={O.caption}>each one needs a pocket before it can be recorded</p>
     </Show>
   );
 }
@@ -312,8 +381,19 @@ function PlainCard(props: { feed: FeedDto; card: { id: string } }) {
 /**
  * ★★★ The signature flow: an effect → `infer` → **one question at a time** →
  * confirm → the operator through the real gate.
+ *
+ * ★★ `autoStart` matters more than it looks. Before, a captured message showed
+ * a "classify this" button whose only job was to trigger the inference the
+ * screen was always going to need — a tap, and a wait, that bought nothing. On
+ * a card that exists *because* something needs classifying, the first question
+ * should already be on screen when you get there.
  */
-function Classify(props: { sustain: string; messageId: string | null; onDone: () => void }) {
+function Classify(props: {
+  sustain: string;
+  messageId: string | null;
+  autoStart?: boolean;
+  onDone: () => void;
+}) {
   const [text, setText] = createSignal("");
   const [known, setKnown] = createSignal<Record<string, JsonValue>>({});
   const [ignoreHistory, setIgnoreHistory] = createSignal(false);
@@ -326,6 +406,13 @@ function Classify(props: { sustain: string; messageId: string | null; onDone: ()
   //    sending an empty object would teach nothing and say it learned.
   const [confirmed, setConfirmed] = createSignal<JsonValue | null>(null);
   const [failure, setFailure] = createSignal<string | null>(null);
+  // ★★★ Optimistic: the option a thumb just landed on, held lit while the
+  //     engine answers. Without this a tap produced NOTHING visible until the
+  //     round trip returned, which is the single biggest reason it felt dead.
+  const [pending, setPending] = createSignal<string | null>(null);
+  // How many questions have been answered — a short trail, so the flow has a
+  // visible bottom to it rather than feeling like it could go on forever.
+  const [answered, setAnswered] = createSignal(0);
 
   const run = async (next: Record<string, JsonValue>) => {
     setFailure(null);
@@ -345,10 +432,23 @@ function Classify(props: { sustain: string; messageId: string | null; onDone: ()
       setFailure(String(e).replace(/^Error:\s*/, ""));
     } finally {
       setBusy(false);
+      setPending(null);
     }
   };
 
-  const answer = (field: string, value: string) => void run({ ...known(), [field]: value });
+  const answer = (field: string, value: string) => {
+    setPending(value);
+    setAnswered((n) => n + 1);
+    void run({ ...known(), [field]: value });
+  };
+
+  const reset = () => {
+    setStep(null);
+    setKnown({});
+    setAnswered(0);
+    setIgnoreHistory(false);
+    setPending(null);
+  };
 
   const confirm = async (s: Extract<InferenceDto, { status: "ready" }>) => {
     setBusy(true);
@@ -364,8 +464,7 @@ function Classify(props: { sustain: string; messageId: string | null; onDone: ()
       setVerdict(v);
       setConfirmed(s.params as JsonValue);
       if (v.verdict === "admitted") {
-        setStep(null);
-        setKnown({});
+        reset();
         setText("");
         props.onDone();
       }
@@ -385,94 +484,157 @@ function Classify(props: { sustain: string; messageId: string | null; onDone: ()
     }
   };
 
+  // ★ A card that exists because something needs classifying opens already
+  //   asking. One fewer tap, and one fewer wait, on the most common path.
+  onMount(() => {
+    if (props.autoStart && props.messageId) void run({});
+  });
+
   return (
-    <div class={S.note.sm}>
-      <Show when={!props.messageId && !step()}>
-        <Cluster>
-          <input
-            class={S.input}
-            placeholder="spent 500 on food"
-            value={text()}
-            onInput={(e) => setText(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void run({});
-            }}
-          />
-        </Cluster>
-        <Note gap="sm">
-          <Button onClick={() => void run({})} disabled={busy() || text().trim() === ""}>
-            {busy() ? "working it out…" : "go"}
-          </Button>
-        </Note>
+    <div class={O.stack}>
+      {/* ── narration entry (only when there is no captured message) ───── */}
+      <Show when={!props.messageId && !step() && !verdict()}>
+        <input
+          ref={keyboardAware}
+          class={O.input}
+          type="text"
+          enterkeyhint="go"
+          autocapitalize="none"
+          autocomplete="off"
+          placeholder="spent 500 on food"
+          value={text()}
+          onInput={(e) => setText(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.currentTarget.blur();
+              void run({});
+            }
+          }}
+        />
+        <button
+          class={`${O.action.primary} ${O.actionWide}`}
+          onClick={() => void run({})}
+          disabled={busy() || text().trim() === ""}
+        >
+          <Show when={busy()} fallback="work it out">
+            <span class={O.working} /> working it out…
+          </Show>
+        </button>
       </Show>
 
-      <Show when={props.messageId && !step()}>
-        <Cluster>
-          <Chip onClick={() => void run({})} disabled={busy()}>
-            {busy() ? "working it out…" : "classify this"}
-          </Chip>
-        </Cluster>
+      {/* ── a captured message that is not auto-started ────────────────── */}
+      <Show when={props.messageId && !props.autoStart && !step() && !verdict()}>
+        <button
+          class={`${O.action.primary} ${O.actionWide}`}
+          onClick={() => void run({})}
+          disabled={busy()}
+        >
+          <Show when={busy()} fallback="classify this">
+            <span class={O.working} /> working it out…
+          </Show>
+        </button>
+      </Show>
+
+      {/* ── the first inference on an auto-started card ────────────────── */}
+      <Show when={props.autoStart && !step() && busy() && !verdict()}>
+        <div class={O.stack}>
+          <div class={O.skelLine.text} />
+          <div class={O.options}>
+            <div class={O.skeleton} style={{ height: "56px" }} />
+            <div class={O.skeleton} style={{ height: "56px" }} />
+          </div>
+        </div>
       </Show>
 
       <Show when={step()}>
         {(s) => (
-          <Note gap="sm">
-            {/* one question at a time */}
+          <div class={O.stack}>
+            {/* ═══ one question at a time ═══════════════════════════════ */}
             <Show when={s().status === "needsDisambiguation"}>
-              <>
-                {(() => {
-                  const q = () => s() as Extract<InferenceDto, { status: "needsDisambiguation" }>;
-                  return (
-                    <>
-                    <Label>{q().question}</Label>
-                    <Caption>{q().why}</Caption>
+              {(() => {
+                const q = () => s() as Extract<InferenceDto, { status: "needsDisambiguation" }>;
+                return (
+                  <div class={O.stack}>
+                    <Show when={answered() > 0}>
+                      <div class={O.steps}>
+                        <For each={Array.from({ length: answered() })}>
+                          {() => <span class={O.stepDot.done} />}
+                        </For>
+                        <span class={O.stepDot.todo} />
+                      </div>
+                    </Show>
+
+                    <h3 class={O.cardTitle}>{q().question}</h3>
+                    <Show when={q().why}>
+                      <p class={O.caption}>{q().why}</p>
+                    </Show>
+
                     {/* ★ options: null means the answer is not a tap. */}
                     <Show
                       when={q().options}
                       fallback={
-                        <Cluster>
+                        <>
                           <input
-                            class={S.input}
+                            ref={keyboardAware}
+                            class={O.inputNumeric}
+                            // ★★ `decimal` gives a numeric pad WITH a decimal
+                            //    separator; `numeric` gives digits only, which
+                            //    makes 1500.50 impossible to type.
                             inputmode="decimal"
+                            enterkeyhint="done"
                             placeholder="0"
                             onKeyDown={(e) => {
-                              if (e.key === "Enter")
-                                answer(q().field, e.currentTarget.value);
+                              if (e.key === "Enter") {
+                                const v = e.currentTarget.value;
+                                e.currentTarget.blur();
+                                answer(q().field, v);
+                              }
                             }}
                           />
-                        </Cluster>
+                          <p class={O.caption}>type the amount, then press done</p>
+                        </>
                       }
                     >
                       {(opts) => (
-                        <Cluster>
+                        <div class={O.options}>
                           <For each={opts()}>
                             {(o) => (
-                              <Chip disabled={busy()} onClick={() => answer(q().field, o.value)}>
+                              <button
+                                class={pending() === o.value ? O.optionChosen : O.option}
+                                disabled={busy()}
+                                onClick={() => answer(q().field, o.value)}
+                              >
                                 {o.label}
-                              </Chip>
+                              </button>
                             )}
                           </For>
-                        </Cluster>
+                        </div>
                       )}
                     </Show>
-                    </>
-                  );
-                })()}
-              </>
+
+                    <button class={O.linkish} onClick={reset}>
+                      start over
+                    </button>
+                  </div>
+                );
+              })()}
             </Show>
 
+            {/* ═══ ready to record ══════════════════════════════════════ */}
             <Show when={s().status === "ready"}>
-              <>
-                {(() => {
-                  const rd = () => s() as Extract<InferenceDto, { status: "ready" }>;
-                  return (
-                    <>
-                    <Caption>{rd().why}</Caption>
+              {(() => {
+                const rd = () => s() as Extract<InferenceDto, { status: "ready" }>;
+                return (
+                  <div class={O.stack}>
+                    <p class={O.body}>{rd().why}</p>
+
                     {/* ★★ A history pre-fill is never silent. */}
                     <Show when={rd().fromHistory}>
-                      <Cluster>
-                        <Badge tone="quiet">from what you did before</Badge>
-                        <Chip
+                      <div class={O.row}>
+                        <span class={O.badge.quiet}>from what you did before</span>
+                        <span class={O.spacer} />
+                        <button
+                          class={O.linkish}
                           onClick={() => {
                             setIgnoreHistory(true);
                             const { pocket_name: _drop, ...rest } = known();
@@ -480,70 +642,91 @@ function Classify(props: { sustain: string; messageId: string | null; onDone: ()
                           }}
                         >
                           change
-                        </Chip>
-                      </Cluster>
+                        </button>
+                      </div>
                     </Show>
-                    <Note gap="sm">
-                      <Cluster>
-                        <Button onClick={() => void confirm(rd())} disabled={busy()}>
-                          {busy() ? "asking the gate…" : "confirm"}
-                        </Button>
-                        <Chip onClick={() => { setStep(null); setKnown({}); }}>cancel</Chip>
-                      </Cluster>
-                    </Note>
-                    </>
-                  );
-                })()}
-              </>
+
+                    <button
+                      class={`${O.action.primary} ${O.actionWide}`}
+                      onClick={() => void confirm(rd())}
+                      disabled={busy()}
+                    >
+                      <Show when={busy()} fallback="record it">
+                        <span class={O.working} /> asking the gate…
+                      </Show>
+                    </button>
+                    <button class={`${O.action.quiet} ${O.actionWide}`} onClick={reset}>
+                      not now
+                    </button>
+                  </div>
+                );
+              })()}
             </Show>
 
             <Show when={s().status === "cannotInfer"}>
-              <Caption>{(s() as Extract<InferenceDto, { status: "cannotInfer" }>).why}</Caption>
+              <p class={O.body}>
+                {(s() as Extract<InferenceDto, { status: "cannotInfer" }>).why}
+              </p>
+              <button class={`${O.action.quiet} ${O.actionWide}`} onClick={reset}>
+                try again
+              </button>
             </Show>
-          </Note>
+          </div>
         )}
       </Show>
 
+      {/* ═══ the gate's answer ══════════════════════════════════════════ */}
       <Show when={verdict()}>
         {(v) => (
-          <Note gap="sm">
-            <div class={S.verdictBox[v().verdict]}>
-              <span class={S.verdictWord[v().verdict]}>
+          <div class={O.stack}>
+            <div class={O.verdict[v().verdict === "admitted" ? "admitted" : "refused"]}>
+              <div class={O.verdictWord[v().verdict === "admitted" ? "admitted" : "refused"]}>
                 {v().verdict === "admitted" ? "RECORDED" : v().verdict.toUpperCase()}
-              </span>
-              <Show when={v().reason}>{(r) => <p class={S.reason}>{r()}</p>}</Show>
+              </div>
+              <Show when={v().reason}>
+                {(r) => <p class={O.caption}>{r()}</p>}
+              </Show>
               <Show when={v().verdict !== "admitted"}>
-                <div class={S.reasonCode}>nothing moved · nothing logged</div>
+                <p class={O.caption}>nothing moved · nothing logged</p>
               </Show>
             </div>
+
             {/* ★★★ "remember this format" — only after a real success, and only
                 for a captured message. A learned SPEND still asks next time. */}
             <Show when={v().verdict === "admitted" && props.messageId}>
-              <Cluster>
-                <Show
-                  when={!learned()}
-                  fallback={<Caption>learned · this shape is recognised from now on</Caption>}
-                >
-                  <Show when={confirmed()}>
-                    {(p) => (
-                      <Chip onClick={() => void remember(v().operator, p())}>
-                        remember this format
-                      </Chip>
-                    )}
-                  </Show>
+              <Show
+                when={!learned()}
+                fallback={<p class={O.caption}>learned · this shape is recognised from now on</p>}
+              >
+                <Show when={confirmed()}>
+                  {(p) => (
+                    <button
+                      class={`${O.action.secondary} ${O.actionWide}`}
+                      onClick={() => void remember(v().operator, p())}
+                    >
+                      remember this format
+                    </button>
+                  )}
                 </Show>
-              </Cluster>
+              </Show>
             </Show>
-          </Note>
+
+            <button
+              class={`${O.action.quiet} ${O.actionWide}`}
+              onClick={() => {
+                setVerdict(null);
+                setLearned(null);
+                setConfirmed(null);
+              }}
+            >
+              done
+            </button>
+          </div>
         )}
       </Show>
 
       <Show when={failure()}>
-        {(f) => (
-          <Note gap="sm">
-            <ErrorState>{f()}</ErrorState>
-          </Note>
-        )}
+        {(f) => <div class={O.errorBox}>{f()}</div>}
       </Show>
     </div>
   );

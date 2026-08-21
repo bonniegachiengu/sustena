@@ -31,10 +31,27 @@ import {
   vars,
 } from "../ui";
 import { engine, type IdentityDto } from "../lib/engine";
+import { keyboardAware, watchViewport } from "../lib/viewport";
+import * as O from "../ui/orchie.css";
+import { onMount } from "solid-js";
 
 export default function Lock(props: {
   identity: IdentityDto;
   onUnlocked: (id: IdentityDto) => void;
+  /**
+   * ★★★ Which face is asking. This screen is the FIRST thing anyone sees, and
+   * for a long time it showed everybody the same thing: the cockpit's own
+   * panel, at cockpit density, headed MYCELIUM, explaining ed25519 keypairs and
+   * PBKDF2 at 600,000 iterations. On a laptop that is exactly right -- the
+   * person opening the cockpit wants to know what the door is made of.
+   *
+   * On a phone it is the wrong door entirely. Orchie's users are Bonnie's mum,
+   * Cira and Epha; the first screen of the app was a locked technical briefing
+   * they have no way to act on, before they could reach the one thing they are
+   * here to do. Same door, same key, same refusal on a wrong passphrase --
+   * different clothes.
+   */
+  face?: "mycelium" | "orchie";
 }) {
   const [handle, setHandle] = createSignal("bg.myc");
   const [pass, setPass] = createSignal("");
@@ -66,6 +83,106 @@ export default function Lock(props: {
     }
   };
 
+  onMount(watchViewport);
+
+  // ═══ the phone door ═══════════════════════════════════════════════════════
+  if (props.face === "orchie") {
+    return (
+      <div class={O.frame} data-face="orchie">
+        <div class={O.column}>
+          <div class={O.header}>
+            <span class={O.brand}>ORCHIE</span>
+          </div>
+
+          <div class={O.card}>
+            <h2 class={O.cardTitle}>
+              {enrolling() ? "set a passphrase" : "welcome back"}
+            </h2>
+            <p class={O.body}>
+              {enrolling()
+                ? "This phone does not have your key yet. Choose a passphrase — it never leaves this phone, and it is the only way in."
+                : "Enter your passphrase to open your household."}
+            </p>
+
+            <Show when={enrolling()}>
+              <input
+                ref={keyboardAware}
+                class={O.input}
+                type="text"
+                autocapitalize="none"
+                autocomplete="off"
+                placeholder="a name for this phone"
+                value={handle()}
+                onInput={(e) => setHandle(e.currentTarget.value)}
+              />
+            </Show>
+
+            <input
+              ref={keyboardAware}
+              class={O.input}
+              type="password"
+              enterkeyhint={enrolling() ? "next" : "go"}
+              autocapitalize="none"
+              autocomplete={enrolling() ? "new-password" : "current-password"}
+              placeholder="passphrase"
+              value={pass()}
+              onInput={(e) => setPass(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !enrolling()) {
+                  e.currentTarget.blur();
+                  void go();
+                }
+              }}
+            />
+
+            <Show when={enrolling()}>
+              <input
+                ref={keyboardAware}
+                class={O.input}
+                type="password"
+                enterkeyhint="go"
+                autocapitalize="none"
+                autocomplete="new-password"
+                placeholder="the same passphrase again"
+                value={confirm()}
+                onInput={(e) => setConfirm(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.currentTarget.blur();
+                    void go();
+                  }
+                }}
+              />
+            </Show>
+
+            <button
+              class={`${O.action.primary} ${O.actionWide}`}
+              onClick={() => void go()}
+              disabled={busy() || pass() === ""}
+            >
+              <Show when={busy()} fallback={enrolling() ? "create it" : "open"}>
+                <span class={O.working} /> checking…
+              </Show>
+            </button>
+
+            {/* ★ The host's own words, unchanged. A friendlier lie here would
+                be a worse one -- and on a phone it would be the only thing
+                standing between a person and thinking the app is broken. */}
+            <Show when={failure()}>
+              {(f) => <div class={O.errorBox}>{f()}</div>}
+            </Show>
+          </div>
+
+          {/* ★★ The technical account is not deleted, only folded away. It is
+              true and it matters; it is simply not the first thing a person
+              needs in order to get in. */}
+          <Details />
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ the cockpit door, unchanged ══════════════════════════════════════════
   return (
     <div class={S.lockFrame}>
       <div class={S.lockPanel}>
@@ -176,5 +293,41 @@ export default function Lock(props: {
         </Note>
       </div>
     </div>
+  );
+}
+
+/**
+ * ★★ The same account of what the door is made of, folded away.
+ *
+ * Not softened and not removed -- a person who wants to know how their key is
+ * held should be able to find out, and on the cockpit face this text is on
+ * screen by default. It is behind a tap here only because it is not the thing
+ * standing between someone and their household.
+ */
+function Details() {
+  const [open, setOpen] = createSignal(false);
+  return (
+    <>
+      <button class={O.linkish} onClick={() => setOpen((o) => !o)}>
+        {open() ? "▾" : "▸"} how is my passphrase kept?
+      </button>
+      <Show when={open()}>
+        <div class={O.card}>
+          <p class={O.caption}>
+            Your identity is a keypair, and the handle is its name. The passphrase never leaves
+            this phone and is never stored anywhere — it derives a key, and that key either
+            decrypts your private half or it does not.
+          </p>
+          <p class={O.caption}>
+            Nothing in the app can act until it does. While it is locked, every request is refused
+            for having no-one to attribute it to — the lock is a door, not a curtain.
+          </p>
+          <p class={O.caption}>
+            A wrong passphrase and a damaged file give the same message on purpose. Telling them
+            apart would tell someone which half they had guessed right.
+          </p>
+        </div>
+      </Show>
+    </>
   );
 }

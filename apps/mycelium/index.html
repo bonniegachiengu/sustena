@@ -2,14 +2,32 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mycelium — Sustena</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter+Tight:wght@400;500;600&display=swap"
-      rel="stylesheet"
+    <!--
+      viewport-fit=cover        -> the app may paint under the notch and the
+                                   gesture bar; safe-area insets then keep
+                                   content out from under them deliberately,
+                                   rather than the OS letterboxing us.
+      interactive-widget=resizes-content
+                                -> when the on-screen keyboard opens, the LAYOUT
+                                   VIEWPORT shrinks instead of the page being
+                                   scrolled up underneath the keyboard. Without
+                                   this the keyboard simply covers whatever it
+                                   lands on, which is exactly the bug Bonnie hit.
+      maximum-scale is deliberately NOT set: pinch-zoom is an accessibility
+      affordance and disabling it to stop input auto-zoom would be fixing the
+      wrong thing. Inputs are 16px instead, which is what actually stops it.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0d0d0e" />
+    <title>Mycelium — Sustena</title>
+    <!--
+      Fonts are bundled (see src/main.tsx), not fetched. An installed app should
+      not need Google's CDN to draw its own text.
+    -->
   </head>
   <body>
     <div id="root"></div>

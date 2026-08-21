@@ -1,0 +1,512 @@
+/**
+ * ORCHIE'S OWN SCALE — because a cockpit and a phone are not the same instrument.
+ *
+ * ★★★ **The root cause of "clunky and impossible to use".** Orchie was rendered
+ * with Mycelium's tokens, and those are a *cockpit* scale: body text at 11.5px,
+ * labels at 10px, chips with 4px/8px padding. On a 1080-wide phone held at
+ * arm's length that is roughly a 22px tall tap target carrying 10px text. The
+ * platform guidance is 48dp, and the reason is not aesthetic -- a thumb pad is
+ * about 45px across, so a 22px target is smaller than the finger pressing it
+ * and you aim by memory. That is precisely what "fights the finger" means.
+ *
+ * ★★ These are Orchie-only. Mycelium keeps its density, because on a laptop
+ * with a mouse that density is an advantage and shrinking it would be a
+ * regression for the person who actually uses it that way. Same tokens, same
+ * palette, same voice, different scale -- the colours below are all `vars`, so
+ * the corrected WCAG contrast ramp is inherited rather than re-decided.
+ *
+ * ★★★ **Touch feedback is `:active`, not `:hover`.** Every interactive style in
+ * the cockpit reacts on hover, which on a touchscreen either never fires or
+ * fires and then STICKS after the finger leaves. So a tapped chip stayed lit
+ * and an untapped one gave nothing back. Here every control has an `:active`
+ * state that fires on the way down, and `touch-action: manipulation` removes
+ * the browser's double-tap-zoom wait -- that wait is a real ~300ms of "nothing
+ * happened" on every single tap, and it is most of what "slow" felt like.
+ */
+import { globalStyle, keyframes, style, styleVariants } from "@vanilla-extract/css";
+import { vars } from "./tokens.css";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Global touch behaviour. Scoped to the Orchie frame via a data attribute so
+// the cockpit is untouched.
+// ═══════════════════════════════════════════════════════════════════════════
+
+globalStyle('[data-face="orchie"]', {
+  // The grey flash Android paints over a tapped element, on its own schedule,
+  // after its own delay. Replaced below with feedback we control.
+  WebkitTapHighlightColor: "transparent",
+  // Stops long-press turning a card into a text selection while scrolling.
+  WebkitUserSelect: "none",
+  userSelect: "none",
+});
+
+// Text a person may genuinely want to copy keeps selection.
+globalStyle('[data-face="orchie"] p, [data-face="orchie"] code', {
+  WebkitUserSelect: "text",
+  userSelect: "text",
+});
+
+globalStyle('[data-face="orchie"] button, [data-face="orchie"] input', {
+  // No double-tap-zoom wait. See the header note: this is a real 300ms.
+  touchAction: "manipulation",
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Motion
+// ═══════════════════════════════════════════════════════════════════════════
+
+const rise = keyframes({
+  from: { opacity: 0, transform: "translateY(6px)" },
+  to: { opacity: 1, transform: "none" },
+});
+
+const shimmer = keyframes({
+  from: { backgroundPosition: "-200px 0" },
+  to: { backgroundPosition: "calc(200px + 100%) 0" },
+});
+
+const pulse = keyframes({
+  "0%, 100%": { opacity: 1 },
+  "50%": { opacity: 0.45 },
+});
+
+/**
+ * ★★ Every animation here is behind this guard. Motion that cannot be turned
+ * off is an accessibility failure, and on a phone it is also a battery cost.
+ */
+globalStyle("@media (prefers-reduced-motion: reduce)", {});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The frame
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * ★★★ The scroll container, and the one place the keyboard is accounted for.
+ *
+ * `--kb` is published by lib/viewport.ts. Adding it to the bottom padding means
+ * the content can always be scrolled clear of the keyboard: without it, the
+ * last card is unreachable while typing, which is the other half of the bug.
+ */
+export const frame = style({
+  position: "fixed",
+  inset: 0,
+  overflowY: "auto",
+  overflowX: "hidden",
+  WebkitOverflowScrolling: "touch",
+  // A pull past the end must not drag the whole WebView (rubber-banding the
+  // app itself looks broken) and must not trigger pull-to-refresh.
+  overscrollBehavior: "contain",
+  background: vars.color.bgBase,
+  paddingTop: "max(14px, env(safe-area-inset-top))",
+  paddingLeft: "max(14px, env(safe-area-inset-left))",
+  paddingRight: "max(14px, env(safe-area-inset-right))",
+  // safe area + keyboard + room to breathe past the last card.
+  paddingBottom: "calc(env(safe-area-inset-bottom) + var(--kb, 0px) + 96px)",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+});
+
+export const column = style({
+  width: "100%",
+  maxWidth: "560px",
+  display: "flex",
+  flexDirection: "column",
+  gap: "14px",
+  minWidth: 0,
+});
+
+/** The header. Compact, and it gets out of the way while typing. */
+export const header = style({
+  display: "flex",
+  alignItems: "center",
+  gap: "10px",
+  paddingBottom: "2px",
+  transition: "opacity 160ms ease, max-height 200ms ease",
+  selectors: {
+    '[data-keyboard="open"] &': { opacity: 0, maxHeight: 0, overflow: "hidden", paddingBottom: 0 },
+  },
+});
+
+export const brand = style({
+  fontFamily: vars.font.mono,
+  fontSize: "13px",
+  fontWeight: 500,
+  letterSpacing: "0.22em",
+  color: vars.color.amber,
+});
+
+export const headerMeta = style({
+  fontFamily: vars.font.mono,
+  fontSize: "11px",
+  color: vars.color.textMuted,
+  marginLeft: "auto",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  maxWidth: "55%",
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cards
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const card = style({
+  background: vars.color.bgSurface,
+  border: `1px solid ${vars.color.border}`,
+  borderRadius: "10px",
+  padding: "14px",
+  display: "flex",
+  flexDirection: "column",
+  gap: "10px",
+  minWidth: 0,
+  animation: `${rise} 240ms ease-out both`,
+  "@media": { "(prefers-reduced-motion: reduce)": { animation: "none" } },
+});
+
+/** The one card that is the job in front of you. It should look like it. */
+export const cardPrimary = style([
+  card,
+  {
+    borderColor: vars.color.amberBorder,
+    background: `linear-gradient(${vars.color.amberGlow}, transparent 60%), ${vars.color.bgSurface}`,
+  },
+]);
+
+export const cardTitle = style({
+  fontFamily: vars.font.ui,
+  fontSize: "16px",
+  fontWeight: 600,
+  lineHeight: 1.3,
+  color: vars.color.textPrimary,
+  margin: 0,
+});
+
+export const cardHead = style({ display: "flex", alignItems: "flex-start", gap: "10px" });
+
+/** ★ 16px minimum. Below that is where a phone stops being readable to an
+ *  adult who is not looking for an excuse to squint. */
+export const body = style({
+  fontFamily: vars.font.ui,
+  fontSize: "15px",
+  lineHeight: 1.5,
+  color: vars.color.textSecondary,
+  margin: 0,
+});
+
+export const caption = style({
+  fontFamily: vars.font.ui,
+  fontSize: "13px",
+  lineHeight: 1.45,
+  color: vars.color.textMuted,
+  margin: 0,
+});
+
+/** A number you are meant to read across the room. */
+export const figure = style({
+  fontFamily: vars.font.mono,
+  fontSize: "30px",
+  fontWeight: 500,
+  letterSpacing: "-0.01em",
+  color: vars.color.textPrimary,
+  fontVariantNumeric: "tabular-nums",
+});
+
+export const figureLabel = style({
+  fontFamily: vars.font.mono,
+  fontSize: "11px",
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  color: vars.color.textMuted,
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Controls -- all of them at least 48px in the direction a thumb lands
+// ═══════════════════════════════════════════════════════════════════════════
+
+const tappable = style({
+  fontFamily: vars.font.ui,
+  minHeight: "52px",
+  padding: "14px 18px",
+  borderRadius: "10px",
+  border: "1px solid transparent",
+  fontSize: "16px",
+  fontWeight: 500,
+  cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "8px",
+  // ★ The feedback is a scale, not a colour change: it reads instantly even
+  //   under a thumb that is covering most of the control.
+  transition: "transform 90ms ease, background 140ms ease, border-color 140ms ease, opacity 140ms",
+  selectors: {
+    "&:active:not(:disabled)": { transform: "scale(0.97)" },
+    "&:disabled": { opacity: 0.5, cursor: "default" },
+  },
+  "@media": { "(prefers-reduced-motion: reduce)": { transition: "background 140ms ease" } },
+});
+
+export const action = styleVariants({
+  /** The one thing to do next. */
+  primary: [
+    tappable,
+    {
+      color: "#1a1200",
+      background: vars.color.amber,
+      fontWeight: 600,
+      selectors: { "&:active:not(:disabled)": { transform: "scale(0.97)", background: vars.color.amberDim } },
+    },
+  ],
+  /** A real alternative, not a decoration. */
+  secondary: [
+    tappable,
+    {
+      color: vars.color.textPrimary,
+      background: vars.color.bgRaised,
+      borderColor: vars.color.borderMid,
+      selectors: { "&:active:not(:disabled)": { transform: "scale(0.97)", background: vars.color.bgOverlay } },
+    },
+  ],
+  /** Getting out. Quiet, but the same size -- a cancel you can't hit is a trap. */
+  quiet: [
+    tappable,
+    {
+      color: vars.color.textMuted,
+      background: "transparent",
+      borderColor: vars.color.border,
+      selectors: { "&:active:not(:disabled)": { transform: "scale(0.97)", color: vars.color.textPrimary } },
+    },
+  ],
+});
+
+export const actionWide = style({ width: "100%" });
+
+/**
+ * ★★★ The answer buttons -- the thing his mum taps most.
+ *
+ * A grid, not a wrapping row: wrapped chips give you a ragged last line and
+ * targets of six different widths, so the eye has to search. Equal cells at a
+ * fixed height are scannable, and at two columns each cell is ~50% of a phone's
+ * width, which is a target you can hit without looking.
+ */
+export const options = style({
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+  gap: "10px",
+});
+
+export const option = style({
+  fontFamily: vars.font.ui,
+  fontSize: "16px",
+  fontWeight: 500,
+  minHeight: "56px",
+  padding: "12px 14px",
+  borderRadius: "10px",
+  color: vars.color.textPrimary,
+  background: vars.color.bgRaised,
+  border: `1px solid ${vars.color.borderMid}`,
+  cursor: "pointer",
+  textAlign: "center",
+  lineHeight: 1.25,
+  wordBreak: "break-word",
+  transition: "transform 90ms ease, background 140ms ease, border-color 140ms ease",
+  selectors: {
+    "&:active:not(:disabled)": {
+      transform: "scale(0.96)",
+      background: vars.color.amberGlow,
+      borderColor: vars.color.amberBorder,
+    },
+    "&:disabled": { opacity: 0.4, cursor: "default" },
+  },
+  "@media": { "(prefers-reduced-motion: reduce)": { transition: "background 140ms ease" } },
+});
+
+/** ★ The option that was just chosen, held lit while the engine answers. */
+export const optionChosen = style([
+  option,
+  { background: vars.color.amberGlow, borderColor: vars.color.amberBorder, color: vars.color.amber },
+]);
+
+/**
+ * ★★★ 16px is not a style choice. Any input under 16px makes mobile browsers
+ * zoom the page on focus, and the zoom does not undo itself -- you finish
+ * typing and the whole app is left magnified and scrolled sideways. That alone
+ * reads as "broken".
+ */
+export const input = style({
+  fontFamily: vars.font.ui,
+  fontSize: "16px",
+  minHeight: "52px",
+  width: "100%",
+  color: vars.color.textPrimary,
+  background: vars.color.bgBase,
+  border: `1px solid ${vars.color.borderMid}`,
+  borderRadius: "10px",
+  padding: "13px 15px",
+  outline: "none",
+  transition: "border-color 140ms ease, box-shadow 140ms ease",
+  selectors: {
+    "&:focus": {
+      borderColor: vars.color.amberBorder,
+      boxShadow: `0 0 0 3px ${vars.color.amberGlow}`,
+    },
+    "&::placeholder": { color: vars.color.textDim },
+  },
+});
+
+export const inputNumeric = style([input, { fontFamily: vars.font.mono, fontVariantNumeric: "tabular-nums" }]);
+
+/** A small, genuinely secondary control. Still 44px tall. */
+export const linkish = style({
+  fontFamily: vars.font.ui,
+  fontSize: "14px",
+  minHeight: "44px",
+  padding: "10px 12px",
+  background: "transparent",
+  border: "none",
+  color: vars.color.textMuted,
+  textAlign: "left",
+  cursor: "pointer",
+  borderRadius: "8px",
+  transition: "color 140ms ease, background 140ms ease",
+  selectors: { "&:active": { color: vars.color.textPrimary, background: vars.color.bgRaised } },
+});
+
+export const row = style({ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 });
+export const stack = style({ display: "flex", flexDirection: "column", gap: "10px", minWidth: 0 });
+export const spacer = style({ flex: 1 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// State: loading, empty, error, verdict
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * ★★★ A skeleton, not a spinner and not a blank.
+ *
+ * The old screen replaced everything with the words "reading the household…",
+ * so every refresh threw the layout away and rebuilt it -- which reads as a
+ * stall even when it takes 80ms. A skeleton in the shape of the answer keeps
+ * the layout still and tells the eye where to wait.
+ */
+export const skeleton = style({
+  borderRadius: "8px",
+  background: `linear-gradient(90deg, ${vars.color.bgRaised} 0px, ${vars.color.bgOverlay} 40px, ${vars.color.bgRaised} 80px)`,
+  backgroundSize: "600px 100%",
+  animation: `${shimmer} 1.4s linear infinite`,
+  "@media": { "(prefers-reduced-motion: reduce)": { animation: "none" } },
+});
+
+export const skelLine = styleVariants({
+  title: [skeleton, { height: "18px", width: "58%" }],
+  text: [skeleton, { height: "13px", width: "88%" }],
+  short: [skeleton, { height: "13px", width: "44%" }],
+  figure: [skeleton, { height: "34px", width: "50%" }],
+});
+
+/** ★ Shown over content that is being refreshed, so it dims rather than vanishes. */
+export const staleWhileRefreshing = style({
+  opacity: 0.55,
+  transition: "opacity 180ms ease",
+});
+
+export const empty = style({
+  fontFamily: vars.font.ui,
+  fontSize: "15px",
+  color: vars.color.textMuted,
+  textAlign: "center",
+  padding: "36px 16px",
+  lineHeight: 1.5,
+});
+
+export const errorBox = style({
+  fontFamily: vars.font.ui,
+  fontSize: "14px",
+  lineHeight: 1.5,
+  color: vars.color.danger,
+  background: vars.color.dangerGlow,
+  border: `1px solid ${vars.color.dangerBorder}`,
+  borderRadius: "10px",
+  padding: "14px",
+});
+
+export const verdict = styleVariants({
+  admitted: [
+    { borderRadius: "10px", padding: "16px", textAlign: "center" as const },
+    { background: vars.color.tealGlow, border: `1px solid ${vars.color.tealBorder}` },
+  ],
+  refused: [
+    { borderRadius: "10px", padding: "16px", textAlign: "center" as const },
+    { background: vars.color.dangerGlow, border: `1px solid ${vars.color.dangerBorder}` },
+  ],
+});
+
+export const verdictWord = styleVariants({
+  admitted: [{ fontFamily: vars.font.mono, fontSize: "17px", letterSpacing: "0.16em", fontWeight: 500 }, { color: vars.color.teal }],
+  refused: [{ fontFamily: vars.font.mono, fontSize: "17px", letterSpacing: "0.16em", fontWeight: 500 }, { color: vars.color.danger }],
+});
+
+/** A dot that says "working", without taking a whole screen to say it. */
+export const working = style({
+  display: "inline-block",
+  width: "8px",
+  height: "8px",
+  borderRadius: "50%",
+  background: vars.color.amber,
+  animation: `${pulse} 900ms ease-in-out infinite`,
+  "@media": { "(prefers-reduced-motion: reduce)": { animation: "none" } },
+});
+
+export const badge = styleVariants({
+  warn: [
+    { fontFamily: vars.font.mono, fontSize: "11px", padding: "4px 8px", borderRadius: "6px", whiteSpace: "nowrap" as const },
+    { color: vars.color.warn, background: vars.color.amberGlow, border: `1px solid ${vars.color.amberBorder}` },
+  ],
+  danger: [
+    { fontFamily: vars.font.mono, fontSize: "11px", padding: "4px 8px", borderRadius: "6px", whiteSpace: "nowrap" as const },
+    { color: vars.color.danger, background: vars.color.dangerGlow, border: `1px solid ${vars.color.dangerBorder}` },
+  ],
+  quiet: [
+    { fontFamily: vars.font.mono, fontSize: "11px", padding: "4px 8px", borderRadius: "6px", whiteSpace: "nowrap" as const },
+    { color: vars.color.textMuted, background: vars.color.bgRaised, border: `1px solid ${vars.color.border}` },
+  ],
+});
+
+/** The raw message text, kept readable but clearly quoted machinery. */
+export const raw = style({
+  fontFamily: vars.font.mono,
+  fontSize: "12.5px",
+  lineHeight: 1.5,
+  color: vars.color.textMuted,
+  background: vars.color.bgBase,
+  border: `1px solid ${vars.color.border}`,
+  borderRadius: "8px",
+  padding: "10px 12px",
+  margin: 0,
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+  maxHeight: "132px",
+  overflowY: "auto",
+});
+
+export const meter = style({
+  height: "8px",
+  borderRadius: "4px",
+  background: vars.color.bgRaised,
+  overflow: "hidden",
+});
+
+export const meterFill = style({
+  height: "100%",
+  borderRadius: "4px",
+  transition: "width 320ms ease-out",
+  "@media": { "(prefers-reduced-motion: reduce)": { transition: "none" } },
+});
+
+/** A progress trail through a multi-step question. Small, but it stops the
+ *  flow feeling endless -- you can see there is a bottom to it. */
+export const steps = style({ display: "flex", gap: "5px", alignItems: "center" });
+export const stepDot = styleVariants({
+  done: [{ width: "18px", height: "3px", borderRadius: "2px" }, { background: vars.color.amber }],
+  todo: [{ width: "18px", height: "3px", borderRadius: "2px" }, { background: vars.color.border }],
+});
