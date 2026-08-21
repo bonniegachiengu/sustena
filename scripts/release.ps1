@@ -304,7 +304,11 @@ and the single source of truth is the `VERSION` file at the repo root.
 '@
 
 if (Test-Path $changelogPath) {
-    $existingLog = Get-Content $changelogPath -Raw
+    # -Encoding UTF8 is load-bearing. PowerShell 5.1's Get-Content defaults to
+    # the system codepage for a file with no BOM, so it read this UTF-8 file as
+    # Windows-1252 and every em-dash came back out as "a-EUR-"" -- corrupting
+    # the parts of the changelog it was only supposed to be reading past.
+    $existingLog = Get-Content $changelogPath -Raw -Encoding UTF8
     # Insert this entry directly under the header, above the previous newest.
     $marker = "`n## "
     $idx = $existingLog.IndexOf($marker)
@@ -318,7 +322,8 @@ if (Test-Path $changelogPath) {
 else {
     $body = $header + $entry.ToString()
 }
-[System.IO.File]::WriteAllText($changelogPath, $body)
+# UTF-8 without a BOM, explicitly, to match how it is read above.
+[System.IO.File]::WriteAllText($changelogPath, $body, (New-Object System.Text.UTF8Encoding $false))
 Ok 'changelog updated'
 
 # ===========================================================================
