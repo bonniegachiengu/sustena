@@ -178,6 +178,21 @@ export async function refreshIdentity(): Promise<IdentityDto | null> {
 }
 
 /** Read the world once. ★ Called on mount and after a selection change — never on a push. */
+/**
+ * Record a failure that stopped the world being opened.
+ *
+ * ★★ Exists because the unlock path used to `void` its own errors. A push
+ * channel that failed to attach took the whole household load down with it, in
+ * silence -- the screen simply never filled. A surface can only be honest about
+ * a failure it is told about.
+ */
+export function noteWorldError(message: string): void {
+  setWorld(produce((s) => {
+    s.error = message;
+    s.loaded = true;
+  }));
+}
+
 export async function refreshWorld(): Promise<void> {
   try {
     mergeWorld(await engine.world());
