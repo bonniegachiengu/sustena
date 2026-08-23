@@ -41,7 +41,7 @@
  * household's own pocket names, and stops at a confirmation every time. A
  * history pre-fill saves the tap, never the confirm.
  */
-import { createResource, createSignal, For, onMount, Show } from "solid-js";
+import { createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import {
   engine,
   fmt,
@@ -74,11 +74,46 @@ const TITLE: Record<string, string> = {
 };
 
 export default function Orchie() {
-  const sustain = () => world.selected ?? "";
+  /**
+   * ★★★ **`null`, never `""`. This one line was the whole bug.**
+   *
+   * `createResource` skips its fetcher only for `false | null | undefined`. An
+   * empty string is a perfectly ordinary value, so `?? ""` did not mean "no
+   * selection yet" to Solid -- it meant "go and fetch the Sustain whose id is
+   * the empty string". The engine answered exactly as it should:
+   *
+   *     Error: no Sustain called ''
+   *
+   * and the resource wedged on that first rejection. On the phone the screen
+   * then sat on its loading skeleton for ever, on real data, with no error
+   * shown, because the failed fetch was for an id nobody had asked about.
+   *
+   * ★★ It only ever bit on a phone, which is why it survived every check. The
+   * unlocked tree renders the moment the identity opens, while `refreshWorld`
+   * is still in flight -- so there is a real window where nothing is selected
+   * yet. On a laptop the face is Mycelium and Orchie is not mounted during that
+   * window; on a phone Orchie IS the face, so it mounts straight into it, every
+   * single time.
+   */
+  const sustain = () => world.selected;
   const [feed, { refetch }] = createResource(sustain, (id) => engine.feed(id, null));
   const [showQuiet, setShowQuiet] = createSignal(false);
 
   onMount(watchViewport);
+
+  /**
+   * ★★ Has the first load been going on unreasonably long?
+   *
+   * Only ever used to add a line of explanation to the skeleton. It changes
+   * nothing about what is fetched and it never hides anything -- it exists
+   * because a loading state with no upper bound is indistinguishable from a
+   * broken one, and that is exactly how the empty-string stall stayed hidden.
+   */
+  const [slow, setSlow] = createSignal(false);
+  onMount(() => {
+    const t = window.setTimeout(() => setSlow(true), 10_000);
+    onCleanup(() => window.clearTimeout(t));
+  });
 
   // ★★★ `feed.latest` rather than `feed()`. During a refetch, `feed()` is
   //     undefined and the whole screen would fall back to a placeholder — which
@@ -100,17 +135,50 @@ export default function Orchie() {
           <span class={O.headerMeta}>{shown()?.label ?? ""}</span>
         </div>
 
-        {/* first load, and only the first: afterwards `latest` carries us */}
-        <Show when={!shown() && !feed.error}>
-          <FeedSkeleton />
-        </Show>
+        {/* ★★★ **Every way of having nothing to show now says which one it is.**
+            The stall that shipped was invisible precisely because "loading" and
+            "wedged" looked identical -- an endless shimmer with no way to tell
+            them apart, on either side of the screen. Four distinct answers now,
+            and the last one exists so that a stall can never be silent again. */}
 
-        <Show when={feed.error && !shown()}>
+        {/* the world itself could not be read */}
+        <Show when={world.error && !shown()}>
           <div class={O.errorBox}>
-            the engine is unreachable — {String(feed.error)}
+            the household could not be opened — {world.error}
             <br />
             nothing is shown rather than something stale.
           </div>
+        </Show>
+
+        {/* the world opened, and there is genuinely nothing in it */}
+        <Show when={!world.error && world.loaded && !world.selected}>
+          <p class={O.empty}>
+            no household on this device yet
+            <br />
+            nothing to show until there is one
+          </p>
+        </Show>
+
+        {/* the feed itself refused or failed */}
+        <Show when={feed.error && !shown()}>
+          <div class={O.errorBox}>
+            the household could not be read — {String(feed.error)}
+            <br />
+            nothing is shown rather than something stale.
+          </div>
+        </Show>
+
+        {/* genuinely still loading */}
+        <Show when={!shown() && !feed.error && !world.error && !(world.loaded && !world.selected)}>
+          <FeedSkeleton />
+          {/* ★★ A shimmer that never ends is a lie of omission. After ten
+              seconds this stops pretending it is nearly there. */}
+          <Show when={slow()}>
+            <p class={O.caption}>
+              this is taking longer than it should — the household is not
+              answering
+            </p>
+          </Show>
         </Show>
 
         <Show when={shown()}>
