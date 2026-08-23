@@ -19,6 +19,7 @@ import { engine, fmt } from "./lib/engine";
 import {
   attentionAcross,
   hydrate,
+  noteWorldError,
   refreshIdentity,
   refreshWorld,
   subscribe,
@@ -121,10 +122,32 @@ export default function App() {
    * act on would render a cockpit that looks alive and can do nothing.
    */
   const openCockpit = async () => {
-    const stop = await subscribe();
-    onCleanup(stop);
+    // ★★★ **The world FIRST, and the order is the fix.**
+    //
+    // `subscribe()` used to come first and be awaited, so attaching the push
+    // channel gated the one thing every surface needs -- which Sustain is
+    // selected. On the phone Orchie mounts the instant the identity opens and
+    // asks for the household immediately, so anything slow or broken ahead of
+    // `refreshWorld` is a stall the person sees and nothing else explains.
+    // Nothing here depends on the subscription having attached.
     await refreshWorld();
-    await Promise.all(world.order.map((id) => hydrate(id)));
+
+    // ★★ Live updates are an enhancement, not a precondition. If the channel
+    //    will not attach, the household still opens and the failure is SAID
+    //    rather than swallowed by a bare `void`.
+    try {
+      const stop = await subscribe();
+      onCleanup(stop);
+    } catch (e) {
+      noteWorldError(`live updates unavailable — ${String(e)}`);
+    }
+
+    // ★ One unreadable Sustain must not take the other six down with it.
+    await Promise.all(
+      world.order.map((id) =>
+        hydrate(id).catch((e) => noteWorldError(`could not read ${id} — ${String(e)}`)),
+      ),
+    );
   };
 
   onMount(async () => {
@@ -184,7 +207,11 @@ export default function App() {
                  was the cockpit's technical briefing for everybody. */
               face={face()}
               onUnlocked={() => {
-                void refreshIdentity().then(() => void openCockpit());
+                // ★ A bare `void` on both halves of this chain is how a failure
+                //   right after unlock became an unexplained empty screen.
+                void refreshIdentity()
+                  .then(() => openCockpit())
+                  .catch((e) => noteWorldError(`could not open the household — ${String(e)}`));
               }}
             />
           )}

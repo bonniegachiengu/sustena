@@ -60,9 +60,23 @@ const rise = keyframes({
   to: { opacity: 1, transform: "none" },
 });
 
+/**
+ * ★★★ **`opacity`, not `background-position`.**
+ *
+ * The first version animated a gradient's `background-position`, which is a
+ * PAINT property: the browser re-rasterises the element on every frame, on the
+ * main render thread, for as long as it runs. Measured on the device while the
+ * feed was stalled, that shimmer alone held the process at ~53% CPU and had
+ * burned over four minutes of CPU time -- a loading indicator that made the
+ * thing it was waiting for slower, and cooked the phone doing it.
+ *
+ * `opacity` is a COMPOSITED property. It runs on the compositor without
+ * repainting anything, which is why this is the one safe way to animate an
+ * element that may be on screen indefinitely.
+ */
 const shimmer = keyframes({
-  from: { backgroundPosition: "-200px 0" },
-  to: { backgroundPosition: "calc(200px + 100%) 0" },
+  "0%, 100%": { opacity: 0.45 },
+  "50%": { opacity: 0.9 },
 });
 
 const pulse = keyframes({
@@ -391,10 +405,12 @@ export const spacer = style({ flex: 1 });
  */
 export const skeleton = style({
   borderRadius: "8px",
-  background: `linear-gradient(90deg, ${vars.color.bgRaised} 0px, ${vars.color.bgOverlay} 40px, ${vars.color.bgRaised} 80px)`,
-  backgroundSize: "600px 100%",
-  animation: `${shimmer} 1.4s linear infinite`,
-  "@media": { "(prefers-reduced-motion: reduce)": { animation: "none" } },
+  // A flat fill rather than a gradient: nothing to re-rasterise.
+  background: vars.color.bgRaised,
+  animation: `${shimmer} 1.6s ease-in-out infinite`,
+  // ★ Promotes it to its own compositor layer so the pulse never touches paint.
+  willChange: "opacity",
+  "@media": { "(prefers-reduced-motion: reduce)": { animation: "none", opacity: 0.6 } },
 });
 
 export const skelLine = styleVariants({
