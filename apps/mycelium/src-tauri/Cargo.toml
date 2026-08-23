@@ -1,13 +1,13 @@
 [package]
 name = "mycelium"
-version = "0.3.0"
-description = "Mycelium Ã¢â‚¬â€ the Sustena cockpit. A Tauri v2 host with sustena-core compiled in."
+version = "0.3.1"
+description = "Mycelium ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the Sustena cockpit. A Tauri v2 host with sustena-core compiled in."
 edition = "2021"
 rust-version = "1.82"
 
 [lib]
 name = "mycelium_lib"
-# Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦ **The mobile crate-types are back, and the note that removed them was
+# ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ **The mobile crate-types are back, and the note that removed them was
 #     re-tested rather than inherited.** An earlier slice recorded that
 #     `cdylib`/`staticlib` made a Windows integration-test binary fail to load
 #     with STATUS_ENTRYPOINT_NOT_FOUND -- a real observation at the time, and
@@ -16,15 +16,15 @@ name = "mycelium_lib"
 #     host suite was re-run with all three on. See the commit for the result.
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-# Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦ **The helper bins are gated, and the reason is what the installer
+# ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ **The helper bins are gated, and the reason is what the installer
 #     shipped.** `src/bin/` is auto-discovered, so a release build produced
-#     `export_bindings.exe` and `smoke.exe` alongside the app Ã¢â‚¬â€ and Tauri
+#     `export_bindings.exe` and `smoke.exe` alongside the app ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â and Tauri
 #     bundles what it finds in `target/release`, so the first NSIS package
 #     genuinely installed a bindings generator onto a person's machine.
 #     Declaring them with `required-features` keeps them out of a default
 #     build; they are still one flag away for the two things that need them.
 #
-# Ã¢Ëœâ€¦ `smoke` in particular writes to a scratch store and prints an engine
+# ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ `smoke` in particular writes to a scratch store and prints an engine
 #   walkthrough. It is a proof, not a product, and it has no business in a
 #   Start menu.
 [[bin]]
@@ -45,15 +45,15 @@ required-features = ["dev-bins"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦ The engine, compiled straight into the host. Not a network hop, not a
-# server Ã¢â‚¬â€ the same crate `examples/household_run.rs` drives, linked in.
+# ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ The engine, compiled straight into the host. Not a network hop, not a
+# server ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the same crate `examples/household_run.rs` drives, linked in.
 sustena-core = { path = "../../../sustena-core" }
 
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 
-# Ã¢Ëœâ€¦Ã¢Ëœâ€¦ The typed boundary. See `dto.rs` for why these live HERE and not in the
+# ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ The typed boundary. See `dto.rs` for why these live HERE and not in the
 # core: ADR-0001 fixes the core's dependencies at serde/serde_json/thiserror.
 specta = { version = "=2.0.0-rc.22", features = ["serde_json"] }
 specta-typescript = "=0.0.9"
@@ -62,8 +62,8 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac", "sha2"] }
 sha2 = "0.10"
 chacha20poly1305 = "0.10"
-# Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦ The session layer. `x25519` for the ephemeral key exchange and `hkdf`
-# to turn its output into directional keys Ã¢â‚¬â€ both RustCrypto, both small, and
+# ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦ The session layer. `x25519` for the ephemeral key exchange and `hkdf`
+# to turn its output into directional keys ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â both RustCrypto, both small, and
 # `curve25519-dalek` is already in the tree via `ed25519-dalek`. Deliberately
 # NOT a Noise framework: the pattern needed here is one round of signed
 # ephemerals, and a framework would be more surface than protocol.

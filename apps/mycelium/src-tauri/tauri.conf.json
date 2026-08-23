@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Mycelium Ã¢â‚¬â€ Sustena",
-  "version": "0.3.0",
+  "productName": "Mycelium ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Sustena",
+  "version": "0.3.1",
   "identifier": "online.vyybandasky.sustena.mycelium",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Mycelium Ã¢â‚¬â€ Sustena",
+        "title": "Mycelium ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Sustena",
         "width": 1280,
         "height": 860,
         "minWidth": 900,
@@ -38,8 +38,8 @@
     "publisher": "Sustena",
     "copyright": "Apache-2.0",
     "category": "Productivity",
-    "shortDescription": "The Sustena cockpit Ã¢â‚¬â€ a local-first engine, not a client.",
-    "longDescription": "Mycelium is the cockpit for Sustena: the sustena-core engine compiled straight in, with its own append-only event log on this machine. Local-first by construction Ã¢â‚¬â€ there is no server to be offline from. The identity is an ed25519 keypair unlocked by a passphrase, every write passes the same admission gate, and peers sync directly over the local network when you add them by key.",
+    "shortDescription": "The Sustena cockpit ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a local-first engine, not a client.",
+    "longDescription": "Mycelium is the cockpit for Sustena: the sustena-core engine compiled straight in, with its own append-only event log on this machine. Local-first by construction ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â there is no server to be offline from. The identity is an ed25519 keypair unlocked by a passphrase, every write passes the same admission gate, and peers sync directly over the local network when you add them by key.",
     "windows": {
       "nsis": {
         "installMode": "currentUser",

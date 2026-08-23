@@ -9,6 +9,14 @@ move: a **minor** bump (0.1 → 0.2) is where new capability lands and where
 something may change how it behaves, and a **patch** bump (0.2.0 → 0.2.1) is a
 fix that does not add anything.
 
+## v0.3.1 - 2026-08-23
+
+Fixes the stall after unlock: Orchie sat on its loading skeleton for ever instead of showing your household.
+Also stops the loading animation cooking the phone, and makes any future stall say what went wrong instead of shimmering in silence.
+
+- fix(orchie): never ask the engine for the Sustain called ""
+- fix(devops): stage the installer for the version being released
+
 ## v0.3.0 - 2026-08-21
 
 Orchie is a phone app now, not the cockpit shrunk to fit.
