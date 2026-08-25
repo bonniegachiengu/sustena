@@ -28,6 +28,7 @@ import {
   type IdentityDto,
   type IngestDto,
   type CaptureResult,
+  type SmsSweep,
   type NetworkDto,
   type PeerDto,
   type SyncDto,
@@ -72,6 +73,7 @@ export type {
   IdentityDto,
   IngestDto,
   CaptureResult,
+  SmsSweep,
   NetworkDto,
   PeerDto,
   SyncDto,
@@ -133,6 +135,17 @@ export const engine = {
    */
   capture: async (sustainId: string, sourceId: string, raw: string): Promise<CaptureResult> =>
     unwrap(await commands.captureMessage(sustainId, sourceId, raw)),
+  // ── reading M-Pesa and KCB texts off the phone ───────────────────────────
+  /** "granted" | "denied" | "prompt" | "prompt-with-rationale" */
+  smsPermission: async (): Promise<string> => unwrap(await commands.smsPermissionState()),
+  smsRequestPermission: async (): Promise<string> => unwrap(await commands.smsRequestPermission()),
+  /** Reads texts already on the phone. 0 days means all of them. */
+  smsImport: async (sustainId: string, sinceDays: number): Promise<SmsSweep> =>
+    unwrap(await commands.smsImportInbox(sustainId, sinceDays)),
+  /** Hands over what arrived while the app was shut, and clears it. */
+  smsDrain: async (sustainId: string): Promise<SmsSweep> =>
+    unwrap(await commands.smsDrainQueue(sustainId)),
+
   declareSource: async (id: string, label: string, minutes: number | null): Promise<null> =>
     unwrap(await commands.declareSource(id, label, minutes)),
   resolveMessage: async (id: string): Promise<boolean> =>

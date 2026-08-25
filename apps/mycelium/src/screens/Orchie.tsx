@@ -41,7 +41,7 @@
  * household's own pocket names, and stops at a confirmation every time. A
  * history pre-fill saves the tap, never the confirm.
  */
-import { createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import {
   engine,
   fmt,
@@ -49,6 +49,7 @@ import {
   type GateResult,
   type InferenceDto,
   type JsonValue,
+  type SmsSweep,
 } from "../lib/engine";
 import { world } from "../lib/live";
 import { keyboardAware, watchViewport } from "../lib/viewport";
@@ -80,6 +81,138 @@ const TITLE: Record<string, string> = {
  * it, the header grows the one control that makes the cockpit reachable from a
  * touch device. See `faceToggle` in orchie.css.ts for why it exists at all.
  */
+/**
+ * Reading M-Pesa and KCB texts off this phone.
+ *
+ * Two things happen here. The button reads what is already in the inbox, which
+ * is the point: nobody is going to paste a thousand messages by hand. And once
+ * the permission is given, texts that arrive later are picked up on their own
+ * and swept in the next time the app is open.
+ *
+ * The reason is shown before the system dialog, because a phone asking to read
+ * your texts deserves an explanation first.
+ */
+function SmsCard(props: { sustainId: string; onSwept: () => void }) {
+  const [perm, setPerm] = createSignal<string | null>(null);
+  const [busy, setBusy] = createSignal<null | "asking" | "reading">(null);
+  const [swept, setSwept] = createSignal<SmsSweep | null>(null);
+  const [failed, setFailed] = createSignal<string | null>(null);
+
+  onMount(() => {
+    void engine
+      .smsPermission()
+      .then(setPerm)
+      .catch(() => setPerm("unavailable"));
+  });
+
+  const ask = async () => {
+    setBusy("asking");
+    setFailed(null);
+    try {
+      setPerm(await engine.smsRequestPermission());
+    } catch (e) {
+      setFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const importInbox = async () => {
+    setBusy("reading");
+    setFailed(null);
+    try {
+      // 0 means the whole inbox. Captures are deduped by the engine, so
+      // running this twice costs nothing.
+      const r = await engine.smsImport(props.sustainId, 0);
+      setSwept(r);
+      props.onSwept();
+    } catch (e) {
+      setFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Not an Android build, so there is no inbox to read.
+  return (
+    <Show when={perm() !== "unavailable"}>
+      <div class={O.card}>
+        <p class={O.cardTitle}>your M-Pesa and KCB texts</p>
+
+        <Show when={perm() === "granted"}>
+          <p class={O.caption}>
+            Orchie reads M-Pesa and KCB texts only. Money in is filed on its own.
+            Money out waits for you to pick a pocket.
+          </p>
+          <button
+            class={`${O.action.primary} ${O.actionWide}`}
+            onClick={() => void importInbox()}
+            disabled={busy() !== null}
+          >
+            <Show when={busy() === "reading"} fallback="read my texts">
+              <span class={O.working} /> reading…
+            </Show>
+          </button>
+        </Show>
+
+        <Show when={perm() !== null && perm() !== "granted"}>
+          <p class={O.caption}>
+            To do this Orchie needs permission to read your texts. It reads M-Pesa
+            and KCB only. Every other message on this phone is skipped on the
+            phone itself and never leaves it, and anything carrying a one-time
+            code is dropped without being stored.
+          </p>
+          <button
+            class={`${O.action.primary} ${O.actionWide}`}
+            onClick={() => void ask()}
+            disabled={busy() !== null}
+          >
+            <Show when={busy() === "asking"} fallback="allow Orchie to read them">
+              <span class={O.working} /> asking…
+            </Show>
+          </button>
+          <Show when={perm() === "denied"}>
+            <p class={O.caption}>
+              Permission was refused. You can still paste a message by hand in
+              Mycelium, under Ingest.
+            </p>
+          </Show>
+        </Show>
+
+        <Show when={swept()}>
+          {(r) => (
+            <div class={O.stack}>
+              <p class={O.caption}>
+                {r().read} text{r().read === 1 ? "" : "s"} read.{" "}
+                {r().applied} filed, {r().needsYou} waiting for you,{" "}
+                {r().duplicates} already seen.
+              </p>
+              <Show when={r().unparsed > 0}>
+                <p class={O.caption}>
+                  {r().unparsed} in a shape no rule recognises yet.
+                </p>
+              </Show>
+              <Show when={r().skippedOtherSenders + r().skippedSecrets > 0}>
+                <p class={O.caption}>
+                  {r().skippedOtherSenders} from other senders and{" "}
+                  {r().skippedSecrets} carrying a code were skipped on the phone.
+                </p>
+              </Show>
+              <Show when={r().failed > 0}>
+                <p class={O.caption}>
+                  {r().failed} could not be recorded. {r().firstFailure ?? ""}
+                </p>
+              </Show>
+            </div>
+          )}
+        </Show>
+
+        <Show when={failed()}>{(f) => <div class={O.errorBox}>{f()}</div>}</Show>
+      </div>
+    </Show>
+  );
+}
+
 export default function Orchie(props: { onFace?: () => void }) {
   /**
    * ★★★ **`null`, never `""`. This one line was the whole bug.**
@@ -104,6 +237,35 @@ export default function Orchie(props: { onFace?: () => void }) {
    */
   const sustain = () => world.selected;
   const [feed, { refetch }] = createResource(sustain, (id) => engine.feed(id, null));
+
+  /**
+   * Texts that arrived while the app was shut are sitting in a local queue,
+   * because the receiver cannot write to the engine: a write needs the
+   * unlocked key and a text usually lands while the phone is locked. This is
+   * the other half. It runs when the household opens and again whenever the
+   * app comes back to the front, and it says nothing unless it found
+   * something.
+   */
+  const drain = async () => {
+    const id = sustain();
+    if (!id) return;
+    try {
+      const r = await engine.smsDrain(id);
+      if (r.read > 0) await refetch();
+    } catch {
+      // No permission yet, or not an Android build. Nothing to say.
+    }
+  };
+  createEffect(() => {
+    if (sustain()) void drain();
+  });
+  onMount(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void drain();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    onCleanup(() => document.removeEventListener("visibilitychange", onVisible));
+  });
   const [showQuiet, setShowQuiet] = createSignal(false);
 
   onMount(watchViewport);
@@ -267,6 +429,9 @@ export default function Orchie(props: { onFace?: () => void }) {
                   )}
                 </For>
               </Show>
+
+              {/* ═══ read the phone's own texts ══════════════════════════ */}
+              <SmsCard sustainId={f().sustainId} onSwept={() => void refetch()} />
 
               {/* ═══ narrate anything ════════════════════════════════════ */}
               <div class={O.card}>
