@@ -103,7 +103,14 @@ pub fn widget_declarations() -> Vec<WidgetDecl> {
             id: "classify_capture".into(),
             inputs: vec!["unclassified".into()],
             render: "classify_capture".into(),
-            emits: vec!["budget.spend".into(), "budget.allocate".into()],
+            // ★★★ `unspend` is here because a refund arrives in the same queue
+            //   as a purchase. Without it the only way to answer a refund was
+            //   to file it as a spend, which counts the original charge twice.
+            emits: vec![
+                "budget.spend".into(),
+                "budget.allocate".into(),
+                "budget.unspend".into(),
+            ],
             binding: BindingKey::Unit,
         },
         // The calm read — the one card worth showing when nothing is wrong.
@@ -140,6 +147,10 @@ pub fn view_definition() -> Definition {
     )
     .with_operator("budget.allocate")
     .with_operator("budget.spend")
+    // ★★ A card may only emit what the view permits, and a refund arrives in
+    //    the same queue as a purchase. Without this the only answer available
+    //    for one was to file it as a spend.
+    .with_operator("budget.unspend")
 }
 
 /// **The projection.** Top-level readings, every one derived from the
@@ -272,10 +283,8 @@ mod tests {
     fn every_declared_widget_loads_against_the_view_schema() {
         // ★ A card reading a dimension the projection does not carry is a
         //   load-time failure, not an empty box at render time.
-        assert!(
-            WidgetSet::load(widget_declarations(), &view_definition(), &Registry::default())
-                .is_ok()
-        );
+        let r = WidgetSet::load(widget_declarations(), &view_definition(), &Registry::default());
+        assert!(r.is_ok(), "a declared card was refused at load: {:?}", r.err());
     }
 
     #[test]
