@@ -975,6 +975,12 @@ pub struct FeedDto {
     pub sustain_id: String,
     pub label: String,
     pub cards: Vec<CardDto>,
+    /// The oldest capture still needing a person, if there is one.
+    ///
+    /// ★★ ONE id rather than a list. The classify card works the queue one
+    /// message at a time; a list here would be the unbounded second surface
+    /// the attention budget exists to prevent.
+    pub queue_head: Option<String>,
     /// ★ What stayed quiet — withdrawn and excluded alike, each saying which.
     pub quiet: Vec<QuietDto>,
     pub budget: u32,

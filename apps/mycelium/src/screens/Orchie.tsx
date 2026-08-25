@@ -87,6 +87,12 @@ const TITLE: Record<string, string> = {
  */
 const PAGE = 100;
 
+/** How many captures are waiting, from the projection `compose(r)` ranked on. */
+function waiting(feed: FeedDto): number {
+  const n = Number(read(feed, "unclassified"));
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** A zeroed sweep, to add pages into. */
 function blank(): SmsSweep {
   return {
@@ -350,10 +356,13 @@ export default function Orchie(props: { onFace?: () => void }) {
   //     it dims (see `staleWhileRefreshing`) and the numbers change in place.
   const shown = () => feed.latest;
 
-  /** The messages that need a person. ★ This is the job, and it goes first. */
-  const jobs = () => (shown()?.attention ?? []).filter((a) => a.messageId);
-  /** Everything else that needs attention but is not a classifiable capture. */
-  const notices = () => (shown()?.attention ?? []).filter((a) => !a.messageId);
+  /**
+   * The standing rows. ★ Bounded by what they are, rather than by how many
+   * events happened: at most one strained pocket. Captures are NOT here; they
+   * are the `classify_capture` widget, which `compose(r)` scores and the
+   * knapsack bounds like every other card.
+   */
+  const notices = () => shown()?.attention ?? [];
 
   return (
     <div class={O.frame} data-face="orchie">
@@ -420,23 +429,35 @@ export default function Orchie(props: { onFace?: () => void }) {
               class={O.stack}
               classList={{ [O.staleWhileRefreshing]: feed.loading }}
             >
-              {/* ═══ THE JOB — first, open, and the only amber card ═══════ */}
-              <For each={jobs()}>
-                {(a) => (
+              {/* ═══ THE JOB — one message, whatever the queue holds ══════
+                  This used to be a `For` over a row per waiting capture, which
+                  on a real inbox meant thousands of open classify flows and a
+                  frozen screen. One at a time now: the feed hands over a single
+                  id, and the next arrives when this one is done. */}
+              <Show when={f().queueHead}>
+                {(id) => (
                   <div class={O.cardPrimary}>
                     <div class={O.cardHead}>
-                      <h2 class={O.cardTitle}>{a.what}</h2>
+                      <h2 class={O.cardTitle}>
+                        {waiting(f()) > 1
+                          ? `${waiting(f())} to classify`
+                          : "one to classify"}
+                      </h2>
                     </div>
-                    <p class={O.caption}>{a.why}</p>
+                    <p class={O.caption}>
+                      {waiting(f()) > 1
+                        ? "they come one at a time. pick a pocket for this one."
+                        : "pick a pocket for it."}
+                    </p>
                     <Classify
                       sustain={f().sustainId}
-                      messageId={a.messageId!}
+                      messageId={id()}
                       autoStart
                       onDone={() => void refetch()}
                     />
                   </div>
                 )}
-              </For>
+              </Show>
 
               {/* ═══ the calm read ═══════════════════════════════════════ */}
               <Summary feed={f()} />
@@ -465,7 +486,7 @@ export default function Orchie(props: { onFace?: () => void }) {
               <Show
                 when={f().cards.length > 0}
                 fallback={
-                  <Show when={jobs().length === 0}>
+                  <Show when={!f().queueHead}>
                     <p class={O.empty}>nothing needs you right now</p>
                   </Show>
                 }

@@ -966,73 +966,14 @@ pub fn learn_rule(
 // ── Orchie ──────────────────────────────────────────────────
 
 /// **The curated feed** — `compose(r)` over one household.
-/// The capture rows for the feed, aggregated by tier.
+/// Which capture the classify card should offer next.
 ///
-/// Pulled out of `get_feed` so the one property that matters can be tested:
-/// **the number of rows does not grow with the number of messages.**
-fn attention_for_captures(queued: &[crate::ingest::IngestedMessage]) -> Vec<AttentionDto> {
-    // ★★★ **ONE ROW PER TIER, never one per message.**
-    //
-    // This used to push an `AttentionDto` for every queued capture. Reading a
-    // real inbox turned that into thousands of rows, the screen tried to draw a
-    // classify card for each, and the app froze. The threading was the smaller
-    // half of that bug; this was the larger one.
-    //
-    // A view is `compose(r)`'s pick under an attention budget of about four
-    // (Curated UI §§III to VI). A list that grows with the number of events is
-    // the thing the budget exists to forbid, and the article is explicit that
-    // the count is Cowan's four chunks rather than a scroll.
-    //
-    // So the two tiers that genuinely need a person (Ingest §II: parsed but
-    // deliberately undecided, and unrecognised) aggregate to at most one row
-    // each, and each row carries the OLDEST message's id. Tapping it works that
-    // one, the count drops, and the next is offered: the disclosure machine of
-    // §VII, one question at a time, rather than a wall of them.
-    //
-    // Mapped applies on its own and is never a row. Informational is recorded
-    // and deliberately not surfaced. Both are already excluded upstream by
-    // `needs_attention()`, and that is the tier partition doing its job.
-    let mut out: Vec<AttentionDto> = Vec::new();
-    let mut by_tier: Vec<(&str, &str, &str)> = vec![
-        ("parsed_unmapped", "capture", "waiting for you to pick a pocket"),
-        ("unparsed", "unparsed", "in a shape no rule recognises yet"),
-    ];
-    by_tier.retain(|(status, _, _)| queued.iter().any(|m| m.status == *status));
-
-    for (status, kind, plural_why) in by_tier {
-        // Oldest first, so the same message is offered until it is dealt with.
-        let mut tier: Vec<_> = queued.iter().filter(|m| m.status == status).collect();
-        tier.sort_by_key(|m| m.seq);
-        let Some(first) = tier.first() else { continue };
-        let n = tier.len();
-
-        // One message reads better as itself than as a count of one.
-        let (what, why) = if n == 1 {
-            (
-                first
-                    .parsed_fields
-                    .get("counterparty")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("a captured message")
-                    .to_string(),
-                first.reason.clone(),
-            )
-        } else {
-            (
-                format!("{n} to classify"),
-                format!("{n} captures {plural_why}. They come one at a time."),
-            )
-        };
-
-        out.push(AttentionDto {
-            kind: kind.into(),
-            what,
-            why,
-            severity: "warn".into(),
-            message_id: Some(first.id.clone()),
-        });
-    }
-    out
+/// ★★ Oldest first, so the same message is offered until it is dealt with
+/// rather than a different one on every refresh. One id, never a list: the
+/// card works the queue one message at a time, which is the disclosure machine
+/// of Curated UI VII and the reason the screen cannot grow with the queue.
+fn oldest_waiting(queued: &[crate::ingest::IngestedMessage]) -> Option<String> {
+    queued.iter().min_by_key(|m| m.seq).map(|m| m.id.clone())
 }
 
 #[tauri::command]
@@ -1150,12 +1091,30 @@ pub fn get_feed(
             });
         }
     }
-    attention.extend(attention_for_captures(&queued));
+    // ★★★ **No capture rows here, and that is the point.**
+    //
+    // Classifying already IS a widget: `classify_capture`, declared in
+    // `orchie.rs`, Unit-bound, reading the `unclassified` dimension and
+    // emitting the budget Enzymes. `compose(r)` scores it against everything
+    // else and the knapsack decides whether it fits.
+    //
+    // This function used to push a row per queued message ALONGSIDE that, a
+    // second surface the budget never saw. Reading a real inbox made it
+    // thousands of rows and the screen tried to work every one at once. A view
+    // is the knapsack's pick (Curated UI III to VI); a list that grows with the
+    // number of events is what the budget exists to forbid.
+    //
+    // So the card is the only capture surface, and all it needs from here is
+    // which message to offer next.
+    // The oldest still needing a person. ONE id, never a list: the card works
+    // them one at a time, which is the disclosure machine of Curated UI VII.
+    let queue_head = oldest_waiting(&queued);
 
     Ok(FeedDto {
         sustain_id: sustain_id.clone(),
         label,
         cards,
+        queue_head,
         quiet,
         budget: view.budget as u32,
         spent: view.spent as u32,
@@ -2001,18 +1960,18 @@ pub fn sms_queue_depth(app: tauri::AppHandle) -> Result<u32, String> {
 }
 
 #[cfg(test)]
-mod attention_tests {
+mod feed_surface_tests {
     use super::*;
     use crate::ingest::IngestedMessage;
 
-    fn msg(seq: u64, status: &str) -> IngestedMessage {
+    fn msg(seq: u64) -> IngestedMessage {
         IngestedMessage {
             id: format!("m{seq}"),
             sustain_id: "h".into(),
             source_id: "mpesa".into(),
             raw_payload: "Ksh100 paid to SOMEONE".into(),
             dedup_key: format!("k{seq}"),
-            status: status.into(),
+            status: "parsed_unmapped".into(),
             parser_name: "mpesa_buygoods".into(),
             reason: "which pocket is yours to decide".into(),
             parsed_fields: Default::default(),
@@ -2028,51 +1987,26 @@ mod attention_tests {
 
     /// ★★★ The property the freeze was a violation of.
     ///
-    /// A view is a pick under an attention budget, so the number of rows is a
-    /// function of the number of TIERS, never of the number of messages. Two
-    /// thousand captures and two captures produce the same shape of screen.
+    /// Two thousand waiting captures reach the screen as ONE id, exactly as two
+    /// do. What the person sees is `compose(r)`'s pick under the budget, and
+    /// nothing here grows with the queue.
     #[test]
-    fn rows_do_not_grow_with_the_number_of_messages() {
-        let many: Vec<_> = (0..2_000).map(|i| msg(i, "parsed_unmapped")).collect();
-        let rows = attention_for_captures(&many);
-        assert_eq!(rows.len(), 1, "one tier, one row, whatever the count");
-        assert!(rows[0].what.contains("2000"), "the count is said: {}", rows[0].what);
+    fn a_large_queue_reaches_the_screen_as_one_id() {
+        let many: Vec<_> = (0..2_000).map(msg).collect();
+        let head = oldest_waiting(&many);
+        assert_eq!(head.as_deref(), Some("m0"));
     }
 
-    /// Both tiers that need a person get a row. Neither gets more than one.
+    /// Oldest first, whatever order they arrive in.
     #[test]
-    fn each_tier_gets_exactly_one_row() {
-        let mut all: Vec<_> = (0..500).map(|i| msg(i, "parsed_unmapped")).collect();
-        all.extend((500..900).map(|i| msg(i, "unparsed")));
-        let rows = attention_for_captures(&all);
-        assert_eq!(rows.len(), 2, "two tiers, two rows");
-        assert!(rows.iter().any(|r| r.kind == "capture"));
-        assert!(rows.iter().any(|r| r.kind == "unparsed"));
+    fn the_oldest_is_offered_first() {
+        let some = vec![msg(9), msg(3), msg(7)];
+        assert_eq!(oldest_waiting(&some).as_deref(), Some("m3"));
     }
 
-    /// ★★ The row points at the OLDEST, so the same one is offered until it is
-    /// dealt with rather than a different one each refresh.
+    /// An empty queue offers nothing rather than a fabricated id.
     #[test]
-    fn the_row_offers_the_oldest_message() {
-        let mut all = vec![msg(9, "parsed_unmapped"), msg(3, "parsed_unmapped")];
-        all.push(msg(7, "parsed_unmapped"));
-        let rows = attention_for_captures(&all);
-        assert_eq!(rows[0].message_id.as_deref(), Some("m3"));
-    }
-
-    /// One message reads as itself rather than as a count of one.
-    #[test]
-    fn a_single_capture_is_named_not_counted() {
-        let rows = attention_for_captures(&[msg(1, "parsed_unmapped")]);
-        assert_eq!(rows.len(), 1);
-        assert!(!rows[0].what.contains("to classify"), "got {}", rows[0].what);
-    }
-
-    /// Ingest §II: mapped applies on its own and informational is recorded and
-    /// deliberately not surfaced. Neither is ever a row.
-    #[test]
-    fn mapped_and_informational_never_surface() {
-        let quiet = vec![msg(1, "mapped"), msg(2, "informational")];
-        assert!(attention_for_captures(&quiet).is_empty());
+    fn nothing_waiting_offers_nothing() {
+        assert!(oldest_waiting(&[]).is_none());
     }
 }

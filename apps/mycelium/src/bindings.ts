@@ -907,6 +907,14 @@ export type ExclusionDto = { sustainId: string; label: string; isHousehold: bool
  */
 export type FeedDto = { sustainId: string; label: string; cards: CardDto[]; 
 /**
+ * The oldest capture still needing a person, if there is one.
+ * 
+ * ★★ ONE id rather than a list. The classify card works the queue one
+ * message at a time; a list here would be the unbounded second surface
+ * the attention budget exists to prevent.
+ */
+queueHead: string | null; 
+/**
  * ★ What stayed quiet — withdrawn and excluded alike, each saying which.
  */
 quiet: QuietDto[]; budget: number; spent: number; candidatesConsidered: number; 
