@@ -254,6 +254,24 @@ if (-not $SkipApps) {
     Ok 'desktop built'
 
     Say 'Building Android (arm64 debug APK)'
+    # -----------------------------------------------------------------
+    # gen/android is a CACHE, and `tauri android init` only creates files
+    # that are MISSING -- it never rewrites one that already exists. The
+    # Android LABEL lives in a generated strings.xml, derived from
+    # productName. So changing productName silently does NOT reach the APK
+    # while a stale strings.xml sits there: the build succeeds and ships the
+    # OLD name. Found exactly that way when Orchie's rename appeared to do
+    # nothing. Delete the generated label file and re-init, so the label is
+    # always re-derived from tauri.conf.json + tauri.android.conf.json.
+    # -----------------------------------------------------------------
+    $labelFile = Join-Path $repo 'apps/mycelium/src-tauri/gen/android/app/src/main/res/values/strings.xml'
+    Remove-Item -Force -ErrorAction SilentlyContinue $labelFile
+    Push-Location 'apps/mycelium'
+    Native { npx tauri android init } | Out-Null
+    Pop-Location
+    if (-not (Test-Path $labelFile)) { RevertAll 'android init did not regenerate strings.xml (the app label)' }
+    Note "android label: $(([xml](Get-Content $labelFile)).resources.string[0].'#text')"
+
     # ---------------------------------------------------------------------
     # KNOWN WINDOWS LIMIT, handled rather than worked around blindly.
     # `tauri android build` SYMLINKS the built .so into jniLibs, which needs
