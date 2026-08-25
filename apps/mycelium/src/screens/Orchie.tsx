@@ -126,7 +126,7 @@ function blank(): SmsSweep {
   return {
     read: 0, applied: 0, needsYou: 0, duplicates: 0, unparsed: 0, refused: 0,
     skippedOtherSenders: 0, skippedSecrets: 0, failed: 0, firstFailure: null,
-    hasMore: false, nextOffset: 0, remaining: 0,
+    hasMore: false, nextOffset: 0, remaining: 0, nettedPairs: 0,
   };
 }
 
@@ -141,6 +141,7 @@ function add(total: SmsSweep, page: SmsSweep) {
   total.skippedOtherSenders += page.skippedOtherSenders;
   total.skippedSecrets += page.skippedSecrets;
   total.failed += page.failed;
+  total.nettedPairs += page.nettedPairs;
   if (total.firstFailure === null) total.firstFailure = page.firstFailure;
 }
 
@@ -389,6 +390,15 @@ function SmsCard(props: { sustainId: string; onSwept: () => void }) {
                 {r().applied} filed, {r().needsYou} waiting for you,{" "}
                 {r().duplicates} already seen.
               </p>
+              {/* ★★ Each pair took TWO out of the queue and recorded nothing:
+                  a charge and its refund are zero together. */}
+              <Show when={r().nettedPairs > 0}>
+                <p class={O.caption}>
+                  {r().nettedPairs} refund{r().nettedPairs === 1 ? "" : "s"} cancelled against
+                  {r().nettedPairs === 1 ? " its charge" : " their charges"}. Nothing recorded,
+                  because together they are zero.
+                </p>
+              </Show>
               <Show when={r().unparsed > 0}>
                 <p class={O.caption}>
                   {r().unparsed} in a shape no rule recognises yet.
@@ -461,7 +471,19 @@ export default function Orchie(props: { onFace?: () => void }) {
         // call is what made unlocking freeze when texts had piled up.
         await new Promise((r) => setTimeout(r, 0));
       }
-      if (handled > 0) await refetch();
+      // ★★★ Cancel refunds against their charges, once per open.
+      //
+      // The backlog was captured before netting existed, so without this his
+      // existing refunds would sit in the queue forever waiting for an import
+      // that never comes. Idempotent: a second pass finds nothing left to do.
+      let cancelled = 0;
+      try {
+        cancelled = (await engine.netReversals(id)).netted;
+        if (cancelled > 0) setNetted(cancelled);
+      } catch {
+        // Nothing to say. The queue is unchanged.
+      }
+      if (handled > 0 || cancelled > 0) await refetch();
     } catch {
       // No permission yet, or not an Android build. Nothing to say.
     }
@@ -477,6 +499,8 @@ export default function Orchie(props: { onFace?: () => void }) {
     onCleanup(() => document.removeEventListener("visibilitychange", onVisible));
   });
   const [showQuiet, setShowQuiet] = createSignal(false);
+  /** Pairs cancelled on this open, so the count never drops unexplained. */
+  const [netted, setNetted] = createSignal(0);
 
   onMount(watchViewport);
 
@@ -667,6 +691,20 @@ export default function Orchie(props: { onFace?: () => void }) {
                     </div>
                   )}
                 </For>
+              </Show>
+
+              {/* ★★ A count that fell on its own needs a reason on screen. */}
+              <Show when={netted() > 0}>
+                <div class={O.card}>
+                  <p class={O.caption}>
+                    {netted()} refund{netted() === 1 ? "" : "s"} cancelled against
+                    {netted() === 1 ? " its charge" : " their charges"}. Both left the
+                    list and nothing was recorded, because together they are zero.
+                  </p>
+                  <button class={O.linkish} onClick={() => setNetted(0)}>
+                    got it
+                  </button>
+                </div>
               </Show>
 
               {/* ═══ read the phone's own texts ══════════════════════════ */}

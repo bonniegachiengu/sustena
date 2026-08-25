@@ -373,6 +373,26 @@ async ignoreMessage(messageId: string) : Promise<Result<boolean, string>> {
 }
 },
 /**
+ * Cancel refunds against their charges, where both are still unclassified.
+ * 
+ * ★★★ Case 1 of the netting design. A charge and its refund net to zero, so
+ * if neither has been filed the honest outcome is that both leave the queue
+ * and nothing is recorded: no money moved on balance, and no event should
+ * claim it did. Nothing is deleted; each keeps its text and gains the id of
+ * the other.
+ * 
+ * ★★ Where more than one charge could be the match, it nets NOTHING. Getting
+ * the pair wrong would make two real transactions disappear.
+ */
+async netReversals(sustainId: string) : Promise<Result<NettingDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("net_reversals", { sustainId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * **Remember this format** — synthesise a rule from a confirmed correction.
  * 
  * ★★ Verified before it is ever added: it must be well-typed, must match the
@@ -1183,6 +1203,22 @@ rawPayload: string; amount: number | null; counterparty: string | null; directio
  */
 gateReason: string | null; resolved: boolean; needsAttention: boolean }
 /**
+ * What a netting pass did.
+ */
+export type NettingDto = { 
+/**
+ * Charge/refund pairs cancelled. Each removes TWO from the queue.
+ */
+netted: number; 
+/**
+ * Refunds with no charge to cancel, left for a person.
+ */
+unmatched: number; 
+/**
+ * Refunds with more than one candidate. Deliberately untouched.
+ */
+ambiguous: number }
+/**
  * This node on the network.
  */
 export type NetworkDto = { 
@@ -1549,7 +1585,12 @@ nextOffset: number;
 /**
  * Still queued after this batch. Draining only.
  */
-remaining: number }
+remaining: number; 
+/**
+ * Charge/refund pairs cancelled once the read finished. Each took TWO out
+ * of the queue and recorded nothing, because together they are zero.
+ */
+nettedPairs: number }
 /**
  * A declared capture source.
  */

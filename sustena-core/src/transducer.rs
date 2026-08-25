@@ -458,7 +458,8 @@ mod tests {
     #[test]
     fn the_shipped_set_is_the_expected_shape() {
         assert_eq!(seed_rules("mpesa").len(), 7);
-        assert_eq!(seed_rules("kcb").len(), 15);
+        // 16 = 15 original shapes + kcb_reversal, added for refund netting.
+        assert_eq!(seed_rules("kcb").len(), 16);
         assert_eq!(seed_rules("nobody").len(), 0);
     }
 

@@ -72,6 +72,7 @@ pub fn specta_builder() -> Builder {
         commands::declare_source,
         commands::resolve_message,
         commands::ignore_message,
+        commands::net_reversals,
         commands::learn_rule,
         commands::get_feed,
         commands::orchie_infer,

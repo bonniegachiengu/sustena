@@ -31,7 +31,7 @@
 //! source with no declared cadence is never flagged, because inventing one
 //! would be exactly the fabricated state the queue exists to prevent.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -66,6 +66,13 @@ pub struct IngestedMessage {
     pub gate_reason: Option<String>,
     #[serde(default)]
     pub resolved: bool,
+    /// ★★★ Cancelled against its opposite number, and which one.
+    ///
+    /// A charge and its refund net to zero. Both leave the queue, and each
+    /// records the id of the other, so "where did those two go?" has an answer
+    /// and the pairing can be checked rather than taken on trust.
+    #[serde(default)]
+    pub netted_with: Option<String>,
     /// ★★★ Set aside by a person as not a transaction.
     ///
     /// A real state, never a silent drop. The message stays in the log with
@@ -81,7 +88,20 @@ impl IngestedMessage {
     pub fn needs_attention(&self) -> bool {
         !self.resolved
             && !self.ignored
+            && self.netted_with.is_none()
             && matches!(self.status.as_str(), "parsed_unmapped" | "unparsed")
+    }
+
+    /// The amount the transducer read off this message, if it read one.
+    pub fn amount(&self) -> Option<f64> {
+        self.parsed_fields.get("amount").and_then(|v| {
+            v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
+        })
+    }
+
+    /// Who it was with, as the transducer read it.
+    pub fn counterparty(&self) -> Option<&str> {
+        self.parsed_fields.get("counterparty").and_then(|v| v.as_str())
     }
 }
 
@@ -287,6 +307,7 @@ impl Ingested {
             gate_reason: None,
             resolved: false,
             ignored: false,
+            netted_with: None,
             seq,
         };
         self.append_message(&message)?;
@@ -520,6 +541,130 @@ impl std::fmt::Debug for Capture {
                 f.debug_struct("Stored").field("id", &m.id).field("status", &m.status).finish()
             }
         }
+    }
+}
+
+// ── reversal netting ─────────────────────────────────────────────────────────
+
+/// Does this text describe a refund of an earlier charge?
+///
+/// ★★ Deliberately NOT a transducer tier. The five tiers are about what a
+/// message IS; this is about what two messages are to EACH OTHER, which only
+/// the queue can answer. Keeping it here leaves the tier partition alone.
+pub fn looks_like_reversal(raw: &str) -> bool {
+    let t = raw.to_lowercase();
+    t.contains("has been reversed")
+        || t.contains("was reversed")
+        || t.contains("have been reversed")
+        || t.contains("reversal of")
+}
+
+/// Merchant names, compared the way a person would.
+fn same_counterparty(a: &str, b: &str) -> bool {
+    let norm = |x: &str| x.to_uppercase().split_whitespace().collect::<Vec<_>>().join(" ");
+    let (a, b) = (norm(a), norm(b));
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    // One often carries a suffix the other does not: "NAIVAS" and
+    // "NAIVAS SUPERMARKET" are the same shop.
+    a == b || a.contains(&b) || b.contains(&a)
+}
+
+/// Two amounts are the same money.
+fn same_amount(a: f64, b: f64) -> bool {
+    (a - b).abs() < 0.005
+}
+
+/// One charge cancelled by one refund.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct NettedPair {
+    pub reversal: String,
+    pub original: String,
+    pub amount: f64,
+    pub counterparty: String,
+}
+
+/// What a netting pass did, and what it deliberately would not do.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct NettingReport {
+    pub netted: Vec<NettedPair>,
+    /// Reversals with no charge to cancel. Left alone for cases 2 and 3.
+    pub unmatched: u32,
+    /// ★★★ Reversals with MORE THAN ONE candidate charge.
+    ///
+    /// Left alone on purpose. Netting removes two messages and records
+    /// nothing, so guessing the wrong pair makes two real transactions
+    /// disappear. Where it cannot tell, it does not choose.
+    pub ambiguous: u32,
+}
+
+impl Ingested {
+    /// Cancel refunds against their charges, where both are still unclassified.
+    ///
+    /// ★★★ Case 1 of the netting design. A charge and its refund net to zero,
+    /// so if neither has been filed yet the honest outcome is that both leave
+    /// the queue and nothing is recorded. No money moved on balance, and no
+    /// event should claim it did.
+    ///
+    /// Nothing is deleted. Each keeps its text and gains the id of the other,
+    /// which is what makes this an entry in the log rather than a silent drop.
+    ///
+    /// ★★ Matching is amount plus merchant. Time is deliberately NOT required:
+    /// messages captured before this existed carry no timestamp, and demanding
+    /// one would make the whole backlog unmatchable. The uniqueness rule is
+    /// what keeps that safe.
+    pub fn net_reversals(&self, sustain_id: &str) -> StoreResult<NettingReport> {
+        let queue: Vec<IngestedMessage> = self
+            .current()?
+            .into_iter()
+            .filter(|m| m.sustain_id == sustain_id && m.needs_attention())
+            .collect();
+
+        let (reversals, charges): (Vec<_>, Vec<_>) =
+            queue.iter().partition(|m| looks_like_reversal(&m.raw_payload));
+
+        let mut report = NettingReport::default();
+        let mut taken: BTreeSet<String> = BTreeSet::new();
+
+        for r in reversals {
+            let (Some(amount), Some(who)) = (r.amount(), r.counterparty()) else {
+                report.unmatched += 1;
+                continue;
+            };
+            let candidates: Vec<&&IngestedMessage> = charges
+                .iter()
+                .filter(|c| !taken.contains(&c.id))
+                .filter(|c| c.amount().map(|a| same_amount(a, amount)).unwrap_or(false))
+                .filter(|c| c.counterparty().map(|x| same_counterparty(x, who)).unwrap_or(false))
+                .collect();
+
+            match candidates.len() {
+                1 => {
+                    let c = candidates[0];
+                    taken.insert(c.id.clone());
+                    self.mark_netted(&r.id, &c.id)?;
+                    self.mark_netted(&c.id, &r.id)?;
+                    report.netted.push(NettedPair {
+                        reversal: r.id.clone(),
+                        original: c.id.clone(),
+                        amount,
+                        counterparty: who.to_string(),
+                    });
+                }
+                0 => report.unmatched += 1,
+                _ => report.ambiguous += 1,
+            }
+        }
+        Ok(report)
+    }
+
+    fn mark_netted(&self, id: &str, partner: &str) -> StoreResult<()> {
+        let Some(mut m) = self.current()?.into_iter().find(|m| m.id == id) else {
+            return Ok(());
+        };
+        m.netted_with = Some(partner.to_string());
+        self.append_message(&m)
     }
 }
 
@@ -833,5 +978,153 @@ mod ignore_tests {
     fn ignoring_an_unknown_message_reports_it() {
         let ing = Ingested::at(scratch("three")).expect("ingest");
         assert!(!ing.ignore("nope").expect("ignore"));
+    }
+}
+
+#[cfg(test)]
+mod netting_tests {
+    use super::*;
+    use std::env;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-net-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    /// A real KCB card purchase, and the reversal that undoes it.
+    fn charge(amount: &str, who: &str) -> String {
+        format!(
+            "KES {amount} transaction made on KCB card 1234XXXXXXXX5678 at {who} \
+             on 1/8/26 12:25pm, Avail balance KES 59,055.00"
+        )
+    }
+    fn reversal(amount: &str, who: &str) -> String {
+        format!(
+            "Your card transaction of KES {amount} at {who} on 1/8/26 has been reversed. \
+             Avail balance KES 59,155.00"
+        )
+    }
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let ing = Ingested::at(scratch(name)).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    fn waiting(ing: &Ingested) -> usize {
+        ing.current().expect("current").iter().filter(|m| m.needs_attention()).count()
+    }
+
+    /// ★★★ Case 1. A charge and its refund both unclassified cancel, both
+    /// leave the queue, and nothing is recorded.
+    #[test]
+    fn a_charge_and_its_refund_cancel_each_other() {
+        let (ing, rules) = store("pair");
+        ing.capture("h", "kcb", &charge("100.00", "Bolt KE"), &rules).expect("charge");
+        ing.capture("h", "kcb", &reversal("100.00", "Bolt KE"), &rules).expect("reversal");
+        assert_eq!(waiting(&ing), 2, "both start in the queue");
+
+        let r = ing.net_reversals("h").expect("net");
+        assert_eq!(r.netted.len(), 1, "one pair");
+        assert_eq!(r.ambiguous, 0);
+        assert_eq!(waiting(&ing), 0, "and the queue is clear");
+    }
+
+    /// Nothing is deleted, and each names the other.
+    #[test]
+    fn netting_records_the_pairing_rather_than_deleting() {
+        let (ing, rules) = store("record");
+        ing.capture("h", "kcb", &charge("250.00", "NAIVAS"), &rules).expect("charge");
+        ing.capture("h", "kcb", &reversal("250.00", "NAIVAS"), &rules).expect("reversal");
+        ing.net_reversals("h").expect("net");
+
+        let all = ing.current().expect("current");
+        assert_eq!(all.len(), 2, "both still on record");
+        for m in &all {
+            assert!(m.netted_with.is_some(), "each says what it cancelled against");
+            assert!(!m.raw_payload.is_empty(), "and keeps its text");
+        }
+        let ids: Vec<&str> = all.iter().map(|m| m.id.as_str()).collect();
+        for m in &all {
+            let partner = m.netted_with.as_deref().expect("partner");
+            assert!(ids.contains(&partner), "and points at the other one");
+            assert_ne!(partner, m.id, "never at itself");
+        }
+    }
+
+    /// ★★★ THE SAFETY PROPERTY. Two identical charges and one refund is
+    /// ambiguous, and netting the wrong one would make a real transaction
+    /// disappear. Where it cannot tell, it does not choose.
+    #[test]
+    fn an_ambiguous_match_is_left_alone() {
+        let (ing, rules) = store("ambiguous");
+        ing.capture("h", "kcb", &charge("100.00", "Bolt KE"), &rules).expect("a");
+        // Same amount, same merchant, different text so it is not a duplicate.
+        ing.capture("h", "kcb", &format!("{} ", charge("100.00", "Bolt KE")), &rules)
+            .expect("b");
+        ing.capture("h", "kcb", &reversal("100.00", "Bolt KE"), &rules).expect("reversal");
+
+        let r = ing.net_reversals("h").expect("net");
+        assert_eq!(r.netted.len(), 0, "nothing netted");
+        assert_eq!(r.ambiguous, 1, "and it says why");
+        assert_eq!(waiting(&ing), 3, "all three still waiting for a person");
+    }
+
+    /// A refund with no charge to cancel is left for cases 2 and 3.
+    #[test]
+    fn a_refund_with_no_charge_is_left_alone() {
+        let (ing, rules) = store("orphan");
+        ing.capture("h", "kcb", &reversal("70.00", "SOMEWHERE"), &rules).expect("reversal");
+        let r = ing.net_reversals("h").expect("net");
+        assert_eq!(r.netted.len(), 0);
+        assert_eq!(r.unmatched, 1);
+        assert_eq!(waiting(&ing), 1, "it still asks");
+    }
+
+    /// A different amount is a different transaction.
+    #[test]
+    fn amounts_must_match() {
+        let (ing, rules) = store("amounts");
+        ing.capture("h", "kcb", &charge("100.00", "Bolt KE"), &rules).expect("charge");
+        ing.capture("h", "kcb", &reversal("90.00", "Bolt KE"), &rules).expect("reversal");
+        let r = ing.net_reversals("h").expect("net");
+        assert_eq!(r.netted.len(), 0);
+        assert_eq!(waiting(&ing), 2);
+    }
+
+    /// A different merchant is a different transaction.
+    #[test]
+    fn merchants_must_match() {
+        let (ing, rules) = store("merchants");
+        ing.capture("h", "kcb", &charge("100.00", "Bolt KE"), &rules).expect("charge");
+        ing.capture("h", "kcb", &reversal("100.00", "NAIVAS"), &rules).expect("reversal");
+        let r = ing.net_reversals("h").expect("net");
+        assert_eq!(r.netted.len(), 0);
+        assert_eq!(waiting(&ing), 2);
+    }
+
+    /// Running it twice nets nothing further and disturbs nothing.
+    #[test]
+    fn a_second_pass_is_a_no_op() {
+        let (ing, rules) = store("twice");
+        ing.capture("h", "kcb", &charge("100.00", "Bolt KE"), &rules).expect("charge");
+        ing.capture("h", "kcb", &reversal("100.00", "Bolt KE"), &rules).expect("reversal");
+        assert_eq!(ing.net_reversals("h").expect("first").netted.len(), 1);
+        let second = ing.net_reversals("h").expect("second");
+        assert_eq!(second.netted.len(), 0, "nothing left to net");
+        assert_eq!(second.unmatched, 0, "and the netted one is not counted again");
+        assert_eq!(waiting(&ing), 0);
+    }
+
+    /// One household's reversal never cancels another's charge.
+    #[test]
+    fn netting_does_not_cross_sustains() {
+        let (ing, rules) = store("cross");
+        ing.capture("h", "kcb", &charge("100.00", "Bolt KE"), &rules).expect("charge");
+        ing.capture("other", "kcb", &reversal("100.00", "Bolt KE"), &rules).expect("reversal");
+        let r = ing.net_reversals("h").expect("net");
+        assert_eq!(r.netted.len(), 0, "different households do not net");
     }
 }

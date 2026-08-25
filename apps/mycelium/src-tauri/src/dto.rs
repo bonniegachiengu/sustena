@@ -1025,6 +1025,18 @@ pub struct CaptureContextDto {
     pub reason: String,
 }
 
+/// What a netting pass did.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NettingDto {
+    /// Charge/refund pairs cancelled. Each removes TWO from the queue.
+    pub netted: u32,
+    /// Refunds with no charge to cancel, left for a person.
+    pub unmatched: u32,
+    /// Refunds with more than one candidate. Deliberately untouched.
+    pub ambiguous: u32,
+}
+
 /// One inference pass, on the wire.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "status", rename_all = "camelCase")]

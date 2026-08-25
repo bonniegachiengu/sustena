@@ -14,7 +14,7 @@ use crate::dto::{
     AccessDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
-    AttentionDto, CaptureContextDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
+    AttentionDto, CaptureContextDto, NettingDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
     InferenceDto, IngestDto, MessageDto, QuietDto, RuleDto, SourceDto,
     BodyDto, CoOwnerDto, InstallDto, LibraryDto, NetworkDto, OfferDto, PackageDto,
     OrderDto, PeerDto, PeerShelfDto,
@@ -1152,6 +1152,30 @@ fn pockets_of(state: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Cancel refunds against their charges, where both are still unclassified.
+///
+/// ★★★ Case 1 of the netting design. A charge and its refund net to zero, so
+/// if neither has been filed the honest outcome is that both leave the queue
+/// and nothing is recorded: no money moved on balance, and no event should
+/// claim it did. Nothing is deleted; each keeps its text and gains the id of
+/// the other.
+///
+/// ★★ Where more than one charge could be the match, it nets NOTHING. Getting
+/// the pair wrong would make two real transactions disappear.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn net_reversals(world: State<'_, World>, sustain_id: String) -> Result<NettingDto, String> {
+    let r = world.ingest().net_reversals(&sustain_id).map_err(|e| e.to_string())?;
+    if !r.netted.is_empty() {
+        trace!("netted {} charge/refund pair(s)", r.netted.len());
+    }
+    Ok(NettingDto {
+        netted: r.netted.len() as u32,
+        unmatched: r.unmatched,
+        ambiguous: r.ambiguous,
+    })
+}
+
 /// Set a captured message aside as not a transaction.
 ///
 /// ★★ A real state on the message, never a delete. A reversal, a promo or a
@@ -1869,6 +1893,9 @@ pub struct SmsSweep {
     pub next_offset: u32,
     /// Still queued after this batch. Draining only.
     pub remaining: u32,
+    /// Charge/refund pairs cancelled once the read finished. Each took TWO out
+    /// of the queue and recorded nothing, because together they are zero.
+    pub netted_pairs: u32,
 }
 
 /// The inbox is read as one stream rather than per sender, so the mark is kept
@@ -1991,11 +2018,18 @@ pub fn sms_import_page(
     // ★ Kept in Rust only: the mark is the store's business and a timestamp
     //   cannot cross into TypeScript anyway (specta forbids i64).
     let newest = batch.messages.iter().map(|m| m.timestamp_ms).max();
-    let out = sweep(&world, &sustain_id, batch);
+    let mut out = sweep(&world, &sustain_id, batch);
 
     // ★★ The mark moves only when the LAST page lands. A read abandoned halfway
     //    must not make the next one skip what it never looked at.
     if !out.has_more {
+        // ★★★ And once the whole inbox is in, cancel the refunds against their
+        //     charges. It runs here rather than per page because a refund and
+        //     its charge can land in different pages, and a pass over a partial
+        //     queue would call a pair unmatched that simply had not arrived.
+        if let Ok(net) = world.ingest().net_reversals(&sustain_id) {
+            out.netted_pairs = net.netted.len() as u32;
+        }
         if let Some(ms) = newest.or(Some(since_ms)) {
             let _ = world.ingest().set_read_mark(&sustain_id, ANY_SOURCE, ms);
         }
@@ -2060,6 +2094,7 @@ mod feed_surface_tests {
             gate_reason: None,
             resolved: false,
             ignored: false,
+            netted_with: None,
             seq,
         }
     }

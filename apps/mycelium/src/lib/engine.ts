@@ -29,6 +29,7 @@ import {
   type IngestDto,
   type CaptureResult,
   type ChoiceDto,
+  type NettingDto,
   type SmsSweep,
   type CaptureContextDto,
   type NetworkDto,
@@ -76,6 +77,7 @@ export type {
   IngestDto,
   CaptureResult,
   ChoiceDto,
+  NettingDto,
   SmsSweep,
   CaptureContextDto,
   NetworkDto,
@@ -165,6 +167,9 @@ export const engine = {
 
   declareSource: async (id: string, label: string, minutes: number | null): Promise<null> =>
     unwrap(await commands.declareSource(id, label, minutes)),
+  /** Cancel refunds against their charges. Returns what it did. */
+  netReversals: async (sustainId: string): Promise<NettingDto> =>
+    unwrap(await commands.netReversals(sustainId)),
   /** Set a captured message aside as not a transaction. Keeps the record. */
   ignoreMessage: async (id: string): Promise<boolean> =>
     unwrap(await commands.ignoreMessage(id)),

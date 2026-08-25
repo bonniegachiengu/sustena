@@ -344,6 +344,39 @@
  ],
  "kcb": [
   {
+   "id": "kcb_reversal",
+   "source": "kcb",
+   "version": 1,
+   "pattern": "(?s)transaction\\s+of\\s+KES\\s*(?P<amount>[\\d,]+\\.?\\d*)\\s+at\\s+(?P<counterparty>.+?)\\s+on\\s+.*?revers",
+   "extract": {
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "counterparty": {
+     "type": "string",
+     "group": "counterparty",
+     "value": null
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "received"
+    }
+   },
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "A refund of KES {amount:,.2f} from {counterparty}.",
+   "trust": "shipped",
+   "provenance": "reversal, recognised so netting can pair it with its charge",
+   "examples": []
+  },
+  {
    "id": "kcb_receive",
    "source": "kcb",
    "version": 1,
