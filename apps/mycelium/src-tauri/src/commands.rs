@@ -1166,11 +1166,49 @@ fn pockets_of(state: &Value) -> Vec<String> {
 #[specta::specta]
 pub fn net_reversals(world: State<'_, World>, sustain_id: String) -> Result<NettingDto, String> {
     let r = world.ingest().net_reversals(&sustain_id).map_err(|e| e.to_string())?;
-    if !r.netted.is_empty() {
-        trace!("netted {} charge/refund pair(s)", r.netted.len());
+
+    // ★★★ Case 2 is the only part of netting that moves money, and it moves it
+    //     through `World::call` -- the same door the Console and the classify
+    //     card use. There is no store-level write path to the ledger, and this
+    //     does not become the first one.
+    let mut given_back = 0u32;
+    let mut refused = 0u32;
+    for c in &r.compensations {
+        let mut all_committed = true;
+        for call in &c.calls {
+            let params: Map<String, Value> = call.params.clone().into_iter().collect();
+            match world.call(&sustain_id, &call.operator, &params) {
+                Ok(Some((x, _))) if x.committed() => {}
+                // ★★ A refusal stops this pair here. The earlier calls of a
+                //    pair are themselves real, committed moves and are left
+                //    standing rather than force-reversed -- a second undo of a
+                //    refusal is how a mistake gets doubled. The pair stays
+                //    unmarked, so it comes back next pass.
+                _ => {
+                    all_committed = false;
+                    break;
+                }
+            }
+        }
+        if all_committed {
+            world
+                .ingest()
+                .mark_compensated(&c.reversal, &c.original)
+                .map_err(|e| e.to_string())?;
+            given_back += 1;
+        } else {
+            refused += 1;
+        }
+    }
+
+    if !r.netted.is_empty() || given_back > 0 {
+        trace!("netted {} pair(s), gave back {given_back}", r.netted.len());
     }
     Ok(NettingDto {
         netted: r.netted.len() as u32,
+        given_back,
+        refused,
+        uncompensable: r.uncompensable,
         unmatched: r.unmatched,
         ambiguous: r.ambiguous,
     })
@@ -1316,6 +1354,7 @@ pub fn orchie_confirm(
     params: Value,
     message_id: Option<String>,
     description: Option<String>,
+    resolves: Option<bool>,
 ) -> Result<GateResult, String> {
     let params_map: Map<String, Value> = match params {
         Value::Object(o) => o,
@@ -1348,11 +1387,22 @@ pub fn orchie_confirm(
             let _ = world.ingest().remember(&sustain_id, d, pocket);
         }
         if let Some(id) = &message_id {
-            let _ = world.ingest().record_outcome(id, true, None);
+            // ★★★ What was done, before whether it is finished. Filing a past
+            //     charge is an allocation and then a spend, and undoing it
+            //     later needs both -- so each leg records itself as it lands,
+            //     and only the last one resolves the message.
+            let params_sorted: std::collections::BTreeMap<String, Value> =
+                params_map.clone().into_iter().collect();
+            let _ = world.ingest().record_filing(id, &operator, &params_sorted);
+            if resolves.unwrap_or(true) {
+                let _ = world.ingest().record_outcome(id, true, None);
+            }
         }
     } else {
         let _ = Refused::of(&sustain_id, &operator, &result).emit(&app);
         if let Some(id) = &message_id {
+            // ★ A refusal changed nothing, so there is no filing to record --
+            //   only the reason, and the message stays in the queue.
             let _ = world.ingest().record_outcome(id, false, result.reason.clone());
         }
     }
@@ -2095,6 +2145,7 @@ mod feed_surface_tests {
             resolved: false,
             ignored: false,
             netted_with: None,
+            filed: Vec::new(),
             seq,
         }
     }

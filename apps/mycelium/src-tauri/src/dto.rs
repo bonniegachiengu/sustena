@@ -1031,6 +1031,16 @@ pub struct CaptureContextDto {
 pub struct NettingDto {
     /// Charge/refund pairs cancelled. Each removes TWO from the queue.
     pub netted: u32,
+    /// Refunds of charges already filed, where the money really went back
+    /// through the gate.
+    pub given_back: u32,
+    /// Compensating calls the gate refused. The pair stays unsettled and comes
+    /// back next pass, rather than being marked done on a move that never
+    /// landed.
+    pub refused: u32,
+    /// Matched a filed charge, but nothing recorded HOW it was filed, so there
+    /// is no honest way to undo it.
+    pub uncompensable: u32,
     /// Refunds with no charge to cancel, left for a person.
     pub unmatched: u32,
     /// Refunds with more than one candidate. Deliberately untouched.

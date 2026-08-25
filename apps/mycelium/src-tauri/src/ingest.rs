@@ -73,6 +73,18 @@ pub struct IngestedMessage {
     /// and the pairing can be checked rather than taken on trust.
     #[serde(default)]
     pub netted_with: Option<String>,
+    /// ★★★ What was actually DONE about this message, in the order it happened.
+    ///
+    /// Recording the outcome as a bare `resolved: true` answered "was this
+    /// dealt with" and lost "how". That gap is what made a refund unanswerable:
+    /// undoing a charge needs to know which pocket it went to, and whether the
+    /// filing also moved money out of liquid to get it there.
+    ///
+    /// A list rather than one entry, because filing a past charge is two moves
+    /// -- an allocation to make room, then the spend itself -- and undoing it
+    /// is both of them in reverse.
+    #[serde(default)]
+    pub filed: Vec<Filing>,
     /// ★★★ Set aside by a person as not a transaction.
     ///
     /// A real state, never a silent drop. The message stays in the log with
@@ -103,6 +115,17 @@ impl IngestedMessage {
     pub fn counterparty(&self) -> Option<&str> {
         self.parsed_fields.get("counterparty").and_then(|v| v.as_str())
     }
+}
+
+/// One real operator call made about a captured message.
+///
+/// ★ The params as they were sent, not as they were inferred. An inference can
+/// be edited before it is confirmed, and it is the confirmed call that moved
+/// money.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Filing {
+    pub operator: String,
+    pub params: BTreeMap<String, serde_json::Value>,
 }
 
 /// A declared capture source.
@@ -308,6 +331,7 @@ impl Ingested {
             resolved: false,
             ignored: false,
             netted_with: None,
+            filed: Vec::new(),
             seq,
         };
         self.append_message(&message)?;
@@ -330,6 +354,24 @@ impl Ingested {
         // ★ Applying resolves it; a refusal leaves it in the queue, because a
         //   person still has something to do about it.
         m.resolved = applied;
+        self.append_message(&m)
+    }
+
+    /// Note a real operator call made about this message.
+    ///
+    /// ★★ Deliberately does NOT resolve it. Filing a past charge takes two
+    /// calls, and the message is only dealt with after the second. Resolution
+    /// stays `record_outcome`'s decision alone.
+    pub fn record_filing(
+        &self,
+        id: &str,
+        operator: &str,
+        params: &BTreeMap<String, serde_json::Value>,
+    ) -> StoreResult<()> {
+        let Some(mut m) = self.current()?.into_iter().find(|m| m.id == id) else {
+            return Ok(());
+        };
+        m.filed.push(Filing { operator: operator.to_string(), params: params.clone() });
         self.append_message(&m)
     }
 
@@ -576,6 +618,49 @@ fn same_amount(a: f64, b: f64) -> bool {
     (a - b).abs() < 0.005
 }
 
+/// The calls that would undo a filed charge, in the order to make them.
+///
+/// ★★★ Derived from what the original filing actually DID, never assumed. A
+/// charge filed into a pocket that already had room is one spend, and undoing
+/// it is one `budget.unspend`. A charge filed the backfill way moved money out
+/// of liquid first, and undoing that is the unspend AND an unallocate. Guessing
+/// either shape would move real money the wrong way.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Compensation {
+    pub operator: String,
+    pub params: BTreeMap<String, serde_json::Value>,
+}
+
+/// Work out how to undo a filed charge, or say why it cannot be worked out.
+///
+/// ★★ The inverses run in REVERSE order. Unspending first frees the pocket's
+/// room, which is exactly what `budget.unallocate` then needs in order to give
+/// the money back to liquid -- the other order refuses itself.
+pub fn compensation_for(filed: &[Filing]) -> Vec<Compensation> {
+    let mut out = Vec::new();
+    for f in filed.iter().rev() {
+        let inverse = match f.operator.as_str() {
+            "budget.spend" => "budget.unspend",
+            "budget.allocate" => "budget.unallocate",
+            // ★ Anything else is left alone rather than guessed at. A pocket
+            //   that was merely CREATED has nothing to undo, and an unknown
+            //   operator has no inverse this code can claim to know.
+            _ => continue,
+        };
+        let mut params = BTreeMap::new();
+        if let Some(v) = f.params.get("pocket_name") {
+            params.insert("pocket_name".to_string(), v.clone());
+        }
+        if let Some(v) = f.params.get("amount") {
+            params.insert("amount".to_string(), v.clone());
+        }
+        if params.len() == 2 {
+            out.push(Compensation { operator: inverse.to_string(), params });
+        }
+    }
+    out
+}
+
 /// One charge cancelled by one refund.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NettedPair {
@@ -585,11 +670,35 @@ pub struct NettedPair {
     pub counterparty: String,
 }
 
+/// A refund of a charge that was already filed, and how to give the money back.
+///
+/// ★★★ Not applied here. This pass reads; the caller runs the calls through the
+/// real gate, because moving money is the gate's business and a store has no
+/// right to it. The pairing is recorded either way, so a refusal cannot leave
+/// the same refund matched twice.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PendingCompensation {
+    pub reversal: String,
+    pub original: String,
+    pub amount: f64,
+    pub counterparty: String,
+    pub calls: Vec<Compensation>,
+}
+
 /// What a netting pass did, and what it deliberately would not do.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct NettingReport {
     pub netted: Vec<NettedPair>,
-    /// Reversals with no charge to cancel. Left alone for cases 2 and 3.
+    /// ★★★ Case 2: the charge was already filed, so the money has to come back
+    /// rather than the pair simply vanishing.
+    pub compensations: Vec<PendingCompensation>,
+    /// Reversals whose original was filed in a way this cannot undo -- filed
+    /// before filings were recorded, or by an operator with no known inverse.
+    /// Reported rather than guessed at.
+    pub uncompensable: u32,
+    /// ★★★ Case 3: no charge anywhere to match. The money came back and
+    /// nobody can say from where, so it stays in the queue as a question
+    /// rather than being quietly absorbed.
     pub unmatched: u32,
     /// ★★★ Reversals with MORE THAN ONE candidate charge.
     ///
@@ -615,14 +724,25 @@ impl Ingested {
     /// one would make the whole backlog unmatchable. The uniqueness rule is
     /// what keeps that safe.
     pub fn net_reversals(&self, sustain_id: &str) -> StoreResult<NettingReport> {
-        let queue: Vec<IngestedMessage> = self
-            .current()?
-            .into_iter()
-            .filter(|m| m.sustain_id == sustain_id && m.needs_attention())
-            .collect();
+        let all: Vec<IngestedMessage> =
+            self.current()?.into_iter().filter(|m| m.sustain_id == sustain_id).collect();
 
-        let (reversals, charges): (Vec<_>, Vec<_>) =
-            queue.iter().partition(|m| looks_like_reversal(&m.raw_payload));
+        // Reversals still waiting on an answer. One already paired or set aside
+        // has had its answer.
+        let reversals: Vec<&IngestedMessage> =
+            all.iter().filter(|m| m.needs_attention() && looks_like_reversal(&m.raw_payload)).collect();
+
+        // ★★ Two pools, searched in this order. An unfiled charge cancels for
+        //    free and records nothing, so it is always the better match when
+        //    both are available.
+        let unfiled: Vec<&IngestedMessage> = all
+            .iter()
+            .filter(|m| m.needs_attention() && !looks_like_reversal(&m.raw_payload))
+            .collect();
+        let filed: Vec<&IngestedMessage> = all
+            .iter()
+            .filter(|m| m.netted_with.is_none() && m.resolved && !looks_like_reversal(&m.raw_payload))
+            .collect();
 
         let mut report = NettingReport::default();
         let mut taken: BTreeSet<String> = BTreeSet::new();
@@ -632,31 +752,76 @@ impl Ingested {
                 report.unmatched += 1;
                 continue;
             };
-            let candidates: Vec<&&IngestedMessage> = charges
-                .iter()
-                .filter(|c| !taken.contains(&c.id))
-                .filter(|c| c.amount().map(|a| same_amount(a, amount)).unwrap_or(false))
-                .filter(|c| c.counterparty().map(|x| same_counterparty(x, who)).unwrap_or(false))
-                .collect();
+            let matches = |pool: &[&IngestedMessage]| -> Vec<String> {
+                pool.iter()
+                    .filter(|c| !taken.contains(&c.id))
+                    .filter(|c| c.amount().map(|a| same_amount(a, amount)).unwrap_or(false))
+                    .filter(|c| c.counterparty().map(|x| same_counterparty(x, who)).unwrap_or(false))
+                    .map(|c| c.id.clone())
+                    .collect()
+            };
 
-            match candidates.len() {
-                1 => {
-                    let c = candidates[0];
-                    taken.insert(c.id.clone());
-                    self.mark_netted(&r.id, &c.id)?;
-                    self.mark_netted(&c.id, &r.id)?;
-                    report.netted.push(NettedPair {
-                        reversal: r.id.clone(),
-                        original: c.id.clone(),
-                        amount,
-                        counterparty: who.to_string(),
-                    });
-                }
-                0 => report.unmatched += 1,
-                _ => report.ambiguous += 1,
+            // ── case 1 ───────────────────────────────────────────────────────
+            let free = matches(&unfiled);
+            if free.len() > 1 {
+                report.ambiguous += 1;
+                continue;
             }
+            if let Some(id) = free.first() {
+                taken.insert(id.clone());
+                self.mark_netted(&r.id, id)?;
+                self.mark_netted(id, &r.id)?;
+                report.netted.push(NettedPair {
+                    reversal: r.id.clone(),
+                    original: id.clone(),
+                    amount,
+                    counterparty: who.to_string(),
+                });
+                continue;
+            }
+
+            // ── case 2 ───────────────────────────────────────────────────────
+            let done = matches(&filed);
+            if done.len() > 1 {
+                report.ambiguous += 1;
+                continue;
+            }
+            if let Some(id) = done.first() {
+                let original =
+                    filed.iter().find(|m| &m.id == id).expect("it came out of this pool");
+                let calls = compensation_for(&original.filed);
+                if calls.is_empty() {
+                    // ★★★ Filed in a way this cannot undo. Left in the queue
+                    //     with nothing claimed, because a refund that quietly
+                    //     did nothing is worse than one still asking.
+                    report.uncompensable += 1;
+                    continue;
+                }
+                taken.insert(id.clone());
+                report.compensations.push(PendingCompensation {
+                    reversal: r.id.clone(),
+                    original: id.clone(),
+                    amount,
+                    counterparty: who.to_string(),
+                    calls,
+                });
+                continue;
+            }
+
+            // ── case 3 ───────────────────────────────────────────────────────
+            report.unmatched += 1;
         }
         Ok(report)
+    }
+
+    /// Record that a refund and the charge it gave back are settled.
+    ///
+    /// ★★ Called only after the compensating calls actually committed. Marking
+    /// the pair before the gate has spoken would leave a refund looking handled
+    /// while the money never moved.
+    pub fn mark_compensated(&self, reversal: &str, original: &str) -> StoreResult<()> {
+        self.mark_netted(reversal, original)?;
+        self.mark_netted(original, reversal)
     }
 
     fn mark_netted(&self, id: &str, partner: &str) -> StoreResult<()> {
@@ -1119,6 +1284,201 @@ mod netting_tests {
     }
 
     /// One household's reversal never cancels another's charge.
+    // ── case 2: the charge was already filed ─────────────────────────────────
+
+    /// File a charge the way the card does: allocate to make room, then spend.
+    fn file_backfilled(ing: &Ingested, id: &str, pocket: &str, amount: f64) {
+        let p = |a: f64| -> BTreeMap<String, serde_json::Value> {
+            BTreeMap::from([
+                ("pocket_name".to_string(), serde_json::json!(pocket)),
+                ("amount".to_string(), serde_json::json!(a)),
+            ])
+        };
+        ing.record_filing(id, "budget.allocate", &p(amount)).expect("allocate leg");
+        ing.record_filing(id, "budget.spend", &p(amount)).expect("spend leg");
+        ing.record_outcome(id, true, None).expect("resolve");
+    }
+
+    #[test]
+    fn a_refund_of_a_filed_charge_asks_for_the_money_back() {
+        let (ing, rules) = store("case2");
+        let Capture::Stored(c) = ing.capture("h", "kcb", &charge("500.00", "Java House"), &rules)
+            .expect("charge") else { panic!("stored") };
+        file_backfilled(&ing, &c.id, "food", 500.0);
+        ing.capture("h", "kcb", &reversal("500.00", "Java House"), &rules).expect("reversal");
+
+        let r = ing.net_reversals("h").expect("net");
+        assert!(r.netted.is_empty(), "nothing to cancel: the charge is already on the books");
+        assert_eq!(r.compensations.len(), 1, "one refund to give back");
+
+        let comp = &r.compensations[0];
+        assert_eq!(comp.original, c.id);
+        assert_eq!(comp.amount, 500.0);
+        // ★★★ Both legs, in reverse. Unspend frees the room that unallocate
+        //     then needs, and the other order refuses itself.
+        let ops: Vec<&str> = comp.calls.iter().map(|c| c.operator.as_str()).collect();
+        assert_eq!(ops, vec!["budget.unspend", "budget.unallocate"]);
+        for call in &comp.calls {
+            assert_eq!(call.params["pocket_name"], serde_json::json!("food"));
+            assert_eq!(call.params["amount"], serde_json::json!(500.0));
+        }
+    }
+
+    #[test]
+    fn a_charge_filed_into_a_funded_pocket_only_gives_back_the_spend() {
+        // ★★★ The money never came out of liquid for this one, so putting it
+        //     back into liquid would invent money. Only the spend is undone.
+        let (ing, rules) = store("case2-funded");
+        let Capture::Stored(c) = ing.capture("h", "kcb", &charge("80.00", "Naivas"), &rules)
+            .expect("charge") else { panic!("stored") };
+        let p = BTreeMap::from([
+            ("pocket_name".to_string(), serde_json::json!("shopping")),
+            ("amount".to_string(), serde_json::json!(80.0)),
+        ]);
+        ing.record_filing(&c.id, "budget.spend", &p).expect("spend");
+        ing.record_outcome(&c.id, true, None).expect("resolve");
+        ing.capture("h", "kcb", &reversal("80.00", "Naivas"), &rules).expect("reversal");
+
+        let r = ing.net_reversals("h").expect("net");
+        let ops: Vec<&str> =
+            r.compensations[0].calls.iter().map(|c| c.operator.as_str()).collect();
+        assert_eq!(ops, vec!["budget.unspend"], "no allocation happened, so none is undone");
+    }
+
+    #[test]
+    fn netting_does_not_settle_the_pair_until_the_money_actually_moved() {
+        // ★★★ The store proposes; only the caller, having run the calls through
+        //     the gate, may say it is done. Otherwise a refused compensation
+        //     would leave a refund looking handled with nothing given back.
+        let (ing, rules) = store("case2-unsettled");
+        let Capture::Stored(c) = ing.capture("h", "kcb", &charge("200.00", "Uber"), &rules)
+            .expect("charge") else { panic!("stored") };
+        file_backfilled(&ing, &c.id, "transport", 200.0);
+        let Capture::Stored(rev) = ing.capture("h", "kcb", &reversal("200.00", "Uber"), &rules)
+            .expect("reversal") else { panic!("stored") };
+
+        ing.net_reversals("h").expect("net");
+        let after = ing.current().expect("current");
+        let r = after.iter().find(|m| m.id == rev.id).expect("the reversal");
+        assert!(r.netted_with.is_none(), "still unsettled until the gate has spoken");
+        assert!(r.needs_attention(), "so it comes back next pass");
+
+        // And once it has, both sides record the pairing.
+        ing.mark_compensated(&rev.id, &c.id).expect("settle");
+        let after = ing.current().expect("current");
+        let r = after.iter().find(|m| m.id == rev.id).expect("the reversal");
+        assert_eq!(r.netted_with.as_deref(), Some(c.id.as_str()));
+        assert!(!r.needs_attention(), "and it stops asking");
+    }
+
+    #[test]
+    fn a_settled_refund_is_not_offered_again() {
+        let (ing, rules) = store("case2-once");
+        let Capture::Stored(c) = ing.capture("h", "kcb", &charge("310.00", "Carrefour"), &rules)
+            .expect("charge") else { panic!("stored") };
+        file_backfilled(&ing, &c.id, "food", 310.0);
+        let Capture::Stored(rev) = ing.capture("h", "kcb", &reversal("310.00", "Carrefour"), &rules)
+            .expect("reversal") else { panic!("stored") };
+
+        assert_eq!(ing.net_reversals("h").expect("first").compensations.len(), 1);
+        ing.mark_compensated(&rev.id, &c.id).expect("settle");
+        let second = ing.net_reversals("h").expect("second");
+        assert!(second.compensations.is_empty(), "a second pass gives nothing back twice");
+    }
+
+    #[test]
+    fn a_charge_filed_before_filings_were_recorded_is_reported_not_guessed() {
+        // ★★★ The real migration case. Anything he classified before tonight
+        //     has `resolved: true` and an empty filing list, so there is no
+        //     honest way to know which pocket to give the money back to.
+        //     Reported as such, and left in the queue.
+        let (ing, rules) = store("case2-legacy");
+        let Capture::Stored(c) = ing.capture("h", "kcb", &charge("90.00", "Shell"), &rules)
+            .expect("charge") else { panic!("stored") };
+        ing.record_outcome(&c.id, true, None).expect("resolve with no filing recorded");
+        ing.capture("h", "kcb", &reversal("90.00", "Shell"), &rules).expect("reversal");
+
+        let r = ing.net_reversals("h").expect("net");
+        assert!(r.compensations.is_empty(), "nothing is invented");
+        assert_eq!(r.uncompensable, 1, "and it says so out loud");
+        assert_eq!(waiting(&ing), 1, "the refund is still a question for a person");
+    }
+
+    #[test]
+    fn an_unfiled_charge_is_preferred_over_a_filed_one() {
+        // ★★★ Cancelling costs nothing and moves no money, so where both are
+        //     available it is the safer answer.
+        let (ing, rules) = store("case2-prefer");
+        let Capture::Stored(filed) = ing.capture("h", "kcb", &charge("60.00", "Java"), &rules)
+            .expect("filed charge") else { panic!("stored") };
+        file_backfilled(&ing, &filed.id, "food", 60.0);
+        // A second, identical charge that was never classified.
+        let raw2 = format!("{} ref 2", charge("60.00", "Java"));
+        ing.capture("h", "kcb", &raw2, &rules).expect("unfiled charge");
+        ing.capture("h", "kcb", &reversal("60.00", "Java"), &rules).expect("reversal");
+
+        let r = ing.net_reversals("h").expect("net");
+        assert_eq!(r.netted.len(), 1, "it cancelled against the unfiled one");
+        assert!(r.compensations.is_empty(), "and moved no money");
+    }
+
+    #[test]
+    fn two_filed_candidates_are_left_alone() {
+        // The same safety rule as case 1: where it cannot tell, it does not choose.
+        let (ing, rules) = store("case2-ambiguous");
+        for tag in ["a", "b"] {
+            let raw = format!("{} ref {tag}", charge("45.00", "Bolt"));
+            let Capture::Stored(c) = ing.capture("h", "kcb", &raw, &rules).expect("charge")
+                else { panic!("stored") };
+            file_backfilled(&ing, &c.id, "transport", 45.0);
+        }
+        ing.capture("h", "kcb", &reversal("45.00", "Bolt"), &rules).expect("reversal");
+
+        let r = ing.net_reversals("h").expect("net");
+        assert!(r.compensations.is_empty(), "two candidates, so it gives nothing back");
+        assert_eq!(r.ambiguous, 1);
+    }
+
+    // ── case 3: nothing to match ─────────────────────────────────────────────
+
+    #[test]
+    fn an_orphan_refund_stays_a_question_rather_than_being_absorbed() {
+        let (ing, rules) = store("case3");
+        ing.capture("h", "kcb", &reversal("777.00", "Nowhere Ltd"), &rules).expect("reversal");
+
+        let r = ing.net_reversals("h").expect("net");
+        assert!(r.netted.is_empty());
+        assert!(r.compensations.is_empty());
+        assert_eq!(r.unmatched, 1, "counted honestly as unmatched");
+        assert_eq!(waiting(&ing), 1, "and still in the queue for a person to place");
+    }
+
+    // ── the plan itself ──────────────────────────────────────────────────────
+
+    #[test]
+    fn compensation_ignores_filings_it_has_no_inverse_for() {
+        let p = BTreeMap::from([
+            ("pocket_name".to_string(), serde_json::json!("food")),
+            ("amount".to_string(), serde_json::json!(10.0)),
+        ]);
+        let filed = vec![
+            Filing { operator: "budget.add_pocket".into(), params: p.clone() },
+            Filing { operator: "budget.spend".into(), params: p.clone() },
+        ];
+        let calls = compensation_for(&filed);
+        let ops: Vec<&str> = calls.iter().map(|c| c.operator.as_str()).collect();
+        assert_eq!(ops, vec!["budget.unspend"], "creating a pocket has nothing to undo");
+    }
+
+    #[test]
+    fn a_filing_missing_its_numbers_is_skipped() {
+        let filed = vec![Filing {
+            operator: "budget.spend".into(),
+            params: BTreeMap::from([("pocket_name".to_string(), serde_json::json!("food"))]),
+        }];
+        assert!(compensation_for(&filed).is_empty(), "no amount, so no claim about one");
+    }
+
     #[test]
     fn netting_does_not_cross_sustains() {
         let (ing, rules) = store("cross");

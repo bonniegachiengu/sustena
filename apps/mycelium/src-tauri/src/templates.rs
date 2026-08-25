@@ -53,6 +53,11 @@ pub fn definition(template: TemplateId) -> Definition {
         .with_operator("budget.add_pocket")
         .with_operator("budget.allocate")
         .with_operator("budget.spend")
+        // ★★ The declared inverses of the two moves above. A Sustain that can
+        //    spend must be able to record a refund of that spend, or a real
+        //    reversal has nowhere to go but a wrong number.
+        .with_operator("budget.unspend")
+        .with_operator("budget.unallocate")
         // Every Sustain that holds money holds this one.
         .with_invariant("liquid_non_negative", "finances.liquid.balance >= 0");
 

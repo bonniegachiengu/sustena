@@ -290,7 +290,167 @@ fn spend(
     }))
 }
 
-// ── registration ──────────────────────────────────────────────────────────────
+// ── budget.unspend ───────────────────────────────────────────────────────────
+
+/// The declared inverse of `budget.spend`.
+///
+/// ★★★ A refund is not a negative spend, it is the undo of one. The money the
+/// pocket recorded as gone is back, so `spent` falls and the pocket's room
+/// grows by the same amount. Liquid is untouched, because a spend never took
+/// anything out of liquid in the first place.
+///
+/// ★★ Why a named operator rather than `inverse::invert` over the original
+/// event's mutations. The generic patch-level inverse in `inverse.rs` is the
+/// stronger general mechanism, but applying it needs an operator that accepts a
+/// raw mutation list, and that is a far wider door than this needs -- one that
+/// could rewrite any path in the state. §V of that module calls a declared
+/// semantic inverse a move in `T` subject to the same gate as any other move,
+/// which is exactly what this is: narrow, guarded, and named after what it
+/// means rather than after the bytes it touches.
+fn unspend(
+    state: &mut State,
+    params: &Map<String, Value>,
+    events: &mut Vec<EmittedEvent>,
+    movements: &mut Vec<Movement>,
+) -> OperatorResult {
+    let pocket_name = text(params, "pocket_name");
+    let amount = num(params, "amount");
+    let pocket_path = format!("finances.pockets.{pocket_name}");
+
+    if !state.exists(&format!("{pocket_path}.allocated")) {
+        return OperatorResult::fail(
+            format!("Pocket '{pocket_name}' does not exist, so there is no spend to undo."),
+            "pocket_exists",
+        );
+    }
+
+    let spent = state
+        .get(&format!("{pocket_path}.spent"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+
+    // ★★★ The second clause of §V: an inverse that refuses at the states the
+    // forward move produces is not an inverse. This refuses only where there
+    // was never that much spending to undo, which is a different thing.
+    if amount > spent {
+        let mut result = OperatorResult::fail(
+            format!(
+                "Refund of KES {amount:.0} is more than '{pocket_name}' has recorded as spent (KES {spent:.0})."
+            ),
+            "pocket_spent_sufficient",
+        );
+        result.data = json!({
+            "pocket": pocket_name,
+            "spent": money(spent),
+            "requested": money(amount),
+            "excess": money(((amount - spent) * 100.0).round() / 100.0),
+        });
+        return result;
+    }
+
+    let _ = state.decrement(&format!("{pocket_path}.spent"), &json!(amount), false);
+
+    // The mirror of the spend's own movement: back from the payee into the
+    // pocket. A refund really is money crossing the boundary inward.
+    let payer = {
+        let p = text(params, "payer");
+        if p.is_empty() { "unknown".to_string() } else { p }
+    };
+    movements.push(Movement::new(
+        "money",
+        amount,
+        &payer,
+        &format!("finances.pockets.{pocket_name}"),
+    ));
+
+    events.push(EmittedEvent {
+        name: "event.finances.pocket_refunded".into(),
+        payload: json!({"pocket": pocket_name, "amount": money(amount)}),
+    });
+
+    OperatorResult::ok(json!({
+        "pocket": pocket_name,
+        "amount": money(amount),
+        "spent": money(spent - amount),
+    }))
+}
+
+// ── budget.unallocate ────────────────────────────────────────────────────────
+
+/// The declared inverse of `budget.allocate`: money leaves a pocket for liquid.
+///
+/// ★★★ Only unspent money can come back. Allocated money that has already been
+/// spent is gone from the pocket's point of view, so the guard is the pocket's
+/// remaining room rather than its whole allocation -- otherwise this would let
+/// a pocket claim back money it no longer has and leave `spent > allocated`.
+fn unallocate(
+    state: &mut State,
+    params: &Map<String, Value>,
+    events: &mut Vec<EmittedEvent>,
+    movements: &mut Vec<Movement>,
+) -> OperatorResult {
+    let pocket_name = text(params, "pocket_name");
+    let amount = num(params, "amount");
+    let pocket_path = format!("finances.pockets.{pocket_name}");
+
+    if !state.exists(&format!("{pocket_path}.allocated")) {
+        return OperatorResult::fail(
+            format!("Pocket '{pocket_name}' does not exist, so there is nothing to take back."),
+            "pocket_exists",
+        );
+    }
+
+    let allocated = state
+        .get(&format!("{pocket_path}.allocated"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let spent = state
+        .get(&format!("{pocket_path}.spent"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let free = allocated - spent;
+
+    if amount > free {
+        let mut result = OperatorResult::fail(
+            format!(
+                "'{pocket_name}' has only KES {free:.0} unspent, so KES {amount:.0} cannot come back out."
+            ),
+            "pocket_unspent_sufficient",
+        );
+        result.data = json!({
+            "pocket": pocket_name,
+            "unspent": money(free),
+            "requested": money(amount),
+            "excess": money(((amount - free) * 100.0).round() / 100.0),
+        });
+        return result;
+    }
+
+    let _ = state.decrement(&format!("{pocket_path}.allocated"), &json!(amount), false);
+    let _ = state.increment("finances.liquid.balance", &json!(amount));
+
+    // Pocket to liquid. Both ends are inside the household, so like the
+    // allocation it mirrors, this classifies as internal and is not a flow.
+    movements.push(Movement::new(
+        "money",
+        amount,
+        &format!("finances.pockets.{pocket_name}"),
+        "finances.liquid",
+    ));
+
+    events.push(EmittedEvent {
+        name: "event.finances.pocket_unallocated".into(),
+        payload: json!({"pocket": pocket_name, "amount": money(amount)}),
+    });
+
+    OperatorResult::ok(json!({
+        "pocket": pocket_name,
+        "amount": money(amount),
+        "liquid_remaining": state.get("finances.liquid.balance").cloned().unwrap_or(Value::Null),
+    }))
+}
+
+// ── registration ─────────────────────────────────────────────────────────────
 
 pub fn register(registry: &mut Registry) {
     registry.register(OperatorMeta {
@@ -366,6 +526,41 @@ pub fn register(registry: &mut Registry) {
         min_privilege: 1,
         effect: None,
         run: spend,
+    });
+
+    registry.register(OperatorMeta {
+        name: "budget.unspend",
+        description: "Undo a spend: a refund returns room to the pocket it left.",
+        params: vec![
+            ParamDecl::naming("pocket_name", "finances.pockets"),
+            ParamDecl::number("amount"),
+            ParamDecl::text("payer").optional(),
+        ],
+        constraints: vec!["params.amount > 0".into()],
+        post_constraints: vec![],
+        side_effects: vec!["event.finances.pocket_refunded"],
+        pawa_cost: 0,
+        protocol: Protocol::Rpc,
+        min_privilege: 1,
+        effect: None,
+        run: unspend,
+    });
+
+    registry.register(OperatorMeta {
+        name: "budget.unallocate",
+        description: "Undo an allocation: unspent money in a pocket returns to liquid.",
+        params: vec![
+            ParamDecl::naming("pocket_name", "finances.pockets"),
+            ParamDecl::number("amount"),
+        ],
+        constraints: vec!["params.amount > 0".into()],
+        post_constraints: vec![],
+        side_effects: vec!["event.finances.pocket_unallocated"],
+        pawa_cost: 0,
+        protocol: Protocol::Rpc,
+        min_privilege: 1,
+        effect: None,
+        run: unallocate,
     });
 
     // Test-only: mutates state in a way no guard would catch, so the gate is

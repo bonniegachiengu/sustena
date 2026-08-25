@@ -445,9 +445,9 @@ async orchieInfer(sustainId: string, messageId: string | null, effectText: strin
  * honestly fail at T+n if the household moved, and that is the correct
  * outcome, not an error.
  */
-async orchieConfirm(sustainId: string, operator: string, params: JsonValue, messageId: string | null, description: string | null) : Promise<Result<GateResult, string>> {
+async orchieConfirm(sustainId: string, operator: string, params: JsonValue, messageId: string | null, description: string | null, resolves: boolean | null) : Promise<Result<GateResult, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("orchie_confirm", { sustainId, operator, params, messageId, description }) };
+    return { status: "ok", data: await TAURI_INVOKE("orchie_confirm", { sustainId, operator, params, messageId, description, resolves }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1210,6 +1210,22 @@ export type NettingDto = {
  * Charge/refund pairs cancelled. Each removes TWO from the queue.
  */
 netted: number; 
+/**
+ * Refunds of charges already filed, where the money really went back
+ * through the gate.
+ */
+givenBack: number; 
+/**
+ * Compensating calls the gate refused. The pair stays unsettled and comes
+ * back next pass, rather than being marked done on a move that never
+ * landed.
+ */
+refused: number; 
+/**
+ * Matched a filed charge, but nothing recorded HOW it was filed, so there
+ * is no honest way to undo it.
+ */
+uncompensable: number; 
 /**
  * Refunds with no charge to cancel, left for a person.
  */

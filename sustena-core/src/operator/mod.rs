@@ -1640,4 +1640,147 @@ mod tests {
                                    ("period", json!("monthly"))]));
         assert!(!ex.committed(), "an unreadable rule must not be silently skipped");
     }
+
+    // ── declared inverses ─────────────────────────────────────────────────────
+    //
+    // ★★★ §V's second clause is the one worth testing: an inverse that refuses
+    // at exactly the states the forward move produces is not an inverse. Each
+    // pair below runs the forward move first and then asks its inverse to undo
+    // precisely that, which is the state it must never refuse.
+
+    /// Run a sequence of calls, threading state through, and hand back the last state.
+    fn run_all(mut state: Value, calls: &[(&str, Vec<(&str, Value)>)]) -> Value {
+        let reg = Registry::default();
+        for (name, ps) in calls {
+            let ex = execute(&reg, &allowed(), &armed(), &state, name, &params(ps));
+            assert!(ex.committed(), "{name} was refused: {:?}", ex.result.reason);
+            state = ex.state.clone();
+        }
+        state
+    }
+
+    fn at(state: &Value, path: &str) -> f64 {
+        let mut cur = state;
+        for seg in path.split('.') {
+            cur = cur.get(seg).unwrap_or_else(|| panic!("no {path}"));
+        }
+        cur.as_f64().unwrap_or_else(|| panic!("{path} is not a number"))
+    }
+
+    #[test]
+    fn unspend_puts_the_room_back_and_leaves_liquid_alone() {
+        let after = run_all(
+            homestead_state(),
+            &[
+                ("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(300.0))]),
+                ("budget.spend", vec![("pocket_name", json!("food")), ("amount", json!(120.0))]),
+                ("budget.unspend", vec![("pocket_name", json!("food")), ("amount", json!(120.0))]),
+            ],
+        );
+        assert_eq!(at(&after, "finances.pockets.food.spent"), 0.0);
+        assert_eq!(at(&after, "finances.pockets.food.allocated"), 300.0, "the earmark stands");
+        assert_eq!(
+            at(&after, "finances.liquid.balance"),
+            700.0,
+            "a refund of a spend does not touch liquid, because the spend never did"
+        );
+    }
+
+    #[test]
+    fn unallocate_returns_unspent_money_to_liquid() {
+        let after = run_all(
+            homestead_state(),
+            &[
+                ("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(300.0))]),
+                ("budget.unallocate", vec![("pocket_name", json!("food")), ("amount", json!(300.0))]),
+            ],
+        );
+        assert_eq!(at(&after, "finances.pockets.food.allocated"), 0.0);
+        assert_eq!(at(&after, "finances.liquid.balance"), 1000.0, "back where it started");
+    }
+
+    #[test]
+    fn the_pair_returns_a_backfilled_charge_to_exactly_where_it_was() {
+        // ★★★ The whole point of case 2. A charge filed the backfill way is an
+        // allocate and a spend of the same amount; undoing it is the two
+        // inverses in reverse order, and the household must land byte-identical
+        // to before the charge.
+        let before = homestead_state();
+        let after = run_all(
+            before.clone(),
+            &[
+                ("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(250.0))]),
+                ("budget.spend", vec![("pocket_name", json!("food")), ("amount", json!(250.0))]),
+                ("budget.unspend", vec![("pocket_name", json!("food")), ("amount", json!(250.0))]),
+                ("budget.unallocate", vec![("pocket_name", json!("food")), ("amount", json!(250.0))]),
+            ],
+        );
+        assert_eq!(at(&after, "finances.liquid.balance"), at(&before, "finances.liquid.balance"));
+        assert_eq!(at(&after, "finances.pockets.food.allocated"), 0.0);
+        assert_eq!(at(&after, "finances.pockets.food.spent"), 0.0);
+    }
+
+    #[test]
+    fn unspend_refuses_more_than_was_ever_spent() {
+        let reg = Registry::default();
+        let state = run_all(
+            homestead_state(),
+            &[
+                ("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(300.0))]),
+                ("budget.spend", vec![("pocket_name", json!("food")), ("amount", json!(100.0))]),
+            ],
+        );
+        let ex = execute(&reg, &allowed(), &armed(), &state, "budget.unspend",
+                         &params(&[("pocket_name", json!("food")), ("amount", json!(150.0))]));
+        assert!(!ex.committed(), "there was never KES 150 of spending to give back");
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("pocket_spent_sufficient"));
+        // And the refusal carries the numbers, so a caller can act without parsing prose.
+        assert_eq!(ex.result.data.get("spent").and_then(|v| v.as_f64()), Some(100.0));
+    }
+
+    #[test]
+    fn unallocate_refuses_to_claw_back_money_already_spent() {
+        // ★★★ Guarding on the whole allocation rather than the unspent part
+        // would leave `spent > allocated`, which is a pocket claiming to have
+        // spent money it never held.
+        let reg = Registry::default();
+        let state = run_all(
+            homestead_state(),
+            &[
+                ("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(300.0))]),
+                ("budget.spend", vec![("pocket_name", json!("food")), ("amount", json!(200.0))]),
+            ],
+        );
+        let ex = execute(&reg, &allowed(), &armed(), &state, "budget.unallocate",
+                         &params(&[("pocket_name", json!("food")), ("amount", json!(300.0))]));
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("pocket_unspent_sufficient"));
+        assert_eq!(ex.result.data.get("unspent").and_then(|v| v.as_f64()), Some(100.0));
+    }
+
+    #[test]
+    fn an_inverse_on_a_pocket_that_never_existed_is_refused_not_invented() {
+        let reg = Registry::default();
+        for op in ["budget.unspend", "budget.unallocate"] {
+            let ex = execute(&reg, &allowed(), &armed(), &homestead_state(), op,
+                             &params(&[("pocket_name", json!("ghost")), ("amount", json!(10.0))]));
+            assert!(!ex.committed(), "{op} conjured a pocket");
+            assert_eq!(ex.result.constraint_violated.as_deref(), Some("pocket_exists"));
+        }
+    }
+
+    #[test]
+    fn the_inverses_go_through_the_same_gate_as_everything_else() {
+        // A zero or negative amount is refused by the declared constraint, not
+        // by anything the operator body does.
+        let reg = Registry::default();
+        let state = run_all(
+            homestead_state(),
+            &[("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(300.0))])],
+        );
+        let ex = execute(&reg, &allowed(), &armed(), &state, "budget.unallocate",
+                         &params(&[("pocket_name", json!("food")), ("amount", json!(0.0))]));
+        assert!(!ex.committed(), "the gate holds for an inverse exactly as for a forward move");
+    }
+
 }

@@ -195,8 +195,18 @@ export const engine = {
     params: JsonValue,
     messageId: string | null,
     description: string | null,
+    /**
+     * Whether this call finishes the message off.
+     *
+     * Filing a past charge takes two calls, and only the second one deals with
+     * it. Both are recorded against the message either way, because undoing a
+     * charge later needs to know both halves of how it was filed.
+     */
+    resolves: boolean | null = null,
   ): Promise<GateResult> =>
-    unwrap(await commands.orchieConfirm(sustainId, operator, params, messageId, description)),
+    unwrap(
+      await commands.orchieConfirm(sustainId, operator, params, messageId, description, resolves),
+    ),
 
   /** "remember this format" — synthesise a rule from a confirmed correction. */
   learnRule: async (messageId: string, operator: string, params: JsonValue): Promise<string> =>

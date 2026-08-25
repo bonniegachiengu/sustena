@@ -61,6 +61,7 @@ import {
   type SmsSweep,
   type CaptureContextDto,
   type ChoiceDto,
+  type NettingDto,
 } from "../lib/engine";
 import { world } from "../lib/live";
 import { keyboardAware, watchViewport } from "../lib/viewport";
@@ -476,14 +477,15 @@ export default function Orchie(props: { onFace?: () => void }) {
       // The backlog was captured before netting existed, so without this his
       // existing refunds would sit in the queue forever waiting for an import
       // that never comes. Idempotent: a second pass finds nothing left to do.
-      let cancelled = 0;
+      let moved = 0;
       try {
-        cancelled = (await engine.netReversals(id)).netted;
-        if (cancelled > 0) setNetted(cancelled);
+        const n = await engine.netReversals(id);
+        moved = n.netted + n.givenBack;
+        if (n.netted > 0 || n.givenBack > 0 || n.uncompensable > 0) setNetting(n);
       } catch {
         // Nothing to say. The queue is unchanged.
       }
-      if (handled > 0 || cancelled > 0) await refetch();
+      if (handled > 0 || moved > 0) await refetch();
     } catch {
       // No permission yet, or not an Android build. Nothing to say.
     }
@@ -499,8 +501,13 @@ export default function Orchie(props: { onFace?: () => void }) {
     onCleanup(() => document.removeEventListener("visibilitychange", onVisible));
   });
   const [showQuiet, setShowQuiet] = createSignal(false);
-  /** Pairs cancelled on this open, so the count never drops unexplained. */
-  const [netted, setNetted] = createSignal(0);
+  /**
+   * What the last netting pass did, so a count that fell says why.
+   *
+   * Cancelling and giving back are different events and read differently: one
+   * removed two questions and touched no money, the other put money back.
+   */
+  const [netting, setNetting] = createSignal<NettingDto | null>(null);
 
   onMount(watchViewport);
 
@@ -694,17 +701,43 @@ export default function Orchie(props: { onFace?: () => void }) {
               </Show>
 
               {/* ★★ A count that fell on its own needs a reason on screen. */}
-              <Show when={netted() > 0}>
-                <div class={O.card}>
-                  <p class={O.caption}>
-                    {netted()} refund{netted() === 1 ? "" : "s"} cancelled against
-                    {netted() === 1 ? " its charge" : " their charges"}. Both left the
-                    list and nothing was recorded, because together they are zero.
-                  </p>
-                  <button class={O.linkish} onClick={() => setNetted(0)}>
-                    got it
-                  </button>
-                </div>
+              <Show when={netting()}>
+                {(n) => (
+                  <div class={O.card}>
+                    <Show when={n().netted > 0}>
+                      <p class={O.caption}>
+                        {n().netted} refund{n().netted === 1 ? "" : "s"} cancelled against
+                        {n().netted === 1 ? " its charge" : " their charges"}. Both left the
+                        list and nothing was recorded, because together they are zero.
+                      </p>
+                    </Show>
+                    {/* ★★★ This one really moved money, so it says so plainly. */}
+                    <Show when={n().givenBack > 0}>
+                      <p class={O.caption}>
+                        {n().givenBack} refund{n().givenBack === 1 ? "" : "s"} of money you had
+                        already filed went back to where {n().givenBack === 1 ? "it" : "they"} came
+                        from. Your pockets and balance are where they were before the charge.
+                      </p>
+                    </Show>
+                    <Show when={n().refused > 0}>
+                      <p class={O.caption}>
+                        {n().refused} could not go back yet and {n().refused === 1 ? "is" : "are"}{" "}
+                        still in the list.
+                      </p>
+                    </Show>
+                    <Show when={n().uncompensable > 0}>
+                      <p class={O.caption}>
+                        {n().uncompensable} refund{n().uncompensable === 1 ? "" : "s"} matched
+                        something you filed before Orchie kept track of which pocket it went to,
+                        so {n().uncompensable === 1 ? "it is" : "they are"} still in the list for
+                        you to place.
+                      </p>
+                    </Show>
+                    <button class={O.linkish} onClick={() => setNetting(null)}>
+                      got it
+                    </button>
+                  </div>
+                )}
               </Show>
 
               {/* ═══ read the phone's own texts ══════════════════════════ */}
@@ -1111,12 +1144,17 @@ function Classify(props: {
     setFixing(how);
     setFixFailed(null);
     try {
+      // The allocation is recorded against the message but does not finish
+      // it: the spend that follows is what deals with it. Both are on the
+      // record, so a refund of this charge knows the money came out of liquid
+      // and can put it back there.
       const put = await engine.confirm(
         props.sustain,
         "budget.allocate",
         { pocket_name: room.pocket, amount: move },
+        props.messageId,
         null,
-        null,
+        false,
       );
       if (put.verdict !== "admitted") {
         // ★ Most likely liquid itself is short. The engine says so; this does
