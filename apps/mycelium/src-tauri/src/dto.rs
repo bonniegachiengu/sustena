@@ -103,11 +103,18 @@ pub struct GateResult {
     pub events: Vec<EventDto>,
     /// The resulting state, or the **untouched original** if refused.
     pub state: serde_json::Value,
+    /// ★★★ What the operator returned alongside its verdict.
+    ///
+    /// A refusal from `budget.spend` carries `remaining`, `requested` and
+    /// `shortfall`, put there so a caller can build an allocate-then-retry
+    /// without reading an English sentence. It was being dropped here, which
+    /// left the surface with a dead end and a paragraph.
+    pub data: serde_json::Value,
 }
 
 impl GateResult {
     pub fn of(operator: &str, x: &Execution) -> Self {
-        let OperatorResult { status, reason, constraint_violated, .. } = &x.result;
+        let OperatorResult { status, reason, constraint_violated, data, .. } = &x.result;
         GateResult {
             verdict: Verdict::from(*status),
             operator: operator.to_string(),
@@ -116,6 +123,7 @@ impl GateResult {
             mutations: x.mutations.len() as u32,
             events: x.events.iter().map(EventDto::from).collect(),
             state: x.state.clone(),
+            data: data.clone(),
         }
     }
 }
