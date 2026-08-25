@@ -224,8 +224,7 @@ export default function App() {
         <span class={`${S.caption} ${L.hideNarrow}`}>v1</span>
 
         <select
-          class={S.select}
-          style={{ "max-width": "200px", width: "auto" }}
+          class={`${S.select} ${L.topbarSelect}`}
           value={world.selected ?? ""}
           disabled={busy() || world.order.length === 0}
           onChange={(e) => void select(e.currentTarget.value)}
@@ -251,12 +250,18 @@ export default function App() {
         >
           {face() === "mycelium" ? "orchie" : "mycelium"}
         </button>
-        <Badge tone="ok">{world.pushes} pushed</Badge>
+        {/* ★ Real, and not essential. On a phone the row has space for the
+            brand and the face toggle; the counters are still on the belt. */}
+        <span class={L.hideNarrow}>
+          <Badge tone="ok">{world.pushes} pushed</Badge>
+        </span>
         <Show when={world.refusals > 0}>
-          <Badge tone="danger">{world.refusals} refused</Badge>
+          <span class={L.hideNarrow}>
+            <Badge tone="danger">{world.refusals} refused</Badge>
+          </span>
         </Show>
 
-        <span class={S.avatar}>bg</span>
+        <span class={`${S.avatar} ${L.hideNarrow}`}>bg</span>
         {/* ★★ An AUTHENTICATED principal, and the key that proves it. The
             fingerprint is short on purpose — enough to notice if it ever
             changed, not so long it becomes furniture. */}

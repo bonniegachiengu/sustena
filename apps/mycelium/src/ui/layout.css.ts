@@ -188,17 +188,57 @@ export const cols = style({
 
 /* ── the shell chrome ───────────────────────────────────────────────────── */
 
+/**
+ * ★★★ **`env(safe-area-inset-top)` is the whole status-bar bug.**
+ *
+ * index.html asks for `viewport-fit=cover`, so the WebView paints UNDER the
+ * notch and clock -- deliberately, and Orchie's frame already pays the inset
+ * back. The cockpit never did, so on a phone MYCELIUM was drawn beneath the
+ * OS clock. It reads as an overlap and it is one. `env()` is 0 on desktop, so
+ * this costs a laptop nothing.
+ *
+ * ★★ Below `sm` the bar becomes two rows rather than a wrap-and-hope: the
+ * brand and the face toggle share row one, and the Sustain selector takes row
+ * two whole. A wrapping flex row with a `flex: 1` spacer in it re-orders
+ * unpredictably as items drop out, which is what piled the dropdown, the
+ * badges and the toggle on top of each other.
+ */
 export const topbar = style({
   display: "flex",
   alignItems: "center",
   gap: vars.space.md,
   padding: `0 ${vars.space.lg}`,
+  paddingTop: "env(safe-area-inset-top, 0px)",
   minHeight: "44px",
   borderBottom: `1px solid ${vars.color.border}`,
   background: vars.color.bgSurface,
   minWidth: 0,
   "@media": {
-    [bp.md]: { flexWrap: "wrap", padding: `${vars.space.sm} ${vars.space.md}`, gap: vars.space.sm },
+    [bp.md]: {
+      flexWrap: "wrap",
+      padding: `${vars.space.sm} ${vars.space.md}`,
+      paddingTop: `calc(env(safe-area-inset-top, 0px) + ${vars.space.sm})`,
+      gap: vars.space.sm,
+    },
+    [bp.sm]: {
+      rowGap: vars.space.sm,
+      paddingLeft: `max(${vars.space.md}, env(safe-area-inset-left))`,
+      paddingRight: `max(${vars.space.md}, env(safe-area-inset-right))`,
+    },
+  },
+});
+
+/**
+ * The Sustain selector. ★★ On a phone it stops competing for row one and takes
+ * a row of its own -- `order` puts it after the toggle even though it comes
+ * before it in the DOM, so the markup stays in reading order.
+ */
+export const topbarSelect = style({
+  maxWidth: "200px",
+  width: "auto",
+  minWidth: 0,
+  "@media": {
+    [bp.sm]: { order: 2, flex: "1 1 100%", maxWidth: "none", width: "100%" },
   },
 });
 
@@ -217,12 +257,26 @@ export const nav = style({
     //   is the one place a sideways scroll is correct — the page still does not.
     [bp.md]: {
       flexDirection: "row",
+      flexWrap: "nowrap",
+      alignItems: "center",
       overflowX: "auto",
       overflowY: "hidden",
       borderRight: "none",
       borderBottom: `1px solid ${vars.color.border}`,
       padding: vars.space.sm,
-      gap: vars.space.sm,
+      paddingLeft: `max(${vars.space.sm}, env(safe-area-inset-left))`,
+      paddingRight: `max(${vars.space.sm}, env(safe-area-inset-right))`,
+      // ★★ The GROUP gap stays wide while the gap WITHIN a group is narrow --
+      //    that difference is the only thing separating watch / act / system
+      //    once the group titles are hidden, and without it twelve tabs read
+      //    as one unbroken run of words.
+      gap: vars.space.lg,
+      // Momentum + snap, so a flick lands on a tab instead of between two.
+      scrollSnapType: "x proximity",
+      WebkitOverflowScrolling: "touch",
+      // A sideways flick must not drag the page or trigger back-navigation.
+      overscrollBehaviorX: "contain",
+      flexShrink: 0,
     },
   },
 });
@@ -232,7 +286,7 @@ export const navGroup = style({
   flexDirection: "column",
   gap: "1px",
   minWidth: 0,
-  "@media": { [bp.md]: { flexDirection: "row", gap: vars.space.xs } },
+  "@media": { [bp.md]: { flexDirection: "row", gap: vars.space.xs, flexShrink: 0 } },
 });
 
 export const navGroupTitle = style({
@@ -261,7 +315,21 @@ const navItemBase = style({
   textAlign: "left",
   width: "100%",
   whiteSpace: "nowrap",
-  "@media": { [bp.md]: { width: "auto" } },
+  "@media": {
+    // ★★★ 44px, and the reason is not aesthetic: at `sm` these were 8px of
+    //     padding around 12.5px text -- about a 30px target, under the 44px a
+    //     thumb pad actually needs. Twelve of them at that size, touching, is
+    //     what "jammed and hard to tap" describes.
+    [bp.md]: {
+      width: "auto",
+      minHeight: "44px",
+      padding: `${vars.space.sm} ${vars.space.md}`,
+      fontSize: "13px",
+      flexShrink: 0,
+      scrollSnapAlign: "start",
+      border: `1px solid ${vars.color.border}`,
+    },
+  },
 });
 
 export const navItem = styleVariants({
@@ -306,7 +374,13 @@ export const statusBelt = style({
   overflowX: "auto",
   whiteSpace: "nowrap",
   minWidth: 0,
-  "@media": { [bp.sm]: { padding: `${vars.space.xs} ${vars.space.sm}` } },
+  "@media": {
+    [bp.sm]: {
+      padding: `${vars.space.xs} ${vars.space.sm}`,
+      // The gesture bar sits over the belt otherwise.
+      paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${vars.space.xs})`,
+    },
+  },
 });
 
 export const beltCell = style({ display: "flex", alignItems: "baseline", gap: vars.space.xs, flexShrink: 0 });
