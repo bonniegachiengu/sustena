@@ -30,6 +30,8 @@ import {
   type CaptureResult,
   type ChoiceDto,
   type NettingDto,
+  type OwnIdentifiersDto,
+  type TransferDto,
   type SmsSweep,
   type CaptureContextDto,
   type NetworkDto,
@@ -78,6 +80,8 @@ export type {
   CaptureResult,
   ChoiceDto,
   NettingDto,
+  OwnIdentifiersDto,
+  TransferDto,
   SmsSweep,
   CaptureContextDto,
   NetworkDto,
@@ -167,6 +171,15 @@ export const engine = {
 
   declareSource: async (id: string, label: string, minutes: number | null): Promise<null> =>
     unwrap(await commands.declareSource(id, label, minutes)),
+  /** The phone and account numbers this household calls its own. */
+  ownIdentifiers: async (): Promise<OwnIdentifiersDto> =>
+    unwrap(await commands.getOwnIdentifiers()),
+  /** Record them. Stays on the device. */
+  setOwnIdentifiers: async (own: OwnIdentifiersDto): Promise<OwnIdentifiersDto> =>
+    unwrap(await commands.setOwnIdentifiers(own)),
+  /** Turn each pair of texts that is really one move into one move. */
+  applyTransfers: async (sustainId: string): Promise<TransferDto> =>
+    unwrap(await commands.applyTransfers(sustainId)),
   /** Cancel refunds against their charges. Returns what it did. */
   netReversals: async (sustainId: string): Promise<NettingDto> =>
     unwrap(await commands.netReversals(sustainId)),

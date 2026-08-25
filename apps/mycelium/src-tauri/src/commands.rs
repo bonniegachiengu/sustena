@@ -11,7 +11,7 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::dto::{
-    AccessDto, AccountDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
+    AccessDto, AccountDto, Branch, BranchStep, OwnIdentifiersDto, TransferDto, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
     AttentionDto, CaptureContextDto, NettingDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
@@ -1275,6 +1275,69 @@ pub fn net_reversals(world: State<'_, World>, sustain_id: String) -> Result<Nett
         unmatched: r.unmatched,
         ambiguous: r.ambiguous,
     })
+}
+
+/// The numbers this household calls its own.
+///
+/// ★★ Read and written on the device only. They exist so a move between his
+/// own accounts can be told apart from a payment to someone else, which is not
+/// a distinction any wording makes.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn get_own_identifiers(world: State<'_, World>) -> Result<OwnIdentifiersDto, String> {
+    let own = world.ingest().own_identifiers().map_err(|e| e.to_string())?;
+    Ok(OwnIdentifiersDto { mpesa: own.mpesa, kcb: own.kcb })
+}
+
+#[tauri::command(async)]
+#[specta::specta]
+pub fn set_own_identifiers(
+    world: State<'_, World>,
+    own: OwnIdentifiersDto,
+) -> Result<OwnIdentifiersDto, String> {
+    let store = crate::ingest::OwnIdentifiers { mpesa: own.mpesa, kcb: own.kcb };
+    world.ingest().set_own_identifiers(&store).map_err(|e| e.to_string())?;
+    get_own_identifiers(world)
+}
+
+/// Turn each pair of texts that is really one move into one move.
+///
+/// ★★★ Net zero by construction: `budget.transfer` takes money out of one
+/// account and puts the same amount into another, touches no pocket and adds
+/// nothing to income. Booking the two texts separately would record an expense
+/// and an income that never happened, and his income would grow every time he
+/// moved his own money.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn apply_transfers(
+    world: State<'_, World>,
+    sustain_id: String,
+) -> Result<TransferDto, String> {
+    let found = world.ingest().find_transfers(&sustain_id).map_err(|e| e.to_string())?;
+    let mut out =
+        TransferDto { unpaired: found.unpaired, ambiguous: found.ambiguous, ..Default::default() };
+
+    for t in &found.matched {
+        let mut params = Map::new();
+        params.insert("from_account".into(), Value::String(t.from_account.clone()));
+        params.insert("to_account".into(), Value::String(t.to_account.clone()));
+        params.insert("amount".into(), serde_json::json!(t.amount));
+        // The same door every other write uses.
+        match world.call(&sustain_id, "budget.transfer", &params) {
+            Ok(Some((x, _))) if x.committed() => {
+                world
+                    .ingest()
+                    .mark_transferred(&t.out_leg, &t.in_leg)
+                    .map_err(|e| e.to_string())?;
+                out.moved += 1;
+            }
+            _ => out.refused += 1,
+        }
+    }
+    if out.moved > 0 {
+        trace!("recorded {} transfer(s) between his own accounts", out.moved);
+    }
+    Ok(out)
 }
 
 /// Set a captured message aside as not a transaction.

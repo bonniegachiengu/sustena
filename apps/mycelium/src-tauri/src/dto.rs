@@ -1012,6 +1012,32 @@ pub struct FeedDto {
     pub unaccounted: f64,
 }
 
+/// The numbers a household calls its own, on the wire.
+///
+/// ★★★ These cross between this process and its own webview and nowhere else.
+/// A phone number and a bank account are the address of a person; there is no
+/// code path that sends them off the device, and there should not be one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnIdentifiersDto {
+    pub mpesa: Vec<String>,
+    pub kcb: Vec<String>,
+}
+
+/// What a transfer pass did.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferDto {
+    /// Pairs recognised as one move and recorded as one.
+    pub moved: u32,
+    /// The gate refused it. The pair stays in the queue rather than being
+    /// marked done on a move that never landed.
+    pub refused: u32,
+    /// A leg to one of his own numbers whose other half is not here.
+    pub unpaired: u32,
+    pub ambiguous: u32,
+}
+
 /// One account, on the wire.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

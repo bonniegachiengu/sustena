@@ -62,6 +62,7 @@ import {
   type CaptureContextDto,
   type ChoiceDto,
   type NettingDto,
+  type OwnIdentifiersDto,
 } from "../lib/engine";
 import { world } from "../lib/live";
 import { keyboardAware, watchViewport } from "../lib/viewport";
@@ -741,6 +742,7 @@ export default function Orchie(props: { onFace?: () => void }) {
               </Show>
 
               <AccountsCard feed={f()} onChanged={() => void refetch()} />
+              <OwnNumbersCard sustainId={f().sustainId} />
 
               {/* ═══ read the phone's own texts ══════════════════════════ */}
               <SmsCard sustainId={f().sustainId} onSwept={() => void refetch()} />
@@ -819,6 +821,110 @@ function FeedSkeleton() {
 }
 
 /** The calm read: one plain figure, never the machinery. */
+/**
+ * The numbers he calls his own.
+ *
+ * ★★★ Moving money from KCB to M-Pesa produces two texts that each read like
+ * an ordinary transaction. Nothing in the wording separates that from paying a
+ * friend the same amount; the only thing that does is whether the number on the
+ * other side is his. So it has to be asked, and it is asked here, on the phone,
+ * and stored on the phone. Nothing sends it anywhere.
+ */
+function OwnNumbersCard(props: { sustainId: string }) {
+  const [own, setOwn] = createSignal<OwnIdentifiersDto | null>(null);
+  const [open, setOpen] = createSignal(false);
+  const [mpesa, setMpesa] = createSignal("");
+  const [kcb, setKcb] = createSignal("");
+  const [saving, setSaving] = createSignal(false);
+  const [failed, setFailed] = createSignal<string | null>(null);
+
+  const load = async () => {
+    try {
+      const o = await engine.ownIdentifiers();
+      setOwn(o);
+      setMpesa(o.mpesa.join(", "));
+      setKcb(o.kcb.join(", "));
+    } catch {
+      // Nothing declared yet is the ordinary case, not an error.
+    }
+  };
+  void load();
+
+  const split = (v: string) =>
+    v
+      .split(",")
+      .map((x) => x.trim())
+      .filter((x) => x !== "");
+
+  const save = async () => {
+    setSaving(true);
+    setFailed(null);
+    try {
+      const o = await engine.setOwnIdentifiers({ mpesa: split(mpesa()), kcb: split(kcb()) });
+      setOwn(o);
+      setOpen(false);
+      // Now that it knows which numbers are his, look for his own moves.
+      await engine.applyTransfers(props.sustainId).catch(() => undefined);
+    } catch (e) {
+      setFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const declared = () => (own()?.mpesa.length ?? 0) + (own()?.kcb.length ?? 0);
+
+  return (
+    <div class={O.card}>
+      <h2 class={O.cardTitle}>your own numbers</h2>
+      <Show
+        when={open()}
+        fallback={
+          <>
+            <p class={O.caption}>
+              {declared() === 0
+                ? "Moving money between your own accounts looks exactly like paying someone else. Tell Orchie your numbers and it can tell the difference."
+                : `${declared()} number${declared() === 1 ? "" : "s"} saved on this phone.`}
+            </p>
+            <button class={O.linkish} onClick={() => setOpen(true)}>
+              {declared() === 0 ? "add my numbers" : "change them"}
+            </button>
+          </>
+        }
+      >
+        <p class={O.caption}>
+          Your M-Pesa number, and your KCB account number. They stay on this phone.
+        </p>
+        <input
+          class={O.input}
+          value={mpesa()}
+          placeholder="my M-Pesa number"
+          inputmode="tel"
+          onInput={(e) => setMpesa(e.currentTarget.value)}
+        />
+        <input
+          class={O.input}
+          value={kcb()}
+          placeholder="my KCB account number"
+          inputmode="numeric"
+          onInput={(e) => setKcb(e.currentTarget.value)}
+        />
+        <div class={O.row}>
+          <button class={O.linkish} disabled={saving()} onClick={() => void save()}>
+            {saving() ? "saving…" : "save"}
+          </button>
+          <button class={O.linkish} onClick={() => setOpen(false)}>
+            cancel
+          </button>
+        </div>
+        <Show when={failed()}>
+          <p class={O.caption}>{failed()}</p>
+        </Show>
+      </Show>
+    </div>
+  );
+}
+
 /**
  * Where the money is, as against what it is for.
  *

@@ -393,6 +393,46 @@ async netReversals(sustainId: string) : Promise<Result<NettingDto, string>> {
 }
 },
 /**
+ * The numbers this household calls its own.
+ * 
+ * ★★ Read and written on the device only. They exist so a move between his
+ * own accounts can be told apart from a payment to someone else, which is not
+ * a distinction any wording makes.
+ */
+async getOwnIdentifiers() : Promise<Result<OwnIdentifiersDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_own_identifiers") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setOwnIdentifiers(own: OwnIdentifiersDto) : Promise<Result<OwnIdentifiersDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_own_identifiers", { own }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Turn each pair of texts that is really one move into one move.
+ * 
+ * ★★★ Net zero by construction: `budget.transfer` takes money out of one
+ * account and puts the same amount into another, touches no pocket and adds
+ * nothing to income. Booking the two texts separately would record an expense
+ * and an income that never happened, and his income would grow every time he
+ * moved his own money.
+ */
+async applyTransfers(sustainId: string) : Promise<Result<TransferDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("apply_transfers", { sustainId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * **Remember this format** — synthesise a rule from a confirmed correction.
  * 
  * ★★ Verified before it is ever added: it must be well-typed, must match the
@@ -1347,6 +1387,14 @@ export type OrderDto = { reference: string; packageId: string; packageName: stri
  */
 shares: ([string, string, number])[]; placedAt: string }
 /**
+ * The numbers a household calls its own, on the wire.
+ * 
+ * ★★★ These cross between this process and its own webview and nowhere else.
+ * A phone number and a bank account are the address of a person; there is no
+ * code path that sends them off the device, and there should not be one.
+ */
+export type OwnIdentifiersDto = { mpesa: string[]; kcb: string[] }
+/**
  * One published package, as a screen sees it.
  */
 export type PackageDto = { id: string; name: string; 
@@ -1750,6 +1798,23 @@ export type TemplateId =
  * A person — the smallest Sustain that still holds its own money.
  */
 "habitat"
+/**
+ * What a transfer pass did.
+ */
+export type TransferDto = { 
+/**
+ * Pairs recognised as one move and recorded as one.
+ */
+moved: number; 
+/**
+ * The gate refused it. The pair stays in the queue rather than being
+ * marked done on a move that never landed.
+ */
+refused: number; 
+/**
+ * A leg to one of his own numbers whose other half is not here.
+ */
+unpaired: number; ambiguous: number }
 /**
  * One side of a settled transfer, as the cockpit shows it.
  */

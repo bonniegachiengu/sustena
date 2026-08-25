@@ -142,6 +142,118 @@ pub struct Filing {
     pub params: BTreeMap<String, serde_json::Value>,
 }
 
+/// Two texts that are one move between his own accounts.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MatchedTransfer {
+    /// The message saying money left.
+    pub out_leg: String,
+    /// The message saying money arrived.
+    pub in_leg: String,
+    pub from_account: String,
+    pub to_account: String,
+    pub amount: f64,
+}
+
+/// What a transfer pass found, and what it would not guess at.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct TransferReport {
+    pub matched: Vec<MatchedTransfer>,
+    /// ★★★ Legs addressed to one of his own numbers with no partner text.
+    ///
+    /// The other half may not have been read yet, or the second bank may not
+    /// send one. Left in the queue as an ordinary question rather than made
+    /// into a half transfer, which would move money out of one account and
+    /// into nowhere.
+    pub unpaired: u32,
+    /// More than one candidate partner. Left alone, like everything else here.
+    pub ambiguous: u32,
+    /// ★★★ The partner leg exists but has ALREADY been filed as income.
+    ///
+    /// Every KCB text saying money arrived is mapped and applied the moment it
+    /// is captured, long before the matching outgoing text may have been read.
+    /// So by the time both halves are here, the income has already been
+    /// recorded -- which is exactly the overstated income this whole mechanism
+    /// exists to prevent, and it cannot be undone yet because there is no
+    /// inverse of `budget.record_income`.
+    ///
+    /// Counted and reported rather than silently returning nothing, because a
+    /// zero here would read as "no transfers found" when the truth is "found
+    /// and cannot act on it yet". Undoing it needs `budget.unrecord_income`,
+    /// and that needs each applied income to carry the id of the message that
+    /// caused it so the right entry can be taken back out.
+    pub blocked_by_applied_income: u32,
+}
+
+/// The numbers a household recognises as its own.
+///
+/// ★ Never leaves the device. There is no code path that sends this anywhere,
+/// and there should not be one.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct OwnIdentifiers {
+    /// His own M-Pesa number, or numbers.
+    #[serde(default)]
+    pub mpesa: Vec<String>,
+    /// His own KCB account number, or numbers.
+    #[serde(default)]
+    pub kcb: Vec<String>,
+}
+
+impl OwnIdentifiers {
+    pub fn is_empty(&self) -> bool {
+        self.mpesa.is_empty() && self.kcb.is_empty()
+    }
+
+    /// Does this identifier belong to him?
+    ///
+    /// ★★ Compared on the trailing digits, because the same phone is printed
+    /// as `254712345678`, `0712345678` and `+254 712 345678` depending on who
+    /// is printing it. Nine digits is the length of a Kenyan subscriber number
+    /// without its country or trunk prefix, so it is the longest tail the three
+    /// forms reliably share.
+    pub fn claims(&self, candidate: &str) -> bool {
+        let c = digits_of(candidate);
+        if c.is_empty() {
+            return false;
+        }
+        self.mpesa.iter().chain(self.kcb.iter()).any(|own| same_number(own, &c))
+    }
+}
+
+/// Does this message name one of his own numbers as the other party?
+///
+/// ★ Checks every identifying field a rule extracts -- a phone, a bank account,
+/// a paybill -- because which one a text carries depends on how the money was
+/// sent, and a transfer is a transfer either way.
+fn addresses_own(m: &IngestedMessage, own: &OwnIdentifiers) -> bool {
+    ["phone", "account", "paybill"].iter().any(|f| {
+        m.parsed_fields
+            .get(*f)
+            .and_then(|v| v.as_str())
+            .is_some_and(|x| own.claims(x))
+    })
+}
+
+fn digits_of(s: &str) -> String {
+    s.chars().filter(char::is_ascii_digit).collect()
+}
+
+/// Two written forms of the same number.
+fn same_number(a: &str, b: &str) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    if a == b {
+        return true;
+    }
+    let tail = |x: &str| -> String {
+        let n = x.len().min(9);
+        x[x.len() - n..].to_string()
+    };
+    // ★ Only when there are enough digits to be a number rather than a
+    //   coincidence. A four-digit card mask must never claim a phone.
+    a.len() >= 9 && b.len() >= 9 && tail(a) == tail(b)
+}
+
 /// A balance a bank itself reported, and when.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Reported {
@@ -220,6 +332,10 @@ impl Ingested {
     fn rules_path(&self) -> PathBuf {
         self.root.join("rules.jsonl")
     }
+    fn own_path(&self) -> PathBuf {
+        self.root.join("own_identifiers.json")
+    }
+
     fn history_path(&self) -> PathBuf {
         self.root.join("history.json")
     }
@@ -396,6 +512,137 @@ impl Ingested {
         //   person still has something to do about it.
         m.resolved = applied;
         self.append_message(&m)
+    }
+
+    // ── who you are, to your own bank ────────────────────────────────────────
+    //
+    // ★★★ Sending money from KCB to M-Pesa produces two texts that each look
+    // like an ordinary transaction: one says money left, the other says money
+    // arrived. Taking them at face value books an expense and an income that
+    // never happened, and the household's income figure grows every time
+    // someone moves their own money.
+    //
+    // Telling that apart from a real payment to someone else needs one fact
+    // nothing else can supply: which numbers are HIS. A phone number and an
+    // account number are the addresses of a person, so they stay on the device,
+    // are never sent anywhere, and are only ever typed by him.
+
+    /// The phone and account numbers this household recognises as its own.
+    pub fn own_identifiers(&self) -> StoreResult<OwnIdentifiers> {
+        let path = self.own_path();
+        if !path.exists() {
+            return Ok(OwnIdentifiers::default());
+        }
+        Ok(serde_json::from_slice(&fs::read(&path)?).unwrap_or_default())
+    }
+
+    /// Record them. Digits only, so a number typed with spaces or a `+` still
+    /// matches the bare digits a bank prints.
+    pub fn set_own_identifiers(&self, own: &OwnIdentifiers) -> StoreResult<()> {
+        let cleaned = OwnIdentifiers {
+            mpesa: own.mpesa.iter().map(|x| digits_of(x)).filter(|x| !x.is_empty()).collect(),
+            kcb: own.kcb.iter().map(|x| digits_of(x)).filter(|x| !x.is_empty()).collect(),
+        };
+        let tmp = self.own_path().with_extension("json.tmp");
+        let text =
+            serde_json::to_string_pretty(&cleaned).map_err(|e| StoreError::Io(e.to_string()))?;
+        fs::write(&tmp, text)?;
+        fs::rename(&tmp, self.own_path())?;
+        Ok(())
+    }
+
+    /// Find the pairs of texts that are really one move between his own accounts.
+    ///
+    /// ★★★ A transfer is recognised by ADDRESS, not by wording. "Sent to
+    /// 254712345678" and "sent to MARY" are the same sentence; the only thing
+    /// that separates a move between his own accounts from a payment to a
+    /// friend is whether that number is his. Nothing is matched at all until he
+    /// has said which numbers those are.
+    ///
+    /// ★★ Both halves must be present. One leg alone stays an ordinary
+    /// question: booking it as a transfer would move money into an account no
+    /// text ever confirmed it reached.
+    pub fn find_transfers(&self, sustain_id: &str) -> StoreResult<TransferReport> {
+        let own = self.own_identifiers()?;
+        let mut report = TransferReport::default();
+        if own.is_empty() {
+            // Nothing has been declared his, so nothing can be his own move.
+            return Ok(report);
+        }
+
+        let everything: Vec<IngestedMessage> =
+            self.current()?.into_iter().filter(|m| m.sustain_id == sustain_id).collect();
+        let queue: Vec<IngestedMessage> =
+            everything.iter().filter(|m| m.needs_attention()).cloned().collect();
+
+        // Only the legs that name one of his own numbers are in play at all.
+        let mine: Vec<&IngestedMessage> =
+            queue.iter().filter(|m| addresses_own(m, &own)).collect();
+        let all_mine: Vec<&IngestedMessage> =
+            everything.iter().filter(|m| addresses_own(m, &own)).collect();
+
+        let dir = |m: &IngestedMessage| -> Option<String> {
+            m.parsed_fields.get("direction").and_then(|v| v.as_str()).map(str::to_string)
+        };
+
+        let mut taken: BTreeSet<String> = BTreeSet::new();
+        for out in mine.iter().filter(|m| dir(m).as_deref() == Some("sent")) {
+            if taken.contains(&out.id) {
+                continue;
+            }
+            let Some(amount) = out.amount() else {
+                report.unpaired += 1;
+                continue;
+            };
+            // The other half: money arriving, same amount, a different account.
+            // The partner may already have been filed as income at capture
+            // time. Look for that too, so the answer is "found, blocked"
+            // rather than a bare nothing.
+            let applied_partner = all_mine
+                .iter()
+                .filter(|m| m.id != out.id && !m.needs_attention())
+                .filter(|m| dir(m).as_deref() == Some("received"))
+                .filter(|m| m.source_id != out.source_id)
+                .filter(|m| m.amount().map(|a| same_amount(a, amount)).unwrap_or(false))
+                .count();
+
+            let partners: Vec<&&IngestedMessage> = mine
+                .iter()
+                .filter(|m| !taken.contains(&m.id) && m.id != out.id)
+                .filter(|m| dir(m).as_deref() == Some("received"))
+                .filter(|m| m.source_id != out.source_id)
+                .filter(|m| m.amount().map(|a| same_amount(a, amount)).unwrap_or(false))
+                .collect();
+
+            match partners.len() {
+                1 => {
+                    let inn = partners[0];
+                    taken.insert(out.id.clone());
+                    taken.insert(inn.id.clone());
+                    report.matched.push(MatchedTransfer {
+                        out_leg: out.id.clone(),
+                        in_leg: inn.id.clone(),
+                        from_account: out.source_id.clone(),
+                        to_account: inn.source_id.clone(),
+                        amount,
+                    });
+                }
+                0 if applied_partner > 0 => report.blocked_by_applied_income += 1,
+                0 => report.unpaired += 1,
+                _ => report.ambiguous += 1,
+            }
+        }
+        Ok(report)
+    }
+
+    /// Record that two texts were one move, so neither asks again.
+    ///
+    /// ★★ Called only after the transfer really committed, the same discipline
+    /// the refunds follow: marking a pair settled before the gate has spoken
+    /// would leave them looking handled with no money moved.
+    pub fn mark_transferred(&self, out_leg: &str, in_leg: &str) -> StoreResult<()> {
+        self.mark_netted(out_leg, in_leg)?;
+        self.mark_netted(in_leg, out_leg)
     }
 
     /// The balance each source most recently reported, and when it said so.
@@ -1696,5 +1943,195 @@ mod reconciliation_tests {
         ing.capture_at("h", "mpesa", &paid("EEEEEEEEEE", "100.00", "1,111.00"), &rules, Some(10))
             .expect("one");
         assert!(ing.reported_balances("other").expect("balances").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+    use std::env;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-xfer-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    const OWN_PHONE: &str = "254712345678";
+    const OWN_ACCT: &str = "112233";
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let ing = Ingested::at(scratch(name)).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    fn knows_his_own(ing: &Ingested) {
+        ing.set_own_identifiers(&OwnIdentifiers {
+            mpesa: vec![OWN_PHONE.into()],
+            kcb: vec![OWN_ACCT.into()],
+        })
+        .expect("own");
+    }
+
+    /// M-Pesa's own words for money leaving, addressed to a phone.
+    fn sent_to(phone: &str, amount: &str) -> String {
+        format!(
+            "QGH7XJ4P2Q Confirmed. Ksh{amount} sent to MARY WANJIRU {phone} on 2/8/26 \
+             at 9:00 AM. New M-PESA balance is Ksh12,050.00"
+        )
+    }
+
+    /// M-Pesa's own words for money leaving toward a bank account.
+    fn paid_to_account(account: &str, amount: &str) -> String {
+        format!(
+            "QGH7XJ4P2Q Confirmed. Ksh{amount} sent to KCB BANK for account {account} \
+             on 2/8/26 at 9:00 AM. New M-PESA balance is Ksh12,050.00"
+        )
+    }
+
+
+    /// KCB's own words for that same money arriving. Its real shipped shape.
+    fn kcb_account_credited(account: &str, amount: &str) -> String {
+        format!(
+            "Ksh{amount} sent to KCB account JOHN KAMAU {account} has been received \
+             on 01/08/2026. M-PESA Ref UH1B91GYNX"
+        )
+    }
+
+
+    #[test]
+    fn nothing_is_a_transfer_until_he_says_which_numbers_are_his() {
+        // ★★★ The safety property. Without his numbers there is no difference
+        //     between paying a friend and moving his own money, and guessing
+        //     would silently erase a real expense.
+        let (ing, rules) = store("undeclared");
+        ing.capture("h", "mpesa", &paid_to_account(OWN_ACCT, "2,000.00"), &rules).expect("out");
+        ing.capture("h", "kcb", &kcb_account_credited(OWN_ACCT, "2,000.00"), &rules).expect("in");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert!(r.matched.is_empty(), "no identifiers declared, so nothing is his own move");
+        assert_eq!(r.unpaired, 0, "and nothing is even a candidate");
+    }
+
+    #[test]
+    fn a_number_that_is_not_his_is_an_ordinary_payment() {
+        // ★★★ The other half of the same property: paying someone else must
+        //     stay an expense.
+        let (ing, rules) = store("someone-else");
+        knows_his_own(&ing);
+        ing.capture("h", "mpesa", &paid_to_account("999999", "2,000.00"), &rules).expect("out");
+        ing.capture("h", "kcb", &kcb_account_credited("999999", "2,000.00"), &rules).expect("in");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert!(r.matched.is_empty(), "that is a payment to a person, not a move");
+    }
+
+    #[test]
+    fn one_leg_alone_stays_a_question() {
+        // ★★★ Recording half a transfer would take money out of one account
+        //     and put it into one no text ever confirmed it reached.
+        let (ing, rules) = store("half");
+        knows_his_own(&ing);
+        ing.capture("h", "mpesa", &sent_to(OWN_PHONE, "2,000.00"), &rules).expect("out");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert!(r.matched.is_empty());
+        assert_eq!(r.unpaired, 1, "counted, and left in the queue");
+    }
+
+
+    #[test]
+    fn a_partner_already_filed_as_income_is_reported_not_silently_missed() {
+        // ★★★ The real state of things, found by testing rather than assumed.
+        //
+        // Every KCB text saying money arrived is MAPPED, so it is applied as
+        // income the instant it is captured -- long before the outgoing M-Pesa
+        // text that would reveal it was his own money moving. By the time both
+        // halves are in hand the income is already on the books, which is
+        // precisely the overstated income this mechanism exists to prevent.
+        //
+        // It cannot be undone yet: there is no inverse of budget.record_income,
+        // and building one needs each applied income to carry the id of the
+        // message that caused it so the right entry comes back out. Until then
+        // this reports the situation instead of returning a bare zero, because
+        // "no transfers found" and "found one and cannot act on it" are
+        // different answers.
+        let (ing, rules) = store("blocked");
+        knows_his_own(&ing);
+        ing.capture("h", "mpesa", &paid_to_account(OWN_ACCT, "2,000.00"), &rules).expect("out");
+        let inn = ing
+            .capture("h", "kcb", &kcb_account_credited(OWN_ACCT, "2,000.00"), &rules)
+            .expect("in");
+        // The inbound leg really did apply itself on the way in.
+        if let Capture::Stored(m) = &inn {
+            assert_eq!(m.status, "mapped", "KCB inbound is mapped, which is why this happens");
+        }
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert!(r.matched.is_empty(), "it cannot be turned into a transfer yet");
+        assert_eq!(r.blocked_by_applied_income, 1, "and it says so rather than staying quiet");
+        assert_eq!(r.unpaired, 0, "this is not the same thing as having no partner");
+    }
+
+    #[test]
+    fn a_settled_pair_stops_asking_and_is_never_paired_twice() {
+        // ★★ Marking is separate from finding, and this is the marking half:
+        //    once a pair is recorded as one move, neither leg is a question and
+        //    neither can be picked up again.
+        let (ing, rules) = store("once");
+        knows_his_own(&ing);
+        let out = ing
+            .capture("h", "mpesa", &paid_to_account(OWN_ACCT, "2,000.00"), &rules)
+            .expect("out");
+        let inn = ing
+            .capture("h", "kcb", &kcb_account_credited(OWN_ACCT, "2,000.00"), &rules)
+            .expect("in");
+        let (Capture::Stored(o), Capture::Stored(i)) = (&out, &inn) else { panic!("stored") };
+
+        ing.mark_transferred(&o.id, &i.id).expect("settle");
+        let after = ing.current().expect("current");
+        assert!(after.iter().all(|m| !m.needs_attention()), "neither leg still asks");
+        let second = ing.find_transfers("h").expect("second");
+        assert!(second.matched.is_empty(), "and it is not moved twice");
+        assert_eq!(second.blocked_by_applied_income, 0, "nor reported as blocked once settled");
+    }
+
+
+    #[test]
+    fn a_phone_number_matches_however_it_was_written() {
+        // ★★ The same phone is printed three ways depending on who prints it.
+        let own = OwnIdentifiers { mpesa: vec!["0712345678".into()], kcb: vec![] };
+        assert!(own.claims("254712345678"), "with a country code");
+        assert!(own.claims("+254 712 345678"), "with spaces and a plus");
+        assert!(own.claims("0712345678"), "as he typed it");
+        assert!(!own.claims("254799999999"), "and a different number is different");
+    }
+
+    #[test]
+    fn a_short_number_never_claims_a_long_one() {
+        // ★★★ A four-digit card mask must not match a phone by its tail.
+        let own = OwnIdentifiers { mpesa: vec!["5678".into()], kcb: vec![] };
+        assert!(!own.claims("254712345678"), "four digits is a coincidence, not an identity");
+    }
+
+    #[test]
+    fn identifiers_are_stored_as_digits_however_they_were_typed() {
+        let (ing, _) = store("digits");
+        ing.set_own_identifiers(&OwnIdentifiers {
+            mpesa: vec!["+254 712 345 678".into()],
+            kcb: vec!["  1234-5678  ".into()],
+        })
+        .expect("set");
+        let back = ing.own_identifiers().expect("get");
+        assert_eq!(back.mpesa, vec!["254712345678".to_string()]);
+        assert_eq!(back.kcb, vec!["12345678".to_string()]);
+    }
+
+    #[test]
+    fn a_household_with_no_identifiers_reads_as_empty_rather_than_failing() {
+        let (ing, _) = store("fresh");
+        assert!(ing.own_identifiers().expect("get").is_empty());
     }
 }
