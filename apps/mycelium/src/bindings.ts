@@ -261,6 +261,52 @@ async captureMessage(sustainId: string, sourceId: string, raw: string) : Promise
 }
 },
 /**
+ * Has the phone been given permission to read texts yet?
+ */
+async smsPermissionState() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sms_permission_state") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Ask for it. The reason is shown in the app first, before this is called.
+ */
+async smsRequestPermission() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sms_request_permission") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The backfill. Reads texts already on the phone, so a person never pastes a
+ * thousand messages by hand. `since_days` of 0 means all of them.
+ */
+async smsImportInbox(sustainId: string, sinceDays: number) : Promise<Result<SmsSweep, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sms_import_inbox", { sustainId, sinceDays }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Whatever arrived while the app was closed. Draining clears the queue, so a
+ * text is offered once; the engine's own dedup covers the rest.
+ */
+async smsDrainQueue(sustainId: string) : Promise<Result<SmsSweep, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sms_drain_queue", { sustainId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Declare a capture source, optionally with the cadence it should keep.
  */
 async declareSource(id: string, label: string, expectedIntervalMinutes: number | null) : Promise<Result<null, string>> {
@@ -1360,6 +1406,46 @@ status: string; operator: string | null;
  * `shipped` | `user_corrected` | `proposed_confirmed`.
  */
 trust: string; examples: number }
+/**
+ * What one sweep did. Every number is counted from a real outcome.
+ */
+export type SmsSweep = { 
+/**
+ * Read off the phone and offered to the engine.
+ */
+read: number; 
+/**
+ * Understood and routed on their own. Income only.
+ */
+applied: number; 
+/**
+ * Understood, and waiting for a person to say which pocket.
+ */
+needsYou: number; 
+/**
+ * Seen before. Captured once, counted here, changed nothing.
+ */
+duplicates: number; 
+/**
+ * No rule recognised the shape.
+ */
+unparsed: number; 
+/**
+ * Carried a one-time code. Nothing about them was stored.
+ */
+refused: number; 
+/**
+ * Read on the phone and dropped there: not from M-Pesa or KCB.
+ */
+skippedOtherSenders: number; 
+/**
+ * Dropped on the phone as a one-time code, before reaching this side.
+ */
+skippedSecrets: number; 
+/**
+ * A text the engine refused outright, with the first reason.
+ */
+failed: number; firstFailure: string | null }
 /**
  * A declared capture source.
  */
