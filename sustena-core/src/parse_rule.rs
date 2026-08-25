@@ -343,6 +343,57 @@ pub fn typecheck_rule<U: OperatorUniverse>(rule: &ParseRule, universe: &U) -> Ve
 
 // ── the interpreter ─────────────────────────────────────────────────────────
 
+/// Render a value, honouring the small part of the format language the shipped
+/// rules actually use.
+///
+/// ★ Only `,` (thousands) and `.Nf` (fixed decimals) are understood, because
+/// only those appear. Anything else falls back to the plain rendering rather
+/// than guessing, on the same principle as a missing name being left visible.
+fn render_with_spec(v: &serde_json::Value, spec: Option<&str>) -> String {
+    let Some(spec) = spec else { return render(v) };
+    let Some(n) = v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok())) else {
+        return render(v);
+    };
+    let decimals = spec
+        .rsplit_once('.')
+        .and_then(|(_, tail)| tail.strip_suffix('f'))
+        .and_then(|d| d.parse::<usize>().ok());
+    let mut body = match decimals {
+        Some(d) => format!("{n:.*}", d),
+        None => render(v),
+    };
+    if spec.contains(',') {
+        body = group_thousands(&body);
+    }
+    body
+}
+
+/// `1234567.89` becomes `1,234,567.89`. Digits before the point only.
+fn group_thousands(s: &str) -> String {
+    let (sign, rest) = match s.strip_prefix('-') {
+        Some(r) => ("-", r),
+        None => ("", s),
+    };
+    let (whole, frac) = match rest.split_once('.') {
+        Some((w, f)) => (w, Some(f)),
+        None => (rest, None),
+    };
+    if !whole.bytes().all(|b| b.is_ascii_digit()) {
+        return s.to_string();
+    }
+    let mut grouped = String::with_capacity(whole.len() + whole.len() / 3);
+    for (i, c) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(c);
+    }
+    match frac {
+        Some(f) => format!("{sign}{grouped}.{f}"),
+        None => format!("{sign}{grouped}"),
+    }
+}
+
 /// Substitute `{name}` from a map. ★ A missing name is left **verbatim**
 /// rather than blanked: a template that referred to something absent should
 /// look wrong, not look like an answer.
@@ -358,12 +409,21 @@ fn format_template(t: &str, values: &BTreeMap<String, serde_json::Value>) -> Str
                 return out;
             }
             Some(close) => {
-                let key = &after[..close];
+                let placeholder = &after[..close];
+                // ★★ `{name}` or `{name:spec}`. The spec half exists because the
+                //    shipped rules were authored against Python's formatter and
+                //    carry `{amount:,.2f}`. Treating the whole thing as a key
+                //    left that verbatim, and a real capture card on a real
+                //    phone read "KES {amount:,.2f} to KPLC PREPAID".
+                let (key, spec) = match placeholder.split_once(':') {
+                    Some((k, s)) => (k, Some(s)),
+                    None => (placeholder, None),
+                };
                 match values.get(key) {
-                    Some(v) => out.push_str(&render(v)),
+                    Some(v) => out.push_str(&render_with_spec(v, spec)),
                     None => {
                         out.push('{');
-                        out.push_str(key);
+                        out.push_str(placeholder);
                         out.push('}');
                     }
                 }
@@ -734,5 +794,59 @@ mod tests {
             spec(FieldKind::Template, None, Some(json!("a {nope} b"))),
         );
         assert_eq!(apply_rule(&r, "x").unwrap().parsed_fields()["t"], json!("a {nope} b"));
+    }
+}
+
+#[cfg(test)]
+mod format_spec_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn vals(n: serde_json::Value) -> BTreeMap<String, serde_json::Value> {
+        let mut m = BTreeMap::new();
+        m.insert("amount".to_string(), n);
+        m
+    }
+
+    /// ★★★ The shipped rules carry Python format specs. This is the exact
+    /// string a real card showed on a real phone before the fix.
+    #[test]
+    fn a_python_format_spec_is_honoured_not_printed() {
+        let out = format_template("KES {amount:,.2f} to KPLC", &vals(json!(1234.5)));
+        assert_eq!(out, "KES 1,234.50 to KPLC");
+    }
+
+    #[test]
+    fn a_plain_name_still_works() {
+        assert_eq!(format_template("{amount}", &vals(json!(7.0))), "7");
+    }
+
+    /// A number that arrived as text still formats.
+    #[test]
+    fn a_numeric_string_formats_too() {
+        let out = format_template("{amount:,.2f}", &vals(json!("40000")));
+        assert_eq!(out, "40,000.00");
+    }
+
+    /// ★ A name nobody supplied stays visible, spec and all. A template that
+    /// referred to something absent should look wrong.
+    #[test]
+    fn a_missing_name_is_left_verbatim_with_its_spec() {
+        let out = format_template("{nope:,.2f}", &vals(json!(1.0)));
+        assert_eq!(out, "{nope:,.2f}");
+    }
+
+    /// A spec this does not understand falls back rather than guessing.
+    #[test]
+    fn an_unknown_spec_falls_back() {
+        let out = format_template("{amount:%Y}", &vals(json!("hello")));
+        assert_eq!(out, "hello");
+    }
+
+    #[test]
+    fn grouping_handles_small_and_negative() {
+        assert_eq!(group_thousands("999"), "999");
+        assert_eq!(group_thousands("1000"), "1,000");
+        assert_eq!(group_thousands("-1234567.89"), "-1,234,567.89");
     }
 }
