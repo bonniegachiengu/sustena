@@ -163,7 +163,7 @@ export default function Define() {
           </Cluster>
 
           <Note gap="lg">
-            <Label>V · invariants</Label>
+            <Label>rules</Label>
           </Note>
           <For each={invs()}>
             {(inv, i) => (

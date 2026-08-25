@@ -281,7 +281,7 @@ export default function Lock(props: {
         </Card>
 
         <Note>
-          <Meta>sustena-core · embedded · no server, no network</Meta>
+          <Meta>the engine runs on this device · no server, no network</Meta>
         </Note>
       </div>
     </div>
