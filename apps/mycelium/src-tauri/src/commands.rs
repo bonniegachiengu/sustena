@@ -30,6 +30,7 @@ use crate::definitions::{AuthoredDefinition, DefinitionVerdict};
 use crate::templates::TemplateId;
 use sustena_core::holon::Transfer as HolonTransfer;
 use crate::ingest::Capture;
+use tauri_plugin_sms_capture::SmsBatch;
 use std::collections::BTreeMap;
 use crate::world::{World, DEFAULT_HANDLE};
 
@@ -1759,4 +1760,148 @@ pub fn place_order(
     let order = world.place_order(&package_id, u64::from(on))?;
     trace!("order {} · {} juul", order.reference, order.paid);
     Ok(order_dto(&order))
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SMS auto-capture
+//
+// The plugin reads texts and filters them. The engine is written here, through
+// `world.capture`, which is the same call a pasted message makes: same
+// transducer, same rules, same admission. There is no second way in.
+//
+// Why draining happens here and not when the text arrives: a write needs the
+// unlocked key, and a text usually arrives while the phone is locked. So the
+// receiver only ever puts the text in a local queue, and this runs when the
+// app is open. Capturing costs nothing and needs nobody; applying needs a key.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// What one sweep did. Every number is counted from a real outcome.
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SmsSweep {
+    /// Read off the phone and offered to the engine.
+    pub read: u32,
+    /// Understood and routed on their own. Income only.
+    pub applied: u32,
+    /// Understood, and waiting for a person to say which pocket.
+    pub needs_you: u32,
+    /// Seen before. Captured once, counted here, changed nothing.
+    pub duplicates: u32,
+    /// No rule recognised the shape.
+    pub unparsed: u32,
+    /// Carried a one-time code. Nothing about them was stored.
+    pub refused: u32,
+    /// Read on the phone and dropped there: not from M-Pesa or KCB.
+    pub skipped_other_senders: u32,
+    /// Dropped on the phone as a one-time code, before reaching this side.
+    pub skipped_secrets: u32,
+    /// A text the engine refused outright, with the first reason.
+    pub failed: u32,
+    pub first_failure: Option<String>,
+}
+
+/// M-Pesa or KCB, decided by WHO SENT IT. Never by the wording: several real
+/// KCB messages say M-PESA in their own text and are still KCB.
+fn source_of(sender: &str) -> Option<&'static str> {
+    let s = sender.to_uppercase();
+    // KCB first. A sender carrying both substrings is the bank.
+    if s.contains("KCB") {
+        Some("kcb")
+    } else if s.contains("MPESA") {
+        Some("mpesa")
+    } else {
+        None
+    }
+}
+
+fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
+    let mut out = SmsSweep {
+        skipped_other_senders: batch.filtered_out,
+        skipped_secrets: batch.secrets_refused,
+        ..Default::default()
+    };
+    for m in batch.messages {
+        let Some(source) = source_of(&m.sender) else {
+            out.skipped_other_senders += 1;
+            continue;
+        };
+        out.read += 1;
+        match world.capture(sustain_id, source, &m.body) {
+            Ok(Capture::Rejected { .. }) => out.refused += 1,
+            Ok(Capture::Duplicate(_)) => out.duplicates += 1,
+            Ok(Capture::Stored(stored)) => match stored.status.as_str() {
+                "mapped" => out.applied += 1,
+                "unparsed" => out.unparsed += 1,
+                _ => out.needs_you += 1,
+            },
+            Err(e) => {
+                out.failed += 1;
+                if out.first_failure.is_none() {
+                    out.first_failure = Some(e.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Has the phone been given permission to read texts yet?
+#[tauri::command]
+#[specta::specta]
+pub fn sms_permission_state(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_sms_capture::SmsCaptureExt;
+    app.sms_capture()
+        .permission_state()
+        .map(|p| p.sms)
+        .map_err(|e| e.to_string())
+}
+
+/// Ask for it. The reason is shown in the app first, before this is called.
+#[tauri::command]
+#[specta::specta]
+pub fn sms_request_permission(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_sms_capture::SmsCaptureExt;
+    app.sms_capture()
+        .request_permission()
+        .map(|p| p.sms)
+        .map_err(|e| e.to_string())
+}
+
+/// The backfill. Reads texts already on the phone, so a person never pastes a
+/// thousand messages by hand. `since_days` of 0 means all of them.
+#[tauri::command]
+#[specta::specta]
+pub fn sms_import_inbox(
+    world: State<'_, World>,
+    app: tauri::AppHandle,
+    sustain_id: String,
+    since_days: i32,
+) -> Result<SmsSweep, String> {
+    use tauri_plugin_sms_capture::{ReadInboxArgs, SmsCaptureExt};
+    let batch = app
+        .sms_capture()
+        .read_inbox(ReadInboxArgs { since_days })
+        .map_err(|e| e.to_string())?;
+    trace!("sms import: {} message(s) offered", batch.messages.len());
+    Ok(sweep(&world, &sustain_id, batch))
+}
+
+/// Whatever arrived while the app was closed. Draining clears the queue, so a
+/// text is offered once; the engine's own dedup covers the rest.
+#[tauri::command]
+#[specta::specta]
+pub fn sms_drain_queue(
+    world: State<'_, World>,
+    app: tauri::AppHandle,
+    sustain_id: String,
+) -> Result<SmsSweep, String> {
+    use tauri_plugin_sms_capture::SmsCaptureExt;
+    let batch = app
+        .sms_capture()
+        .drain_queue()
+        .map_err(|e| e.to_string())?;
+    if !batch.messages.is_empty() {
+        trace!("sms drain: {} message(s) waiting", batch.messages.len());
+    }
+    Ok(sweep(&world, &sustain_id, batch))
 }

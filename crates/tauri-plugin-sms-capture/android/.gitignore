@@ -1,0 +1,4 @@
+# Copied in by the plugin's build step from whichever tauri version is in use.
+/.tauri/
+/build/
+/.gradle/

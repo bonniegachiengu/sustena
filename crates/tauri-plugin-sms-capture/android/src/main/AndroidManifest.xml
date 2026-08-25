@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Declared HERE rather than in the app, because the generated Android
+      project is rebuilt from scratch and anything written into it is lost.
+      Manifest merging folds these into the app at build time.
+
+      READ_SMS covers the backfill (texts already on the phone).
+      RECEIVE_SMS covers the ones that arrive from now on.
+      Both are runtime permissions and both are asked for, with a reason, in
+      the app before the system dialog appears.
+    -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+
+    <application>
+        <!--
+          Registered in the manifest rather than at runtime so it fires when
+          the app is not running, which is the normal case for a text arriving
+          during the day. android:permission means only the OS can broadcast
+          to it.
+        -->
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

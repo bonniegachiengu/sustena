@@ -1,0 +1,17 @@
+[package]
+name = "tauri-plugin-sms-capture"
+version = "0.3.2"
+edition = "2021"
+description = "Reads M-Pesa and KCB transaction texts on this device and queues them for the engine."
+license = "Apache-2.0"
+# Required by tauri-plugin's build step, and must match the package name.
+links = "tauri-plugin-sms-capture"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

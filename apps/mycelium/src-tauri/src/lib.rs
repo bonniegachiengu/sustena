@@ -64,6 +64,10 @@ pub fn specta_builder() -> Builder {
         commands::lock_identity,
         commands::get_ingest,
         commands::capture_message,
+        commands::sms_permission_state,
+        commands::sms_request_permission,
+        commands::sms_import_inbox,
+        commands::sms_drain_queue,
         commands::declare_source,
         commands::resolve_message,
         commands::learn_rule,
@@ -148,6 +152,7 @@ pub fn run() {
     export_bindings(&builder);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_sms_capture::init())
         .invoke_handler(builder.invoke_handler())
         // ★ ONE setup. `tauri::Builder::setup` replaces rather than chains, so
         //   a second call would silently discard the first — and the one it
