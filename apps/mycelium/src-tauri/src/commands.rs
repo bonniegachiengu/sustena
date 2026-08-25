@@ -966,6 +966,16 @@ pub fn learn_rule(
 // ── Orchie ──────────────────────────────────────────────────
 
 /// **The curated feed** — `compose(r)` over one household.
+/// Which capture the classify card should offer next.
+///
+/// ★★ Oldest first, so the same message is offered until it is dealt with
+/// rather than a different one on every refresh. One id, never a list: the
+/// card works the queue one message at a time, which is the disclosure machine
+/// of Curated UI VII and the reason the screen cannot grow with the queue.
+fn oldest_waiting(queued: &[crate::ingest::IngestedMessage]) -> Option<String> {
+    queued.iter().min_by_key(|m| m.seq).map(|m| m.id.clone())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn get_feed(
@@ -1081,25 +1091,30 @@ pub fn get_feed(
             });
         }
     }
-    for m in &queued {
-        attention.push(AttentionDto {
-            kind: "capture".into(),
-            what: m
-                .parsed_fields
-                .get("counterparty")
-                .and_then(|v| v.as_str())
-                .unwrap_or("a captured message")
-                .to_string(),
-            why: m.reason.clone(),
-            severity: "warn".into(),
-            message_id: Some(m.id.clone()),
-        });
-    }
+    // ★★★ **No capture rows here, and that is the point.**
+    //
+    // Classifying already IS a widget: `classify_capture`, declared in
+    // `orchie.rs`, Unit-bound, reading the `unclassified` dimension and
+    // emitting the budget Enzymes. `compose(r)` scores it against everything
+    // else and the knapsack decides whether it fits.
+    //
+    // This function used to push a row per queued message ALONGSIDE that, a
+    // second surface the budget never saw. Reading a real inbox made it
+    // thousands of rows and the screen tried to work every one at once. A view
+    // is the knapsack's pick (Curated UI III to VI); a list that grows with the
+    // number of events is what the budget exists to forbid.
+    //
+    // So the card is the only capture surface, and all it needs from here is
+    // which message to offer next.
+    // The oldest still needing a person. ONE id, never a list: the card works
+    // them one at a time, which is the disclosure machine of Curated UI VII.
+    let queue_head = oldest_waiting(&queued);
 
     Ok(FeedDto {
         sustain_id: sustain_id.clone(),
         label,
         cards,
+        queue_head,
         quiet,
         budget: view.budget as u32,
         spent: view.spent as u32,
@@ -1798,6 +1813,12 @@ pub struct SmsSweep {
     /// A text the engine refused outright, with the first reason.
     pub failed: u32,
     pub first_failure: Option<String>,
+    /// Another page or batch is waiting.
+    pub has_more: bool,
+    /// Where the next page starts. Reading only.
+    pub next_offset: u32,
+    /// Still queued after this batch. Draining only.
+    pub remaining: u32,
 }
 
 /// M-Pesa or KCB, decided by WHO SENT IT. Never by the wording: several real
@@ -1818,6 +1839,9 @@ fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
     let mut out = SmsSweep {
         skipped_other_senders: batch.filtered_out,
         skipped_secrets: batch.secrets_refused,
+        has_more: batch.has_more,
+        next_offset: batch.next_offset,
+        remaining: batch.remaining,
         ..Default::default()
     };
     for m in batch.messages {
@@ -1846,7 +1870,7 @@ fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
 }
 
 /// Has the phone been given permission to read texts yet?
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sms_permission_state(app: tauri::AppHandle) -> Result<String, String> {
     use tauri_plugin_sms_capture::SmsCaptureExt;
@@ -1857,7 +1881,7 @@ pub fn sms_permission_state(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 /// Ask for it. The reason is shown in the app first, before this is called.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sms_request_permission(app: tauri::AppHandle) -> Result<String, String> {
     use tauri_plugin_sms_capture::SmsCaptureExt;
@@ -1867,41 +1891,122 @@ pub fn sms_request_permission(app: tauri::AppHandle) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-/// The backfill. Reads texts already on the phone, so a person never pastes a
-/// thousand messages by hand. `since_days` of 0 means all of them.
-#[tauri::command]
+/// ★★★ **`(async)` on a sync body, and it is the whole freeze fix.**
+///
+/// Tauri's macro defaults a plain `fn` command to `ExecutionContext::Blocking`,
+/// which the generated handler runs INLINE on the IPC thread. On a phone that
+/// is the UI thread, so a command that takes a while takes the interface with
+/// it. Marking it `async` on a synchronous body selects the `sync_threadpool`
+/// path instead: the same code, run off the thread that draws.
+///
+/// Found the hard way. 6,078 texts on the reporting device, 2,779 of them
+/// matching, every one captured before the one call returned. The button sat
+/// reading "read my texts" the entire time, and unlocking did the same thing
+/// because the queue drains there.
+///
+/// ONE PAGE of the backfill. The caller loops, and shows progress between
+/// pages. `since_days` of 0 means the whole inbox.
+#[tauri::command(async)]
 #[specta::specta]
-pub fn sms_import_inbox(
+pub fn sms_import_page(
     world: State<'_, World>,
     app: tauri::AppHandle,
     sustain_id: String,
     since_days: i32,
+    offset: u32,
+    limit: u32,
 ) -> Result<SmsSweep, String> {
     use tauri_plugin_sms_capture::{ReadInboxArgs, SmsCaptureExt};
     let batch = app
         .sms_capture()
-        .read_inbox(ReadInboxArgs { since_days })
+        .read_inbox(ReadInboxArgs { since_days, offset, limit })
         .map_err(|e| e.to_string())?;
-    trace!("sms import: {} message(s) offered", batch.messages.len());
+    trace!("sms page @{offset}: {} offered", batch.messages.len());
     Ok(sweep(&world, &sustain_id, batch))
 }
 
-/// Whatever arrived while the app was closed. Draining clears the queue, so a
-/// text is offered once; the engine's own dedup covers the rest.
-#[tauri::command]
+/// ONE BATCH of whatever arrived while the app was closed. Taking clears what
+/// was taken, so a text is offered once; the engine's own dedup covers the
+/// rest. The caller loops while `has_more`.
+///
+/// Bounded and off the UI thread for the same reason as the page above: this
+/// runs on unlock, and a queue that had built up froze the unlock itself.
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sms_drain_queue(
     world: State<'_, World>,
     app: tauri::AppHandle,
     sustain_id: String,
+    limit: u32,
 ) -> Result<SmsSweep, String> {
-    use tauri_plugin_sms_capture::SmsCaptureExt;
+    use tauri_plugin_sms_capture::{DrainArgs, SmsCaptureExt};
     let batch = app
         .sms_capture()
-        .drain_queue()
+        .drain_queue(DrainArgs { limit })
         .map_err(|e| e.to_string())?;
     if !batch.messages.is_empty() {
-        trace!("sms drain: {} message(s) waiting", batch.messages.len());
+        trace!("sms drain: {} taken, {} left", batch.messages.len(), batch.remaining);
     }
     Ok(sweep(&world, &sustain_id, batch))
+}
+
+/// How many texts are waiting, without taking any. Cheap enough to ask before
+/// deciding whether to show progress at all.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn sms_queue_depth(app: tauri::AppHandle) -> Result<u32, String> {
+    use tauri_plugin_sms_capture::SmsCaptureExt;
+    app.sms_capture().queue_depth().map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod feed_surface_tests {
+    use super::*;
+    use crate::ingest::IngestedMessage;
+
+    fn msg(seq: u64) -> IngestedMessage {
+        IngestedMessage {
+            id: format!("m{seq}"),
+            sustain_id: "h".into(),
+            source_id: "mpesa".into(),
+            raw_payload: "Ksh100 paid to SOMEONE".into(),
+            dedup_key: format!("k{seq}"),
+            status: "parsed_unmapped".into(),
+            parser_name: "mpesa_buygoods".into(),
+            reason: "which pocket is yours to decide".into(),
+            parsed_fields: Default::default(),
+            external_ref: None,
+            operator: None,
+            params: Default::default(),
+            applied: false,
+            gate_reason: None,
+            resolved: false,
+            seq,
+        }
+    }
+
+    /// ★★★ The property the freeze was a violation of.
+    ///
+    /// Two thousand waiting captures reach the screen as ONE id, exactly as two
+    /// do. What the person sees is `compose(r)`'s pick under the budget, and
+    /// nothing here grows with the queue.
+    #[test]
+    fn a_large_queue_reaches_the_screen_as_one_id() {
+        let many: Vec<_> = (0..2_000).map(msg).collect();
+        let head = oldest_waiting(&many);
+        assert_eq!(head.as_deref(), Some("m0"));
+    }
+
+    /// Oldest first, whatever order they arrive in.
+    #[test]
+    fn the_oldest_is_offered_first() {
+        let some = vec![msg(9), msg(3), msg(7)];
+        assert_eq!(oldest_waiting(&some).as_deref(), Some("m3"));
+    }
+
+    /// An empty queue offers nothing rather than a fabricated id.
+    #[test]
+    fn nothing_waiting_offers_nothing() {
+        assert!(oldest_waiting(&[]).is_none());
+    }
 }

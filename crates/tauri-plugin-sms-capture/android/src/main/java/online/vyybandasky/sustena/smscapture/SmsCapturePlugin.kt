@@ -17,6 +17,16 @@ import org.json.JSONArray
 class ReadInboxArgs {
     /** 0 or less means the whole inbox. */
     var sinceDays: Int = 0
+    /** How many matching messages to skip before collecting. */
+    var offset: Int = 0
+    /** How many to collect. 0 or less means all of them, which the caller should avoid. */
+    var limit: Int = 200
+}
+
+@InvokeArg
+class DrainArgs {
+    /** How many to take. 0 or less means all of them. */
+    var limit: Int = 200
 }
 
 /**
@@ -26,7 +36,14 @@ class ReadInboxArgs {
  *   readInbox   reads texts already on the phone. This is the one that saves
  *               a person from pasting a thousand messages by hand.
  *   drainQueue  hands over what arrived while the app was closed, and clears
- *               it, so a message is handed over once.
+ *               what it handed over.
+ *
+ * BOTH ARE PAGED, and that is the fix for a real failure. A phone with a few
+ * thousand texts returned every match in one call, the caller then processed
+ * the whole lot before returning, and the app sat frozen with the button still
+ * reading "read my texts". Measured on the device that reported it: 6,078
+ * texts, of which 2,779 matched. A page at a time keeps every call short and
+ * gives the caller somewhere to show progress.
  *
  * Nothing here writes to the engine or opens a socket. It returns text to the
  * host, and the host captures it through the same path a pasted message takes.
@@ -55,6 +72,8 @@ class SmsCapturePlugin(private val activity: Activity) : Plugin(activity) {
         val out = JSONArray()
         var filtered = 0
         var secrets = 0
+        var matched = 0      // matching messages seen, including the ones skipped
+        var hasMore = false
 
         val projection = arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE)
         var selection: String? = null
@@ -80,13 +99,23 @@ class SmsCapturePlugin(private val activity: Activity) : Plugin(activity) {
                     while (cursor.moveToNext()) {
                         val sender = cursor.getString(aIdx)
                         if (!SmsSenderFilter.isKnownFinancialSender(sender)) {
-                            filtered++
+                            // Counted once, on the first page, so a total is not
+                            // multiplied by the number of pages.
+                            if (args.offset == 0) filtered++
                             continue // someone else's text. Never leaves this loop.
                         }
                         val body = cursor.getString(bIdx)
                         if (SmsSecretFilter.containsSensitiveSecret(body)) {
-                            secrets++
+                            if (args.offset == 0) secrets++
                             continue // a one-time code. Never returned, whoever sent it.
+                        }
+                        matched++
+                        // Walking past the earlier pages costs a cursor step each.
+                        // Cheap next to what the caller does with a message.
+                        if (matched <= args.offset) continue
+                        if (args.limit > 0 && out.length() >= args.limit) {
+                            hasMore = true
+                            break
                         }
                         out.put(row(sender, body, cursor.getLong(dIdx)))
                     }
@@ -97,15 +126,30 @@ class SmsCapturePlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
 
-        invoke.resolve(batch(out, filtered, secrets))
+        val o = batch(out, filtered, secrets)
+        o.put("hasMore", hasMore)
+        o.put("nextOffset", args.offset + out.length())
+        invoke.resolve(o)
     }
 
     @Command
     fun drainQueue(invoke: Invoke) {
+        val args = invoke.parseArgs(DrainArgs::class.java)
         // Everything in the queue already passed both checks in the receiver
         // before it was written, so there is nothing to re-check here.
-        val queued = SmsQueueStore.drain(activity)
-        invoke.resolve(batch(queued, 0, 0))
+        val result = SmsQueueStore.drain(activity, args.limit)
+        val o = batch(result.taken, 0, 0)
+        o.put("hasMore", result.remaining > 0)
+        o.put("remaining", result.remaining)
+        invoke.resolve(o)
+    }
+
+    /** How many texts are waiting, without taking any. */
+    @Command
+    fun queueDepth(invoke: Invoke) {
+        val o = JSObject()
+        o.put("depth", SmsQueueStore.depth(activity))
+        invoke.resolve(o)
     }
 
     private fun row(sender: String, body: String, ts: Long) =

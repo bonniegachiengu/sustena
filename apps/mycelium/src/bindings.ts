@@ -283,24 +283,53 @@ async smsRequestPermission() : Promise<Result<string, string>> {
 }
 },
 /**
- * The backfill. Reads texts already on the phone, so a person never pastes a
- * thousand messages by hand. `since_days` of 0 means all of them.
+ * ★★★ **`(async)` on a sync body, and it is the whole freeze fix.**
+ * 
+ * Tauri's macro defaults a plain `fn` command to `ExecutionContext::Blocking`,
+ * which the generated handler runs INLINE on the IPC thread. On a phone that
+ * is the UI thread, so a command that takes a while takes the interface with
+ * it. Marking it `async` on a synchronous body selects the `sync_threadpool`
+ * path instead: the same code, run off the thread that draws.
+ * 
+ * Found the hard way. 6,078 texts on the reporting device, 2,779 of them
+ * matching, every one captured before the one call returned. The button sat
+ * reading "read my texts" the entire time, and unlocking did the same thing
+ * because the queue drains there.
+ * 
+ * ONE PAGE of the backfill. The caller loops, and shows progress between
+ * pages. `since_days` of 0 means the whole inbox.
  */
-async smsImportInbox(sustainId: string, sinceDays: number) : Promise<Result<SmsSweep, string>> {
+async smsImportPage(sustainId: string, sinceDays: number, offset: number, limit: number) : Promise<Result<SmsSweep, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("sms_import_inbox", { sustainId, sinceDays }) };
+    return { status: "ok", data: await TAURI_INVOKE("sms_import_page", { sustainId, sinceDays, offset, limit }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
 /**
- * Whatever arrived while the app was closed. Draining clears the queue, so a
- * text is offered once; the engine's own dedup covers the rest.
+ * ONE BATCH of whatever arrived while the app was closed. Taking clears what
+ * was taken, so a text is offered once; the engine's own dedup covers the
+ * rest. The caller loops while `has_more`.
+ * 
+ * Bounded and off the UI thread for the same reason as the page above: this
+ * runs on unlock, and a queue that had built up froze the unlock itself.
  */
-async smsDrainQueue(sustainId: string) : Promise<Result<SmsSweep, string>> {
+async smsDrainQueue(sustainId: string, limit: number) : Promise<Result<SmsSweep, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("sms_drain_queue", { sustainId }) };
+    return { status: "ok", data: await TAURI_INVOKE("sms_drain_queue", { sustainId, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * How many texts are waiting, without taking any. Cheap enough to ask before
+ * deciding whether to show progress at all.
+ */
+async smsQueueDepth() : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sms_queue_depth") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -878,6 +907,14 @@ export type ExclusionDto = { sustainId: string; label: string; isHousehold: bool
  */
 export type FeedDto = { sustainId: string; label: string; cards: CardDto[]; 
 /**
+ * The oldest capture still needing a person, if there is one.
+ * 
+ * ★★ ONE id rather than a list. The classify card works the queue one
+ * message at a time; a list here would be the unbounded second surface
+ * the attention budget exists to prevent.
+ */
+queueHead: string | null; 
+/**
  * ★ What stayed quiet — withdrawn and excluded alike, each saying which.
  */
 quiet: QuietDto[]; budget: number; spent: number; candidatesConsidered: number; 
@@ -1445,7 +1482,19 @@ skippedSecrets: number;
 /**
  * A text the engine refused outright, with the first reason.
  */
-failed: number; firstFailure: string | null }
+failed: number; firstFailure: string | null; 
+/**
+ * Another page or batch is waiting.
+ */
+hasMore: boolean; 
+/**
+ * Where the next page starts. Reading only.
+ */
+nextOffset: number; 
+/**
+ * Still queued after this batch. Draining only.
+ */
+remaining: number }
 /**
  * A declared capture source.
  */

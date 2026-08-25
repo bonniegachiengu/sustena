@@ -82,6 +82,41 @@ const TITLE: Record<string, string> = {
  * touch device. See `faceToggle` in orchie.css.ts for why it exists at all.
  */
 /**
+ * How many texts one call handles. Small enough that a page finishes fast, big
+ * enough that a few thousand is a few dozen calls rather than a few thousand.
+ */
+const PAGE = 100;
+
+/** How many captures are waiting, from the projection `compose(r)` ranked on. */
+function waiting(feed: FeedDto): number {
+  const n = Number(read(feed, "unclassified"));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** A zeroed sweep, to add pages into. */
+function blank(): SmsSweep {
+  return {
+    read: 0, applied: 0, needsYou: 0, duplicates: 0, unparsed: 0, refused: 0,
+    skippedOtherSenders: 0, skippedSecrets: 0, failed: 0, firstFailure: null,
+    hasMore: false, nextOffset: 0, remaining: 0,
+  };
+}
+
+/** Adds one page into a running total, keeping the first failure reported. */
+function add(total: SmsSweep, page: SmsSweep) {
+  total.read += page.read;
+  total.applied += page.applied;
+  total.needsYou += page.needsYou;
+  total.duplicates += page.duplicates;
+  total.unparsed += page.unparsed;
+  total.refused += page.refused;
+  total.skippedOtherSenders += page.skippedOtherSenders;
+  total.skippedSecrets += page.skippedSecrets;
+  total.failed += page.failed;
+  if (total.firstFailure === null) total.firstFailure = page.firstFailure;
+}
+
+/**
  * Reading M-Pesa and KCB texts off this phone.
  *
  * Two things happen here. The button reads what is already in the inbox, which
@@ -96,6 +131,7 @@ function SmsCard(props: { sustainId: string; onSwept: () => void }) {
   const [perm, setPerm] = createSignal<string | null>(null);
   const [busy, setBusy] = createSignal<null | "asking" | "reading">(null);
   const [swept, setSwept] = createSignal<SmsSweep | null>(null);
+  const [progress, setProgress] = createSignal(0);
   const [failed, setFailed] = createSignal<string | null>(null);
 
   onMount(() => {
@@ -117,14 +153,34 @@ function SmsCard(props: { sustainId: string; onSwept: () => void }) {
     }
   };
 
+  /**
+   * A page at a time, so the app keeps drawing.
+   *
+   * Reading everything in one call is what froze this button. The engine work
+   * per message is small and there are thousands of them, so the total is long
+   * and the interface had no way to say so. Each page is a separate call now,
+   * the counts add up as they arrive, and the label says where it has got to.
+   */
   const importInbox = async () => {
     setBusy("reading");
     setFailed(null);
+    setProgress(0);
+    const total = blank();
     try {
-      // 0 means the whole inbox. Captures are deduped by the engine, so
-      // running this twice costs nothing.
-      const r = await engine.smsImport(props.sustainId, 0);
-      setSwept(r);
+      let offset = 0;
+      for (;;) {
+        // 0 days means the whole inbox. Captures are deduped by the engine, so
+        // running this again costs nothing.
+        const page = await engine.smsImportPage(props.sustainId, 0, offset, PAGE);
+        add(total, page);
+        setProgress(total.read);
+        setSwept({ ...total });
+        if (!page.hasMore) break;
+        offset = page.nextOffset;
+        // Hand the frame back before the next page, so the count on screen is
+        // one a person can actually watch move.
+        await new Promise((r) => setTimeout(r, 0));
+      }
       props.onSwept();
     } catch (e) {
       setFailed(String(e).replace(/^Error:\s*/, ""));
@@ -150,7 +206,8 @@ function SmsCard(props: { sustainId: string; onSwept: () => void }) {
             disabled={busy() !== null}
           >
             <Show when={busy() === "reading"} fallback="read my texts">
-              <span class={O.working} /> reading…
+              <span class={O.working} />{" "}
+              {progress() === 0 ? "reading…" : `reading… ${progress()} so far`}
             </Show>
           </button>
         </Show>
@@ -250,8 +307,16 @@ export default function Orchie(props: { onFace?: () => void }) {
     const id = sustain();
     if (!id) return;
     try {
-      const r = await engine.smsDrain(id);
-      if (r.read > 0) await refetch();
+      let handled = 0;
+      for (;;) {
+        const batch = await engine.smsDrain(id, PAGE);
+        handled += batch.read;
+        if (!batch.hasMore) break;
+        // Give the frame back between batches. Draining the whole queue in one
+        // call is what made unlocking freeze when texts had piled up.
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      if (handled > 0) await refetch();
     } catch {
       // No permission yet, or not an Android build. Nothing to say.
     }
@@ -291,10 +356,13 @@ export default function Orchie(props: { onFace?: () => void }) {
   //     it dims (see `staleWhileRefreshing`) and the numbers change in place.
   const shown = () => feed.latest;
 
-  /** The messages that need a person. ★ This is the job, and it goes first. */
-  const jobs = () => (shown()?.attention ?? []).filter((a) => a.messageId);
-  /** Everything else that needs attention but is not a classifiable capture. */
-  const notices = () => (shown()?.attention ?? []).filter((a) => !a.messageId);
+  /**
+   * The standing rows. ★ Bounded by what they are, rather than by how many
+   * events happened: at most one strained pocket. Captures are NOT here; they
+   * are the `classify_capture` widget, which `compose(r)` scores and the
+   * knapsack bounds like every other card.
+   */
+  const notices = () => shown()?.attention ?? [];
 
   return (
     <div class={O.frame} data-face="orchie">
@@ -361,23 +429,35 @@ export default function Orchie(props: { onFace?: () => void }) {
               class={O.stack}
               classList={{ [O.staleWhileRefreshing]: feed.loading }}
             >
-              {/* ═══ THE JOB — first, open, and the only amber card ═══════ */}
-              <For each={jobs()}>
-                {(a) => (
+              {/* ═══ THE JOB — one message, whatever the queue holds ══════
+                  This used to be a `For` over a row per waiting capture, which
+                  on a real inbox meant thousands of open classify flows and a
+                  frozen screen. One at a time now: the feed hands over a single
+                  id, and the next arrives when this one is done. */}
+              <Show when={f().queueHead}>
+                {(id) => (
                   <div class={O.cardPrimary}>
                     <div class={O.cardHead}>
-                      <h2 class={O.cardTitle}>{a.what}</h2>
+                      <h2 class={O.cardTitle}>
+                        {waiting(f()) > 1
+                          ? `${waiting(f())} to classify`
+                          : "one to classify"}
+                      </h2>
                     </div>
-                    <p class={O.caption}>{a.why}</p>
+                    <p class={O.caption}>
+                      {waiting(f()) > 1
+                        ? "they come one at a time. pick a pocket for this one."
+                        : "pick a pocket for it."}
+                    </p>
                     <Classify
                       sustain={f().sustainId}
-                      messageId={a.messageId!}
+                      messageId={id()}
                       autoStart
                       onDone={() => void refetch()}
                     />
                   </div>
                 )}
-              </For>
+              </Show>
 
               {/* ═══ the calm read ═══════════════════════════════════════ */}
               <Summary feed={f()} />
@@ -406,7 +486,7 @@ export default function Orchie(props: { onFace?: () => void }) {
               <Show
                 when={f().cards.length > 0}
                 fallback={
-                  <Show when={jobs().length === 0}>
+                  <Show when={!f().queueHead}>
                     <p class={O.empty}>nothing needs you right now</p>
                   </Show>
                 }

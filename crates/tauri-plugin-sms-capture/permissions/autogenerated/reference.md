@@ -73,6 +73,32 @@ Denies the permission_state command without any pre-configured scope.
 <tr>
 <td>
 
+`sms-capture:allow-queue-depth`
+
+</td>
+<td>
+
+Enables the queue_depth command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`sms-capture:deny-queue-depth`
+
+</td>
+<td>
+
+Denies the queue_depth command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `sms-capture:allow-read-inbox`
 
 </td>

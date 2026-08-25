@@ -139,12 +139,25 @@ export const engine = {
   /** "granted" | "denied" | "prompt" | "prompt-with-rationale" */
   smsPermission: async (): Promise<string> => unwrap(await commands.smsPermissionState()),
   smsRequestPermission: async (): Promise<string> => unwrap(await commands.smsRequestPermission()),
-  /** Reads texts already on the phone. 0 days means all of them. */
-  smsImport: async (sustainId: string, sinceDays: number): Promise<SmsSweep> =>
-    unwrap(await commands.smsImportInbox(sustainId, sinceDays)),
-  /** Hands over what arrived while the app was shut, and clears it. */
-  smsDrain: async (sustainId: string): Promise<SmsSweep> =>
-    unwrap(await commands.smsDrainQueue(sustainId)),
+  /**
+   * ONE PAGE of the texts already on the phone. 0 days means the whole inbox.
+   *
+   * Paged because it has to be. A phone holding a few thousand texts froze the
+   * app when every match was read and captured in one call. The caller loops
+   * while `hasMore` and shows progress between pages.
+   */
+  smsImportPage: async (
+    sustainId: string,
+    sinceDays: number,
+    offset: number,
+    limit: number,
+  ): Promise<SmsSweep> =>
+    unwrap(await commands.smsImportPage(sustainId, sinceDays, offset, limit)),
+  /** ONE BATCH of what arrived while the app was shut. Loop while `hasMore`. */
+  smsDrain: async (sustainId: string, limit: number): Promise<SmsSweep> =>
+    unwrap(await commands.smsDrainQueue(sustainId, limit)),
+  /** How many texts are waiting, without taking any. */
+  smsQueueDepth: async (): Promise<number> => unwrap(await commands.smsQueueDepth()),
 
   declareSource: async (id: string, label: string, minutes: number | null): Promise<null> =>
     unwrap(await commands.declareSource(id, label, minutes)),
