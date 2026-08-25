@@ -73,7 +73,14 @@ const TITLE: Record<string, string> = {
   recent_income: "money came in",
 };
 
-export default function Orchie() {
+/**
+ * ★★ `onFace` is how a phone leaves Orchie.
+ *
+ * Optional, because Orchie must still render on its own; when the shell passes
+ * it, the header grows the one control that makes the cockpit reachable from a
+ * touch device. See `faceToggle` in orchie.css.ts for why it exists at all.
+ */
+export default function Orchie(props: { onFace?: () => void }) {
   /**
    * ★★★ **`null`, never `""`. This one line was the whole bug.**
    *
@@ -133,6 +140,16 @@ export default function Orchie() {
         <div class={O.header}>
           <span class={O.brand}>ORCHIE</span>
           <span class={O.headerMeta}>{shown()?.label ?? ""}</span>
+          {/* ★★ The cockpit, which is where Ingest lives -- the source picker
+              and the paste field for a real M-Pesa or KCB message. Reachable
+              from the phone the messages arrive on, which it was not. */}
+          <Show when={props.onFace}>
+            {(go) => (
+              <button class={O.faceToggle} onClick={() => go()()}>
+                mycelium
+              </button>
+            )}
+          </Show>
         </div>
 
         {/* ★★★ **Every way of having nothing to show now says which one it is.**
