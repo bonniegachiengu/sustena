@@ -28,6 +28,7 @@ import {
   type IdentityDto,
   type IngestDto,
   type CaptureResult,
+  type ChoiceDto,
   type SmsSweep,
   type CaptureContextDto,
   type NetworkDto,
@@ -74,6 +75,7 @@ export type {
   IdentityDto,
   IngestDto,
   CaptureResult,
+  ChoiceDto,
   SmsSweep,
   CaptureContextDto,
   NetworkDto,
@@ -163,6 +165,9 @@ export const engine = {
 
   declareSource: async (id: string, label: string, minutes: number | null): Promise<null> =>
     unwrap(await commands.declareSource(id, label, minutes)),
+  /** Set a captured message aside as not a transaction. Keeps the record. */
+  ignoreMessage: async (id: string): Promise<boolean> =>
+    unwrap(await commands.ignoreMessage(id)),
   resolveMessage: async (id: string): Promise<boolean> =>
     unwrap(await commands.resolveMessage(id)),
   // ── Orchie ──────────────────────────────────────────────────────────────

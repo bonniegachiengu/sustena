@@ -60,6 +60,7 @@ import {
   type JsonValue,
   type SmsSweep,
   type CaptureContextDto,
+  type ChoiceDto,
 } from "../lib/engine";
 import { world } from "../lib/live";
 import { keyboardAware, watchViewport } from "../lib/viewport";
@@ -99,6 +100,14 @@ const PAGE = 100;
 
 /** How much of a message shows before it needs a tap. Most texts are shorter. */
 const RAW_CLAMP = 220;
+
+/**
+ * How many pockets lead the picker.
+ *
+ * ★★ Four, the same number the attention budget uses. More choices at once is
+ * a slower decision, not a better-informed one, and the rest are one tap away.
+ */
+const SUGGESTIONS = 4;
 
 /** The pocket names in a state document, in the engine's own spelling. */
 function pocketNames(state: unknown): string[] {
@@ -919,6 +928,45 @@ function Classify(props: {
     }
   };
 
+  const [skipping, setSkipping] = createSignal(false);
+
+  /**
+   * Set this message aside. Not a transaction.
+   *
+   * ★★ A reversal, a promo, a notice: nothing to file. The message keeps its
+   * place in the log with its text and a real "set aside" mark, so this is
+   * never a disappearance nobody can account for.
+   */
+  const skip = async () => {
+    const id = props.messageId;
+    if (!id) return;
+    setSkipping(true);
+    setFailure(null);
+    try {
+      await engine.ignoreMessage(id);
+      props.onDone();
+    } catch (e) {
+      setFailure(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setSkipping(false);
+    }
+  };
+
+  /** Is the whole pocket list showing, or just the leading few? */
+  const [allPockets, setAllPockets] = createSignal(false);
+
+  /**
+   * The options actually rendered as buttons.
+   *
+   * ★ Only trims the POCKET question. Every other question offers a small,
+   * fixed set that is already the whole answer.
+   */
+  const shortlist = (opts: ChoiceDto[], field: string) =>
+    field === "pocket_name" && !allPockets() ? opts.slice(0, SUGGESTIONS) : opts;
+
+  const hidden = (opts: ChoiceDto[], field: string) =>
+    field === "pocket_name" ? Math.max(0, opts.length - SUGGESTIONS) : 0;
+
   /** The inline pocket creator: closed, or open with a name being typed. */
   const [newPocket, setNewPocket] = createSignal<string | null>(null);
   const [creating, setCreating] = createSignal(false);
@@ -1191,7 +1239,14 @@ function Classify(props: {
                     >
                       {(opts) => (
                         <div class={O.options}>
-                          <For each={opts()}>
+                          {/* ★★★ A few, then the rest on request.
+                              Every pocket as a full-width button stops fitting
+                              somewhere around ten and asks him to read the lot
+                              before choosing. The engine orders them by how
+                              often he has actually used each one, so the head
+                              of the list is the answer most of the time and
+                              the tail is one tap away. */}
+                          <For each={shortlist(opts(), q().field)}>
                             {(o) => (
                               <button
                                 class={pending() === o.value ? O.optionChosen : O.option}
@@ -1202,6 +1257,11 @@ function Classify(props: {
                               </button>
                             )}
                           </For>
+                          <Show when={hidden(opts(), q().field) > 0 && !allPockets()}>
+                            <button class={O.linkish} onClick={() => setAllPockets(true)}>
+                              more pockets ({hidden(opts(), q().field)})
+                            </button>
+                          </Show>
                           {/* ★★ A pocket he does not have yet is a real answer.
                               Without this the only way out of a wrong guess is
                               to accept it. */}
@@ -1253,9 +1313,23 @@ function Classify(props: {
                       )}
                     </Show>
 
-                    <button class={O.linkish} onClick={reset}>
-                      start over
-                    </button>
+                    <div class={O.row}>
+                      <button class={O.linkish} onClick={reset}>
+                        start over
+                      </button>
+                      <span class={O.spacer} />
+                      {/* ★ Quiet on purpose. Most messages ARE transactions,
+                          so this is the exception, not a peer of recording. */}
+                      <Show when={props.messageId}>
+                        <button
+                          class={O.linkish}
+                          disabled={skipping()}
+                          onClick={() => void skip()}
+                        >
+                          {skipping() ? "setting aside…" : "not a transaction · skip"}
+                        </button>
+                      </Show>
+                    </div>
                   </div>
                 );
               })()}

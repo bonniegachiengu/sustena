@@ -1,6 +1,34 @@
 {
  "mpesa": [
   {
+   "id": "mpesa_reversal",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?:transaction|Ksh\\s*(?P<amount>[\\d,]+\\.?\\d*))\\s*(?:of\\s*)?.*?(?:has been|was)\\s+reversed",
+   "extract": {
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "none"
+    }
+   },
+   "status": "informational",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "A reversal. Nothing to file.",
+   "trust": "shipped",
+   "provenance": "reversal, recognised so it never asks for a pocket",
+   "examples": []
+  },
+  {
    "id": "mpesa_received",
    "source": "mpesa",
    "version": 1,
@@ -343,6 +371,39 @@
   }
  ],
  "kcb": [
+  {
+   "id": "kcb_reversal",
+   "source": "kcb",
+   "version": 1,
+   "pattern": "transaction\\s+of\\s+KES\\s*(?P<amount>[\\d,]+\\.?\\d*)\\s+at\\s+(?P<counterparty>.+?)\\s+(?:has been|was)\\s+reversed",
+   "extract": {
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "counterparty": {
+     "type": "string",
+     "group": "counterparty",
+     "value": null
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "none"
+    }
+   },
+   "status": "informational",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "Reversal of KES {amount:,.2f} at {counterparty}. Nothing to file.",
+   "trust": "shipped",
+   "provenance": "reversal, recognised so it never asks for a pocket",
+   "examples": []
+  },
   {
    "id": "kcb_receive",
    "source": "kcb",

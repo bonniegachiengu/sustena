@@ -358,6 +358,21 @@ async resolveMessage(id: string) : Promise<Result<boolean, string>> {
 }
 },
 /**
+ * Set a captured message aside as not a transaction.
+ * 
+ * ★★ A real state on the message, never a delete. A reversal, a promo or a
+ * notice has nothing to file, and saying so should not mean losing the record
+ * that it arrived.
+ */
+async ignoreMessage(messageId: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ignore_message", { messageId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * **Remember this format** — synthesise a rule from a confirmed correction.
  * 
  * ★★ Verified before it is ever added: it must be well-typed, must match the

@@ -1152,6 +1152,17 @@ fn pockets_of(state: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Set a captured message aside as not a transaction.
+///
+/// ★★ A real state on the message, never a delete. A reversal, a promo or a
+/// notice has nothing to file, and saying so should not mean losing the record
+/// that it arrived.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn ignore_message(world: State<'_, World>, message_id: String) -> Result<bool, String> {
+    world.ingest().ignore(&message_id).map_err(|e| e.to_string())
+}
+
 /// **`ε → (o, θ)`** — one inference pass over a narrated effect or a captured
 /// message. Read-only: it resolves, it never writes.
 #[tauri::command]
@@ -1213,6 +1224,14 @@ pub fn orchie_infer(
         raw_text: raw.as_deref(),
     };
 
+    // ★★★ Rank the pockets he is offered by what he has actually done.
+    //
+    // The engine hands back every pocket in whatever order the state holds
+    // them, which is arbitrary. The classification history knows how many
+    // times each pocket has been chosen, so the ones he uses lead and the
+    // long tail follows. Real counts, not a guess at relevance.
+    let by_use = world.ingest().pocket_use_counts(&sustain_id).unwrap_or_default();
+
     Ok(match sustena_core::infer(&world.operators, &capture) {
         sustena_core::Inference::Ready {
             operator,
@@ -1230,6 +1249,18 @@ pub fn orchie_infer(
             history_use_count,
         },
         sustena_core::Inference::NeedsDisambiguation { field, question, options, why } => {
+            let options = options.map(|mut opts| {
+                if field == "pocket_name" {
+                    // Most-used first, then alphabetical so the tail is
+                    // predictable rather than arbitrary.
+                    opts.sort_by(|a, b| {
+                        let ua = by_use.get(&a.value).copied().unwrap_or(0);
+                        let ub = by_use.get(&b.value).copied().unwrap_or(0);
+                        ub.cmp(&ua).then_with(|| a.label.cmp(&b.label))
+                    });
+                }
+                opts
+            });
             InferenceDto::NeedsDisambiguation {
                 field,
                 question,
@@ -2028,6 +2059,7 @@ mod feed_surface_tests {
             applied: false,
             gate_reason: None,
             resolved: false,
+            ignored: false,
             seq,
         }
     }

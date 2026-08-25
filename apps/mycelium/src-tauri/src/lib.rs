@@ -71,6 +71,7 @@ pub fn specta_builder() -> Builder {
         commands::sms_queue_depth,
         commands::declare_source,
         commands::resolve_message,
+        commands::ignore_message,
         commands::learn_rule,
         commands::get_feed,
         commands::orchie_infer,
