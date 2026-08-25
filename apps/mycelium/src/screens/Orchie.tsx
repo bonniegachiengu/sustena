@@ -91,6 +91,12 @@ const PAGE = 100;
 /** How much of a message shows before it needs a tap. Most texts are shorter. */
 const RAW_CLAMP = 220;
 
+/** The pocket names in a state document, in the engine's own spelling. */
+function pocketNames(state: unknown): string[] {
+  const pockets = (state as { finances?: { pockets?: Record<string, unknown> } })?.finances?.pockets;
+  return pockets ? Object.keys(pockets) : [];
+}
+
 /** How many captures are waiting, from the projection `compose(r)` ranked on. */
 function waiting(feed: FeedDto): number {
   const n = Number(read(feed, "unclassified"));
@@ -835,6 +841,49 @@ function Classify(props: {
     }
   };
 
+  /** The inline pocket creator: closed, or open with a name being typed. */
+  const [newPocket, setNewPocket] = createSignal<string | null>(null);
+  const [creating, setCreating] = createSignal(false);
+  const [createFailed, setCreateFailed] = createSignal<string | null>(null);
+
+  /**
+   * Make a pocket, then file into it.
+   *
+   * ★★★ Through `budget.add_pocket`, the real Enzyme, so it passes the same
+   * gate as everything else and lands in the log. The engine normalises the
+   * name, so the pocket to answer with is read back off the resulting state
+   * rather than guessed at here: two normalisers would drift.
+   */
+  const createAndFile = async (field: string, existing: string[]) => {
+    const name = (newPocket() ?? "").trim();
+    if (name === "") return;
+    setCreating(true);
+    setCreateFailed(null);
+    try {
+      // ★ The options ARE the pockets he has, so the new one is whichever name
+      //   the engine's state gained. No second call, and no second normaliser.
+      const before = new Set(existing);
+      const r = await engine.confirm(
+        props.sustain,
+        "budget.add_pocket",
+        { pocket_name: name },
+        null,
+        null,
+      );
+      if (r.verdict !== "admitted") {
+        setCreateFailed(r.reason ?? "the engine refused it");
+        return;
+      }
+      const made = pocketNames(r.state).find((p) => !before.has(p));
+      setNewPocket(null);
+      answer(field, made ?? name);
+    } catch (e) {
+      setCreateFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const answer = (field: string, value: string) => {
     setPending(value);
     setAnswered((n) => n + 1);
@@ -1007,6 +1056,53 @@ function Classify(props: {
                               </button>
                             )}
                           </For>
+                          {/* ★★ A pocket he does not have yet is a real answer.
+                              Without this the only way out of a wrong guess is
+                              to accept it. */}
+                          <Show when={q().field === "pocket_name"}>
+                            <Show
+                              when={newPocket() !== null}
+                              fallback={
+                                <button
+                                  class={O.option}
+                                  disabled={busy()}
+                                  onClick={() => setNewPocket("")}
+                                >
+                                  + new pocket
+                                </button>
+                              }
+                            >
+                              <input
+                                ref={keyboardAware}
+                                class={O.input}
+                                placeholder="name it"
+                                enterkeyhint="done"
+                                value={newPocket() ?? ""}
+                                onInput={(e) => setNewPocket(e.currentTarget.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.currentTarget.blur();
+                                    void createAndFile(q().field, opts().map((o) => o.value));
+                                  }
+                                }}
+                              />
+                              <button
+                                class={O.option}
+                                disabled={creating() || (newPocket() ?? "").trim() === ""}
+                                onClick={() => void createAndFile(q().field, opts().map((o) => o.value))}
+                              >
+                                {creating() ? "making…" : "make it and file here"}
+                              </button>
+                              <button class={O.linkish} onClick={() => setNewPocket(null)}>
+                                cancel
+                              </button>
+                            </Show>
+                            {/* ★ A refusal says why. "Pocket 'x' already
+                                exists" is the engine's own wording. */}
+                            <Show when={createFailed()}>
+                              {(f) => <div class={O.errorBox}>{f()}</div>}
+                            </Show>
+                          </Show>
                         </div>
                       )}
                     </Show>
