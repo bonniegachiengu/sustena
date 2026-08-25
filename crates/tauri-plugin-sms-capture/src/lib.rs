@@ -51,7 +51,7 @@ pub struct CapturedSms {
     pub timestamp_ms: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmsBatch {
     pub messages: Vec<CapturedSms>,
@@ -61,6 +61,15 @@ pub struct SmsBatch {
     pub filtered_out: u32,
     #[serde(default)]
     pub secrets_refused: u32,
+    /// More pages behind this one.
+    #[serde(default)]
+    pub has_more: bool,
+    /// Where the next page starts. Reading only.
+    #[serde(default)]
+    pub next_offset: u32,
+    /// Still queued after this take. Draining only.
+    #[serde(default)]
+    pub remaining: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +84,24 @@ pub struct PermissionStatus {
 pub struct ReadInboxArgs {
     /// 0 or less means the whole inbox.
     pub since_days: i32,
+    /// Matching messages to skip. Paging exists because a phone holding a few
+    /// thousand texts froze the app when every match came back at once.
+    pub offset: u32,
+    /// How many to take in this page.
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DrainArgs {
+    /// How many to take. The rest stay queued for the next call.
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueDepth {
+    pub depth: u32,
 }
 
 /// A command that takes nothing still needs a body to serialize.
@@ -122,13 +149,26 @@ impl<R: Runtime> SmsCapture<R> {
         Err(Error::Unsupported)
     }
 
-    /// Whatever arrived while the app was closed or in the background. Reading
-    /// clears it, so a message is handed over once.
-    pub fn drain_queue(&self) -> Result<SmsBatch> {
+    /// Whatever arrived while the app was closed, up to `limit`. Taking clears
+    /// what was taken, so a message is handed over once.
+    pub fn drain_queue(&self, _args: DrainArgs) -> Result<SmsBatch> {
         #[cfg(target_os = "android")]
         {
             self.0
-                .run_mobile_plugin::<SmsBatch>("drainQueue", Empty {})
+                .run_mobile_plugin::<SmsBatch>("drainQueue", _args)
+                .map_err(|e| Error::PluginInvoke(e.to_string()))
+        }
+        #[cfg(not(target_os = "android"))]
+        Err(Error::Unsupported)
+    }
+
+    /// How many texts are waiting, without taking any.
+    pub fn queue_depth(&self) -> Result<u32> {
+        #[cfg(target_os = "android")]
+        {
+            self.0
+                .run_mobile_plugin::<QueueDepth>("queueDepth", Empty {})
+                .map(|d| d.depth)
                 .map_err(|e| Error::PluginInvoke(e.to_string()))
         }
         #[cfg(not(target_os = "android"))]

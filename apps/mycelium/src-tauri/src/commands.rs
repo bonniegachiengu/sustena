@@ -1798,6 +1798,12 @@ pub struct SmsSweep {
     /// A text the engine refused outright, with the first reason.
     pub failed: u32,
     pub first_failure: Option<String>,
+    /// Another page or batch is waiting.
+    pub has_more: bool,
+    /// Where the next page starts. Reading only.
+    pub next_offset: u32,
+    /// Still queued after this batch. Draining only.
+    pub remaining: u32,
 }
 
 /// M-Pesa or KCB, decided by WHO SENT IT. Never by the wording: several real
@@ -1818,6 +1824,9 @@ fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
     let mut out = SmsSweep {
         skipped_other_senders: batch.filtered_out,
         skipped_secrets: batch.secrets_refused,
+        has_more: batch.has_more,
+        next_offset: batch.next_offset,
+        remaining: batch.remaining,
         ..Default::default()
     };
     for m in batch.messages {
@@ -1846,7 +1855,7 @@ fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
 }
 
 /// Has the phone been given permission to read texts yet?
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sms_permission_state(app: tauri::AppHandle) -> Result<String, String> {
     use tauri_plugin_sms_capture::SmsCaptureExt;
@@ -1857,7 +1866,7 @@ pub fn sms_permission_state(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 /// Ask for it. The reason is shown in the app first, before this is called.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sms_request_permission(app: tauri::AppHandle) -> Result<String, String> {
     use tauri_plugin_sms_capture::SmsCaptureExt;
@@ -1867,41 +1876,70 @@ pub fn sms_request_permission(app: tauri::AppHandle) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-/// The backfill. Reads texts already on the phone, so a person never pastes a
-/// thousand messages by hand. `since_days` of 0 means all of them.
-#[tauri::command]
+/// ★★★ **`(async)` on a sync body, and it is the whole freeze fix.**
+///
+/// Tauri's macro defaults a plain `fn` command to `ExecutionContext::Blocking`,
+/// which the generated handler runs INLINE on the IPC thread. On a phone that
+/// is the UI thread, so a command that takes a while takes the interface with
+/// it. Marking it `async` on a synchronous body selects the `sync_threadpool`
+/// path instead: the same code, run off the thread that draws.
+///
+/// Found the hard way. 6,078 texts on the reporting device, 2,779 of them
+/// matching, every one captured before the one call returned. The button sat
+/// reading "read my texts" the entire time, and unlocking did the same thing
+/// because the queue drains there.
+///
+/// ONE PAGE of the backfill. The caller loops, and shows progress between
+/// pages. `since_days` of 0 means the whole inbox.
+#[tauri::command(async)]
 #[specta::specta]
-pub fn sms_import_inbox(
+pub fn sms_import_page(
     world: State<'_, World>,
     app: tauri::AppHandle,
     sustain_id: String,
     since_days: i32,
+    offset: u32,
+    limit: u32,
 ) -> Result<SmsSweep, String> {
     use tauri_plugin_sms_capture::{ReadInboxArgs, SmsCaptureExt};
     let batch = app
         .sms_capture()
-        .read_inbox(ReadInboxArgs { since_days })
+        .read_inbox(ReadInboxArgs { since_days, offset, limit })
         .map_err(|e| e.to_string())?;
-    trace!("sms import: {} message(s) offered", batch.messages.len());
+    trace!("sms page @{offset}: {} offered", batch.messages.len());
     Ok(sweep(&world, &sustain_id, batch))
 }
 
-/// Whatever arrived while the app was closed. Draining clears the queue, so a
-/// text is offered once; the engine's own dedup covers the rest.
-#[tauri::command]
+/// ONE BATCH of whatever arrived while the app was closed. Taking clears what
+/// was taken, so a text is offered once; the engine's own dedup covers the
+/// rest. The caller loops while `has_more`.
+///
+/// Bounded and off the UI thread for the same reason as the page above: this
+/// runs on unlock, and a queue that had built up froze the unlock itself.
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sms_drain_queue(
     world: State<'_, World>,
     app: tauri::AppHandle,
     sustain_id: String,
+    limit: u32,
 ) -> Result<SmsSweep, String> {
-    use tauri_plugin_sms_capture::SmsCaptureExt;
+    use tauri_plugin_sms_capture::{DrainArgs, SmsCaptureExt};
     let batch = app
         .sms_capture()
-        .drain_queue()
+        .drain_queue(DrainArgs { limit })
         .map_err(|e| e.to_string())?;
     if !batch.messages.is_empty() {
-        trace!("sms drain: {} message(s) waiting", batch.messages.len());
+        trace!("sms drain: {} taken, {} left", batch.messages.len(), batch.remaining);
     }
     Ok(sweep(&world, &sustain_id, batch))
+}
+
+/// How many texts are waiting, without taking any. Cheap enough to ask before
+/// deciding whether to show progress at all.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn sms_queue_depth(app: tauri::AppHandle) -> Result<u32, String> {
+    use tauri_plugin_sms_capture::SmsCaptureExt;
+    app.sms_capture().queue_depth().map_err(|e| e.to_string())
 }
