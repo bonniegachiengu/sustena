@@ -1,1 +1,4 @@
+// Only used when this module is opened on its own. In the app build the
+// app's own settings.gradle provides :tauri-android.
 include ':tauri-android'
+project(':tauri-android').projectDir = new File('./.tauri/tauri-api')
