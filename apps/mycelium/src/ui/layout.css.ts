@@ -88,11 +88,27 @@ export const panelSlot = style({
 const ROW = "minmax(0, 1fr)";
 
 /**
- * Below `md` the columns stack and the SPLIT is what scrolls, so the row goes
- * back to `auto` — a constrained row here would clip the stack instead.
- * ★ Two independent scrollers stacked on a phone is a trap; one is correct.
+ * ★★★ **Below `md` the split stops being a grid.**
+ *
+ * It used to stay a grid and set `grid-template-rows: auto`, on the reasoning
+ * that an auto row sizes to its content. It does not here. The split has a
+ * definite height (the panel slot gives it one), and a grid distributes that
+ * height across its auto rows — measured at 375px, two stacked columns came
+ * out 304.5px each no matter how tall their content was. The column then held
+ * 1382px of content in a 305px box while carrying `overflow-y: visible`, so
+ * roughly a thousand pixels of it painted straight over the cards below. That
+ * is every "cards overlap and content is cut off" report, and it was one bug.
+ * The cards were being squeezed too: `flex-shrink` is 1 by default, so a card
+ * that should have been 114px tall was rendering at 22.
+ *
+ * A flex column has no such height to distribute. Children take their natural
+ * height, `flex-shrink: 0` stops them being compressed, and the split scrolls.
  */
-const STACKED = { gridTemplateRows: "auto", overflowY: "auto" } as const;
+const STACKED = {
+  display: "flex",
+  flexDirection: "column",
+  overflowY: "auto",
+} as const;
 
 export const split = styleVariants({
   even: [
@@ -156,9 +172,12 @@ export const column = style({
   minWidth: 0,
   overflowY: "auto",
   "@media": {
-    // Below `md` the SPLIT scrolls, not each column — two independent
-    // scrollers stacked on a phone is a trap.
-    [bp.md]: { overflowY: "visible", gap: vars.space.md },
+    // Below `md` the SPLIT scrolls, not each column. Two stacked scrollers on
+    // a phone is a trap.
+    // ★ `flex-shrink: 0`: the split is a flex column there, and a column that
+    //   is allowed to shrink gets compressed below its content, which with
+    //   `overflow-y: visible` means the content paints over what follows.
+    [bp.md]: { overflowY: "visible", gap: vars.space.md, flexShrink: 0 },
   },
 });
 

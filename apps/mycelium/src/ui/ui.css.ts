@@ -121,6 +121,13 @@ export const card = style({
   minHeight: 0,
   display: "flex",
   flexDirection: "column",
+  "@media": {
+    // ★ A card is a flex item in the stacked column below `md`, and flex items
+    //   shrink by default. Measured at 375px, a card whose content needed
+    //   114px was being rendered at 22 and the rest of it drawn over the next
+    //   card. A card is never shorter than what is in it.
+    [bp.md]: { flexShrink: 0 },
+  },
 });
 
 export const cardHead = style({
