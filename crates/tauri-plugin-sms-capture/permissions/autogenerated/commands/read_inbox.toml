@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-read-inbox"
+description = "Enables the read_inbox command without any pre-configured scope."
+commands.allow = ["read_inbox"]
+
+[[permission]]
+identifier = "deny-read-inbox"
+description = "Denies the read_inbox command without any pre-configured scope."
+commands.deny = ["read_inbox"]

@@ -133,6 +133,8 @@ apps/web/out/
 **/src-tauri/target/
 # Rust core build artifacts
 /sustena-core/target/
+# Plugin crates build into their own target/ when checked on their own.
+/crates/*/target/
 **/src-tauri/gen/
 
 # ── Test / tooling caches (general, not just backend/) ────────────────────────
@@ -183,3 +185,4 @@ updater.key*
 
 # Transient output of scripts/release.ps1
 release-run.log
+crates/tauri-plugin-sms-capture/Cargo.lock
