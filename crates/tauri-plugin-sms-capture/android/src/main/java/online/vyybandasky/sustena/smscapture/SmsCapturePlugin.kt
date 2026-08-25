@@ -21,6 +21,13 @@ class ReadInboxArgs {
     var offset: Int = 0
     /** How many to collect. 0 or less means all of them, which the caller should avoid. */
     var limit: Int = 200
+    /**
+     * Only messages newer than this, as the device timestamps them.
+     *
+     * The caller's high-water mark. A repeat read passes the newest it saw last
+     * time, so it walks what arrived since rather than the whole inbox again.
+     */
+    var sinceMs: Long = 0
 }
 
 @InvokeArg
@@ -76,12 +83,21 @@ class SmsCapturePlugin(private val activity: Activity) : Plugin(activity) {
         var hasMore = false
 
         val projection = arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE)
+        // Two floors, and the later one wins: a window the caller asked for,
+        // and the high-water mark from the last completed read.
+        var floorMs = 0L
+        if (args.sinceDays > 0) {
+            floorMs = System.currentTimeMillis() - args.sinceDays * 24L * 60L * 60L * 1000L
+        }
+        if (args.sinceMs > floorMs) {
+            // Strictly newer, so the last message read is not offered again.
+            floorMs = args.sinceMs + 1
+        }
         var selection: String? = null
         var selectionArgs: Array<String>? = null
-        if (args.sinceDays > 0) {
-            val sinceMs = System.currentTimeMillis() - args.sinceDays * 24L * 60L * 60L * 1000L
+        if (floorMs > 0) {
             selection = Telephony.Sms.DATE + " >= ?"
-            selectionArgs = arrayOf(sinceMs.toString())
+            selectionArgs = arrayOf(floorMs.toString())
         }
 
         try {

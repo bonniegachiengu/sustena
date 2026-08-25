@@ -88,6 +88,9 @@ const TITLE: Record<string, string> = {
  */
 const PAGE = 100;
 
+/** How much of a message shows before it needs a tap. Most texts are shorter. */
+const RAW_CLAMP = 220;
+
 /** How many captures are waiting, from the projection `compose(r)` ranked on. */
 function waiting(feed: FeedDto): number {
   const n = Number(read(feed, "unclassified"));
@@ -148,6 +151,7 @@ function DirectionBadge(props: { direction: string | null }) {
  * wrong. Everything here was already on the ingested message.
  */
 function CaptureFacts(props: { head: CaptureContextDto }) {
+  const [showRaw, setShowRaw] = createSignal(false);
   const money = () =>
     props.head.amount === null ? null : `KES ${fmt(props.head.amount)}`;
   return (
@@ -166,7 +170,22 @@ function CaptureFacts(props: { head: CaptureContextDto }) {
         {props.head.source}
         <Show when={props.head.direction}>{(d) => <> · {d()}</>}</Show>
       </p>
-      <p class={O.raw}>{props.head.raw}</p>
+      {/* ★★★ The text itself, because the amount and the merchant are a
+          READING of it and a person filing two thousand of these needs to
+          recognise the transaction, not just its summary. Short ones show
+          whole; a long KCB message clamps so the buttons stay reachable, and
+          opens on a tap. */}
+      <Show
+        when={props.head.raw.length > RAW_CLAMP}
+        fallback={<p class={O.raw}>{props.head.raw}</p>}
+      >
+        <p class={O.raw}>
+          {showRaw() ? props.head.raw : `${props.head.raw.slice(0, RAW_CLAMP)}…`}
+        </p>
+        <button class={O.linkish} onClick={() => setShowRaw((v) => !v)}>
+          {showRaw() ? "▾ less" : "▸ show the whole message"}
+        </button>
+      </Show>
     </div>
   );
 }

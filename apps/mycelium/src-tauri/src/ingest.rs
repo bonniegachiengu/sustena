@@ -143,6 +143,48 @@ impl Ingested {
     fn history_path(&self) -> PathBuf {
         self.root.join("history.json")
     }
+    fn marks_path(&self) -> PathBuf {
+        self.root.join("read_marks.json")
+    }
+
+    /// The newest message already read from a source, as the device timestamps
+    /// it.
+    ///
+    /// ★★★ Why this exists. Re-reading the inbox was correct and wasteful: the
+    /// dedup index caught every repeat, but only after the whole inbox had been
+    /// walked and every message offered again. Two thousand captures re-read
+    /// two thousand times is work nobody asked for. The mark says where the
+    /// last read got to, so a repeat only looks at what arrived since.
+    ///
+    /// ★★ Kept per (sustain, source) because sources are read independently.
+    pub fn read_mark(&self, sustain_id: &str, source_id: &str) -> Option<i64> {
+        self.marks().ok()?.get(&mark_key(sustain_id, source_id)).copied()
+    }
+
+    fn marks(&self) -> StoreResult<BTreeMap<String, i64>> {
+        let path = self.marks_path();
+        if !path.exists() {
+            return Ok(BTreeMap::new());
+        }
+        let text = fs::read_to_string(&path)?;
+        serde_json::from_str(&text).map_err(|e| StoreError::Io(e.to_string()))
+    }
+
+    /// Move the mark forward. ★ Never backwards: a partial read must not make
+    /// the next one skip what it missed.
+    pub fn set_read_mark(&self, sustain_id: &str, source_id: &str, newest_ms: i64) -> StoreResult<()> {
+        let mut marks = self.marks()?;
+        let key = mark_key(sustain_id, source_id);
+        if newest_ms > marks.get(&key).copied().unwrap_or(i64::MIN) {
+            marks.insert(key, newest_ms);
+            let text =
+                serde_json::to_string_pretty(&marks).map_err(|e| StoreError::Io(e.to_string()))?;
+            let tmp = self.marks_path().with_extension("json.tmp");
+            fs::write(&tmp, text)?;
+            fs::rename(&tmp, self.marks_path())?;
+        }
+        Ok(())
+    }
 
     pub fn rejected_count(&self) -> u64 {
         *self.rejected.lock().expect("rejected lock")
@@ -382,6 +424,10 @@ impl Ingested {
     pub fn recall(&self, sustain_id: &str, description: &str) -> Option<(String, u32)> {
         self.history().ok()?.get(&history_key(sustain_id, description)).cloned()
     }
+}
+
+fn mark_key(sustain_id: &str, source_id: &str) -> String {
+    format!("{sustain_id}::{source_id}")
 }
 
 fn history_key(sustain_id: &str, description: &str) -> String {
@@ -650,6 +696,35 @@ mod reread_tests {
             "a reopened store recognises the earlier capture"
         );
         assert_eq!(ing.current().expect("current").len(), 1);
+    }
+
+    /// ★★★ P4: the mark makes a repeat read cheap.
+    ///
+    /// It starts absent, moves forward when a read completes, and never moves
+    /// backwards, so a read abandoned halfway cannot make the next one skip
+    /// what it never looked at.
+    #[test]
+    fn the_read_mark_only_moves_forward() {
+        let ing = Ingested::at(scratch("mark")).expect("ingest");
+        assert_eq!(ing.read_mark("h", "inbox"), None, "no mark before a read");
+
+        ing.set_read_mark("h", "inbox", 1_000).expect("set");
+        assert_eq!(ing.read_mark("h", "inbox"), Some(1_000));
+
+        ing.set_read_mark("h", "inbox", 2_500).expect("forward");
+        assert_eq!(ing.read_mark("h", "inbox"), Some(2_500));
+
+        ing.set_read_mark("h", "inbox", 900).expect("backwards is ignored");
+        assert_eq!(ing.read_mark("h", "inbox"), Some(2_500), "never goes back");
+    }
+
+    /// Marks are per source, so reading one never advances another.
+    #[test]
+    fn marks_do_not_leak_between_sources() {
+        let ing = Ingested::at(scratch("mark-src")).expect("ingest");
+        ing.set_read_mark("h", "mpesa", 5_000).expect("set");
+        assert_eq!(ing.read_mark("h", "kcb"), None);
+        assert_eq!(ing.read_mark("other", "mpesa"), None);
     }
 
     /// Different text from the same sender is a different message.

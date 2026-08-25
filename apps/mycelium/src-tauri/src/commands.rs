@@ -1840,6 +1840,11 @@ pub struct SmsSweep {
     pub remaining: u32,
 }
 
+/// The inbox is read as one stream rather than per sender, so the mark is kept
+/// under one key. ★ The store keys marks per source anyway, so splitting the
+/// read later needs no migration.
+const ANY_SOURCE: &str = "inbox";
+
 /// M-Pesa or KCB, decided by WHO SENT IT. Never by the wording: several real
 /// KCB messages say M-PESA in their own text and are still KCB.
 fn source_of(sender: &str) -> Option<&'static str> {
@@ -1936,12 +1941,35 @@ pub fn sms_import_page(
     limit: u32,
 ) -> Result<SmsSweep, String> {
     use tauri_plugin_sms_capture::{ReadInboxArgs, SmsCaptureExt};
+
+    // ★★★ Only what arrived since the last read.
+    //
+    // A repeat read used to walk the whole inbox and offer every message again.
+    // Nothing was double-counted, because the dedup index caught them, but two
+    // thousand messages were re-read to learn that two thousand times. The mark
+    // is the newest message a completed read saw; a repeat starts there.
+    let since_ms = world.ingest().read_mark(&sustain_id, ANY_SOURCE).unwrap_or(0);
+
     let batch = app
         .sms_capture()
-        .read_inbox(ReadInboxArgs { since_days, offset, limit })
+        .read_inbox(ReadInboxArgs { since_days, offset, limit, since_ms })
         .map_err(|e| e.to_string())?;
-    trace!("sms page @{offset}: {} offered", batch.messages.len());
-    Ok(sweep(&world, &sustain_id, batch))
+    trace!("sms page @{offset} since {since_ms}: {} offered", batch.messages.len());
+
+    // The newest this page saw, so the mark can move once the read finishes.
+    // ★ Kept in Rust only: the mark is the store's business and a timestamp
+    //   cannot cross into TypeScript anyway (specta forbids i64).
+    let newest = batch.messages.iter().map(|m| m.timestamp_ms).max();
+    let out = sweep(&world, &sustain_id, batch);
+
+    // ★★ The mark moves only when the LAST page lands. A read abandoned halfway
+    //    must not make the next one skip what it never looked at.
+    if !out.has_more {
+        if let Some(ms) = newest.or(Some(since_ms)) {
+            let _ = world.ingest().set_read_mark(&sustain_id, ANY_SOURCE, ms);
+        }
+    }
+    Ok(out)
 }
 
 /// ONE BATCH of whatever arrived while the app was closed. Taking clears what
