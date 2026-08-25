@@ -102,6 +102,14 @@ Ordered by dependency, not importance.
 | ✅ 24 | ~~No MonitorEngine; scheduling external, no heartbeats~~ — **the engine is DONE in Rust** (`monitor.rs`, 2026-08-16): per-sustain chains keyed by id with `flatten_holarchy`, the **native** `ingest()` (`W = d(s,V) → EWMA → CUSUM`, no Kalman), and the escalation that makes **OBSERVE self-driving** into the OODA loop. The diagnosis behind this row was exactly right and is worth keeping: the reference watches by RECOMPUTING per request, so an accumulator had nowhere to live. **Scheduling stays external on purpose** — no clock or `tick()` in core, the same boundary CTL-9 draws. Python unchanged. | Monitor |
 | 25 | Widget type-checker exists with **no application call site** | PERCEPT |
 
+> **Orchie's own sequence for rows 23, 24 and 25 lives in
+> [`ORCHIE_IMC_PLAN.md`](ORCHIE_IMC_PLAN.md).** The three rows above are closed or
+> half-closed in the *core*; what the plan tracks is the app-layer work that turns
+> them into something a person sees. P1 (on-device capture) shipped 2026-08-25. P2
+> makes the phone a Sustain so a dead capture path is noticed. P3 gives the app's own
+> `d(s,V)` a history so the finished EWMA and CUSUM chain has a caller. P4 draws the
+> result, which is row 25's other half.
+
 ### Editing
 
 | # | Gap | Article |
