@@ -41,7 +41,16 @@
  * household's own pocket names, and stops at a confirmation every time. A
  * history pre-fill saves the tap, never the confirm.
  */
-import { createEffect, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+  untrack,
+} from "solid-js";
 import {
   engine,
   fmt,
@@ -561,8 +570,21 @@ export default function Orchie(props: { onFace?: () => void }) {
                   on a real inbox meant thousands of open classify flows and a
                   frozen screen. One at a time now: the feed hands over a single
                   id, and the next arrives when this one is done. */}
-              <Show when={f().queueHead}>
-                {(head) => (
+              {/* ★★★ `keyed`, and it is the whole bug.
+                  `Show` without it KEEPS the same children when `when` goes
+                  from one truthy value to another. So filing a message left
+                  the previous card's instance in place for the next one: its
+                  `onMount` had already run, its step had been reset, and it
+                  rendered the text with no actions at all. Keyed on the
+                  message id, every message gets its own card, armed the same
+                  way, by construction rather than by remembering to re-arm. */}
+              {/* ★★ Keyed on the ID, not the object. The feed hands back a
+                  fresh object on every read, so keying on it would re-create
+                  the card whenever anything refetched and throw away answers
+                  given halfway through. The id changes exactly when the
+                  subject does, which is exactly when a new card is right. */}
+              <Show when={f().queueHead?.id} keyed>
+                {(headId) => (
                   <div class={O.cardPrimary}>
                     <div class={O.cardHead}>
                       <h2 class={O.cardTitle}>
@@ -575,11 +597,12 @@ export default function Orchie(props: { onFace?: () => void }) {
                         goes. The card used to ask for a pocket without showing
                         the message, so a person was filing something they could
                         not see. */}
-                    <CaptureFacts head={head()} />
+                    <CaptureFacts head={f().queueHead!} />
                     <Classify
                       sustain={f().sustainId}
-                      messageId={head().id}
+                      messageId={headId}
                       autoStart
+                      backfill
                       onDone={() => void refetch()}
                     />
                   </div>
@@ -844,6 +867,14 @@ function Classify(props: {
   sustain: string;
   messageId: string | null;
   autoStart?: boolean;
+  /**
+   * Sorting texts from the past rather than filing one that just arrived.
+   *
+   * ★★ It changes which action leads, and nothing else. For a past text the
+   * money already moved in the world, so recording both sides is the honest
+   * default; for a live one, funding the pocket and then spending is.
+   */
+  backfill?: boolean;
   onDone: () => void;
 }) {
   const [text, setText] = createSignal("");
@@ -1033,10 +1064,24 @@ function Classify(props: {
     }
   };
 
-  // ★ A card that exists because something needs classifying opens already
-  //   asking. One fewer tap, and one fewer wait, on the most common path.
-  onMount(() => {
-    if (props.autoStart && props.messageId) void run({});
+  /**
+   * ★★★ Arming is a function of the SUBJECT, not of when this happened to
+   * mount.
+   *
+   * It used to be `onMount`, which fires once. Any reuse of the instance for a
+   * second message therefore produced a card with no actions on it. An effect
+   * on the message id cannot have that failure: change the subject and the
+   * card asks about the new subject, whether or not it was re-created.
+   */
+  createEffect(() => {
+    const id = props.messageId;
+    if (!props.autoStart || !id) return;
+    // ★ Only the id is tracked. `untrack` keeps the clearing below from
+    //   feeding back into this effect and looping.
+    untrack(() => {
+      reset();
+      void run({});
+    });
   });
 
   return (
@@ -1309,17 +1354,18 @@ function Classify(props: {
                     </Show>
                     {/* Backfill first: these are texts from the past, and the
                         money already moved in the world. */}
+                    {/* ★★ Which one LEADS is the only difference the mode
+                        makes. Sorting the backlog, the money already moved, so
+                        recording both sides is the honest default. */}
                     <button
-                      class={`${O.action.primary} ${O.actionWide}`}
+                      class={`${props.backfill ? O.action.primary : O.action.secondary} ${O.actionWide}`}
                       disabled={fixing() !== null}
                       onClick={() => void fixAndRecord(room(), "backfill")}
                     >
-                      {fixing() === "backfill"
-                        ? "recording…"
-                        : "record as already spent"}
+                      {fixing() === "backfill" ? "recording…" : "record as already spent"}
                     </button>
                     <button
-                      class={`${O.action.secondary} ${O.actionWide}`}
+                      class={`${props.backfill ? O.action.secondary : O.action.primary} ${O.actionWide}`}
                       disabled={fixing() !== null}
                       onClick={() => void fixAndRecord(room(), "fund")}
                     >
