@@ -66,13 +66,22 @@ pub struct IngestedMessage {
     pub gate_reason: Option<String>,
     #[serde(default)]
     pub resolved: bool,
+    /// ★★★ Set aside by a person as not a transaction.
+    ///
+    /// A real state, never a silent drop. The message stays in the log with
+    /// its raw text, so "why did that disappear?" has an answer and a wrongly
+    /// skipped one can be found again.
+    #[serde(default)]
+    pub ignored: bool,
     /// A monotonic capture order — the host's, not a clock.
     pub seq: u64,
 }
 
 impl IngestedMessage {
     pub fn needs_attention(&self) -> bool {
-        !self.resolved && matches!(self.status.as_str(), "parsed_unmapped" | "unparsed")
+        !self.resolved
+            && !self.ignored
+            && matches!(self.status.as_str(), "parsed_unmapped" | "unparsed")
     }
 }
 
@@ -277,6 +286,7 @@ impl Ingested {
             applied: false,
             gate_reason: None,
             resolved: false,
+            ignored: false,
             seq,
         };
         self.append_message(&message)?;
@@ -300,6 +310,20 @@ impl Ingested {
         //   person still has something to do about it.
         m.resolved = applied;
         self.append_message(&m)
+    }
+
+    /// Set a message aside as not a transaction.
+    ///
+    /// ★ Distinct from `resolve`, which means "a person dealt with this". This
+    /// one means "there was nothing here to deal with", and the log keeps both
+    /// the message and which of the two happened.
+    pub fn ignore(&self, id: &str) -> StoreResult<bool> {
+        let Some(mut m) = self.current()?.into_iter().find(|m| m.id == id) else {
+            return Ok(false);
+        };
+        m.ignored = true;
+        self.append_message(&m)?;
+        Ok(true)
     }
 
     /// Mark a message as handled by a person.
@@ -419,6 +443,22 @@ impl Ingested {
         fs::write(&tmp, text)?;
         fs::rename(&tmp, self.history_path())?;
         Ok(())
+    }
+
+    /// How many times each pocket has been chosen, for this Sustain.
+    ///
+    /// ★ Real counts off the classification history, so the picker can lead
+    /// with what he actually uses rather than whatever order the state happens
+    /// to hold.
+    pub fn pocket_use_counts(&self, sustain_id: &str) -> StoreResult<BTreeMap<String, u32>> {
+        let prefix = format!("{sustain_id}::");
+        let mut out: BTreeMap<String, u32> = BTreeMap::new();
+        for (key, (pocket, count)) in self.history()? {
+            if key.starts_with(&prefix) {
+                *out.entry(pocket).or_insert(0) += count;
+            }
+        }
+        Ok(out)
     }
 
     pub fn recall(&self, sustain_id: &str, description: &str) -> Option<(String, u32)> {
@@ -735,5 +775,63 @@ mod reread_tests {
         assert!(matches!(ing.capture("h", "mpesa", "Ksh1.00 paid to A", &rules), Ok(Capture::Stored(_))));
         assert!(matches!(ing.capture("h", "mpesa", "Ksh2.00 paid to B", &rules), Ok(Capture::Stored(_))));
         assert_eq!(ing.current().expect("current").len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod ignore_tests {
+    use super::*;
+    use std::env;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-ignore-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    /// ★★★ From his phone: a card reversal was asking which pocket it came
+    /// from. Setting it aside takes it out of the queue and leaves the record.
+    #[test]
+    fn ignoring_takes_it_out_of_the_queue_without_deleting_it() {
+        let ing = Ingested::at(scratch("one")).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        let raw = "Ksh100.00 paid to SOMEWHERE on 1/8/26";
+        let Capture::Stored(m) = ing.capture("h", "mpesa", raw, &rules).expect("capture") else {
+            panic!("expected it to be stored");
+        };
+        assert!(m.needs_attention(), "it starts in the queue");
+
+        assert!(ing.ignore(&m.id).expect("ignore"));
+
+        let after = ing.current().expect("current");
+        assert_eq!(after.len(), 1, "still on record, not deleted");
+        let m2 = &after[0];
+        assert!(m2.ignored, "and marked as set aside");
+        assert!(!m2.needs_attention(), "so it no longer asks");
+        assert_eq!(m2.raw_payload, raw, "the text is kept");
+    }
+
+    /// Ignoring is not the same fact as handling, and the log keeps both apart.
+    #[test]
+    fn ignored_and_resolved_are_different_facts() {
+        let ing = Ingested::at(scratch("two")).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        let Capture::Stored(m) = ing
+            .capture("h", "mpesa", "Ksh5.00 paid to A on 1/8/26", &rules)
+            .expect("capture")
+        else {
+            panic!("stored");
+        };
+        ing.ignore(&m.id).expect("ignore");
+        let got = ing.current().expect("current").remove(0);
+        assert!(got.ignored && !got.resolved, "set aside, not handled");
+    }
+
+    /// Ignoring something that is not there says so rather than pretending.
+    #[test]
+    fn ignoring_an_unknown_message_reports_it() {
+        let ing = Ingested::at(scratch("three")).expect("ingest");
+        assert!(!ing.ignore("nope").expect("ignore"));
     }
 }
