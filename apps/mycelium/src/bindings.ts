@@ -373,9 +373,6 @@ async learnRule(messageId: string, operator: string, params: JsonValue) : Promis
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * **The curated feed** — `compose(r)` over one household.
- */
 async getFeed(sustainId: string, query: string | null) : Promise<Result<FeedDto, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_feed", { sustainId, query }) };
@@ -716,6 +713,31 @@ export type BranchStep = { operator: string; verdict: Verdict; reason: string | 
  */
 state: JsonValue }
 /**
+ * What the classify card needs in order to show a person WHAT they are filing.
+ * 
+ * ★★★ The card used to ask "which pocket does this belong to?" without showing
+ * the message. A person was being asked to file something they could not see.
+ * Everything here was already on the ingested message; none of it was reaching
+ * the screen.
+ */
+export type CaptureContextDto = { id: string; 
+/**
+ * The text exactly as it arrived.
+ */
+raw: string; 
+/**
+ * Which sender it came from: "mpesa" or "kcb".
+ */
+source: string; 
+/**
+ * What the transducer made of it, when it could.
+ */
+amount: number | null; counterparty: string | null; direction: string | null; 
+/**
+ * The transducer's own words about why this is waiting.
+ */
+reason: string }
+/**
  * What one capture did, on the wire.
  */
 export type CaptureResult = 
@@ -909,11 +931,11 @@ export type FeedDto = { sustainId: string; label: string; cards: CardDto[];
 /**
  * The oldest capture still needing a person, if there is one.
  * 
- * ★★ ONE id rather than a list. The classify card works the queue one
- * message at a time; a list here would be the unbounded second surface
- * the attention budget exists to prevent.
+ * ★★ ONE message rather than a list. The classify card works the queue one
+ * at a time; a list here would be the unbounded second surface the
+ * attention budget exists to prevent.
  */
-queueHead: string | null; 
+queueHead: CaptureContextDto | null; 
 /**
  * ★ What stayed quiet — withdrawn and excluded alike, each saying which.
  */

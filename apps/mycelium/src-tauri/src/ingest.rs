@@ -110,13 +110,25 @@ pub struct Ingested {
     root: PathBuf,
     /// ★ Rejections counted, never kept. The only trace one leaves.
     rejected: std::sync::Mutex<u64>,
+    /// ★★★ Every dedup key already stored, so "have I seen this?" is a lookup
+    /// rather than a re-read of the whole log.
+    ///
+    /// Capture used to answer that question by loading and parsing every
+    /// message on disk and scanning the list, ONCE PER MESSAGE. Reading an
+    /// inbox of a few thousand made that quadratic on top of a few thousand
+    /// full-log reads. Built once, on first use, and appended to from then on.
+    seen: std::sync::Mutex<Option<std::collections::HashSet<String>>>,
 }
 
 impl Ingested {
     pub fn at(root: impl AsRef<Path>) -> StoreResult<Self> {
         let root = root.as_ref().join("ingest");
         fs::create_dir_all(&root)?;
-        Ok(Self { root, rejected: std::sync::Mutex::new(0) })
+        Ok(Self {
+            root,
+            rejected: std::sync::Mutex::new(0),
+            seen: std::sync::Mutex::new(None),
+        })
     }
 
     fn messages_path(&self) -> PathBuf {
@@ -180,11 +192,32 @@ impl Ingested {
         }
 
         let dedup_key = dedup(sustain_id, source_id, raw);
-        let existing = self.current()?;
-        if let Some(prior) = existing.iter().find(|m| m.dedup_key == dedup_key) {
-            return Ok(Capture::Duplicate(Box::new(prior.clone())));
+
+        // ★★ The cheap question first. Only a key we have never seen costs a
+        //    read of the log, so re-reading an inbox that is already captured
+        //    is a few thousand hash lookups rather than a few thousand full
+        //    parses of everything stored.
+        let is_new = {
+            let mut guard = self.seen.lock().expect("seen lock");
+            let set = match guard.as_mut() {
+                Some(set) => set,
+                None => {
+                    let built: std::collections::HashSet<String> =
+                        self.messages()?.into_iter().map(|m| m.dedup_key).collect();
+                    guard.insert(built)
+                }
+            };
+            set.insert(dedup_key.clone())
+        };
+        if !is_new {
+            // Seen before. Read the log now, once, to hand back what was stored.
+            let existing = self.current()?;
+            if let Some(prior) = existing.iter().find(|m| m.dedup_key == dedup_key) {
+                return Ok(Capture::Duplicate(Box::new(prior.clone())));
+            }
         }
 
+        let existing = self.current()?;
         let seq = existing.last().map(|m| m.seq + 1).unwrap_or(0);
         let message = IngestedMessage {
             id: format!("msg-{seq}-{}", &dedup_key[..8]),
@@ -567,5 +600,65 @@ mod tests {
         assert_eq!(i.current().unwrap().len(), 1);
         assert_eq!(i.recall("h", "NAIVAS").unwrap().0, "food");
         assert_eq!(i.sources().unwrap()[0].expected_interval_minutes, Some(1440));
+    }
+}
+
+#[cfg(test)]
+mod reread_tests {
+    use super::*;
+    use std::env;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-reread-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    /// ★★★ P4: re-reading an inbox does not double-count.
+    ///
+    /// The dedup key fingerprints the sustain, the source and the exact text,
+    /// so the same message captured twice is stored once and reported as a
+    /// duplicate the second time. Re-tapping "read my texts" is safe: it
+    /// re-offers everything and stores nothing new.
+    #[test]
+    fn capturing_the_same_text_twice_stores_it_once() {
+        let ing = Ingested::at(scratch("twice")).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        let raw = "Ksh100.00 paid to NAIVAS on 1/8/26";
+
+        assert!(matches!(ing.capture("h", "mpesa", raw, &rules), Ok(Capture::Stored(_))));
+        assert!(matches!(ing.capture("h", "mpesa", raw, &rules), Ok(Capture::Duplicate(_))));
+        assert_eq!(ing.current().expect("current").len(), 1, "stored once");
+    }
+
+    /// The index is built from disk when first needed, so a store opened fresh
+    /// still recognises what an earlier run captured.
+    #[test]
+    fn a_reopened_store_still_recognises_what_it_has() {
+        let dir = scratch("reopen");
+        let raw = "Ksh250.00 paid to KPLC PREPAID on 1/8/26";
+        {
+            let ing = Ingested::at(&dir).expect("ingest");
+            let rules = ing.effective_rules().expect("rules");
+            assert!(matches!(ing.capture("h", "mpesa", raw, &rules), Ok(Capture::Stored(_))));
+        }
+        let ing = Ingested::at(&dir).expect("reopen");
+        let rules = ing.effective_rules().expect("rules");
+        assert!(
+            matches!(ing.capture("h", "mpesa", raw, &rules), Ok(Capture::Duplicate(_))),
+            "a reopened store recognises the earlier capture"
+        );
+        assert_eq!(ing.current().expect("current").len(), 1);
+    }
+
+    /// Different text from the same sender is a different message.
+    #[test]
+    fn different_text_is_not_a_duplicate() {
+        let ing = Ingested::at(scratch("diff")).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        assert!(matches!(ing.capture("h", "mpesa", "Ksh1.00 paid to A", &rules), Ok(Capture::Stored(_))));
+        assert!(matches!(ing.capture("h", "mpesa", "Ksh2.00 paid to B", &rules), Ok(Capture::Stored(_))));
+        assert_eq!(ing.current().expect("current").len(), 2);
     }
 }

@@ -14,7 +14,7 @@ use crate::dto::{
     AccessDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
-    AttentionDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
+    AttentionDto, CaptureContextDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
     InferenceDto, IngestDto, MessageDto, QuietDto, RuleDto, SourceDto,
     BodyDto, CoOwnerDto, InstallDto, LibraryDto, NetworkDto, OfferDto, PackageDto,
     OrderDto, PeerDto, PeerShelfDto,
@@ -972,11 +972,30 @@ pub fn learn_rule(
 /// rather than a different one on every refresh. One id, never a list: the
 /// card works the queue one message at a time, which is the disclosure machine
 /// of Curated UI VII and the reason the screen cannot grow with the queue.
-fn oldest_waiting(queued: &[crate::ingest::IngestedMessage]) -> Option<String> {
-    queued.iter().min_by_key(|m| m.seq).map(|m| m.id.clone())
+fn oldest_waiting(queued: &[crate::ingest::IngestedMessage]) -> Option<CaptureContextDto> {
+    let m = queued.iter().min_by_key(|m| m.seq)?;
+    let f = |k: &str| m.parsed_fields.get(k);
+    Some(CaptureContextDto {
+        id: m.id.clone(),
+        raw: m.raw_payload.clone(),
+        source: m.source_id.clone(),
+        // A number the transducer wrote as text is still a number.
+        amount: f("amount")
+            .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))),
+        counterparty: f("counterparty").and_then(|v| v.as_str()).map(str::to_string),
+        direction: f("direction").and_then(|v| v.as_str()).map(str::to_string),
+        reason: m.reason.clone(),
+    })
 }
 
-#[tauri::command]
+/// ★★★ `(async)`, because this reads the whole ingest log.
+///
+/// A sync command runs inline on the IPC thread, which on a phone is the thread
+/// that draws. `get_feed` parses every stored message to find the ones still
+/// waiting, and on an inbox that had been read that was thousands of them. The
+/// screen froze for about a minute after unlocking, with no reading happening
+/// at all: this is what it was doing.
+#[tauri::command(async)]
 #[specta::specta]
 pub fn get_feed(
     world: State<'_, World>,
@@ -1994,14 +2013,14 @@ mod feed_surface_tests {
     fn a_large_queue_reaches_the_screen_as_one_id() {
         let many: Vec<_> = (0..2_000).map(msg).collect();
         let head = oldest_waiting(&many);
-        assert_eq!(head.as_deref(), Some("m0"));
+        assert_eq!(head.map(|c| c.id).as_deref(), Some("m0"));
     }
 
     /// Oldest first, whatever order they arrive in.
     #[test]
     fn the_oldest_is_offered_first() {
         let some = vec![msg(9), msg(3), msg(7)];
-        assert_eq!(oldest_waiting(&some).as_deref(), Some("m3"));
+        assert_eq!(oldest_waiting(&some).map(|c| c.id).as_deref(), Some("m3"));
     }
 
     /// An empty queue offers nothing rather than a fabricated id.
