@@ -324,7 +324,15 @@ const navItemBase = style({
       width: "auto",
       minHeight: "44px",
       padding: `${vars.space.sm} ${vars.space.md}`,
-      fontSize: "13px",
+      // ★★★ 16px, not the cockpit's 12.5px, and measured rather than guessed.
+      //     Android applies the system font-size setting to the WebView as a
+      //     TEXT ZOOM, so every declared px is multiplied by it. On the device
+      //     this was reported from that factor is 0.81 -- so the rail's 12.5px
+      //     was arriving as 10.1px, which is the "unreadable" in the report and
+      //     is not something the stylesheet could see. 16px lands back at the
+      //     app's own intended 13px reading size there, and is an ordinary
+      //     touch-nav size on a device that is not scaling at all.
+      fontSize: "16px",
       flexShrink: 0,
       scrollSnapAlign: "start",
       border: `1px solid ${vars.color.border}`,
