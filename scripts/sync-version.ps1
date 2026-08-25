@@ -86,7 +86,14 @@ foreach ($t in $targets) {
     $full = Join-Path $repo $t.Path
     if (-not (Test-Path $full)) { throw "Missing version target: $($t.Path)" }
 
-    $raw = Get-Content $full -Raw
+    # -Encoding UTF8 is load-bearing. On PowerShell 5.1 Get-Content without it
+    # decodes using the system ANSI codepage, so a UTF-8 em dash comes back as
+    # three cp1252 characters -- and WriteAllText below then re-encodes those
+    # AS UTF-8. Every release run therefore doubled the corruption: tauri.conf's
+    # productName went "Mycelium - Sustena" -> "Mycelium Ã¢â‚¬" -> worse again,
+    # three releases deep by v0.3.1. Reading UTF-8 pairs correctly with the
+    # UTF-8 write and the round trip becomes lossless.
+    $raw = Get-Content $full -Raw -Encoding UTF8
     $found = [regex]::Matches($raw, $t.Pattern)
 
     # A pattern that stops matching exactly once means the file was restructured.

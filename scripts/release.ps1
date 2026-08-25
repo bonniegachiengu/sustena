@@ -83,7 +83,28 @@ $env:CARGO_BUILD_JOBS = '2'
 
 if (-not $env:JAVA_HOME) { $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.6.7-hotspot' }
 if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = 'C:\Users\DELL\Android\sdk' }
-if (-not $env:NDK_HOME) { $env:NDK_HOME = 'E:\Android\ndk-root\ndk\27.2.12479018' }
+# NDK_HOME: resolved, not hardcoded. It used to point at a fixed path on E:,
+# which no longer exists on this machine -- and because the Android build's own
+# exit code is deliberately ignored below (its symlink step always fails here),
+# a missing NDK did not surface as 'NDK missing'. It surfaced as 'produced no
+# libmycelium_lib.so', which reads like a compiler fault and is not one.
+# Prefer the NDK installed under the SDK (sdkmanager's standard location),
+# taking the highest version present, and refuse clearly if there is none.
+if (-not $env:NDK_HOME) {
+    $ndkRoot = Join-Path $env:ANDROID_HOME 'ndk'
+    if (Test-Path $ndkRoot) {
+        $newest = Get-ChildItem $ndkRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path (Join-Path $_.FullName 'source.properties') } |
+            Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+        if ($newest) { $env:NDK_HOME = $newest.FullName }
+    }
+}
+if (-not $env:NDK_HOME -or -not (Test-Path $env:NDK_HOME)) {
+    Write-Host "REFUSED: no Android NDK found under $(Join-Path $env:ANDROID_HOME 'ndk')." -ForegroundColor Red
+    Write-Host "Install one:  sdkmanager --sdk_root=`"$env:ANDROID_HOME`" `"ndk;27.2.12479018`"" -ForegroundColor Yellow
+    Write-Host "Or set NDK_HOME yourself if it lives elsewhere." -ForegroundColor Yellow
+    exit 1
+}
 $env:ANDROID_NDK_ROOT = $env:NDK_HOME
 
 # ===========================================================================
