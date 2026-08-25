@@ -983,7 +983,16 @@ mutations: number; events: EventDto[];
 /**
  * The resulting state, or the **untouched original** if refused.
  */
-state: JsonValue }
+state: JsonValue; 
+/**
+ * ★★★ What the operator returned alongside its verdict.
+ * 
+ * A refusal from `budget.spend` carries `remaining`, `requested` and
+ * `shortfall`, put there so a caller can build an allocate-then-retry
+ * without reading an English sentence. It was being dropped here, which
+ * left the surface with a dead end and a paragraph.
+ */
+data: JsonValue }
 /**
  * Whether the composition tree holds, **as the engine judges it**.
  * 

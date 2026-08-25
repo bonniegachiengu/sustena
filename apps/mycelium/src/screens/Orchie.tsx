@@ -149,6 +149,53 @@ function DirectionBadge(props: { direction: string | null }) {
   );
 }
 
+/** What a refusal for an under-funded pocket tells us, if that is what it is. */
+type NoRoom = {
+  pocket: string;
+  remaining: number;
+  requested: number;
+  shortfall: number;
+};
+
+/**
+ * Read the shortfall off a refusal.
+ *
+ * ★★ Only for `pocket_balance_sufficient`. Every other refusal keeps its plain
+ * reason, because a branch that guessed at what to do about an unknown rule
+ * would be worse than a sentence.
+ */
+function noRoom(v: GateResult): NoRoom | null {
+  if (v.verdict === "admitted") return null;
+  if (v.constraintViolated !== "pocket_balance_sufficient") return null;
+  const d = v.data as Record<string, unknown> | null;
+  if (!d || typeof d.pocket !== "string") return null;
+  const n = (k: string) => (typeof d[k] === "number" ? (d[k] as number) : 0);
+  const remaining = n("remaining");
+  const requested = n("requested");
+  return {
+    pocket: d.pocket,
+    remaining,
+    requested,
+    shortfall: n("shortfall"),
+  };
+}
+
+/**
+ * Say what is about to happen, in money and names.
+ *
+ * ★ The engine's own `why` names the operator and its arguments. True, and not
+ * what a person needs while filing two thousand texts.
+ */
+function plainly(operator: string, params: unknown): string {
+  const p = (params ?? {}) as Record<string, unknown>;
+  const amount = typeof p.amount === "number" ? fmt(p.amount) : null;
+  const pocket = typeof p.pocket_name === "string" ? p.pocket_name : null;
+  if (operator === "budget.record_income" && amount) return `Looks like KES ${amount} received.`;
+  if (amount && pocket) return `Looks like KES ${amount} to ${pocket}.`;
+  if (amount) return `Looks like KES ${amount}.`;
+  return "Ready to record.";
+}
+
 /**
  * The message, before the question about it.
  *
@@ -923,6 +970,60 @@ function Classify(props: {
     }
   };
 
+  const [fixing, setFixing] = createSignal<null | "fund" | "backfill">(null);
+  const [fixFailed, setFixFailed] = createSignal<string | null>(null);
+
+  /**
+   * Put money in the pocket, then record the spend.
+   *
+   * ★★★ Two real Enzymes through the real gate, in order, with no bypass.
+   * `budget.allocate` moves liquid into the pocket and `budget.spend` files
+   * against it, which is the same path a person would take by hand.
+   *
+   * The two differ only in how much they move:
+   *   backfill  the shortfall, so the pocket ends exactly consumed. For a text
+   *             from the past, where the money already moved in the world.
+   *   fund      the whole amount, so the pocket keeps room for the next one.
+   * On an empty pocket those are the same number, and the labels still say
+   * which thing he is doing.
+   */
+  const fixAndRecord = async (room: NoRoom, how: "fund" | "backfill") => {
+    const s = step();
+    if (!s || s.status !== "ready") return;
+    const move = how === "backfill" ? room.shortfall : room.requested;
+    setFixing(how);
+    setFixFailed(null);
+    try {
+      const put = await engine.confirm(
+        props.sustain,
+        "budget.allocate",
+        { pocket_name: room.pocket, amount: move },
+        null,
+        null,
+      );
+      if (put.verdict !== "admitted") {
+        // ★ Most likely liquid itself is short. The engine says so; this does
+        //   not invent a second explanation.
+        setFixFailed(put.reason ?? "the engine refused the allocation");
+        return;
+      }
+      await confirm(s);
+    } catch (e) {
+      setFixFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setFixing(null);
+    }
+  };
+
+  /** Back to the picker, keeping everything except the pocket. */
+  const pickAgain = () => {
+    setVerdict(null);
+    setFixFailed(null);
+    const { pocket_name: _drop, ...rest } = known();
+    setKnown(rest);
+    void run(rest);
+  };
+
   const remember = async (operator: string, params: JsonValue) => {
     if (!props.messageId) return;
     try {
@@ -1121,7 +1222,10 @@ function Classify(props: {
                 const rd = () => s() as Extract<InferenceDto, { status: "ready" }>;
                 return (
                   <div class={O.stack}>
-                    <p class={O.body}>{rd().why}</p>
+                    {/* ★★ Plain, from the params themselves. The engine's own
+                        `why` names the operator and its arguments, which is
+                        right in the cockpit and noise here. */}
+                    <p class={O.body}>{plainly(rd().operator, rd().params)}</p>
 
                     {/* ★★ A history pre-fill is never silent. */}
                     <Show when={rd().fromHistory}>
@@ -1176,13 +1280,58 @@ function Classify(props: {
           <div class={O.stack}>
             <div class={O.verdict[v().verdict === "admitted" ? "admitted" : "refused"]}>
               <div class={O.verdictWord[v().verdict === "admitted" ? "admitted" : "refused"]}>
-                {v().verdict === "admitted" ? "RECORDED" : v().verdict.toUpperCase()}
+                {v().verdict === "admitted" ? "recorded" : "not yet"}
               </div>
-              <Show when={v().reason}>
-                {(r) => <p class={O.caption}>{r()}</p>}
-              </Show>
-              <Show when={v().verdict !== "admitted"}>
-                <p class={O.caption}>nothing moved · nothing logged</p>
+              {/* ★★★ A pocket with no room is not a dead end, it is a fork.
+                  The operator hands back `remaining` and `shortfall` for
+                  exactly this, so the reason sits ABOVE real buttons. */}
+              <Show
+                when={noRoom(v())}
+                fallback={
+                  <>
+                    <Show when={v().reason}>{(r) => <p class={O.caption}>{r()}</p>}</Show>
+                    <Show when={v().verdict !== "admitted"}>
+                      <p class={O.caption}>nothing moved, nothing recorded</p>
+                    </Show>
+                  </>
+                }
+              >
+                {(room) => (
+                  <div class={O.stack}>
+                    {/* ★ Both numbers are the operator's own. Nothing here
+                        invents a figure the engine did not report. */}
+                    <p class={O.caption}>
+                      {room().pocket} has {fmt(room().remaining)} left, and this
+                      needs {fmt(room().requested)}.
+                    </p>
+                    <Show when={fixFailed()}>
+                      {(f) => <div class={O.errorBox}>{f()}</div>}
+                    </Show>
+                    {/* Backfill first: these are texts from the past, and the
+                        money already moved in the world. */}
+                    <button
+                      class={`${O.action.primary} ${O.actionWide}`}
+                      disabled={fixing() !== null}
+                      onClick={() => void fixAndRecord(room(), "backfill")}
+                    >
+                      {fixing() === "backfill"
+                        ? "recording…"
+                        : "record as already spent"}
+                    </button>
+                    <button
+                      class={`${O.action.secondary} ${O.actionWide}`}
+                      disabled={fixing() !== null}
+                      onClick={() => void fixAndRecord(room(), "fund")}
+                    >
+                      {fixing() === "fund"
+                        ? "moving…"
+                        : `put ${fmt(room().requested)} into ${room().pocket}, then record`}
+                    </button>
+                    <button class={O.linkish} onClick={pickAgain}>
+                      pick another pocket
+                    </button>
+                  </div>
+                )}
               </Show>
             </div>
 
