@@ -3,14 +3,14 @@ name = "sustena-core"
 version = "0.3.1"
 edition = "2021"
 rust-version = "1.82"
-description = "The portable Sustena engine core ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â state, fold, rules, operators, council."
+description = "The portable Sustena engine core — state, fold, rules, operators, council."
 license = "Apache-2.0"
 repository = "https://github.com/bonniegachiengu/sustena"
 
 # Compiles to every surface Sustena needs (ADR-0001, Decision 1):
-#   rlib     ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the server and tests
-#   cdylib   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Android (JNI/uniffi) and iOS
-#   staticlibÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â desktop linking
+#   rlib     — the server and tests
+#   cdylib   — Android (JNI/uniffi) and iOS
+#   staticlib— desktop linking
 # WASM comes from the same source via wasm32-unknown-unknown; nothing here is
 # platform-specific, which is the point of keeping I/O out of the core.
 [lib]
