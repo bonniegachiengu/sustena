@@ -89,6 +89,9 @@ pub struct ReadInboxArgs {
     pub offset: u32,
     /// How many to take in this page.
     pub limit: u32,
+    /// Only messages newer than this. The caller's high-water mark, so a repeat
+    /// read walks what arrived since rather than the whole inbox again.
+    pub since_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

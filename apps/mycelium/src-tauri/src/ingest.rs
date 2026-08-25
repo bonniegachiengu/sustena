@@ -110,13 +110,25 @@ pub struct Ingested {
     root: PathBuf,
     /// ★ Rejections counted, never kept. The only trace one leaves.
     rejected: std::sync::Mutex<u64>,
+    /// ★★★ Every dedup key already stored, so "have I seen this?" is a lookup
+    /// rather than a re-read of the whole log.
+    ///
+    /// Capture used to answer that question by loading and parsing every
+    /// message on disk and scanning the list, ONCE PER MESSAGE. Reading an
+    /// inbox of a few thousand made that quadratic on top of a few thousand
+    /// full-log reads. Built once, on first use, and appended to from then on.
+    seen: std::sync::Mutex<Option<std::collections::HashSet<String>>>,
 }
 
 impl Ingested {
     pub fn at(root: impl AsRef<Path>) -> StoreResult<Self> {
         let root = root.as_ref().join("ingest");
         fs::create_dir_all(&root)?;
-        Ok(Self { root, rejected: std::sync::Mutex::new(0) })
+        Ok(Self {
+            root,
+            rejected: std::sync::Mutex::new(0),
+            seen: std::sync::Mutex::new(None),
+        })
     }
 
     fn messages_path(&self) -> PathBuf {
@@ -130,6 +142,48 @@ impl Ingested {
     }
     fn history_path(&self) -> PathBuf {
         self.root.join("history.json")
+    }
+    fn marks_path(&self) -> PathBuf {
+        self.root.join("read_marks.json")
+    }
+
+    /// The newest message already read from a source, as the device timestamps
+    /// it.
+    ///
+    /// ★★★ Why this exists. Re-reading the inbox was correct and wasteful: the
+    /// dedup index caught every repeat, but only after the whole inbox had been
+    /// walked and every message offered again. Two thousand captures re-read
+    /// two thousand times is work nobody asked for. The mark says where the
+    /// last read got to, so a repeat only looks at what arrived since.
+    ///
+    /// ★★ Kept per (sustain, source) because sources are read independently.
+    pub fn read_mark(&self, sustain_id: &str, source_id: &str) -> Option<i64> {
+        self.marks().ok()?.get(&mark_key(sustain_id, source_id)).copied()
+    }
+
+    fn marks(&self) -> StoreResult<BTreeMap<String, i64>> {
+        let path = self.marks_path();
+        if !path.exists() {
+            return Ok(BTreeMap::new());
+        }
+        let text = fs::read_to_string(&path)?;
+        serde_json::from_str(&text).map_err(|e| StoreError::Io(e.to_string()))
+    }
+
+    /// Move the mark forward. ★ Never backwards: a partial read must not make
+    /// the next one skip what it missed.
+    pub fn set_read_mark(&self, sustain_id: &str, source_id: &str, newest_ms: i64) -> StoreResult<()> {
+        let mut marks = self.marks()?;
+        let key = mark_key(sustain_id, source_id);
+        if newest_ms > marks.get(&key).copied().unwrap_or(i64::MIN) {
+            marks.insert(key, newest_ms);
+            let text =
+                serde_json::to_string_pretty(&marks).map_err(|e| StoreError::Io(e.to_string()))?;
+            let tmp = self.marks_path().with_extension("json.tmp");
+            fs::write(&tmp, text)?;
+            fs::rename(&tmp, self.marks_path())?;
+        }
+        Ok(())
     }
 
     pub fn rejected_count(&self) -> u64 {
@@ -180,11 +234,32 @@ impl Ingested {
         }
 
         let dedup_key = dedup(sustain_id, source_id, raw);
-        let existing = self.current()?;
-        if let Some(prior) = existing.iter().find(|m| m.dedup_key == dedup_key) {
-            return Ok(Capture::Duplicate(Box::new(prior.clone())));
+
+        // ★★ The cheap question first. Only a key we have never seen costs a
+        //    read of the log, so re-reading an inbox that is already captured
+        //    is a few thousand hash lookups rather than a few thousand full
+        //    parses of everything stored.
+        let is_new = {
+            let mut guard = self.seen.lock().expect("seen lock");
+            let set = match guard.as_mut() {
+                Some(set) => set,
+                None => {
+                    let built: std::collections::HashSet<String> =
+                        self.messages()?.into_iter().map(|m| m.dedup_key).collect();
+                    guard.insert(built)
+                }
+            };
+            set.insert(dedup_key.clone())
+        };
+        if !is_new {
+            // Seen before. Read the log now, once, to hand back what was stored.
+            let existing = self.current()?;
+            if let Some(prior) = existing.iter().find(|m| m.dedup_key == dedup_key) {
+                return Ok(Capture::Duplicate(Box::new(prior.clone())));
+            }
         }
 
+        let existing = self.current()?;
         let seq = existing.last().map(|m| m.seq + 1).unwrap_or(0);
         let message = IngestedMessage {
             id: format!("msg-{seq}-{}", &dedup_key[..8]),
@@ -349,6 +424,10 @@ impl Ingested {
     pub fn recall(&self, sustain_id: &str, description: &str) -> Option<(String, u32)> {
         self.history().ok()?.get(&history_key(sustain_id, description)).cloned()
     }
+}
+
+fn mark_key(sustain_id: &str, source_id: &str) -> String {
+    format!("{sustain_id}::{source_id}")
 }
 
 fn history_key(sustain_id: &str, description: &str) -> String {
@@ -567,5 +646,94 @@ mod tests {
         assert_eq!(i.current().unwrap().len(), 1);
         assert_eq!(i.recall("h", "NAIVAS").unwrap().0, "food");
         assert_eq!(i.sources().unwrap()[0].expected_interval_minutes, Some(1440));
+    }
+}
+
+#[cfg(test)]
+mod reread_tests {
+    use super::*;
+    use std::env;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-reread-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    /// ★★★ P4: re-reading an inbox does not double-count.
+    ///
+    /// The dedup key fingerprints the sustain, the source and the exact text,
+    /// so the same message captured twice is stored once and reported as a
+    /// duplicate the second time. Re-tapping "read my texts" is safe: it
+    /// re-offers everything and stores nothing new.
+    #[test]
+    fn capturing_the_same_text_twice_stores_it_once() {
+        let ing = Ingested::at(scratch("twice")).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        let raw = "Ksh100.00 paid to NAIVAS on 1/8/26";
+
+        assert!(matches!(ing.capture("h", "mpesa", raw, &rules), Ok(Capture::Stored(_))));
+        assert!(matches!(ing.capture("h", "mpesa", raw, &rules), Ok(Capture::Duplicate(_))));
+        assert_eq!(ing.current().expect("current").len(), 1, "stored once");
+    }
+
+    /// The index is built from disk when first needed, so a store opened fresh
+    /// still recognises what an earlier run captured.
+    #[test]
+    fn a_reopened_store_still_recognises_what_it_has() {
+        let dir = scratch("reopen");
+        let raw = "Ksh250.00 paid to KPLC PREPAID on 1/8/26";
+        {
+            let ing = Ingested::at(&dir).expect("ingest");
+            let rules = ing.effective_rules().expect("rules");
+            assert!(matches!(ing.capture("h", "mpesa", raw, &rules), Ok(Capture::Stored(_))));
+        }
+        let ing = Ingested::at(&dir).expect("reopen");
+        let rules = ing.effective_rules().expect("rules");
+        assert!(
+            matches!(ing.capture("h", "mpesa", raw, &rules), Ok(Capture::Duplicate(_))),
+            "a reopened store recognises the earlier capture"
+        );
+        assert_eq!(ing.current().expect("current").len(), 1);
+    }
+
+    /// ★★★ P4: the mark makes a repeat read cheap.
+    ///
+    /// It starts absent, moves forward when a read completes, and never moves
+    /// backwards, so a read abandoned halfway cannot make the next one skip
+    /// what it never looked at.
+    #[test]
+    fn the_read_mark_only_moves_forward() {
+        let ing = Ingested::at(scratch("mark")).expect("ingest");
+        assert_eq!(ing.read_mark("h", "inbox"), None, "no mark before a read");
+
+        ing.set_read_mark("h", "inbox", 1_000).expect("set");
+        assert_eq!(ing.read_mark("h", "inbox"), Some(1_000));
+
+        ing.set_read_mark("h", "inbox", 2_500).expect("forward");
+        assert_eq!(ing.read_mark("h", "inbox"), Some(2_500));
+
+        ing.set_read_mark("h", "inbox", 900).expect("backwards is ignored");
+        assert_eq!(ing.read_mark("h", "inbox"), Some(2_500), "never goes back");
+    }
+
+    /// Marks are per source, so reading one never advances another.
+    #[test]
+    fn marks_do_not_leak_between_sources() {
+        let ing = Ingested::at(scratch("mark-src")).expect("ingest");
+        ing.set_read_mark("h", "mpesa", 5_000).expect("set");
+        assert_eq!(ing.read_mark("h", "kcb"), None);
+        assert_eq!(ing.read_mark("other", "mpesa"), None);
+    }
+
+    /// Different text from the same sender is a different message.
+    #[test]
+    fn different_text_is_not_a_duplicate() {
+        let ing = Ingested::at(scratch("diff")).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        assert!(matches!(ing.capture("h", "mpesa", "Ksh1.00 paid to A", &rules), Ok(Capture::Stored(_))));
+        assert!(matches!(ing.capture("h", "mpesa", "Ksh2.00 paid to B", &rules), Ok(Capture::Stored(_))));
+        assert_eq!(ing.current().expect("current").len(), 2);
     }
 }

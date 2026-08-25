@@ -50,6 +50,7 @@ import {
   type InferenceDto,
   type JsonValue,
   type SmsSweep,
+  type CaptureContextDto,
 } from "../lib/engine";
 import { world } from "../lib/live";
 import { keyboardAware, watchViewport } from "../lib/viewport";
@@ -87,6 +88,9 @@ const TITLE: Record<string, string> = {
  */
 const PAGE = 100;
 
+/** How much of a message shows before it needs a tap. Most texts are shorter. */
+const RAW_CLAMP = 220;
+
 /** How many captures are waiting, from the projection `compose(r)` ranked on. */
 function waiting(feed: FeedDto): number {
   const n = Number(read(feed, "unclassified"));
@@ -114,6 +118,76 @@ function add(total: SmsSweep, page: SmsSweep) {
   total.skippedSecrets += page.skippedSecrets;
   total.failed += page.failed;
   if (total.firstFailure === null) total.firstFailure = page.firstFailure;
+}
+
+/**
+ * `+` for money in, `-` for money out.
+ *
+ * ★ Sustena's own two tokens: teal is what confirmed success already uses, and
+ * amber is the default accent. No new colours, and none borrowed from anywhere
+ * else's convention.
+ */
+function DirectionBadge(props: { direction: string | null }) {
+  const inbound = () => props.direction === "received";
+  return (
+    <Show when={props.direction}>
+      <span
+        style={{
+          color: inbound() ? "var(--teal, #4bb7a1)" : "var(--amber, #E8A020)",
+          "font-weight": 600,
+        }}
+      >
+        {inbound() ? "+" : "−"}
+      </span>
+    </Show>
+  );
+}
+
+/**
+ * The message, before the question about it.
+ *
+ * Amount and merchant first, because those are what a person files on. The raw
+ * text underneath, because the parse is a reading of it and a reading can be
+ * wrong. Everything here was already on the ingested message.
+ */
+function CaptureFacts(props: { head: CaptureContextDto }) {
+  const [showRaw, setShowRaw] = createSignal(false);
+  const money = () =>
+    props.head.amount === null ? null : `KES ${fmt(props.head.amount)}`;
+  return (
+    <div class={O.stack}>
+      <Show when={money()}>
+        {(m) => (
+          <p class={O.figure}>
+            <DirectionBadge direction={props.head.direction} /> {m()}
+          </p>
+        )}
+      </Show>
+      <Show when={props.head.counterparty}>
+        {(who) => <p class={O.cardTitle}>{who()}</p>}
+      </Show>
+      <p class={O.caption}>
+        {props.head.source}
+        <Show when={props.head.direction}>{(d) => <> · {d()}</>}</Show>
+      </p>
+      {/* ★★★ The text itself, because the amount and the merchant are a
+          READING of it and a person filing two thousand of these needs to
+          recognise the transaction, not just its summary. Short ones show
+          whole; a long KCB message clamps so the buttons stay reachable, and
+          opens on a tap. */}
+      <Show
+        when={props.head.raw.length > RAW_CLAMP}
+        fallback={<p class={O.raw}>{props.head.raw}</p>}
+      >
+        <p class={O.raw}>
+          {showRaw() ? props.head.raw : `${props.head.raw.slice(0, RAW_CLAMP)}…`}
+        </p>
+        <button class={O.linkish} onClick={() => setShowRaw((v) => !v)}>
+          {showRaw() ? "▾ less" : "▸ show the whole message"}
+        </button>
+      </Show>
+    </div>
+  );
 }
 
 /**
@@ -435,7 +509,7 @@ export default function Orchie(props: { onFace?: () => void }) {
                   frozen screen. One at a time now: the feed hands over a single
                   id, and the next arrives when this one is done. */}
               <Show when={f().queueHead}>
-                {(id) => (
+                {(head) => (
                   <div class={O.cardPrimary}>
                     <div class={O.cardHead}>
                       <h2 class={O.cardTitle}>
@@ -444,14 +518,14 @@ export default function Orchie(props: { onFace?: () => void }) {
                           : "one to classify"}
                       </h2>
                     </div>
-                    <p class={O.caption}>
-                      {waiting(f()) > 1
-                        ? "they come one at a time. pick a pocket for this one."
-                        : "pick a pocket for it."}
-                    </p>
+                    {/* ★★★ WHAT is being filed, before being asked where it
+                        goes. The card used to ask for a pocket without showing
+                        the message, so a person was filing something they could
+                        not see. */}
+                    <CaptureFacts head={head()} />
                     <Classify
                       sustain={f().sustainId}
-                      messageId={id()}
+                      messageId={head().id}
                       autoStart
                       onDone={() => void refetch()}
                     />
@@ -535,20 +609,21 @@ export default function Orchie(props: { onFace?: () => void }) {
                             <span class={O.spacer} />
                             {/* ★★ Withdrawn and outranked are different facts. */}
                             <span class={O.badge.quiet}>
-                              {q.withdrew ? "nothing to say" : `outranked · ${q.score?.toFixed(2)}`}
+                              {q.withdrew ? "nothing to say" : "not now"}
                             </span>
                           </div>
-                          <Show when={q.reason}>
-                            <p class={O.caption}>{q.reason}</p>
-                          </Show>
+                          {/* ★ The engine's reason names the dimensions that
+                              did not resolve, which is exactly right in the
+                              cockpit and noise on a phone. The badge above
+                              already says the useful half. */}
                         </div>
                       )}
                     </For>
+                    {/* ★ The engine's own bookkeeping is real and belongs in
+                        Mycelium, not on a phone. What a person needs here is
+                        that these were considered and did not make the cut. */}
                     <p class={O.caption}>
-                      A card that <strong>withdrew</strong> had nothing to say and carries a reason;
-                      one that was <strong>outranked</strong> was considered and carries a score.{" "}
-                      {f().spent} of {f().budget} attention spent across {f().candidatesConsidered}{" "}
-                      candidates.
+                      showing {f().spent} of {f().budget}
                     </p>
                   </div>
                 </Show>

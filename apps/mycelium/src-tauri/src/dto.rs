@@ -977,10 +977,10 @@ pub struct FeedDto {
     pub cards: Vec<CardDto>,
     /// The oldest capture still needing a person, if there is one.
     ///
-    /// ★★ ONE id rather than a list. The classify card works the queue one
-    /// message at a time; a list here would be the unbounded second surface
-    /// the attention budget exists to prevent.
-    pub queue_head: Option<String>,
+    /// ★★ ONE message rather than a list. The classify card works the queue one
+    /// at a time; a list here would be the unbounded second surface the
+    /// attention budget exists to prevent.
+    pub queue_head: Option<CaptureContextDto>,
     /// ★ What stayed quiet — withdrawn and excluded alike, each saying which.
     pub quiet: Vec<QuietDto>,
     pub budget: u32,
@@ -993,6 +993,28 @@ pub struct FeedDto {
     /// The calm read: the household's own roll-up ρ, when it declares one.
     pub rollup: Option<RollupDto>,
     pub liquid: Option<f64>,
+}
+
+/// What the classify card needs in order to show a person WHAT they are filing.
+///
+/// ★★★ The card used to ask "which pocket does this belong to?" without showing
+/// the message. A person was being asked to file something they could not see.
+/// Everything here was already on the ingested message; none of it was reaching
+/// the screen.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureContextDto {
+    pub id: String,
+    /// The text exactly as it arrived.
+    pub raw: String,
+    /// Which sender it came from: "mpesa" or "kcb".
+    pub source: String,
+    /// What the transducer made of it, when it could.
+    pub amount: Option<f64>,
+    pub counterparty: Option<String>,
+    pub direction: Option<String>,
+    /// The transducer's own words about why this is waiting.
+    pub reason: String,
 }
 
 /// One inference pass, on the wire.
