@@ -9,6 +9,13 @@ move: a **minor** bump (0.1 → 0.2) is where new capability lands and where
 something may change how it behaves, and a **patch** bump (0.2.0 → 0.2.1) is a
 fix that does not add anything.
 
+## v0.3.2 - 2026-08-25
+
+Rename the Android app's label to Orchie. Repair mojibake in the manifests and stop it recurring. Resolve the Android NDK path instead of hardcoding it.
+
+- fix(build): repair remaining mojibake, guard the Android label against stale gen/
+- fix(android): label the phone app "Orchie", repair mojibake, unbreak NDK path
+
 ## v0.3.1 - 2026-08-23
 
 Fixes the stall after unlock: Orchie sat on its loading skeleton for ever instead of showing your household.
