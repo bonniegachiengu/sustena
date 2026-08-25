@@ -64,7 +64,7 @@ export default function Economy() {
   return (
     <Split>
       <Column>
-        <Card title="juul · internal accounting" right={<Meta>{eco()?.principal ?? "—"}</Meta>}>
+        <Card title="juul" right={<Meta>{eco()?.principal ?? "—"}</Meta>}>
           <Show when={eco()} fallback={<Empty>reading the ledger…</Empty>}>
             {(e) => (
               <>
@@ -146,17 +146,16 @@ export default function Economy() {
 
           <Note>
             <Caption>
-              A parameter changes only through <code>governance.set_parameter</code> — an ordinary
-              Enzyme whose bounds are ordinary invariants. There is no setter that bypasses the
-              gate. ★ The <em>bounds</em> are enforced here; the <em>authority</em> is not yet —
-              every call in this host still runs <code>Authorization::Unchecked</code>.
+              A parameter changes only through a governance operator, with the same checks as
+              anything else. The bounds are enforced. Who is allowed to change them is not
+              enforced yet.
             </Caption>
           </Note>
         </Card>
       </Column>
 
       <Column>
-        <Card title="the meter · measured, not declared">
+        <Card title="the meter">
           <Show
             when={(eco()?.metered ?? []).length > 0}
             fallback={
@@ -219,7 +218,7 @@ export default function Economy() {
           </Show>
           <Show when={(eco()?.entries ?? []).length > 0}>
             <Note>
-              <Label>every line is an entry the ledger holds, not a total this app kept</Label>
+              <Label>each line is one ledger entry</Label>
             </Note>
           </Show>
         </Card>

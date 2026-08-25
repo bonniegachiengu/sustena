@@ -161,9 +161,7 @@ export default function Orchie(props: { onFace?: () => void }) {
         {/* the world itself could not be read */}
         <Show when={world.error && !shown()}>
           <div class={O.errorBox}>
-            the household could not be opened — {world.error}
-            <br />
-            nothing is shown rather than something stale.
+            the household could not be opened: {world.error}
           </div>
         </Show>
 
@@ -179,9 +177,7 @@ export default function Orchie(props: { onFace?: () => void }) {
         {/* the feed itself refused or failed */}
         <Show when={feed.error && !shown()}>
           <div class={O.errorBox}>
-            the household could not be read — {String(feed.error)}
-            <br />
-            nothing is shown rather than something stale.
+            the household could not be read: {String(feed.error)}
           </div>
         </Show>
 
@@ -192,8 +188,7 @@ export default function Orchie(props: { onFace?: () => void }) {
               seconds this stops pretending it is nearly there. */}
           <Show when={slow()}>
             <p class={O.caption}>
-              this is taking longer than it should — the household is not
-              answering
+              this is taking longer than usual
             </p>
           </Show>
         </Show>
@@ -361,14 +356,13 @@ function Summary(props: { feed: FeedDto }) {
       </span>
       <Show when={total()?.grounded}>
         <p class={O.caption}>
-          folded across {members()} member{members() === 1 ? "" : "s"} and this household's own,
-          fresh — nothing stored
+          across {members()} member{members() === 1 ? "" : "s"} and the household itself
         </p>
         {/* ★★★ An exclusion is never silent. A figure that quietly counted an
             unreadable member as zero would read as calm and be wrong. */}
         <Show when={(total()?.excluded.length ?? 0) > 0}>
           <p class={O.caption}>
-            {total()?.excluded.length} left out, not counted as zero:{" "}
+            {total()?.excluded.length} left out of the total:{" "}
             {total()
               ?.excluded.map((e) => e.label)
               .join(", ")}
@@ -404,7 +398,7 @@ function Why(props: {
           <p class={O.caption}>
             {props.card.measured
               ? `urgency ${props.card.urgency.toFixed(2)} · ${props.card.basis}`
-              : `urgency not measured — ${props.card.basis}`}
+              : `urgency not measured · ${props.card.basis}`}
           </p>
           <p class={O.caption}>
             relevance {props.card.relevance.toFixed(2)} · score {props.card.score.toFixed(2)} ·
@@ -737,7 +731,7 @@ function Classify(props: {
                       disabled={busy()}
                     >
                       <Show when={busy()} fallback="record it">
-                        <span class={O.working} /> asking the gate…
+                        <span class={O.working} /> working…
                       </Show>
                     </button>
                     <button class={`${O.action.quiet} ${O.actionWide}`} onClick={reset}>

@@ -79,6 +79,16 @@ export default function Console() {
 
   const [chosen, setChosen] = createSignal<string | null>(null);
   const [paramsText, setParamsText] = createSignal("{}");
+  /** Raw JSON is off by default. It is a developer view, not the answer. */
+  const [raw, setRaw] = createSignal(false);
+  /** One plain line about the state, so the card says something without the dump. */
+  const stateSummary = () => {
+    const st = live()?.state;
+    if (!st || typeof st !== "object") return "nothing to show";
+    const top = Object.keys(st as Record<string, unknown>);
+    if (top.length === 0) return "empty";
+    return `${top.length} top-level ${top.length === 1 ? "field" : "fields"}: ${top.join(", ")}`;
+  };
   const [last, setLast] = createSignal<GateResult | null>(null);
   const [busy, setBusy] = createSignal(false);
   const [failure, setFailure] = createSignal<string | null>(null);
@@ -109,7 +119,7 @@ export default function Console() {
     try {
       parsed = JSON.parse(paramsText()) as JsonValue;
     } catch (e) {
-      setFailure(`params are not valid JSON — ${String(e)}`);
+      setFailure(`params are not valid JSON: ${String(e)}`);
       return;
     }
     setBusy(true);
@@ -122,7 +132,7 @@ export default function Console() {
       //   measured pawa and that number is the point.
       await refetchOps();
     } catch (e) {
-      setFailure(`the engine call itself failed — ${String(e)}`);
+      setFailure(`the engine call failed: ${String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -131,7 +141,7 @@ export default function Console() {
   return (
     <Split>
       <Column>
-        <Card title="T · operators on this Sustain" right={<Meta>{ops()?.length ?? 0}</Meta>}>
+        <Card title="operators" right={<Meta>{ops()?.length ?? 0}</Meta>}>
           <Show when={(ops() ?? []).length > 0} fallback={<Empty>no operators declared</Empty>}>
             <For each={ops()}>
               {(op) => (
@@ -169,13 +179,12 @@ export default function Console() {
           </Show>
           <Note>
             <Caption>
-              "not measured" means the meter has never seen it run — not that it is free. The
-              author's declared estimate is usually <code>0</code>; the meter is the truth.
+              "not measured" means this operator has not run yet. Cost appears here once it has.
             </Caption>
           </Note>
         </Card>
 
-        <Card title="Σ · the selected Sustain">
+        <Card title="the selected Sustain">
           <Show when={live()} fallback={<Empty>nothing selected</Empty>}>
             {(l) => (
               <>
@@ -200,7 +209,7 @@ export default function Console() {
 
       <Column>
         <Card
-          title="console · ask the gate"
+          title="console"
           right={<Meta>targets {live()?.summary.label ?? "nothing"}</Meta>}
         >
           <Show when={chosen()} fallback={<Empty>pick an operator on the left</Empty>}>
@@ -210,7 +219,7 @@ export default function Console() {
                   <input class={S.input} value={op()} readOnly />
                 </Field>
                 <Note>
-                  <Field label="params (json · objects and arrays supported)">
+                  <Field label="params (json)">
                     <input
                       class={S.input}
                       value={paramsText()}
@@ -228,7 +237,7 @@ export default function Console() {
           </Show>
         </Card>
 
-        <Card title="the gate's verdict" right={<Badge tone="ok">{world.pushes} pushed</Badge>}>
+        <Card title="result" right={<Badge tone="ok">{world.pushes} pushed</Badge>}>
           <Show when={last()} fallback={<Empty>nothing asked yet · the gate is quiet</Empty>}>
             {(r) => (
               <Verdict
@@ -257,10 +266,20 @@ export default function Console() {
           </Show>
         </Card>
 
-        <Card title="S · state, as the engine holds it">
+        <Card
+          title="state"
+          right={
+            <Show when={live()?.state}>
+              <button class={S.chip} onClick={() => setRaw((r) => !r)}>
+                {raw() ? "hide raw" : "raw"}
+              </button>
+            </Show>
+          }
+        >
           <Show when={live()?.state} fallback={<Empty>nothing selected</Empty>}>
-            <Code>{JSON.stringify(live()!.state, null, 2)}</Code>
-            <Label>this document is the fold of the log, not a second source</Label>
+            <Show when={raw()} fallback={<Caption>{stateSummary()}</Caption>}>
+              <Code>{JSON.stringify(live()!.state, null, 2)}</Code>
+            </Show>
           </Show>
         </Card>
       </Column>

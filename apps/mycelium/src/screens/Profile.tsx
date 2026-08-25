@@ -80,9 +80,8 @@ export default function Profile() {
                 : ""}
             </Readout>
             <Caption>
-              An <strong>ed25519 keypair</strong>, unlocked this session by a passphrase that
-              genuinely decrypted the private half — and then made to prove itself against the
-              public half on file. The handle is the key's name, not a claim.
+              A keypair, unlocked this session by your passphrase. The handle is the key's
+              name.
             </Caption>
           </Note>
           <Note>
@@ -97,8 +96,7 @@ export default function Profile() {
               </Button>
             </Cluster>
             <Caption>
-              Locking drops the private key from the host's memory — not a screen state. A
-              locked cockpit cannot act even if a surface forgot to stop it.
+              Locking removes the private key from memory. A locked cockpit cannot act.
             </Caption>
           </Note>
         </Card>
@@ -139,9 +137,8 @@ export default function Profile() {
                 </Readout>
                 <Readout label="membership edges">{a().memberships}</Readout>
                 <Caption>
-                  Lower is more privileged: 0 owner, 1 member, 2 contributor, 3 observer. The
-                  effective tier is the <strong>weakest link</strong> along the membership path,
-                  computed by <code>effective_privilege</code> — not read off a single edge.
+                  Lower is more privileged: 0 owner, 1 member, 2 contributor, 3 observer.
+                  Where there is more than one path, the weakest one wins.
                 </Caption>
 
                 <Note gap="lg">

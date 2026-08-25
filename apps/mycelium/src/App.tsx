@@ -357,7 +357,7 @@ export default function App() {
       <footer class={L.statusBelt}>
         <span class={L.beltCell}>
           <span>engine</span>
-          <span class={L.beltValue}>sustena-core · embedded</span>
+          <span class={L.beltValue}>on this device</span>
         </span>
         <span class={`${L.beltCell} ${L.hideNarrow}`}>
           <span>host</span>

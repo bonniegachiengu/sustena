@@ -62,7 +62,7 @@ export default function Define() {
     try {
       openingState = JSON.parse(opening());
     } catch (e) {
-      setFailure(`opening state is not valid JSON — ${String(e)}`);
+      setFailure(`opening state is not valid JSON: ${String(e)}`);
       return;
     }
     setBusy(true);
@@ -109,7 +109,7 @@ export default function Define() {
   return (
     <Split>
       <Column>
-        <Card title="author Σ">
+        <Card title="author a Sustain">
           <Row>
             <input class={S.input} value={id()} onInput={(e) => setId(e.currentTarget.value)} />
             <input
@@ -163,7 +163,7 @@ export default function Define() {
           </Cluster>
 
           <Note gap="lg">
-            <Label>V · invariants</Label>
+            <Label>rules</Label>
           </Note>
           <For each={invs()}>
             {(inv, i) => (
@@ -198,7 +198,7 @@ export default function Define() {
           </Cluster>
 
           <Note gap="lg">
-            <Field label="T · operators (comma separated)">
+            <Field label="operators (comma separated)">
               <input class={S.input} value={ops()} onInput={(e) => setOps(e.currentTarget.value)} />
             </Field>
           </Note>
@@ -237,8 +237,8 @@ export default function Define() {
                 fallback={
                   <Verdict
                     verdict="admitted"
-                    operator="definitions::check"
-                    reason="typecheck bound every invariant against the schema and no live instance would be stranded. Persisted."
+                    operator="check"
+                    reason="every rule checked against the schema, and no existing Sustain breaks. Saved."
                     mutations={0}
                     events={0}
                     consequence="written to the definition store"
@@ -248,8 +248,8 @@ export default function Define() {
                 <>
                   <Verdict
                     verdict="refused"
-                    operator="definitions::check"
-                    rule={v().kind === "notWellTyped" ? "typecheck" : "editing::safe"}
+                    operator="check"
+                    rule={v().kind === "notWellTyped" ? "typecheck" : "safe to edit"}
                     reason={
                       v().kind === "notWellTyped"
                         ? "The engine refused it. Nothing was written."

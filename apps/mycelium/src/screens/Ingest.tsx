@@ -119,10 +119,8 @@ export default function Ingest() {
 
           <Note>
             <Caption>
-              ★ The source is the <strong>sender</strong>, and it decides which rules run. A
-              message tagged <code>kcb</code> is never parsed by M-Pesa's rules — several real KCB
-              messages say <em>M-PESA</em> in their own wording, and the body must never promote a
-              message out of the set its sender established.
+              Pick the source by who sent the message, not by what it says. Several real KCB
+              messages mention M-PESA in their wording, and they are still KCB.
             </Caption>
           </Note>
 
@@ -148,7 +146,7 @@ export default function Ingest() {
                       <p class={S.reason}>{(r() as { reason: string }).reason}</p>
                       {/* ★★★ The line that matters. */}
                       <div class={S.reasonCode}>
-                        nothing stored · no row, no payload, not even a hash
+                        nothing was stored
                       </div>
                     </div>
                   }
@@ -210,9 +208,8 @@ export default function Ingest() {
           </Show>
           <Note>
             <Caption>
-              A source is only ever reported stale if it <strong>declared a cadence</strong> and
-              missed it. One that never declared a rhythm is never flagged — guessing one would be
-              exactly the fabricated state this queue exists to prevent.
+              A source is only shown as stale if you told it how often to expect a message
+              and it missed. Sources with no expected rhythm are never flagged.
             </Caption>
           </Note>
         </Card>
@@ -245,9 +242,8 @@ export default function Ingest() {
             </TelemetryCell>
           </TelemetryStrip>
           <Caption>
-            ★★★ <strong>A refused message is a count and nothing more.</strong> It was never
-            written — no row, no raw text, not even a dedup hash, because a hash of an OTP is still
-            a record that the OTP existed.
+            <strong>A refused message is only ever a count.</strong> Nothing about it is
+            stored, because it may carry a one-time code.
           </Caption>
 
           <Note gap="lg">
@@ -298,8 +294,7 @@ export default function Ingest() {
                     <Cluster>
                       <Chip onClick={() => void resolve(m)}>mark handled</Chip>
                       <Caption>
-                        which pocket this belongs to is yours to decide — Orchie is where that
-                        happens
+                        you choose the pocket in Orchie
                       </Caption>
                     </Cluster>
                   </Show>
@@ -327,10 +322,8 @@ export default function Ingest() {
           </Show>
           <Note>
             <Caption>
-              ★★ Every rule is <strong>declared data</strong>, not code — which is what makes a
-              correction something a person can author instead of a release. ★★★ Only an{" "}
-              <em>income</em> rule may auto-apply: a learned spend rule carries no operator at all,
-              so a correction can never teach the system to spend on your behalf.
+              Rules are data, so you can correct one yourself. Only income rules apply on
+              their own. A learned spend rule always asks you first.
             </Caption>
           </Note>
         </Card>

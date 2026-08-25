@@ -85,7 +85,7 @@ export default function Simulate() {
     try {
       parsed = steps().map((st) => [st.operator, JSON.parse(st.params) as JsonValue]);
     } catch (e) {
-      setFailure(`params are not valid JSON — ${String(e)}`);
+      setFailure(`params are not valid JSON: ${String(e)}`);
       return;
     }
     setBusy(true);
@@ -121,13 +121,13 @@ export default function Simulate() {
         }
         if (r.verdict !== "admitted") {
           setPromoted(
-            `stopped at ${st.operator} after ${done.length} step(s) — REFUSED: ${r.reason ?? r.constraintViolated ?? "no reason"}`,
+            `stopped at ${st.operator} after ${done.length} step(s). Refused: ${r.reason ?? r.constraintViolated ?? "no reason given"}`,
           );
           return;
         }
         done.push(st.operator);
       }
-      setPromoted(`promoted — ${done.length} step(s) committed for real`);
+      setPromoted(`promoted. ${done.length} step(s) committed for real.`);
       setBranch(null);
     } catch (e) {
       setFailure(String(e));
@@ -145,11 +145,11 @@ export default function Simulate() {
   return (
     <Split>
       <Column>
-        <Card title="branch · from live state" right={<Meta>{live()?.summary.label ?? "—"}</Meta>}>
+        <Card title="branch" right={<Meta>{live()?.summary.label ?? "—"}</Meta>}>
           <Hypothetical title="◆ hypothetical">
-            A branch runs against a <strong>copy</strong> of live state, through the same gate a
-            real call uses. Nothing is written — no log, no ledger, no meter. Promoting replays it
-            for real, and can still be refused if the world moved.
+            A branch runs against a copy of live state, through the same checks a real call
+            uses. Nothing is written. Promoting runs it for real, and can still be refused if
+            live state has changed since.
           </Hypothetical>
 
           <Note>
@@ -228,20 +228,16 @@ export default function Simulate() {
                   reason={p()}
                   mutations={0}
                   events={0}
-                  consequence="each step was re-decided against live state, not replayed from the fork"
+                  consequence="every step was run again against live state"
                 />
               </Note>
             )}
           </Show>
         </Card>
 
-        <Card title="⊕ · roll-up, hypothetical">
-          {/* ★ Same honest state as everywhere else. A hypothetical roll-up
-              would need ρ just as much as a real one does. */}
-          <Absent title={<>roll-up <Sym>ρ</Sym> · not available</>}>
-            A branch cannot show a hypothetical household aggregate for the same reason the Monitor
-            cannot show a real one: ρ is not in <code>sustena-core</code>. Nothing is summed, in
-            reality or in a fork.
+        <Card title="roll-up">
+          <Absent title="not available on a branch">
+            A branch does not compute a household total.
           </Absent>
         </Card>
       </Column>
