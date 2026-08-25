@@ -11,7 +11,7 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::dto::{
-    AccessDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
+    AccessDto, AccountDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
     AttentionDto, CaptureContextDto, NettingDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
@@ -1142,7 +1142,58 @@ pub fn get_feed(
         attention,
         rollup: world.rollup(&sustain_id),
         liquid: state.pointer("/finances/liquid/balance").and_then(Value::as_f64),
+        accounts: accounts_of(&state),
+        unaccounted: unaccounted_in(&state),
     })
+}
+
+/// Every account the household holds, in a stable order.
+fn accounts_of(state: &Value) -> Vec<AccountDto> {
+    state
+        .pointer("/finances/accounts")
+        .and_then(Value::as_object)
+        .map(|m| {
+            m.iter()
+                .map(|(id, a)| AccountDto {
+                    id: id.clone(),
+                    label: a
+                        .get("label")
+                        .and_then(Value::as_str)
+                        .unwrap_or(id)
+                        .to_string(),
+                    balance: a.get("balance").and_then(Value::as_f64).unwrap_or(0.0),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Money the household holds that no account claims.
+///
+/// ★★ The same two sums the core's conservation law compares, read here so a
+/// surface can show the gap rather than a total that hides it. Rounded to the
+/// shilling, because a float difference of 1e-13 is not a thing to report.
+fn unaccounted_in(state: &Value) -> f64 {
+    let liquid = state.pointer("/finances/liquid/balance").and_then(Value::as_f64).unwrap_or(0.0);
+    let earmarked: f64 = state
+        .pointer("/finances/pockets")
+        .and_then(Value::as_object)
+        .map(|m| {
+            m.values()
+                .map(|p| {
+                    let a = p.get("allocated").and_then(Value::as_f64).unwrap_or(0.0);
+                    let sp = p.get("spent").and_then(Value::as_f64).unwrap_or(0.0);
+                    a - sp
+                })
+                .sum()
+        })
+        .unwrap_or(0.0);
+    let in_accounts: f64 = state
+        .pointer("/finances/accounts")
+        .and_then(Value::as_object)
+        .map(|m| m.values().filter_map(|a| a.get("balance")?.as_f64()).sum())
+        .unwrap_or(0.0);
+    (((liquid + earmarked) - in_accounts) * 100.0).round() / 100.0
 }
 
 fn pockets_of(state: &Value) -> Vec<String> {
@@ -1356,10 +1407,28 @@ pub fn orchie_confirm(
     description: Option<String>,
     resolves: Option<bool>,
 ) -> Result<GateResult, String> {
-    let params_map: Map<String, Value> = match params {
+    let mut params_map: Map<String, Value> = match params {
         Value::Object(o) => o,
         _ => Map::new(),
     };
+
+    // ★★★ Attribution costs nothing. A captured message already knows whether
+    //     it came from M-Pesa or KCB, so the account the money moved in is
+    //     read off the message rather than asked for. Only when the operator
+    //     actually takes an account, and only when nobody has already said.
+    if !params_map.contains_key("account") {
+        if let Some(id) = &message_id {
+            let takes_account = world
+                .operators
+                .get(&operator)
+                .is_some_and(|m| m.params.iter().any(|p| p.name == "account"));
+            if takes_account {
+                if let Some(src) = world.ingest().source_of_message(id) {
+                    params_map.insert("account".into(), Value::String(src));
+                }
+            }
+        }
+    }
     trace!("orchie_confirm  {sustain_id}  {operator}");
 
     let Some((x, seq)) = world

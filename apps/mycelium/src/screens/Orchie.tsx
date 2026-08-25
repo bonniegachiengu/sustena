@@ -740,6 +740,8 @@ export default function Orchie(props: { onFace?: () => void }) {
                 )}
               </Show>
 
+              <AccountsCard feed={f()} onChanged={() => void refetch()} />
+
               {/* ═══ read the phone's own texts ══════════════════════════ */}
               <SmsCard sustainId={f().sustainId} onSwept={() => void refetch()} />
 
@@ -817,6 +819,107 @@ function FeedSkeleton() {
 }
 
 /** The calm read: one plain figure, never the machinery. */
+/**
+ * Where the money is, as against what it is for.
+ *
+ * A pocket answers "what is this for". An account answers "where is it". They
+ * are two readings of the same shilling, and this card is the second one.
+ *
+ * ★★★ The gap is the point. Money the household holds but no account claims is
+ * shown as its own line, because a total that quietly absorbed it would answer
+ * "how much is in M-Pesa" with a number that was partly nowhere.
+ */
+function AccountsCard(props: { feed: FeedDto; onChanged: () => void }) {
+  const [placing, setPlacing] = createSignal(false);
+  const [failed, setFailed] = createSignal<string | null>(null);
+  const [target, setTarget] = createSignal<string | null>(null);
+
+  const gap = () => props.feed.unaccounted;
+  const accounts = () => props.feed.accounts;
+
+  /** Say where the already-counted money actually sits. Moves no money. */
+  const place = async (account: string | null) => {
+    setPlacing(true);
+    setFailed(null);
+    try {
+      const r = await engine.confirm(
+        props.feed.sustainId,
+        "budget.place_unaccounted",
+        account ? { account } : {},
+        null,
+        null,
+      );
+      if (r.verdict !== "admitted") {
+        setFailed(r.reason ?? "the engine refused it");
+        return;
+      }
+      setTarget(null);
+      props.onChanged();
+    } catch (e) {
+      setFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setPlacing(false);
+    }
+  };
+
+  return (
+    <Show when={accounts().length > 0 || Math.abs(gap()) >= 1}>
+      <div class={O.card}>
+        <h2 class={O.cardTitle}>where your money is</h2>
+
+        <For each={accounts()}>
+          {(a) => (
+            <div class={O.row}>
+              <span class={O.figureLabel}>{a.label}</span>
+              <span class={O.caption}>{fmt(a.balance)}</span>
+            </div>
+          )}
+        </For>
+
+        {/* ★★★ Not folded into a total. This is money he holds that nothing
+            says the location of, and the only honest thing is to ask. */}
+        <Show when={Math.abs(gap()) >= 1}>
+          <p class={O.caption}>
+            {fmt(gap())} is counted but not yet in an account. Which one is it in?
+          </p>
+          <Show
+            when={target() !== null}
+            fallback={
+              <div class={O.row}>
+                <button class={O.linkish} onClick={() => setTarget("mpesa")}>
+                  M-Pesa
+                </button>
+                <button class={O.linkish} onClick={() => setTarget("kcb")}>
+                  KCB
+                </button>
+                <button class={O.linkish} onClick={() => void place(null)}>
+                  not sure yet
+                </button>
+              </div>
+            }
+          >
+            <div class={O.row}>
+              <button
+                class={O.linkish}
+                disabled={placing()}
+                onClick={() => void place(target())}
+              >
+                {placing() ? "placing…" : `put ${fmt(gap())} in ${target()}`}
+              </button>
+              <button class={O.linkish} onClick={() => setTarget(null)}>
+                cancel
+              </button>
+            </div>
+          </Show>
+          <Show when={failed()}>
+            <p class={O.caption}>{failed()}</p>
+          </Show>
+        </Show>
+      </div>
+    </Show>
+  );
+}
+
 function Summary(props: { feed: FeedDto }) {
   const total = () =>
     props.feed.rollup?.aggregates.find((a) => a.childPath === "finances.liquid.balance");

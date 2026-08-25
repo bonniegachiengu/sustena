@@ -61,6 +61,51 @@ fn money(v: f64) -> Value {
     json!(v)
 }
 
+// ── accounts ─────────────────────────────────────────────────────────────────
+//
+// ★★★ Accounts are WHERE the money is; pockets are WHAT it is for. They are two
+// readings of the same shilling, not two piles, and the law that ties them is:
+//
+//     Σ accounts[*].balance  ==  liquid  +  Σ (allocated − spent)
+//
+// Read it as: every shilling you hold is either unearmarked, or earmarked for
+// something and not yet spent. Under that law each move touches exactly the
+// terms it should — income raises an account and liquid, allocating moves
+// liquid into a pocket without any money leaving an account, spending takes it
+// out of an account against a pocket, and a transfer moves it between accounts
+// and changes neither side of the earmarking.
+//
+// The predicate DSL has no arithmetic, so this cannot be a declared invariant
+// the way `liquid >= 0` is. It holds by construction here, and the tests state
+// it directly rather than leaving it as a claim in a comment.
+//
+// ★★ Where a message did not say which account, the money goes to `unassigned`
+// rather than nowhere. A default that quietly skipped the account side would
+// break the law above and leave the total unexplainable; a real balance sitting
+// under a name he can see is a question he can answer.
+const UNASSIGNED: &str = "unassigned";
+
+/// The account a call names, or the honest stand-in.
+fn account_of(params: &Map<String, Value>) -> String {
+    let a = text(params, "account");
+    if a.is_empty() { UNASSIGNED.to_string() } else { normalize_pocket_name(&a) }
+}
+
+/// Move an account's balance, creating the account the first time it is named.
+///
+/// ★★ No guard on going negative, and that is deliberate for now. An account
+/// balance only becomes true once it has been reconciled against what the bank
+/// itself reports; guarding on a figure that has not been established yet would
+/// refuse honest history for failing a test it was never given the data to
+/// pass. The guard belongs with reconciliation, not before it.
+fn move_account(state: &mut State, account: &str, delta: f64) {
+    let path = format!("finances.accounts.{account}");
+    if !state.exists(&format!("{path}.balance")) {
+        let _ = state.set(&path, json!({"label": account, "balance": 0.0}));
+    }
+    let _ = state.increment(&format!("{path}.balance"), &json!(delta));
+}
+
 // ── budget.record_income ──────────────────────────────────────────────────────
 
 fn record_income(
@@ -102,6 +147,9 @@ fn record_income(
     let id = if entry_id.is_empty() { "income" } else { &entry_id };
     let _ = state.append("finances.income.sources", entry, id);
     let _ = state.increment("finances.income.monthly_total", &json!(amount));
+    // Money arrived somewhere real. The source of the text says where, so this
+    // costs the person no extra question.
+    move_account(state, &account_of(params), amount);
 
     // ★ The declared crossing: money arrived from `source`. Whether `source`
     // is outside B is μ's question, not this operator's — see `crate::flow`.
@@ -263,6 +311,10 @@ fn spend(
     }
 
     let _ = state.increment(&format!("{pocket_path}.spent"), &json!(amount));
+    // ★★ A spend leaves an ACCOUNT and lands against a POCKET. Liquid is
+    //    untouched, because the money stopped being unearmarked when it was
+    //    allocated, not when it was spent.
+    move_account(state, &account_of(params), -amount);
 
     // ★ Money left the pocket toward `payee`. Spending with no declared payee
     // names it "unknown" rather than inventing one — a crossing whose far side
@@ -349,6 +401,8 @@ fn unspend(
     }
 
     let _ = state.decrement(&format!("{pocket_path}.spent"), &json!(amount), false);
+    // The mirror of the spend: the money is back in the account it left.
+    move_account(state, &account_of(params), amount);
 
     // The mirror of the spend's own movement: back from the payee into the
     // pocket. A refund really is money crossing the boundary inward.
@@ -450,6 +504,173 @@ fn unallocate(
     }))
 }
 
+// ── budget.open_account ──────────────────────────────────────────────────────
+
+/// Declare an account by name, so it can be seen before anything lands in it.
+///
+/// ★ Accounts also appear on first use, the way pockets do. This exists for the
+/// other order: naming the two you actually hold before reading any texts, so
+/// the list on screen is yours rather than whatever the parser happened to see.
+fn open_account(
+    state: &mut State,
+    params: &Map<String, Value>,
+    events: &mut Vec<EmittedEvent>,
+    _movements: &mut Vec<Movement>,
+) -> OperatorResult {
+    let id = normalize_pocket_name(&text(params, "account"));
+    if id.is_empty() {
+        return OperatorResult::fail("An account needs a name.", "account_name_valid");
+    }
+    let label = {
+        let l = text(params, "label");
+        if l.is_empty() { id.clone() } else { l }
+    };
+    let path = format!("finances.accounts.{id}");
+    if state.exists(&path) {
+        return OperatorResult::fail(
+            format!("Account '{id}' already exists."),
+            "account_not_already_present",
+        );
+    }
+    if state.set(&path, json!({"label": label, "balance": 0.0})).is_err() {
+        return OperatorResult::fail(
+            format!("Account name '{id}' is not a usable path segment."),
+            "account_name_valid",
+        );
+    }
+    events.push(EmittedEvent {
+        name: "event.finances.account_opened".into(),
+        payload: json!({"account": id, "label": label}),
+    });
+    OperatorResult::ok(json!({"account": id, "label": label}))
+}
+
+// ── budget.transfer ──────────────────────────────────────────────────────────
+
+/// Move money between two of your own accounts.
+///
+/// ★★★ Net zero, and that is the whole point. Sending from KCB to M-Pesa
+/// produces two texts that each look like a real transaction, and taking them
+/// at face value books an expense and an income that never happened. One move
+/// between two accounts leaves liquid alone, touches no pocket, and adds
+/// nothing to income.
+fn transfer(
+    state: &mut State,
+    params: &Map<String, Value>,
+    events: &mut Vec<EmittedEvent>,
+    movements: &mut Vec<Movement>,
+) -> OperatorResult {
+    let from = normalize_pocket_name(&text(params, "from_account"));
+    let to = normalize_pocket_name(&text(params, "to_account"));
+    let amount = num(params, "amount");
+
+    if from.is_empty() || to.is_empty() {
+        return OperatorResult::fail(
+            "A transfer needs an account at both ends.",
+            "transfer_endpoints_named",
+        );
+    }
+    if from == to {
+        return OperatorResult::fail(
+            format!("'{from}' is both ends of this transfer, so nothing would move."),
+            "transfer_endpoints_differ",
+        );
+    }
+
+    move_account(state, &from, -amount);
+    move_account(state, &to, amount);
+
+    // Both ends are the household's own, so this is internal and is not a flow.
+    movements.push(Movement::new(
+        "money",
+        amount,
+        &format!("finances.accounts.{from}"),
+        &format!("finances.accounts.{to}"),
+    ));
+
+    events.push(EmittedEvent {
+        name: "event.finances.transferred".into(),
+        payload: json!({"from": from, "to": to, "amount": money(amount)}),
+    });
+
+    OperatorResult::ok(json!({"from": from, "to": to, "amount": money(amount)}))
+}
+
+// ── budget.place_unaccounted ─────────────────────────────────────────────────
+
+/// How much the household holds, read off the pockets and liquid.
+///
+/// ★ The right-hand side of the conservation law: every shilling is either
+/// unearmarked, or earmarked for something and not yet spent.
+pub fn held(state: &State) -> f64 {
+    let liquid = state.get("finances.liquid.balance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let earmarked: f64 = state
+        .get("finances.pockets")
+        .and_then(|v| v.as_object().cloned())
+        .map(|m| {
+            m.values()
+                .map(|p| {
+                    let a = p.get("allocated").and_then(Value::as_f64).unwrap_or(0.0);
+                    let sp = p.get("spent").and_then(Value::as_f64).unwrap_or(0.0);
+                    a - sp
+                })
+                .sum()
+        })
+        .unwrap_or(0.0);
+    liquid + earmarked
+}
+
+/// How much the accounts say the household holds.
+pub fn in_accounts(state: &State) -> f64 {
+    state
+        .get("finances.accounts")
+        .and_then(|v| v.as_object().cloned())
+        .map(|m| m.values().filter_map(|a| a.get("balance")?.as_f64()).sum())
+        .unwrap_or(0.0)
+}
+
+/// Money the household holds but has not said where it is.
+///
+/// ★★★ This is the migration from a single pooled balance to real accounts,
+/// and it is deliberately the only shape that migration takes. It does not set
+/// a balance to a figure someone typed, and it cannot create or destroy money:
+/// it moves the gap between what the pockets say is held and what the accounts
+/// account for, which is exactly zero once every shilling has a place.
+///
+/// ★★ It refuses when there is no gap. A migration that quietly does nothing
+/// reads the same as one that worked, and the difference matters when the
+/// question is where someone's money is.
+fn place_unaccounted(
+    state: &mut State,
+    params: &Map<String, Value>,
+    events: &mut Vec<EmittedEvent>,
+    _movements: &mut Vec<Movement>,
+) -> OperatorResult {
+    let account = account_of(params);
+    let gap = ((held(state) - in_accounts(state)) * 100.0).round() / 100.0;
+
+    if gap.abs() < 0.005 {
+        return OperatorResult::fail(
+            "Every shilling is already in an account, so there is nothing to place.",
+            "unaccounted_money_exists",
+        );
+    }
+
+    move_account(state, &account, gap);
+
+    events.push(EmittedEvent {
+        name: "event.finances.unaccounted_placed".into(),
+        payload: json!({"account": account, "amount": money(gap)}),
+    });
+
+    OperatorResult::ok(json!({
+        "account": account,
+        "amount": money(gap),
+        "held": money(held(state)),
+        "in_accounts": money(in_accounts(state)),
+    }))
+}
+
 // ── registration ─────────────────────────────────────────────────────────────
 
 pub fn register(registry: &mut Registry) {
@@ -462,6 +683,7 @@ pub fn register(registry: &mut Registry) {
             ParamDecl::text("entry_id").optional(),
             ParamDecl::text("frequency").optional(),
             ParamDecl::text("received_at").optional(),
+            ParamDecl::text("account").optional(),
         ],
         constraints: vec!["params.amount > 0".into()],
         post_constraints: vec![],
@@ -517,6 +739,7 @@ pub fn register(registry: &mut Registry) {
             ParamDecl::naming("pocket_name", "finances.pockets"),
             ParamDecl::number("amount"),
             ParamDecl::text("payee").optional(),
+            ParamDecl::text("account").optional(),
         ],
         constraints: vec!["params.amount > 0".into()],
         post_constraints: vec![],
@@ -535,6 +758,7 @@ pub fn register(registry: &mut Registry) {
             ParamDecl::naming("pocket_name", "finances.pockets"),
             ParamDecl::number("amount"),
             ParamDecl::text("payer").optional(),
+            ParamDecl::text("account").optional(),
         ],
         constraints: vec!["params.amount > 0".into()],
         post_constraints: vec![],
@@ -561,6 +785,52 @@ pub fn register(registry: &mut Registry) {
         min_privilege: 1,
         effect: None,
         run: unallocate,
+    });
+
+    registry.register(OperatorMeta {
+        name: "budget.open_account",
+        description: "Declare an account you hold money in.",
+        params: vec![ParamDecl::text("account"), ParamDecl::text("label").optional()],
+        constraints: vec![],
+        post_constraints: vec![],
+        side_effects: vec!["event.finances.account_opened"],
+        pawa_cost: 0,
+        protocol: Protocol::Rpc,
+        min_privilege: 1,
+        effect: None,
+        run: open_account,
+    });
+
+    registry.register(OperatorMeta {
+        name: "budget.transfer",
+        description: "Move money between two of your own accounts. Net zero.",
+        params: vec![
+            ParamDecl::text("from_account"),
+            ParamDecl::text("to_account"),
+            ParamDecl::number("amount"),
+        ],
+        constraints: vec!["params.amount > 0".into()],
+        post_constraints: vec![],
+        side_effects: vec!["event.finances.transferred"],
+        pawa_cost: 0,
+        protocol: Protocol::Rpc,
+        min_privilege: 1,
+        effect: None,
+        run: transfer,
+    });
+
+    registry.register(OperatorMeta {
+        name: "budget.place_unaccounted",
+        description: "Say which account already-counted money is actually sitting in.",
+        params: vec![ParamDecl::text("account").optional()],
+        constraints: vec![],
+        post_constraints: vec![],
+        side_effects: vec!["event.finances.unaccounted_placed"],
+        pawa_cost: 0,
+        protocol: Protocol::Rpc,
+        min_privilege: 1,
+        effect: None,
+        run: place_unaccounted,
     });
 
     // Test-only: mutates state in a way no guard would catch, so the gate is

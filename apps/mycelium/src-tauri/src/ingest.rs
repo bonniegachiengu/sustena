@@ -357,6 +357,15 @@ impl Ingested {
         self.append_message(&m)
     }
 
+    /// Which account a captured message's money moved in.
+    ///
+    /// ★ The source id IS the account name: a text from M-Pesa is money moving
+    /// in M-Pesa. That identity is what makes attribution free rather than one
+    /// more question per message.
+    pub fn source_of_message(&self, id: &str) -> Option<String> {
+        self.current().ok()?.into_iter().find(|m| m.id == id).map(|m| m.source_id)
+    }
+
     /// Note a real operator call made about this message.
     ///
     /// ★★ Deliberately does NOT resolve it. Filing a past charge takes two
@@ -1486,5 +1495,42 @@ mod netting_tests {
         ing.capture("other", "kcb", &reversal("100.00", "Bolt KE"), &rules).expect("reversal");
         let r = ing.net_reversals("h").expect("net");
         assert_eq!(r.netted.len(), 0, "different households do not net");
+    }
+}
+
+#[cfg(test)]
+mod attribution_tests {
+    use super::*;
+    use std::env;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-attrib-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    /// ★★★ The whole reason attribution is free. The text already knows which
+    /// account it is about, so nobody has to be asked which one it was.
+    #[test]
+    fn a_captured_message_knows_which_account_it_moved_in() {
+        let ing = Ingested::at(scratch("source")).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        let Capture::Stored(m) = ing
+            .capture("h", "kcb", "KES 500.00 transaction made on KCB card 1234XXXXXXXX5678 \
+                                  at Java on 1/8/26 12:25pm, Avail balance KES 9,000.00", &rules)
+            .expect("capture")
+        else {
+            panic!("expected it to be stored");
+        };
+        assert_eq!(ing.source_of_message(&m.id).as_deref(), Some("kcb"));
+    }
+
+    #[test]
+    fn a_message_that_does_not_exist_attributes_to_nothing() {
+        // ★ None rather than a default. A guess here would put real money in
+        //   the wrong account.
+        let ing = Ingested::at(scratch("missing")).expect("ingest");
+        assert_eq!(ing.source_of_message("nope"), None);
     }
 }

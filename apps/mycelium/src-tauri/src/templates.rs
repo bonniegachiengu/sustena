@@ -58,6 +58,11 @@ pub fn definition(template: TemplateId) -> Definition {
         //    reversal has nowhere to go but a wrong number.
         .with_operator("budget.unspend")
         .with_operator("budget.unallocate")
+        // ★★ Where the money is, as opposed to what it is for. A household
+        //    holding money in two places cannot answer "how much do I have in
+        //    M-Pesa" from a single pooled figure.
+        .with_operator("budget.open_account")
+        .with_operator("budget.transfer")
         // Every Sustain that holds money holds this one.
         .with_invariant("liquid_non_negative", "finances.liquid.balance >= 0");
 
@@ -106,6 +111,10 @@ pub fn opening_state(template: TemplateId) -> Value {
             "finances": {
                 "liquid": {"balance": 0.0},
                 "pockets": {"food": {"allocated": 0.0, "spent": 0.0, "limit": 0.0}},
+                // ★ Empty rather than pre-named. Which accounts someone holds
+                //   is theirs to say, and the first text that arrives opens the
+                //   one it came from anyway.
+                "accounts": {},
                 "income": {"monthly_total": 0.0, "sources": []}
             }
         }),
@@ -113,6 +122,7 @@ pub fn opening_state(template: TemplateId) -> Value {
             "finances": {
                 "liquid": {"balance": 0.0},
                 "pockets": {},
+                "accounts": {},
                 "income": {"monthly_total": 0.0, "sources": []}
             }
         }),

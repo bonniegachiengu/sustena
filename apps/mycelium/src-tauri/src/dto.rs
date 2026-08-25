@@ -1001,6 +1001,24 @@ pub struct FeedDto {
     /// The calm read: the household's own roll-up ρ, when it declares one.
     pub rollup: Option<RollupDto>,
     pub liquid: Option<f64>,
+    /// Where the money is, as against what it is for.
+    pub accounts: Vec<AccountDto>,
+    /// ★★★ Money the household holds that no account claims.
+    ///
+    /// Zero once every shilling has a place. Non-zero means the pooled balance
+    /// has not been migrated yet, and it is shown rather than quietly folded
+    /// into a total, because "how much is in M-Pesa" cannot be answered
+    /// honestly while some of it is nowhere.
+    pub unaccounted: f64,
+}
+
+/// One account, on the wire.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDto {
+    pub id: String,
+    pub label: String,
+    pub balance: f64,
 }
 
 /// What the classify card needs in order to show a person WHAT they are filing.

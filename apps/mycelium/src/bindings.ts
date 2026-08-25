@@ -669,6 +669,10 @@ tier: number | null; memberships: number; operators: OperatorAccessDto[];
  */
 enforced: boolean; note: string }
 /**
+ * One account, on the wire.
+ */
+export type AccountDto = { id: string; label: string; balance: number }
+/**
  * One declared aggregate, answered by the engine.
  */
 export type AggregateDto = { id: string; childPath: string; 
@@ -992,7 +996,20 @@ reading: JsonValue; attention: AttentionDto[];
 /**
  * The calm read: the household's own roll-up ρ, when it declares one.
  */
-rollup: RollupDto | null; liquid: number | null }
+rollup: RollupDto | null; liquid: number | null; 
+/**
+ * Where the money is, as against what it is for.
+ */
+accounts: AccountDto[]; 
+/**
+ * ★★★ Money the household holds that no account claims.
+ * 
+ * Zero once every shilling has a place. Non-zero means the pooled balance
+ * has not been migrated yet, and it is shown rather than quietly folded
+ * into a total, because "how much is in M-Pesa" cannot be answered
+ * honestly while some of it is nowhere.
+ */
+unaccounted: number }
 /**
  * The gate's own words about one call.
  */

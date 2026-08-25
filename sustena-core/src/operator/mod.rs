@@ -1783,4 +1783,317 @@ mod tests {
         assert!(!ex.committed(), "the gate holds for an inverse exactly as for a forward move");
     }
 
+
+    // ── accounts ──────────────────────────────────────────────────────────────
+    //
+    // ★★★ Accounts are where the money IS, pockets are what it is FOR, and the
+    // law that ties the two readings together is:
+    //
+    //     Σ accounts  ==  liquid  +  Σ (allocated − spent)
+    //
+    // The predicate DSL has no arithmetic, so this cannot be declared as an
+    // invariant the way `liquid >= 0` is. It is checked here after every kind
+    // of move instead, which is the honest substitute: stated once, and
+    // enforced against real operator output rather than asserted in a comment.
+
+    /// Every shilling, counted both ways. Panics with the gap when they differ.
+    fn conserved(state: &Value) {
+        let accounts: f64 = state
+            .pointer("/finances/accounts")
+            .and_then(Value::as_object)
+            .map(|m| m.values().filter_map(|a| a.get("balance")?.as_f64()).sum())
+            .unwrap_or(0.0);
+        let liquid = at(state, "finances.liquid.balance");
+        let earmarked: f64 = state
+            .pointer("/finances/pockets")
+            .and_then(Value::as_object)
+            .map(|m| {
+                m.values()
+                    .map(|p| {
+                        let a = p.get("allocated").and_then(Value::as_f64).unwrap_or(0.0);
+                        let sp = p.get("spent").and_then(Value::as_f64).unwrap_or(0.0);
+                        a - sp
+                    })
+                    .sum()
+            })
+            .unwrap_or(0.0);
+        let gap = accounts - (liquid + earmarked);
+        assert!(
+            gap.abs() < 0.005,
+            "the two readings disagree by {gap}: accounts {accounts}, \
+             liquid {liquid}, earmarked {earmarked}"
+        );
+    }
+
+    /// A household with nothing in it, so every figure below is one this test made.
+    fn empty() -> Value {
+        json!({"finances":{"liquid":{"balance":0.0},"pockets":{},
+                           "accounts":{},"income":{"monthly_total":0.0,"sources":[]}}})
+    }
+
+    #[test]
+    fn income_lands_in_the_account_the_text_came_from() {
+        let after = run_all(
+            empty(),
+            &[(
+                "budget.record_income",
+                vec![
+                    ("amount", json!(5000.0)),
+                    ("source", json!("salary")),
+                    ("account", json!("mpesa")),
+                ],
+            )],
+        );
+        assert_eq!(at(&after, "finances.accounts.mpesa.balance"), 5000.0);
+        assert_eq!(at(&after, "finances.liquid.balance"), 5000.0);
+        conserved(&after);
+    }
+
+    #[test]
+    fn allocating_moves_no_money_between_accounts() {
+        // ★★★ Earmarking is a change of intent, not of location. The money is
+        //     still sitting in exactly the same account afterwards.
+        let after = run_all(
+            empty(),
+            &[
+                ("budget.record_income",
+                 vec![("amount", json!(1000.0)), ("source", json!("s")), ("account", json!("kcb"))]),
+                ("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(400.0))]),
+            ],
+        );
+        assert_eq!(at(&after, "finances.accounts.kcb.balance"), 1000.0, "still in the bank");
+        assert_eq!(at(&after, "finances.liquid.balance"), 600.0, "but no longer unspoken for");
+        conserved(&after);
+    }
+
+    #[test]
+    fn spending_leaves_the_account_and_not_liquid() {
+        let after = run_all(
+            empty(),
+            &[
+                ("budget.record_income",
+                 vec![("amount", json!(1000.0)), ("source", json!("s")), ("account", json!("kcb"))]),
+                ("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(400.0))]),
+                ("budget.spend",
+                 vec![("pocket_name", json!("food")), ("amount", json!(250.0)),
+                      ("account", json!("kcb"))]),
+            ],
+        );
+        assert_eq!(at(&after, "finances.accounts.kcb.balance"), 750.0, "the money really left");
+        assert_eq!(at(&after, "finances.liquid.balance"), 600.0, "and liquid never saw it");
+        conserved(&after);
+    }
+
+    #[test]
+    fn a_refund_puts_it_back_in_the_account_it_left() {
+        let after = run_all(
+            empty(),
+            &[
+                ("budget.record_income",
+                 vec![("amount", json!(1000.0)), ("source", json!("s")), ("account", json!("kcb"))]),
+                ("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(400.0))]),
+                ("budget.spend",
+                 vec![("pocket_name", json!("food")), ("amount", json!(250.0)),
+                      ("account", json!("kcb"))]),
+                ("budget.unspend",
+                 vec![("pocket_name", json!("food")), ("amount", json!(250.0)),
+                      ("account", json!("kcb"))]),
+            ],
+        );
+        assert_eq!(at(&after, "finances.accounts.kcb.balance"), 1000.0);
+        conserved(&after);
+    }
+
+    #[test]
+    fn a_transfer_between_your_own_accounts_is_net_zero() {
+        // ★★★ The case §5d exists for. Two texts, one move: without this the
+        //     pair books an expense and an income that never happened.
+        let after = run_all(
+            empty(),
+            &[
+                ("budget.record_income",
+                 vec![("amount", json!(9000.0)), ("source", json!("s")), ("account", json!("kcb"))]),
+                ("budget.transfer",
+                 vec![("from_account", json!("kcb")), ("to_account", json!("mpesa")),
+                      ("amount", json!(2000.0))]),
+            ],
+        );
+        assert_eq!(at(&after, "finances.accounts.kcb.balance"), 7000.0);
+        assert_eq!(at(&after, "finances.accounts.mpesa.balance"), 2000.0);
+        assert_eq!(at(&after, "finances.liquid.balance"), 9000.0, "no money entered or left");
+        assert_eq!(at(&after, "finances.income.monthly_total"), 9000.0, "and none of it is income");
+        conserved(&after);
+    }
+
+    #[test]
+    fn money_with_no_account_named_is_visible_rather_than_lost() {
+        // ★★★ A silent default that skipped the account side would break the
+        //     law and leave the total unexplainable. It goes somewhere he can
+        //     see and answer instead.
+        let after = run_all(
+            empty(),
+            &[("budget.record_income", vec![("amount", json!(700.0)), ("source", json!("s"))])],
+        );
+        assert_eq!(at(&after, "finances.accounts.unassigned.balance"), 700.0);
+        conserved(&after);
+    }
+
+    #[test]
+    fn a_transfer_to_and_from_the_same_account_is_refused() {
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &armed(), &empty(), "budget.transfer",
+                         &params(&[("from_account", json!("kcb")), ("to_account", json!("kcb")),
+                                   ("amount", json!(10.0))]));
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("transfer_endpoints_differ"));
+    }
+
+    #[test]
+    fn opening_the_same_account_twice_is_refused_rather_than_resetting_it() {
+        // ★★★ A second `set` would zero a real balance. Refusing is the only
+        //     safe answer, and the same one `add_pocket` gives.
+        let state = run_all(
+            empty(),
+            &[
+                ("budget.open_account", vec![("account", json!("mpesa")), ("label", json!("M-Pesa"))]),
+                ("budget.record_income",
+                 vec![("amount", json!(50.0)), ("source", json!("s")), ("account", json!("mpesa"))]),
+            ],
+        );
+        assert_eq!(at(&state, "finances.accounts.mpesa.balance"), 50.0);
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &armed(), &state, "budget.open_account",
+                         &params(&[("account", json!("mpesa"))]));
+        assert!(!ex.committed(), "opening it again would wipe the balance");
+        assert_eq!(at(&ex.state, "finances.accounts.mpesa.balance"), 50.0, "and it did not");
+    }
+
+    #[test]
+    fn a_full_household_run_stays_conserved_throughout() {
+        // Every kind of move, one after another, checked at every step.
+        let moves: Vec<(&str, Vec<(&str, Value)>)> = vec![
+            ("budget.record_income",
+             vec![("amount", json!(20000.0)), ("source", json!("pay")), ("account", json!("kcb"))]),
+            ("budget.record_income",
+             vec![("amount", json!(3000.0)), ("source", json!("gift")), ("account", json!("mpesa"))]),
+            ("budget.transfer",
+             vec![("from_account", json!("kcb")), ("to_account", json!("mpesa")),
+                  ("amount", json!(5000.0))]),
+            ("budget.allocate", vec![("pocket_name", json!("rent")), ("amount", json!(12000.0))]),
+            ("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(4000.0))]),
+            ("budget.spend",
+             vec![("pocket_name", json!("food")), ("amount", json!(1500.0)),
+                  ("account", json!("mpesa"))]),
+            ("budget.unspend",
+             vec![("pocket_name", json!("food")), ("amount", json!(500.0)),
+                  ("account", json!("mpesa"))]),
+            ("budget.unallocate", vec![("pocket_name", json!("rent")), ("amount", json!(2000.0))]),
+        ];
+        let mut state = empty();
+        let reg = Registry::default();
+        for (name, ps) in &moves {
+            let ex = execute(&reg, &allowed(), &armed(), &state, name, &params(ps));
+            assert!(ex.committed(), "{name} was refused: {:?}", ex.result.reason);
+            state = ex.state.clone();
+            conserved(&state);
+        }
+        // And the totals, stated rather than left implied.
+        assert_eq!(at(&state, "finances.accounts.kcb.balance"), 15000.0);
+        assert_eq!(at(&state, "finances.accounts.mpesa.balance"), 7000.0);
+        assert_eq!(at(&state, "finances.liquid.balance"), 9000.0);
+    }
+
+
+    // ── migrating a pooled balance into real accounts ─────────────────────────
+
+    /// A household as it looks today: a real balance, real pockets, no accounts.
+    fn pooled() -> Value {
+        json!({"finances":{
+            "liquid":{"balance":9000.0},
+            "pockets":{"rent":{"allocated":10000.0,"spent":3000.0,"limit":0.0}},
+            "income":{"monthly_total":16000.0,"sources":[]}}})
+    }
+
+    #[test]
+    fn migration_places_every_shilling_and_changes_no_total() {
+        // ★★★ His real position tonight: money counted, but nothing saying
+        //     which account it is in. Held is 9,000 unearmarked plus 7,000
+        //     still earmarked for rent.
+        let before = pooled();
+        let after = run_all(
+            before.clone(),
+            &[("budget.place_unaccounted", vec![("account", json!("mpesa"))])],
+        );
+        assert_eq!(at(&after, "finances.accounts.mpesa.balance"), 16000.0);
+        assert_eq!(
+            at(&after, "finances.liquid.balance"),
+            at(&before, "finances.liquid.balance"),
+            "migrating says where the money is, it does not move any"
+        );
+        assert_eq!(at(&after, "finances.pockets.rent.spent"), 3000.0, "and pockets are untouched");
+        conserved(&after);
+    }
+
+    #[test]
+    fn migrating_twice_is_refused_rather_than_doubling_the_money() {
+        // ★★★ The failure that would matter most. A second run finds no gap,
+        //     and says so instead of crediting the whole balance again.
+        let state = run_all(pooled(), &[("budget.place_unaccounted", vec![])]);
+        conserved(&state);
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &armed(), &state, "budget.place_unaccounted",
+                         &params(&[]));
+        assert!(!ex.committed(), "there was nothing left to place");
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("unaccounted_money_exists"));
+        conserved(&ex.state);
+    }
+
+    #[test]
+    fn money_placed_with_no_account_named_lands_somewhere_visible() {
+        let after = run_all(pooled(), &[("budget.place_unaccounted", vec![])]);
+        assert_eq!(at(&after, "finances.accounts.unassigned.balance"), 16000.0);
+        conserved(&after);
+    }
+
+    #[test]
+    fn a_partly_migrated_household_places_only_what_is_left() {
+        // Some money already attributed, the rest still pooled.
+        let state = run_all(
+            pooled(),
+            &[("budget.record_income",
+               vec![("amount", json!(1000.0)), ("source", json!("s")), ("account", json!("kcb"))])],
+        );
+        // Held is now 17,000 and only 1,000 of it is in an account.
+        let after = run_all(
+            state,
+            &[("budget.place_unaccounted", vec![("account", json!("mpesa"))])],
+        );
+        assert_eq!(at(&after, "finances.accounts.kcb.balance"), 1000.0, "left alone");
+        assert_eq!(at(&after, "finances.accounts.mpesa.balance"), 16000.0, "the remainder");
+        conserved(&after);
+    }
+
+    #[test]
+    fn migration_then_a_transfer_puts_the_money_where_it_really_is() {
+        // ★★ The path once he knows his real balances: place everything, then
+        //    move between accounts. Neither step invents or destroys a shilling.
+        let after = run_all(
+            pooled(),
+            &[
+                ("budget.place_unaccounted", vec![]),
+                ("budget.transfer",
+                 vec![("from_account", json!("unassigned")), ("to_account", json!("mpesa")),
+                      ("amount", json!(4000.0))]),
+                ("budget.transfer",
+                 vec![("from_account", json!("unassigned")), ("to_account", json!("kcb")),
+                      ("amount", json!(12000.0))]),
+            ],
+        );
+        assert_eq!(at(&after, "finances.accounts.unassigned.balance"), 0.0, "nothing left over");
+        assert_eq!(at(&after, "finances.accounts.mpesa.balance"), 4000.0);
+        assert_eq!(at(&after, "finances.accounts.kcb.balance"), 12000.0);
+        assert_eq!(at(&after, "finances.liquid.balance"), 9000.0, "and the household is unchanged");
+        conserved(&after);
+    }
+
 }
