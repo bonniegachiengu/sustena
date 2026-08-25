@@ -104,8 +104,8 @@ export function Library() {
               </Cluster>
               <Show when={!target()}>
                 <Caption>
-                  No household chosen — a definition installs node-wide and does not need
-                  one, but a widget will be refused until you pick where it goes.
+                  No household chosen. A definition installs for the whole node. A widget
+                  needs one, so pick where it goes first.
                 </Caption>
               </Show>
 
@@ -147,9 +147,8 @@ export function Library() {
               }
             >
               <Caption>
-                Only the peers you added and trusted — there is no index, no mesh search
-                and no global catalogue. Looking opens a real connection to each of them
-                over the encrypted session; nothing is transferred by looking.
+                Only the peers you added and trusted. Looking opens a connection to each
+                of them. Nothing is transferred by looking.
               </Caption>
 
               <Show when={shelves()}>
@@ -211,9 +210,8 @@ export function Library() {
                                 )}
                               </For>
                               <Caption>
-                                Fetching copies it here. It is <strong>not installed</strong> by
-                                arriving — it joins the shelf above and faces exactly the gate a
-                                package written on this machine faces.
+                                Fetching copies it to your shelf. Installing is a separate
+                                step, with the same checks as anything written here.
                               </Caption>
                             </Show>
                           </Show>
@@ -256,12 +254,9 @@ export function Library() {
                   )}
                 </For>
                 <Caption>
-                  Acquiring settles the author's share in <strong>juul</strong> — this
-                  host's internal accounting unit. It is a transfer between balances on
-                  this machine, so total circulation is unchanged: nothing is minted and
-                  nothing leaves. <strong>No money is involved at any point</strong>, and
-                  acquiring is not installing — a package you acquired still faces the
-                  whole gate, and one you did not is not blocked from it.
+                  Acquiring pays the author's share in juul, this app's internal unit.
+                  It moves between balances on this machine. <strong>No real money is
+                  involved.</strong> Acquiring and installing are separate steps.
                 </Caption>
               </Card>
             </Show>
@@ -273,7 +268,7 @@ export function Library() {
                 <Card title="publish">
                   <Caption>
                     This node is locked, so nothing can be published under its key. A
-                    package without an author is not a package.
+                    every package has an author.
                   </Caption>
                 </Card>
               }
@@ -289,7 +284,7 @@ export function Library() {
 
             <Show when={failure()}>
               {(f) => (
-                <Card title="that did not work">
+                <Card title="failed">
                   <ErrorState>{f()}</ErrorState>
                 </Card>
               )}
@@ -298,29 +293,20 @@ export function Library() {
             {/* ── the boundary ───────────────────────────────────────────── */}
             <Card title="what a package trades in">
               <Caption>
-                Definitions, widgets, operator names, and <strong>trust</strong> — priced,
-                where they are priced at all, in <strong>juul</strong>: this host's own
-                internal accounting unit. Juul is <strong>never real money</strong>, never
-                transferable off this host, and never a payment rail. A royalty is a
-                transfer between balances on this machine, so total circulation is
-                unchanged by construction — nothing is minted and nothing leaves.
+                Definitions, widgets, operator names and trust. Where they carry a price
+                it is in juul, this app's internal unit. Juul is <strong>never real
+                money</strong> and never leaves this machine.
               </Caption>
               <Caption>
-                <strong>Pull, from peers you chose.</strong> A package travels when you
-                ask for it by content hash — a peer never sends an artifact unsolicited,
-                because an unsolicited-artifact channel is an unsolicited-code channel.
-                What is <strong>not</strong> here: discovery of packages across a mesh.
+                <strong>You pull, from peers you chose.</strong> A package travels only
+                when you ask for it. There is no search across a wider network.
               </Caption>
               <Caption>
-                <strong>Trust is what you can verify, and nothing else.</strong> Whether a
-                package is signed, whether its author is you or a peer you trusted, how
-                many of the peers <em>you asked</em> are holding it, and whether you have
-                installed it. There is no global rating, no stars and no download count —
-                this node cannot see a network like that, so it does not pretend to. A
-                package nobody can say anything about reads <strong>unrated</strong>, which
-                is not a low score: nobody scored it. And trust never decides admission —
-                a well-regarded package that does not typecheck is still refused, and an
-                unrated one still installs if you choose it.
+                <strong>Trust is what you can verify.</strong> Whether a package is
+                signed, whether its author is you or a peer you trusted, how many of the
+                peers you asked are holding it, and whether you installed it. There are no
+                stars and no download counts. <strong>unrated</strong> means nobody has
+                said anything about it yet. Trust never decides admission on its own.
               </Caption>
             </Card>
           </>
@@ -428,7 +414,7 @@ function PackageRow(props: {
                 })
               }
             >
-              {props.busy === `install-${p().id}` ? "asking the gate…" : "install"}
+              {props.busy === `install-${p().id}` ? "running…" : "install"}
             </Button>
             <Chip
               onClick={() =>
@@ -458,9 +444,8 @@ function PackageRow(props: {
           </Cluster>
           <Show when={!p().installable}>
             <Caption>
-              Install is unavailable because the gate says so above — not because of who
-              published it. Trust decides what you choose; it never decides what is
-              allowed.
+              Install is unavailable for the reason given above. Who published it makes no
+              difference.
             </Caption>
           </Show>
         </Note>
@@ -578,9 +563,8 @@ function Publish(props: {
         {props.busy === "publish" ? "typechecking…" : "publish"}
       </Button>
       <Caption>
-        Publishing runs the artifact's real typecheck first. One that does not pass is{" "}
-        <strong>refused and not stored</strong> — a registry that kept broken artifacts
-        would just be a place where they wait.
+        Publishing typechecks the artifact first. If it fails, it is <strong>refused and
+        not stored</strong>.
       </Caption>
     </Card>
   );
@@ -607,7 +591,7 @@ function Outcome(props: { result: InstallDto }) {
         <For each={r().errors}>{(e) => <Caption>{e}</Caption>}</For>
       </Show>
       <Show when={r().applied}>
-        {(id) => <Caption>applied as {id()} — it is now an artifact of this node like any other</Caption>}
+        {(id) => <Caption>applied as {id()}</Caption>}
       </Show>
       <Caption>provenance · {r().provenance}</Caption>
     </Card>
@@ -642,7 +626,7 @@ function Royalty(props: { result: RoyaltyDto }) {
         owed to the payer stays where it is and is still reported.
       </Caption>
       <Show when={r().outcome === "no_royalty"}>
-        <Caption>this package is free — free of royalty, never free of the work it causes</Caption>
+        <Caption>this package carries no royalty</Caption>
       </Show>
     </Card>
   );

@@ -100,7 +100,7 @@ export default function Lock(props: {
             </h2>
             <p class={O.body}>
               {enrolling()
-                ? "This phone does not have your key yet. Choose a passphrase — it never leaves this phone, and it is the only way in."
+                ? "This phone does not have your key yet. Choose a passphrase. It never leaves this phone, and it is the only way in."
                 : "Enter your passphrase to open your household."}
             </p>
 
@@ -264,25 +264,17 @@ export default function Lock(props: {
           <Note gap="lg">
             <Label>what this is</Label>
             <Caption>
-              The identity is an <strong>ed25519 keypair</strong>, and the handle is its name.
-              The passphrase never leaves this machine and is never stored — it derives a key
-              through{" "}
-              <code>{props.identity.kdf ?? "pbkdf2-hmac-sha256"}</code>
-              {props.identity.iterations
-                ? ` at ${props.identity.iterations.toLocaleString()} iterations`
-                : ""}
-              , and that key either decrypts the private half or it does not. Nothing in the
-              cockpit can act until it does: the gate refuses every call with{" "}
-              <code>not_authenticated</code> while there is no principal.
+              Your identity is a keypair and the handle is its name. The passphrase never
+              leaves this machine and is never stored. It unlocks your private key, and
+              nothing here can act until it does.
             </Caption>
           </Note>
 
           <Show when={enrolling()}>
             <Note>
               <Caption style={{ color: vars.color.warn }}>
-                <strong>There is no recovery.</strong> No reset, no second device, no phrase to
-                write down but this one. Losing the passphrase loses the identity — said now
-                rather than discovered later.
+                <strong>There is no recovery.</strong> No reset and no second device. If you
+                lose this passphrase you lose the identity.
               </Caption>
             </Note>
           </Show>
@@ -314,13 +306,12 @@ function Details() {
       <Show when={open()}>
         <div class={O.card}>
           <p class={O.caption}>
-            Your identity is a keypair, and the handle is its name. The passphrase never leaves
-            this phone and is never stored anywhere — it derives a key, and that key either
-            decrypts your private half or it does not.
+            Your identity is a keypair and the handle is its name. The passphrase never leaves
+            this phone and is never stored anywhere. It unlocks your private key.
           </p>
           <p class={O.caption}>
-            Nothing in the app can act until it does. While it is locked, every request is refused
-            for having no-one to attribute it to — the lock is a door, not a curtain.
+            Nothing in the app can act until it does. While it is locked, every request is
+            refused.
           </p>
           <p class={O.caption}>
             A wrong passphrase and a damaged file give the same message on purpose. Telling them

@@ -92,7 +92,7 @@ export default function Composition() {
         await Promise.all([hydrate(from), hydrate(dest)]);
       }
     } catch (e) {
-      setFailure(`the engine call itself failed — ${String(e)}`);
+      setFailure(`the engine call failed: ${String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -101,13 +101,12 @@ export default function Composition() {
   return (
     <Split>
       <Column>
-        <Card title="⊕ · the tree" right={<Meta>{live()?.summary.label ?? "—"}</Meta>}>
+        <Card title="the tree" right={<Meta>{live()?.summary.label ?? "—"}</Meta>}>
           <NoteRow tone={world.holds ? "ok" : "danger"}>
             <Show when={world.holds} fallback={<Caption>{world.holarchyReason}</Caption>}>
-              <Value>tree holds</Value> <Meta>· {world.linked} linked</Meta>
+              <Value>tree is valid</Value> <Meta>· {world.linked} linked</Meta>
               <Caption>
-                validated by <code>MonitorEngine::flatten_holarchy</code> — no duplicate id, no
-                unknown parent, no cycle
+                checked by the engine: no duplicate id, no unknown parent, no cycle
               </Caption>
             </Show>
           </NoteRow>
@@ -145,7 +144,7 @@ export default function Composition() {
           </Show>
         </Card>
 
-        <Card title={<>roll-up <Sym>ρ</Sym></>}>
+        <Card title="roll-up">
           {/* ★★★ Real, and the ENGINE's arithmetic. `sustena_core::rollup`
               folds this Sustain's own state and every linked child's into the
               declared aggregates — the host reads states and reports what came
@@ -154,10 +153,8 @@ export default function Composition() {
           <Rollup rollup={live()?.rollup ?? null} big />
           <Note>
             <Caption>
-              Folded from this Sustain's own state and every linked child's, fresh on every read —
-              there is no stored total anywhere, so a figure here can never be one that quietly
-              stopped being true. Anything unreadable is named above and left out of the sum rather
-              than counted as zero.
+              Added up from this Sustain and every linked child, fresh on every read. Anything
+              unreadable is named above and left out of the total.
             </Caption>
           </Note>
         </Card>
@@ -172,9 +169,8 @@ export default function Composition() {
             when={counterparties().length > 0}
             fallback={
               <Absent title="nowhere to send">
-                A transfer moves a quantity between two <strong>directly linked</strong> Sustains —
-                a parent and its child. This one has neither, so there is no counterparty the engine
-                would accept. Link it under a household first.
+                A transfer moves money between a parent and its child. This Sustain has
+                neither, so there is nowhere to send. Link it under a household first.
               </Absent>
             }
           >
@@ -203,17 +199,15 @@ export default function Composition() {
             <Note gap="lg">
               <Cluster>
                 <Button onClick={send} disabled={busy() || amount().trim() === ""}>
-                  {busy() ? "asking the gate…" : "transfer"}
+                  {busy() ? "transferring…" : "transfer"}
                 </Button>
               </Cluster>
             </Note>
 
             <Note>
               <Caption>
-                Both legs are decided together and written behind a write-ahead journal, so a
-                refusal — or a crash between the two log appends — leaves both households exactly as
-                they were. Whole amounts only: the conservation law is checked in integer minor
-                units, because a law that holds to six decimal places is not a law.
+                Both sides are written together. If either is refused, both households stay as
+                they were. Whole amounts only.
               </Caption>
             </Note>
 
@@ -244,7 +238,7 @@ export default function Composition() {
                         </div>
                         {/* ★★ The line that matters on a refusal. */}
                         <div class={S.reasonCode}>
-                          nothing moved · neither side was written · no leg exists
+                          nothing moved · neither side was written
                         </div>
                       </div>
                     }
@@ -265,19 +259,18 @@ export default function Composition() {
                           </Readout>
                           {/* ★★★ Conservation, as the engine reported it. */}
                           <Readout
-                            label="Σ across both"
+                            label="total across both"
                             tone={t().totalBefore === t().totalAfter ? "ok" : "danger"}
                           >
                             {fmt(t().totalBefore)} = {fmt(t().totalAfter)}
                           </Readout>
                           <div class={S.reasonCode}>
                             {t().totalBefore === t().totalAfter
-                              ? "conserved · a move, not a mint or a burn — checked by the engine, not by this screen"
-                              : "NOT CONSERVED — the engine should not have committed this"}
+                              ? "the total is unchanged, checked by the engine"
+                              : "TOTAL CHANGED. The engine should not have committed this."}
                           </div>
                           <div class={S.reasonCode}>
-                            both legs logged · both Sustains pushed · <Sym>ρ</Sym>{" "}
-                            recomputed
+                            both sides logged · both Sustains updated · roll-up recomputed
                           </div>
                         </div>
                       );
@@ -289,23 +282,15 @@ export default function Composition() {
           </Show>
         </Card>
 
-        <Card title="what a transfer is not">
-          <Absent title="two calls are not one transfer">
-            <code>juul::transfer</code> also exists in the core — but that moves the{" "}
-            <em>economy's internal unit</em> between principals, not a household's own money
-            between Sustains. Using it here would be answering a different question.
-            <br />
-            <br />
-            And the obvious host workaround — spend from one Sustain, then record income on the
-            other — is <strong>two separate gated calls</strong>. If the second refuses, the money
-            has left one household and arrived nowhere. That is not a transfer; it is a way to lose
-            money that looks like a feature. The engine settles both legs in one value, and the only
-            way to hold one leg is to hold both.
-          </Absent>
+        <Card title="how transfers settle">
+          <Caption>
+            One transfer, both sides at once. Spending from one Sustain and recording income on the
+            other would be two separate calls, and if the second one failed the money would leave
+            one household and arrive nowhere.
+          </Caption>
           <Note>
             <Caption>
-              A crash between the two log appends is finished on the next open, and reported rather
-              than healed silently.
+              If the app closes mid-transfer, the next open finishes it and says so.
             </Caption>
           </Note>
         </Card>

@@ -97,9 +97,8 @@ export function Network() {
                 fallback={
                   <Note>
                     <Caption>
-                      This node is locked, so it cannot prove its own key — and a peer that
-                      cannot be answered is a peer that cannot sync. Unlock to rejoin the
-                      network.
+                      This node is locked, so it cannot prove its key or answer a peer.
+                      Unlock to rejoin the network.
                     </Caption>
                   </Note>
                 }
@@ -114,9 +113,8 @@ export function Network() {
                         {busy() === "listen" ? "binding…" : "start listening"}
                       </Button>
                       <Caption>
-                        Binds a port on this machine. LAN and localhost only — there is no
-                        discovery and no NAT traversal, so a peer needs an address you give
-                        it.
+                        Binds a port on this machine, for your local network only. A peer
+                        needs an address you give it.
                       </Caption>
                     </Cluster>
                   </Note>
@@ -142,24 +140,18 @@ export function Network() {
                 </Row>
                 <Caption>{n().session}</Caption>
                 <Caption>
-                  Each connection agrees a fresh key by X25519, and both sides sign the
-                  whole transcript with their identity keys — so the key is{" "}
-                  <strong>bound to who you are talking to</strong> and a middle cannot
-                  substitute its own. The ephemeral secret is never written down, so a key
-                  recovered later cannot open a conversation already had.
+                  Each connection agrees a fresh key, and both sides sign the exchange
+                  with their identity keys, so the key is tied to who you are talking to.
+                  The temporary secret is never written down.
                 </Caption>
                 <Caption>
-                  <strong>There is no unencrypted mode to fall back to.</strong> A peer
-                  speaking the older cleartext protocol is refused before any key material
-                  is exchanged, and a frame that arrives unsealed on a live session is
-                  dropped rather than read.
+                  <strong>There is no unencrypted mode.</strong> A peer speaking the older
+                  plain protocol is refused before any keys are exchanged.
                 </Caption>
                 <Caption>
-                  Covered: confidentiality, tamper-detection (a changed byte fails its tag
-                  and the frame is dropped), forward secrecy, and authenticated peers.{" "}
-                  <strong>Not covered:</strong> post-quantum key exchange, a formal proof
-                  of the pattern, and rekeying on a long-lived session — named because a
-                  security claim is worth exactly what it excludes.
+                  Covered: confidentiality, tamper detection, forward secrecy, and
+                  authenticated peers. Still missing: post-quantum key exchange, a formal
+                  proof, and rekeying on a long session.
                 </Caption>
               </Note>
             </Card>
@@ -193,10 +185,9 @@ export function Network() {
             <Show when={(bodies() ?? []).length > 0}>
               <Card title="shared sustains · quorum">
                 <Caption>
-                  A Sustain with declared co-owners agrees <strong>before</strong> it
-                  appends, so two people writing at once are ordered rather than one
-                  quietly overwriting the other. Everything else on this node writes
-                  locally with no round at all.
+                  A Sustain with co-owners agrees <strong>before</strong> it writes, so two
+                  people writing at once get ordered and neither is overwritten. Everything
+                  else on this node writes locally.
                 </Caption>
                 <For each={bodies() ?? []}>{(b) => <BodyRow body={b} />}</For>
               </Card>
@@ -208,23 +199,18 @@ export function Network() {
 
             <Show when={failure()}>
               {(f) => (
-                <Card title="that did not work">
+                <Card title="failed">
                   <ErrorState>{f()}</ErrorState>
                 </Card>
               )}
             </Show>
 
             {/* ── what this is not ───────────────────────────────────────── */}
-            <Card title="what this transport is not">
+            <Card title="limits">
               <Caption>
-                Two nodes on localhost or a LAN, connected by hand and authenticated by
-                ed25519 key. There is <strong>no discovery</strong> (a peer is added by
-                address), <strong>no NAT traversal</strong> (both ends must be able to
-                reach each other), <strong>no transport encryption</strong> (the handshake
-                proves identity; it does not hide the bytes, which is honest for a LAN and
-                not enough for the open internet), and <strong>no gossip</strong> — sync is
-                pairwise and pull-based. Each of those is a named gap rather than a
-                fabricated feature.
+                Two nodes on the same local network, connected by hand. Still missing:
+                automatic discovery, NAT traversal, and gossip between more than two nodes.
+                Sync happens one pair at a time, and you start it.
               </Caption>
             </Card>
           </>
@@ -260,7 +246,7 @@ function PeerRow(props: {
       </Row>
 
       <Row>
-        <Meta>{props.peer.address ?? "no address — it reached in, this node cannot dial out"}</Meta>
+        <Meta>{props.peer.address ?? "no address · it connected to you"}</Meta>
         <Spacer />
         <Meta>
           {/* ★ never synced is not "0 minutes ago" */}
@@ -379,17 +365,14 @@ function BodyRow(props: { body: BodyDto }) {
         when={b().canWrite}
         fallback={
           <Caption>
-            <strong>Writes to this Sustain are refused right now.</strong> Not queued and
-            not applied locally — a minority cannot write, because the others would never
-            accept a history they did not agree to. It comes back the moment enough
-            co-owners are reachable.
+            <strong>Writes to this Sustain are refused right now.</strong> Too few
+            co-owners are reachable. Writing comes back as soon as enough of them are.
           </Caption>
         }
       >
         <Caption>
-          Enough co-owners are reachable for a round to be attempted. That is not a
-          promise a round will succeed — a peer can still be gone by the time it is
-          asked, and the refusal then says so.
+          Enough co-owners are reachable to try. A peer can still be gone by the time it
+          is asked, and the refusal will say so.
         </Caption>
       </Show>
 
@@ -421,9 +404,8 @@ function AddPeer(props: {
   return (
     <Card title="add a peer">
       <Caption>
-        A peer is added by <strong>key and address</strong> — there is no discovery. Adding
-        one records it; it is trusted only when you say so, and shared with only per
-        Sustain.
+        Add a peer by key and address. Adding records it. You choose when to trust it,
+        and what to share, one Sustain at a time.
       </Caption>
       <Field label="public key">
         <input
@@ -497,25 +479,22 @@ function SyncResult(props: { report: SyncDto }) {
           )}
         </For>
         <Caption>
-          Every entry survives — the log is a grow-only set and nothing was dropped. What
-          did not survive is a <strong>value</strong>: both nodes wrote the same path
-          without having seen each other, and the fold order picked one. A number that must
-          never be overwritten needs a counter that merges by maximum, not a plain field.
+          Every entry survives. What was lost is a <strong>value</strong>: both nodes
+          wrote the same field without having seen each other, and one had to win.
         </Caption>
       </Show>
 
       <Show when={r().concurrent > 0}>
         <Caption>
-          {r().concurrent} pair(s) were genuinely concurrent — neither happened before the
-          other, and the order they folded in was a tie-break rather than a fact.
+          {r().concurrent} pair(s) happened at the same time. Neither came first, so the
+          order was a tie-break.
         </Caption>
       </Show>
 
       <Show when={r().forks > 0}>
         <Caption>
-          {r().forks} stamp(s) arrived carrying two different payloads — a node that forked
-          its own history. The winner is deterministic on every replica; the fact is
-          recorded rather than resolved away.
+          {r().forks} stamp(s) arrived with two different payloads, from a node that split
+          its own history. Every replica picks the same winner, and this is recorded.
         </Caption>
       </Show>
 
@@ -532,17 +511,16 @@ function SyncResult(props: { report: SyncDto }) {
             )}
           </For>
           <Caption>
-            Every entry was admitted by the node that made it, against the state that node
-            could see. The merge was admitted by nobody. Nothing has been repaired — which
-            of two admitted facts to give up is a decision, not an arithmetic.
+            Each entry was accepted by the node that made it, against what that node could
+            see. The merged result was checked by nobody, and nothing has been repaired.
           </Caption>
         </Note>
       </Show>
 
       <Show when={r().admissible === null}>
         <Caption>
-          admissibility unmeasured — this Sustain has no armed enforcement, so there was
-          nothing to check the merged state against. That is not the same as passing.
+          not checked. This Sustain has no rules armed, so there was nothing to check the
+          merged state against.
         </Caption>
       </Show>
     </Card>

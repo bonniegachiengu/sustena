@@ -242,16 +242,15 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
         >
           {(a) => (
             <Caption>
-              <strong>household liquid is the engine's roll-up ρ</strong> — {a().op.toLowerCase()}{" "}
-              over <code>{a().childPath}</code>, folded from the household's own state and{" "}
+              Household liquid is the {a().op.toLowerCase()} of <code>{a().childPath}</code>
+              {" "}across the household and{" "}
               {a().included.filter((c) => !c.isHousehold).length} member
               {a().included.filter((c) => !c.isHousehold).length === 1 ? "" : "s"}, fresh on every
               read.
               <Show when={a().excluded.length > 0}>
                 {" "}
-                {a().excluded.length} contributor{a().excluded.length === 1 ? " was" : "s were"} not
-                readable and {a().excluded.length === 1 ? "is" : "are"} left out rather than counted
-                as zero — see Composition.
+                {a().excluded.length} could not be read and{" "}
+                {a().excluded.length === 1 ? "is" : "are"} left out of the total. See Composition.
               </Show>
             </Caption>
           )}
@@ -262,7 +261,7 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
       <Column>
         {/* the live gate stream */}
         <Card
-          title="gate stream · live"
+          title="activity · live"
           scroll
           right={
             <>

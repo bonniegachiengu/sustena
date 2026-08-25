@@ -159,14 +159,13 @@ export default function Monitor() {
           </Show>
           <Note>
             <Caption>
-              A broken rule is the engine's own verdict. The {Math.round(ATTENTION_AT * 100)}%
-              pocket threshold is this app's declared policy over real numbers — not an engine
-              reading, and labelled so.
+              A broken rule comes from the engine. The {Math.round(ATTENTION_AT * 100)}% pocket
+              threshold is this app's own setting, applied to real numbers.
             </Caption>
           </Note>
         </Card>
 
-        <Card title="⊕ · roll-up">
+        <Card title="roll-up">
           <Meta>
             {kids().length} linked {kids().length === 1 ? "child" : "children"}
           </Meta>
@@ -180,7 +179,7 @@ export default function Monitor() {
 
       {/* ── right ──────────────────────────────────────────────────────── */}
       <Column>
-        <Card title="V · the engine's verdict, now">
+        <Card title="rules, now">
           <Show
             when={(live()?.constraints ?? []).length > 0}
             fallback={<Empty>no invariants declared</Empty>}
@@ -204,7 +203,7 @@ export default function Monitor() {
         </Card>
 
         <Card
-          title="the event log · state = fold(this)"
+          title="the event log"
           right={<Meta>{live()?.log.length ?? 0} entries</Meta>}
         >
           <Show when={(live()?.log ?? []).length > 0} fallback={<Empty>no log yet</Empty>}>

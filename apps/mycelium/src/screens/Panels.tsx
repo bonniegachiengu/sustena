@@ -150,21 +150,17 @@ export function Council() {
 
           <Note>
             <Caption>
-              <code>council::resolve</code> and <code>aggregate_delegated_votes</code> are the
-              engine's own. The rules they encode — a person's vote overrides the council, an{" "}
-              <em>abstaining</em> person leaves it <strong>in voting</strong> rather than deciding,
-              and collected votes with nobody in favour fail — are not re-implemented here.
+              The engine decides this, not this screen. A person's vote overrides the
+              council. A person who abstains leaves it in voting. Collected votes with nobody
+              in favour fail.
             </Caption>
           </Note>
         </Card>
 
-        <Card title="council · what is not here">
+        <Card title="council · limits">
           <Absent title="the proposal lifecycle">
-            Resolution is real; the <strong>proposal lifecycle</strong> is not. There is no
-            persisted proposal, no deadline (the core compares nothing it cannot replay, so{" "}
-            <code>expired</code> is the host's question and this app has none), and no operative
-            actually deliberating — the votes above are yours to set, so this is the engine's rule
-            engine exercised by hand rather than a council that met.
+            The vote itself is real. Proposals are not saved, there are no deadlines, and no
+            operative is deliberating. You set the votes above by hand.
           </Absent>
         </Card>
       </Column>
