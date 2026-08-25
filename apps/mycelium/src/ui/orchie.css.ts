@@ -150,6 +150,39 @@ export const brand = style({
   color: vars.color.amber,
 });
 
+/**
+ * ★★★ The way OUT of Orchie, on a phone.
+ *
+ * The face toggle lives in Mycelium's topbar -- and `frame` above is
+ * `position: fixed; inset: 0`, so on a phone Orchie paints straight over it.
+ * The cockpit was documented as "one tap away" and was in fact unreachable:
+ * there was no way to open Ingest (paste a real M-Pesa/KCB message) from the
+ * device the messages actually arrive on. This is that tap.
+ *
+ * ★★ Orchie's scale, not the cockpit's -- 44px, for the reason this whole file
+ * exists. The cockpit's own chip is ~22px, which is smaller than the thumb
+ * pressing it.
+ */
+export const faceToggle = style({
+  fontFamily: vars.font.mono,
+  fontSize: "11px",
+  letterSpacing: "0.12em",
+  minHeight: "44px",
+  padding: "0 14px",
+  display: "inline-flex",
+  alignItems: "center",
+  color: vars.color.textSecondary,
+  background: vars.color.bgRaised,
+  border: `1px solid ${vars.color.border}`,
+  borderRadius: "10px",
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+  flexShrink: 0,
+  selectors: {
+    "&:active": { color: vars.color.textPrimary, borderColor: vars.color.amberBorder },
+  },
+});
+
 export const headerMeta = style({
   fontFamily: vars.font.mono,
   fontSize: "11px",

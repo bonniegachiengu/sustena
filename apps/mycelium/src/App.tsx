@@ -270,7 +270,10 @@ export default function App() {
       </header>
 
       <Show when={face() === "orchie"}>
-        <Orchie />
+        {/* ★★ Orchie's frame is fixed/inset-0, so it paints over this topbar
+            and the toggle in it. On a phone that made the cockpit -- and so
+            Ingest -- unreachable. Orchie carries its own way back. */}
+        <Orchie onFace={() => setFace("mycelium")} />
       </Show>
       <div class={L.body} style={{ display: face() === "orchie" ? "none" : undefined }}>
         <nav class={L.nav}>
