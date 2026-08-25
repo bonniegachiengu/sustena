@@ -1142,26 +1142,38 @@ pub fn get_feed(
         attention,
         rollup: world.rollup(&sustain_id),
         liquid: state.pointer("/finances/liquid/balance").and_then(Value::as_f64),
-        accounts: accounts_of(&state),
+        accounts: accounts_of(&state, &world.ingest().reported_balances(&sustain_id)
+            .unwrap_or_default()),
         unaccounted: unaccounted_in(&state),
     })
 }
 
-/// Every account the household holds, in a stable order.
-fn accounts_of(state: &Value) -> Vec<AccountDto> {
+/// Every account the household holds, in a stable order, each against what
+/// the bank itself last reported for it.
+///
+/// ★★ Drift is reported, never corrected. A difference between our arithmetic
+/// and the bank's own word is a real thing to look into -- a missed text, a
+/// charge nobody classified, a fee -- and silently moving our figure to match
+/// would erase the evidence of whatever caused it.
+fn accounts_of(
+    state: &Value,
+    reported: &std::collections::BTreeMap<String, crate::ingest::Reported>,
+) -> Vec<AccountDto> {
     state
         .pointer("/finances/accounts")
         .and_then(Value::as_object)
         .map(|m| {
             m.iter()
-                .map(|(id, a)| AccountDto {
-                    id: id.clone(),
-                    label: a
-                        .get("label")
-                        .and_then(Value::as_str)
-                        .unwrap_or(id)
-                        .to_string(),
-                    balance: a.get("balance").and_then(Value::as_f64).unwrap_or(0.0),
+                .map(|(id, a)| {
+                    let balance = a.get("balance").and_then(Value::as_f64).unwrap_or(0.0);
+                    let said = reported.get(id).map(|r| r.balance);
+                    AccountDto {
+                        id: id.clone(),
+                        label: a.get("label").and_then(Value::as_str).unwrap_or(id).to_string(),
+                        balance,
+                        reported: said,
+                        drift: said.map(|r| ((r - balance) * 100.0).round() / 100.0),
+                    }
                 })
                 .collect()
         })
@@ -2051,7 +2063,7 @@ fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
             continue;
         };
         out.read += 1;
-        match world.capture(sustain_id, source, &m.body) {
+        match world.capture_at(sustain_id, source, &m.body, Some(m.timestamp_ms)) {
             Ok(Capture::Rejected { .. }) => out.refused += 1,
             Ok(Capture::Duplicate(_)) => out.duplicates += 1,
             Ok(Capture::Stored(stored)) => match stored.status.as_str() {
@@ -2215,6 +2227,7 @@ mod feed_surface_tests {
             ignored: false,
             netted_with: None,
             filed: Vec::new(),
+            sent_at_ms: None,
             seq,
         }
     }

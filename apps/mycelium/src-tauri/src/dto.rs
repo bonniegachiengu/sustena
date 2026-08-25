@@ -1019,6 +1019,15 @@ pub struct AccountDto {
     pub id: String,
     pub label: String,
     pub balance: f64,
+    /// ★★★ What the bank itself last said was in there.
+    ///
+    /// The only figure in the whole system that is not our own arithmetic,
+    /// which is exactly what makes it able to check it. `None` where no
+    /// captured message for this account carried a running balance.
+    pub reported: Option<f64>,
+    /// Reported minus ours. Positive means the bank says there is more there
+    /// than we have accounted for.
+    pub drift: Option<f64>,
 }
 
 /// What the classify card needs in order to show a person WHAT they are filing.

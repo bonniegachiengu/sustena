@@ -744,8 +744,19 @@ impl World {
         source_id: &str,
         raw: &str,
     ) -> StoreResult<Capture> {
+        self.capture_at(sustain_id, source_id, raw, None)
+    }
+
+    /// Capture, carrying when the phone says the message arrived.
+    pub fn capture_at(
+        &self,
+        sustain_id: &str,
+        source_id: &str,
+        raw: &str,
+        sent_at_ms: Option<i64>,
+    ) -> StoreResult<Capture> {
         let rules = self.ingest.effective_rules()?;
-        let captured = self.ingest.capture(sustain_id, source_id, raw, &rules)?;
+        let captured = self.ingest.capture_at(sustain_id, source_id, raw, &rules, sent_at_ms)?;
 
         // Only a freshly-stored, unambiguously-mapped message applies. A
         // duplicate has already had its chance; anything else is a person's.

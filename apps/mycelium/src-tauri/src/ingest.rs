@@ -92,6 +92,20 @@ pub struct IngestedMessage {
     /// skipped one can be found again.
     #[serde(default)]
     pub ignored: bool,
+    /// When the phone says the message arrived, in epoch milliseconds.
+    ///
+    /// ★★★ NOT the same fact as `seq`, and the difference decides real money.
+    /// `seq` is the order they were READ, and a backlog is read newest-first,
+    /// so it runs backwards through time. Asking which balance a bank most
+    /// recently reported is a question about when the message was SENT, and
+    /// only this answers it.
+    ///
+    /// `None` for anything captured before this was carried, and for a pasted
+    /// message, which has no arrival time of its own. Absent rather than
+    /// guessed: a fabricated timestamp here would silently pick the wrong
+    /// message as the freshest word on an account balance.
+    #[serde(default)]
+    pub sent_at_ms: Option<i64>,
     /// A monotonic capture order — the host's, not a clock.
     pub seq: u64,
 }
@@ -126,6 +140,20 @@ impl IngestedMessage {
 pub struct Filing {
     pub operator: String,
     pub params: BTreeMap<String, serde_json::Value>,
+}
+
+/// A balance a bank itself reported, and when.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct Reported {
+    pub balance: f64,
+    pub at: i64,
+}
+
+/// The running balance a message states, if it states one.
+fn reported_balance_of(m: &IngestedMessage) -> Option<f64> {
+    m.parsed_fields.get("balance_after").and_then(|v| {
+        v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
+    })
 }
 
 /// A declared capture source.
@@ -275,6 +303,18 @@ impl Ingested {
         raw: &str,
         extra_rules: &[ParseRule],
     ) -> StoreResult<Capture> {
+        self.capture_at(sustain_id, source_id, raw, extra_rules, None)
+    }
+
+    /// Capture, carrying when the phone says the message arrived.
+    pub fn capture_at(
+        &self,
+        sustain_id: &str,
+        source_id: &str,
+        raw: &str,
+        extra_rules: &[ParseRule],
+        sent_at_ms: Option<i64>,
+    ) -> StoreResult<Capture> {
         let t = parse_message(raw, Some(source_id), extra_rules);
 
         // ★★★ THE LINE. `storable()` is the engine's own answer, and this runs
@@ -332,6 +372,7 @@ impl Ingested {
             ignored: false,
             netted_with: None,
             filed: Vec::new(),
+            sent_at_ms,
             seq,
         };
         self.append_message(&message)?;
@@ -355,6 +396,35 @@ impl Ingested {
         //   person still has something to do about it.
         m.resolved = applied;
         self.append_message(&m)
+    }
+
+    /// The balance each source most recently reported, and when it said so.
+    ///
+    /// ★★★ Every real M-Pesa and KCB text ends by stating the account's new
+    /// balance. That is the bank's own word for what is there, and it is the
+    /// one figure in this whole system that does not come from our own
+    /// arithmetic -- which makes it the only thing that can check it.
+    ///
+    /// ★★ Ordered by when the message was SENT, never by capture order. A
+    /// backlog is read newest-first, so trusting capture order would take the
+    /// OLDEST balance as the freshest word and report drift that is really
+    /// just history. A message with no arrival time is skipped rather than
+    /// assumed recent, for the same reason.
+    pub fn reported_balances(&self, sustain_id: &str) -> StoreResult<BTreeMap<String, Reported>> {
+        let mut out: BTreeMap<String, Reported> = BTreeMap::new();
+        for m in self.current()? {
+            if m.sustain_id != sustain_id {
+                continue;
+            }
+            let (Some(at), Some(balance)) = (m.sent_at_ms, reported_balance_of(&m)) else {
+                continue;
+            };
+            let e = out.entry(m.source_id.clone()).or_insert(Reported { balance, at });
+            if at > e.at {
+                *e = Reported { balance, at };
+            }
+        }
+        Ok(out)
     }
 
     /// Which account a captured message's money moved in.
@@ -1532,5 +1602,99 @@ mod attribution_tests {
         //   the wrong account.
         let ing = Ingested::at(scratch("missing")).expect("ingest");
         assert_eq!(ing.source_of_message("nope"), None);
+    }
+}
+
+#[cfg(test)]
+mod reconciliation_tests {
+    use super::*;
+    use std::env;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-recon-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let ing = Ingested::at(scratch(name)).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    /// A real M-Pesa text, which like all of them ends by stating the balance.
+    fn paid(ref_: &str, amount: &str, balance: &str) -> String {
+        format!(
+            "{ref_} Confirmed. Ksh{amount} paid to NAIVAS SUPERMARKET on 20/7/26 \
+             at 4:30 PM. New M-PESA balance is Ksh{balance}"
+        )
+    }
+
+    #[test]
+    fn the_balance_a_text_reports_is_read_off_it() {
+        let (ing, rules) = store("reads");
+        ing.capture_at("h", "mpesa", &paid("QGH7XJ4P2Q", "450.00", "12,050.00"), &rules, Some(1_000))
+            .expect("capture");
+        let got = ing.reported_balances("h").expect("balances");
+        assert_eq!(got["mpesa"].balance, 12050.0, "commas and all");
+    }
+
+    #[test]
+    fn the_freshest_word_is_the_newest_message_not_the_last_one_read() {
+        // ★★★ The failure this ordering exists to prevent. A backlog is read
+        //     newest-first, so capture order runs BACKWARDS through time. Here
+        //     the older text is captured second, exactly as a real read does
+        //     it, and the newer balance must still win.
+        let (ing, rules) = store("ordering");
+        ing.capture_at("h", "mpesa", &paid("AAAAAAAAAA", "100.00", "9,000.00"), &rules,
+                       Some(2_000_000))
+            .expect("newer, read first");
+        ing.capture_at("h", "mpesa", &paid("BBBBBBBBBB", "200.00", "500.00"), &rules,
+                       Some(1_000_000))
+            .expect("older, read second");
+
+        let got = ing.reported_balances("h").expect("balances");
+        assert_eq!(got["mpesa"].balance, 9000.0, "the newer text is the freshest word");
+        assert_eq!(got["mpesa"].at, 2_000_000);
+    }
+
+    #[test]
+    fn a_message_with_no_arrival_time_is_skipped_rather_than_assumed_recent() {
+        // ★★ Anything captured before arrival times were carried, and anything
+        //    pasted by hand. Guessing it were recent would let it overrule a
+        //    genuinely newer text about the same account.
+        let (ing, rules) = store("undated");
+        ing.capture_at("h", "mpesa", &paid("CCCCCCCCCC", "100.00", "7,777.00"), &rules, None)
+            .expect("undated");
+        assert!(ing.reported_balances("h").expect("balances").get("mpesa").is_none());
+    }
+
+    #[test]
+    fn each_account_is_reconciled_against_its_own_texts() {
+        let (ing, rules) = store("per-account");
+        ing.capture_at("h", "mpesa", &paid("DDDDDDDDDD", "100.00", "1,111.00"), &rules, Some(10))
+            .expect("mpesa");
+        ing.capture_at(
+            "h",
+            "kcb",
+            "KES 500.00 transaction made on KCB card 1234XXXXXXXX5678 at Java \
+             on 1/8/26 12:25pm, Avail balance KES 2,222.00",
+            &rules,
+            Some(20),
+        )
+        .expect("kcb");
+
+        let got = ing.reported_balances("h").expect("balances");
+        assert_eq!(got["mpesa"].balance, 1111.0);
+        assert_eq!(got["kcb"].balance, 2222.0, "a bank's word is only about its own account");
+    }
+
+    #[test]
+    fn reconciliation_does_not_cross_households() {
+        let (ing, rules) = store("scoped");
+        ing.capture_at("h", "mpesa", &paid("EEEEEEEEEE", "100.00", "1,111.00"), &rules, Some(10))
+            .expect("one");
+        assert!(ing.reported_balances("other").expect("balances").is_empty());
     }
 }

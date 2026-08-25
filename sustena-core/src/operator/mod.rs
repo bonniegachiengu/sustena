@@ -1817,12 +1817,40 @@ mod tests {
                     .sum()
             })
             .unwrap_or(0.0);
-        let gap = accounts - (liquid + earmarked);
+        // ★★ The law carries the gap: sum of accounts plus unplaced equals
+        //    liquid plus sum of (allocated - spent). Where every shilling has
+        //    been placed the gap is zero and this is the plain equality it
+        //    looks like.
+        let gap = (liquid + earmarked) - accounts;
         assert!(
-            gap.abs() < 0.005,
-            "the two readings disagree by {gap}: accounts {accounts}, \
-             liquid {liquid}, earmarked {earmarked}"
+            (gap - unplaced(state)).abs() < 0.005,
+            "the readings disagree beyond the unplaced {}: accounts {accounts}, liquid {liquid}, earmarked {earmarked}",
+            unplaced(state)
         );
+    }
+
+    /// Money the household holds that no account claims.
+    fn unplaced(state: &Value) -> f64 {
+        let accounts: f64 = state
+            .pointer("/finances/accounts")
+            .and_then(Value::as_object)
+            .map(|m| m.values().filter_map(|a| a.get("balance")?.as_f64()).sum())
+            .unwrap_or(0.0);
+        let liquid = at(state, "finances.liquid.balance");
+        let earmarked: f64 = state
+            .pointer("/finances/pockets")
+            .and_then(Value::as_object)
+            .map(|m| {
+                m.values()
+                    .map(|p| {
+                        let a = p.get("allocated").and_then(Value::as_f64).unwrap_or(0.0);
+                        let sp = p.get("spent").and_then(Value::as_f64).unwrap_or(0.0);
+                        a - sp
+                    })
+                    .sum()
+            })
+            .unwrap_or(0.0);
+        (((liquid + earmarked) - accounts) * 100.0).round() / 100.0
     }
 
     /// A household with nothing in it, so every figure below is one this test made.
@@ -1926,16 +1954,25 @@ mod tests {
     }
 
     #[test]
-    fn money_with_no_account_named_is_visible_rather_than_lost() {
-        // ★★★ A silent default that skipped the account side would break the
-        //     law and leave the total unexplainable. It goes somewhere he can
-        //     see and answer instead.
+    fn money_with_no_account_named_writes_no_account_at_all() {
+        // ★★★ Two things at once. Inventing an account to hold it would be a
+        //     fabricated balance sitting among real ones, AND it would change
+        //     what this operator writes for every household that never asked
+        //     for accounts -- which is the parity the conformance vectors hold
+        //     the two engines to. It shows up as the gap instead, derived where
+        //     it is shown and closed by place_unaccounted.
         let after = run_all(
             empty(),
             &[("budget.record_income", vec![("amount", json!(700.0)), ("source", json!("s"))])],
         );
-        assert_eq!(at(&after, "finances.accounts.unassigned.balance"), 700.0);
-        conserved(&after);
+        assert!(
+            after
+                .pointer("/finances/accounts")
+                .and_then(Value::as_object)
+                .is_some_and(|m| m.is_empty()),
+            "no account was named, so none was written"
+        );
+        assert_eq!(unplaced(&after), 700.0, "and it is visible as money with no home yet");
     }
 
     #[test]

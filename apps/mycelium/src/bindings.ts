@@ -671,7 +671,20 @@ enforced: boolean; note: string }
 /**
  * One account, on the wire.
  */
-export type AccountDto = { id: string; label: string; balance: number }
+export type AccountDto = { id: string; label: string; balance: number; 
+/**
+ * ★★★ What the bank itself last said was in there.
+ * 
+ * The only figure in the whole system that is not our own arithmetic,
+ * which is exactly what makes it able to check it. `None` where no
+ * captured message for this account carried a running balance.
+ */
+reported: number | null; 
+/**
+ * Reported minus ours. Positive means the bank says there is more there
+ * than we have accounted for.
+ */
+drift: number | null }
 /**
  * One declared aggregate, answered by the engine.
  */

@@ -869,10 +869,24 @@ function AccountsCard(props: { feed: FeedDto; onChanged: () => void }) {
 
         <For each={accounts()}>
           {(a) => (
-            <div class={O.row}>
-              <span class={O.figureLabel}>{a.label}</span>
-              <span class={O.caption}>{fmt(a.balance)}</span>
-            </div>
+            <>
+              <div class={O.row}>
+                <span class={O.figureLabel}>{a.label}</span>
+                <span class={O.caption}>{fmt(a.balance)}</span>
+              </div>
+              {/* ★★★ The bank's own word, next to ours. Reported, never
+                  corrected: a difference is a real thing to look into, and
+                  quietly moving our figure to match would erase whatever
+                  caused it. A shilling of rounding is not news. */}
+              <Show when={a.drift !== null && Math.abs(a.drift ?? 0) >= 1}>
+                <p class={O.caption}>
+                  {a.label} itself last said {fmt(a.reported)}, which is{" "}
+                  {fmt(Math.abs(a.drift ?? 0))}{" "}
+                  {(a.drift ?? 0) > 0 ? "more" : "less"} than we have accounted for.
+                  Probably a text that was never sorted.
+                </p>
+              </Show>
+            </>
           )}
         </For>
 
@@ -895,6 +909,8 @@ function AccountsCard(props: { feed: FeedDto; onChanged: () => void }) {
                 <button class={O.linkish} onClick={() => void place(null)}>
                   not sure yet
                 </button>
+                {/* "not sure yet" is a real answer: it gets a named holding he
+                    can see and move later, rather than staying nowhere. */}
               </div>
             }
           >

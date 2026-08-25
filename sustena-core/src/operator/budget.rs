@@ -79,16 +79,26 @@ fn money(v: f64) -> Value {
 // the way `liquid >= 0` is. It holds by construction here, and the tests state
 // it directly rather than leaving it as a claim in a comment.
 //
-// ★★ Where a message did not say which account, the money goes to `unassigned`
-// rather than nowhere. A default that quietly skipped the account side would
-// break the law above and leave the total unexplainable; a real balance sitting
-// under a name he can see is a question he can answer.
-const UNASSIGNED: &str = "unassigned";
+// ★★★ A call that names no account writes NO account, and the law is stated
+// with that gap in it:
+//
+//     Σ accounts  +  unaccounted  ==  liquid  +  Σ (allocated − spent)
+//
+// `unaccounted` is derived, never stored. Inventing an `unassigned` account to
+// hold it would be a fabricated balance sitting among real ones, and it would
+// change what an operator writes for every household that never asked for
+// accounts at all -- which is the parity the conformance vectors hold the two
+// engines to. The gap is computed where it is shown, and `place_unaccounted`
+// is how a person closes it.
+//
+// In practice the gap barely appears: a captured message knows its own source,
+// so the account comes free. It is the pasted message and the pre-accounts
+// history that land in it.
 
-/// The account a call names, or the honest stand-in.
-fn account_of(params: &Map<String, Value>) -> String {
+/// The account a call names, if it names one.
+fn account_of(params: &Map<String, Value>) -> Option<String> {
     let a = text(params, "account");
-    if a.is_empty() { UNASSIGNED.to_string() } else { normalize_pocket_name(&a) }
+    if a.is_empty() { None } else { Some(normalize_pocket_name(&a)) }
 }
 
 /// Move an account's balance, creating the account the first time it is named.
@@ -149,7 +159,9 @@ fn record_income(
     let _ = state.increment("finances.income.monthly_total", &json!(amount));
     // Money arrived somewhere real. The source of the text says where, so this
     // costs the person no extra question.
-    move_account(state, &account_of(params), amount);
+    if let Some(a) = account_of(params) {
+        move_account(state, &a, amount);
+    }
 
     // ★ The declared crossing: money arrived from `source`. Whether `source`
     // is outside B is μ's question, not this operator's — see `crate::flow`.
@@ -314,7 +326,9 @@ fn spend(
     // ★★ A spend leaves an ACCOUNT and lands against a POCKET. Liquid is
     //    untouched, because the money stopped being unearmarked when it was
     //    allocated, not when it was spent.
-    move_account(state, &account_of(params), -amount);
+    if let Some(a) = account_of(params) {
+        move_account(state, &a, -amount);
+    }
 
     // ★ Money left the pocket toward `payee`. Spending with no declared payee
     // names it "unknown" rather than inventing one — a crossing whose far side
@@ -402,7 +416,9 @@ fn unspend(
 
     let _ = state.decrement(&format!("{pocket_path}.spent"), &json!(amount), false);
     // The mirror of the spend: the money is back in the account it left.
-    move_account(state, &account_of(params), amount);
+    if let Some(a) = account_of(params) {
+        move_account(state, &a, amount);
+    }
 
     // The mirror of the spend's own movement: back from the payee into the
     // pocket. A refund really is money crossing the boundary inward.
@@ -646,7 +662,9 @@ fn place_unaccounted(
     events: &mut Vec<EmittedEvent>,
     _movements: &mut Vec<Movement>,
 ) -> OperatorResult {
-    let account = account_of(params);
+    // ★ "Not sure yet" is a real answer, and it gets a real name he can see
+    //   and move later, because this is a deliberate act rather than a default.
+    let account = account_of(params).unwrap_or_else(|| "unassigned".to_string());
     let gap = ((held(state) - in_accounts(state)) * 100.0).round() / 100.0;
 
     if gap.abs() < 0.005 {
