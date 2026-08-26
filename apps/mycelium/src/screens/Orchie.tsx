@@ -66,6 +66,7 @@ import {
   type TransferDto,
   type DeviceDto,
   type SkipLearnedDto,
+  type PersonHint,
 } from "../lib/engine";
 import { world } from "../lib/live";
 import { keyboardAware, watchViewport } from "../lib/viewport";
@@ -1014,6 +1015,111 @@ function QueueCard(props: { feed: FeedDto; onChanged: () => void }) {
           )}
         </Show>
       </div>
+    </Show>
+  );
+}
+
+/**
+ * "This number is somebody's tab."
+ *
+ * ★★★ A pocket tied to a real number stops being an envelope and becomes a
+ * running account with a person: money sent to them comes out of it, money
+ * received from them goes back into it, and the two net. Without the link the
+ * same person's money arrives as unrelated household income while their tab
+ * still shows everything outstanding — both halves wrong, and nothing saying so.
+ *
+ * ★★ Offered only where it makes sense: a message that actually printed a
+ * number, and only after something was really filed to a pocket. It never
+ * appears for a number already linked, because there is nothing to ask.
+ *
+ * ★★★ The number has to be typed in full, and the card says why rather than
+ * silently rejecting a paste of what is on screen. Messages print it masked;
+ * a mask is missing its middle, so linking one would claim an identity nobody
+ * actually gave and every later match would inherit the guess.
+ */
+function LinkNumberControl(props: { sustain: string; messageId: string; pocket: string }) {
+  const [hint, setHint] = createSignal<PersonHint | null>(null);
+  const [open, setOpen] = createSignal(false);
+  const [typed, setTyped] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [done, setDone] = createSignal(false);
+  const [failed, setFailed] = createSignal<string | null>(null);
+
+  createEffect(() => {
+    const id = props.messageId;
+    void engine
+      .personHint(props.sustain, id)
+      .then(setHint)
+      .catch(() => setHint(null));
+  });
+
+  const link = async () => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      const r = await engine.linkNumber(props.sustain, props.pocket, typed().trim());
+      if (r.verdict === "admitted") {
+        setDone(true);
+      } else {
+        setFailed(r.reason ?? "the engine refused it");
+      }
+    } catch (e) {
+      setFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Show when={hint()?.printed && !hint()?.pocket}>
+      {(_) => (
+        <Show
+          when={!done()}
+          fallback={
+            <p class={O.caption}>
+              linked · money to and from this number is {props.pocket}'s tab from now on
+            </p>
+          }
+        >
+          <Show
+            when={open()}
+            fallback={
+              <button
+                class={`${O.action.secondary} ${O.actionWide}`}
+                onClick={() => setOpen(true)}
+              >
+                this number is {props.pocket}'s tab
+              </button>
+            }
+          >
+            <div class={O.stack}>
+              <p class={O.caption}>
+                The message only shows {hint()?.printed}. Type the whole number, so it can be
+                matched with certainty rather than guessed at.
+              </p>
+              <input
+                class={O.input}
+                type="tel"
+                inputmode="tel"
+                placeholder="0712345678"
+                value={typed()}
+                onInput={(e) => setTyped(e.currentTarget.value)}
+              />
+              <Show when={failed()}>{(f) => <div class={O.errorBox}>{f()}</div>}</Show>
+              <button
+                class={`${O.action.primary} ${O.actionWide}`}
+                disabled={busy() || typed().trim().length < 9}
+                onClick={() => void link()}
+              >
+                {busy() ? "linking…" : `link to ${props.pocket}`}
+              </button>
+              <button class={O.linkish} onClick={() => setOpen(false)}>
+                not now
+              </button>
+            </div>
+          </Show>
+        </Show>
+      )}
     </Show>
   );
 }
@@ -2497,6 +2603,27 @@ function Classify(props: {
                 )}
               </Show>
             </div>
+
+            {/* ★★★ Whose tab this is. Offered next to the format memory
+                because they answer two different questions about the same
+                message: what SHAPE it is, and WHOSE money it was. */}
+            <Show when={v().verdict === "admitted" && props.messageId}>
+              {(_) => {
+                const pocket = () =>
+                  (confirmed() as Record<string, JsonValue> | null)?.["pocket_name"];
+                return (
+                  <Show when={typeof pocket() === "string" && pocket()}>
+                    {(p) => (
+                      <LinkNumberControl
+                        sustain={props.sustain}
+                        messageId={props.messageId!}
+                        pocket={p() as string}
+                      />
+                    )}
+                  </Show>
+                );
+              }}
+            </Show>
 
             {/* ★★★ "remember this format" — only after a real success, and only
                 for a captured message. A learned SPEND still asks next time. */}

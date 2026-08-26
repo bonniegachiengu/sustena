@@ -341,6 +341,13 @@ pub struct Capture<'a> {
     pub history: Option<(String, u32)>,
     /// The full raw message body, for the last-resort amount recovery.
     pub raw_text: Option<&'a str>,
+    /// The pocket this counterparty's NUMBER is tied to, if it is tied to one.
+    ///
+    /// ★★★ Resolved by the caller against live state, not looked up here, so
+    /// this pass stays a pure function of what it was handed. What it means is
+    /// settled: money to that number leaves that tab and money from it returns
+    /// to that tab, so there is nothing left to ask.
+    pub person_pocket: Option<String>,
 }
 
 /// **`ε → (o, θ)`.** One deterministic pass — see the module docs for the
@@ -432,6 +439,37 @@ pub fn infer<P: OperatorParams>(universe: &P, c: &Capture) -> Inference {
         // ★ A hint that eliminates EVERY candidate is no hint at all.
         if !hinted.is_empty() {
             ops = hinted;
+        }
+    }
+
+    // 3b · a linked number answers the operator AND the pocket at once
+    //
+    // ★★★ This is what a person pocket buys. Money in from a known number is
+    // otherwise ambiguous between income and a refund — two honest readings
+    // this module refuses to guess between — but a number tied to somebody's
+    // tab settles it: it is that tab being paid back, not new money earned.
+    // Money out is the mirror. Neither is a guess, because he said whose
+    // number it was.
+    //
+    // ★★ It never overrides a person. A pocket already answered stands, and the
+    // narrowing is skipped entirely when the operator was chosen by hand above.
+    if let Some(pocket) = c.person_pocket.clone().filter(|p| c.pockets.contains(p)) {
+        let received = c
+            .parsed_fields
+            .get("direction")
+            .and_then(|v| v.as_str())
+            .map_or_else(|| c.raw_text.is_some_and(reads_as_money_in), |d| d == "received");
+        let want = if received { "unspend" } else { "spend" };
+        let narrowed: Vec<String> = ops
+            .iter()
+            .filter(|op| op.rsplit('.').next() == Some(want))
+            .cloned()
+            .collect();
+        // ★ Only when that operator is actually on offer. A widget that cannot
+        //   emit it is not made to.
+        if !narrowed.is_empty() {
+            ops = narrowed;
+            facts.entry("pocket_name".into()).or_insert(serde_json::json!(pocket));
         }
     }
 

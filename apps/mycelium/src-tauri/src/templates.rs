@@ -120,6 +120,10 @@ pub fn definition(template: TemplateId) -> Definition {
         .with_operator("vendor.identify")
         .with_operator("vendor.suggest")
         .with_operator("vendor.remember")
+        // ★★★ A pocket tied to a real person's number, so money out to them and
+        //    money back from them meet in one running tab instead of landing as
+        //    a spend here and an unrelated lump of income there.
+        .with_operator("vendor.link_number")
         // Every Sustain that holds money holds this one.
         .with_invariant("liquid_non_negative", "finances.liquid.balance >= 0");
 

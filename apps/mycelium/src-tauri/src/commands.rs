@@ -1643,6 +1643,71 @@ pub fn reclassify_spend(
     Ok(result)
 }
 
+/// What a message says about whose tab it might be.
+///
+/// ★★ Asked by the card rather than carried on every capture, because it is
+/// only ever needed at the moment somebody is looking at one message.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct PersonHint {
+    /// The number as the message printed it — usually masked.
+    pub printed: Option<String>,
+    /// The pocket it is already tied to, if it is tied to one.
+    pub pocket: Option<String>,
+}
+
+/// Does this message carry a number, and is that number already somebody's tab?
+#[tauri::command(async)]
+#[specta::specta]
+pub fn person_hint(
+    world: State<'_, World>,
+    sustain_id: String,
+    message_id: String,
+) -> Result<PersonHint, String> {
+    let Some(state) = world.with(|i| i.get(&sustain_id).map(|s| s.state.clone())) else {
+        return Err(format!("no Sustain called '{sustain_id}'"));
+    };
+    let printed = world
+        .ingest()
+        .current()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|m| m.id == message_id)
+        .and_then(|m| printed_number(&m.parsed_fields));
+    let pocket = printed
+        .as_deref()
+        .and_then(|n| sustena_core::pocket_for_number(&sustena_core::State::new(state), n));
+    Ok(PersonHint { printed, pocket })
+}
+
+/// **Tie a phone number to a pocket, so money both ways lands in that tab.**
+///
+/// ★★★ Through the gate like everything else. The link changes what future
+/// money does, which makes it a decision the household records, not a setting
+/// tucked into a preferences file where the fold could never see it.
+///
+/// ★★ The number is typed in full on purpose. Messages print it masked, and a
+/// mask is missing its middle — linking one would claim an identity nobody
+/// actually gave, and every later match would inherit the guess.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn link_number(
+    world: State<'_, World>,
+    sustain_id: String,
+    pocket_name: String,
+    number: String,
+) -> Result<GateResult, String> {
+    let mut params = Map::new();
+    params.insert("pocket_name".into(), Value::String(pocket_name));
+    params.insert("number".into(), Value::String(number));
+
+    let Some((x, _)) =
+        world.call(&sustain_id, "vendor.link_number", &params).map_err(|e| e.to_string())?
+    else {
+        return Err(format!("no Sustain called '{sustain_id}'"));
+    };
+    Ok(GateResult::of("vendor.link_number", &x))
+}
+
 /// **Put this off until he remembers what it was.**
 ///
 /// ★★★ An honest defer, and a different act from setting something aside as
@@ -1672,6 +1737,24 @@ pub fn defer_message(
 #[specta::specta]
 pub fn ignore_message(world: State<'_, World>, message_id: String) -> Result<bool, String> {
     world.ingest().ignore(&message_id).map_err(|e| e.to_string())
+}
+
+/// The counterparty number a message printed, however it printed it.
+///
+/// ★★ `phone` when the rule captured one; otherwise the number a bank tucked
+/// into the name field, which several real shapes do. A mask counts — matching
+/// one against a linked number is exactly what `pocket_for_number` is for.
+pub(crate) fn printed_number(parsed: &BTreeMap<String, Value>) -> Option<String> {
+    if let Some(p) = parsed.get("phone").and_then(Value::as_str) {
+        if p.chars().any(|c| c.is_ascii_digit()) {
+            return Some(p.to_string());
+        }
+    }
+    let who = parsed.get("counterparty").and_then(Value::as_str)?;
+    let token = who
+        .split_whitespace()
+        .find(|w| w.chars().filter(char::is_ascii_digit).count() >= 4)?;
+    Some(token.to_string())
 }
 
 /// **`ε → (o, θ)`** — one inference pass over a narrated effect or a captured
@@ -1725,6 +1808,15 @@ pub fn orchie_infer(
         description.as_ref().and_then(|d| world.ingest().recall(&sustain_id, d))
     };
 
+    // ★★★ Whose tab this is, if it is anyone's.
+    //
+    // Read from the number the message itself printed, against the links he
+    // set up. A name is a description; a number is an identity, so this is
+    // checked before any history keyed on how a bank spelled somebody.
+    let person_pocket = printed_number(&parsed).and_then(|n| {
+        sustena_core::pocket_for_number(&sustena_core::State::new(state.clone()), &n)
+    });
+
     let capture = sustena_core::Capture {
         candidates: &candidates,
         pockets: &pockets,
@@ -1733,6 +1825,7 @@ pub fn orchie_infer(
         known: known_map,
         history,
         raw_text: raw.as_deref(),
+        person_pocket,
     };
 
     // ★★★ Rank the pockets he is offered by what he has actually done.

@@ -846,6 +846,32 @@ impl World {
 
         let mut params: Map<String, Value> = m.params.clone().into_iter().collect();
 
+        // ★★★ Money from a number he has tied to somebody's tab is that tab
+        //     being paid back, not new money earned.
+        //
+        //     Without this the commonest real arrival is the wrong entry
+        //     entirely: his sister sends back part of what he sent her, and it
+        //     files as household income while her tab still shows the full
+        //     amount outstanding. Both halves are then wrong, and nothing on
+        //     any screen says so. The link is him having already answered the
+        //     question, so it is answered here rather than asked again.
+        //
+        //     ★★ Only ever a redirect of something that was going to be applied
+        //     anyway. Nothing new starts applying itself because of this.
+        let mut operator = operator;
+        if operator == "budget.record_income" {
+            let linked = self.with(|i| i.get(sustain_id).map(|s| s.state.clone())).and_then(|st| {
+                crate::commands::printed_number(&m.parsed_fields)
+                    .and_then(|n| sustena_core::pocket_for_number(&sustena_core::State::new(st), &n))
+            });
+            if let Some(pocket) = linked {
+                operator = "budget.unspend".to_string();
+                params.insert("pocket_name".to_string(), Value::String(pocket));
+                // The income-only bookkeeping does not belong on a refund.
+                params.remove("source");
+            }
+        }
+
         // ★★★ The message that caused it, carried into the entry it creates.
         //
         // Money arriving from his own other account reads exactly like money
@@ -2697,3 +2723,125 @@ mod device_tests {
     }
 }
 
+#[cfg(test)]
+mod person_tab_tests {
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-tab-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    fn call(w: &World, op: &str, ps: Vec<(&str, Value)>) -> bool {
+        let params: Map<String, Value> = ps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        matches!(w.call("home", op, &params), Ok(Some((x, _))) if x.committed())
+    }
+
+    fn state(w: &World) -> Value {
+        w.with(|i| i.get("home").map(|s| s.state.clone())).expect("state")
+    }
+
+    /// A real received-money text, in the shape M-Pesa actually sends.
+    fn received_from(reference: &str, phone: &str) -> String {
+        format!(
+            "{reference} Confirmed. You have received Ksh1,000.00 from MARY NGIGI {phone} \
+             on 2/8/26 at 9:14 AM New M-PESA balance is Ksh5,000.00"
+        )
+    }
+
+    fn with_tab(name: &str) -> World {
+        let w = world(name);
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(10000.0)), ("source", json!("pay")),
+                          ("account", json!("mpesa"))]));
+        assert!(call(&w, "budget.add_pocket", vec![("pocket_name", json!("Aida"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("Aida")), ("amount", json!(3000.0))]));
+        w
+    }
+
+    fn tab(w: &World) -> f64 {
+        let p = state(&w).pointer("/finances/pockets/Aida").expect("pocket").clone();
+        p["allocated"].as_f64().unwrap() - p["spent"].as_f64().unwrap()
+    }
+
+    #[test]
+    fn money_from_a_linked_number_pays_down_the_tab_instead_of_becoming_income() {
+        // ★★★ The whole point, end to end through the real capture path.
+        //
+        //     Without the link this arrives as household income while her tab
+        //     still shows the full amount outstanding — both halves wrong, and
+        //     nothing on any screen saying so.
+        let w = with_tab("redirect");
+        assert!(call(&w, "vendor.link_number",
+                     vec![("number", json!("0726123961")), ("pocket_name", json!("Aida"))]));
+        assert!(call(&w, "budget.spend",
+                     vec![("pocket_name", json!("Aida")), ("amount", json!(2000.0)),
+                          ("account", json!("mpesa"))]));
+        assert_eq!(tab(&w), 1000.0);
+
+        let earned_before =
+            state(&w).pointer("/finances/income/monthly_total").and_then(Value::as_f64);
+
+        w.capture_at("home", "mpesa", &received_from("QGH7XJ4P2Q", "0726***961"), None)
+            .expect("capture");
+
+        assert_eq!(tab(&w), 2000.0, "her 1,000 came back off what she owes");
+        assert_eq!(
+            state(&w).pointer("/finances/income/monthly_total").and_then(Value::as_f64),
+            earned_before,
+            "and the household did not earn anything",
+        );
+    }
+
+    #[test]
+    fn money_from_an_unlinked_number_is_still_ordinary_income() {
+        // ★★★ Nothing new starts applying itself because of the link. An
+        //     arrival from anybody else behaves exactly as it did before.
+        let w = with_tab("untouched");
+        let earned_before =
+            state(&w).pointer("/finances/income/monthly_total").and_then(Value::as_f64).unwrap();
+        w.capture_at("home", "mpesa", &received_from("QGH7XJ4P2R", "0711000222"), None)
+            .expect("capture");
+        assert_eq!(
+            state(&w).pointer("/finances/income/monthly_total").and_then(Value::as_f64),
+            Some(earned_before + 1000.0),
+        );
+        assert_eq!(tab(&w), 3000.0, "and no tab moved");
+    }
+
+    #[test]
+    fn she_can_send_first_and_the_tab_simply_runs_in_his_favour() {
+        // ★★ Nothing has gone out yet. An envelope would refuse; a tab should
+        //    not, because a person sending first is an ordinary Tuesday.
+        let w = with_tab("she-first");
+        assert!(call(&w, "vendor.link_number",
+                     vec![("number", json!("0726123961")), ("pocket_name", json!("Aida"))]));
+        w.capture_at("home", "mpesa", &received_from("QGH7XJ4P2S", "0726***961"), None)
+            .expect("capture");
+        assert_eq!(tab(&w), 4000.0);
+    }
+
+    #[test]
+    fn the_redirected_entry_can_still_be_rebuilt_from_the_log() {
+        // ★★★ It went through the ordinary operator path, so the fold reproduces
+        //     it. A redirect that bypassed the log would be a private ledger.
+        let w = with_tab("folds");
+        assert!(call(&w, "vendor.link_number",
+                     vec![("number", json!("0726123961")), ("pocket_name", json!("Aida"))]));
+        w.capture_at("home", "mpesa", &received_from("QGH7XJ4P2T", "0726***961"), None)
+            .expect("capture");
+        // The state is never stored: loading it IS the fold.
+        let (rebuilt, _) = w.store().load_state("home").expect("fold");
+        assert_eq!(rebuilt.pointer("/finances/pockets/Aida"),
+                   state(&w).pointer("/finances/pockets/Aida"));
+    }
+}
