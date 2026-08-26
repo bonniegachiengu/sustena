@@ -1043,6 +1043,10 @@ pub struct TransferDto {
     pub refused: u32,
     /// A leg to one of his own numbers whose other half is not here.
     pub unpaired: u32,
+    /// ★★ Messages he had set aside that a shared reference brought back.
+    /// Counted so a queue that GREW can say why, the same way one that shrank
+    /// does.
+    pub reclaimed: u32,
     /// A partner leg that had already been filed as income and could not be
     /// taken back. Reported rather than left as a silent zero.
     pub blocked: u32,

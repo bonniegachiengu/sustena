@@ -93,6 +93,14 @@ pub struct IngestedMessage {
     /// which one got there first.
     #[serde(default)]
     pub same_event_as: Option<String>,
+    /// ★★★ Set aside once, then overturned by evidence.
+    ///
+    /// A skip is a person's judgement, and overturning one quietly would be
+    /// worse than leaving it wrong: the queue would change under him with no
+    /// account of why. Only a shared transaction reference does it — proof
+    /// that the thing he waved past was one half of a real movement of money.
+    #[serde(default)]
+    pub reclaimed: bool,
     /// ★★★ Set aside by a person as not a transaction.
     ///
     /// A real state, never a silent drop. The message stays in the log with
@@ -191,6 +199,9 @@ pub struct SelfMove {
     /// An income already filed for the other side of this same move, if the
     /// partner text arrived first and applied itself.
     pub undo_income: Option<String>,
+    /// ★★ True when he had set this aside and a reference brought it back.
+    /// Reported, so the queue never changes under him unexplained.
+    pub reclaimed_from_skip: bool,
 }
 
 /// Two texts that are one move between his own accounts.
@@ -235,6 +246,9 @@ pub struct TransferReport {
     pub blocked_by_applied_income: u32,
     /// Moves recognised from a single text that names both ends.
     pub self_moves: Vec<SelfMove>,
+    /// ★★ Skipped messages a reference brought back into play. Counted so a
+    /// queue that grew can say why, the same way one that shrank does.
+    pub reclaimed: u32,
 }
 
 /// The numbers a household recognises as its own.
@@ -612,6 +626,7 @@ impl Ingested {
             ignored: false,
             netted_with: None,
             same_event_as: None,
+            reclaimed: false,
             filed: Vec::new(),
             sent_at_ms,
             seq,
@@ -703,6 +718,7 @@ impl Ingested {
             to_account: to_account.to_string(),
             amount,
             undo_income: None,
+            reclaimed_from_skip: false,
         })
     }
 
@@ -730,9 +746,26 @@ impl Ingested {
         let queue: Vec<IngestedMessage> =
             everything.iter().filter(|m| m.needs_attention()).cloned().collect();
 
+        // ★★★ Legs he SKIPPED are candidates again, but only by reference.
+        //
+        //     He waved past both halves of a real transfer impatiently, and
+        //     they are gone from the queue for good under the old rule. A
+        //     shared transaction reference is proof they were one movement of
+        //     money, and proof is allowed to overturn a judgement where a
+        //     resemblance is not. Anything genuinely not a transaction quotes
+        //     no reference another message shares, so it stays where he put it.
+        let reclaimable: Vec<IngestedMessage> = everything
+            .iter()
+            .filter(|m| Self::was_skipped(m) && m.reference().is_some())
+            .cloned()
+            .collect();
+
         // Only the legs that name one of his own numbers are in play at all.
-        let mine: Vec<&IngestedMessage> =
-            queue.iter().filter(|m| addresses_own(m, &own)).collect();
+        let mine: Vec<&IngestedMessage> = queue
+            .iter()
+            .chain(reclaimable.iter())
+            .filter(|m| addresses_own(m, &own))
+            .collect();
         let all_mine: Vec<&IngestedMessage> =
             everything.iter().filter(|m| addresses_own(m, &own)).collect();
 
@@ -744,6 +777,13 @@ impl Ingested {
         let mut taken: BTreeSet<String> = BTreeSet::new();
         for m in &mine {
             let Some(mut mv) = self.self_move_of(m, &own) else { continue };
+            // ★★ A single text naming both ends is already proof enough of
+            //    WHAT it is; but if he set it aside, only a reference gets it
+            //    back, and `reclaimable` is already filtered on having one.
+            mv.reclaimed_from_skip = Self::was_skipped(m);
+            if mv.reclaimed_from_skip {
+                report.reclaimed += 1;
+            }
             // ★★ The other side may already have filed itself as income: an
             //    M-Pesa "you have received" for the same money, captured first.
             //    Left standing it would count his own money as earnings, so the
@@ -809,7 +849,11 @@ impl Ingested {
                 None => Vec::new(),
             };
             let partners: Vec<&&IngestedMessage> = if by_ref.is_empty() {
+                // ★★★ The weaker question may only be asked of messages still
+                //     in the queue. Overturning a skip on a resemblance would
+                //     be undoing his decision on a guess.
                 open.into_iter()
+                    .filter(|m| !Self::was_skipped(m))
                     .filter(|m| m.amount().map(|a| same_amount(a, amount)).unwrap_or(false))
                     .collect()
             } else {
@@ -1051,6 +1095,31 @@ impl Ingested {
         fs::write(&tmp, text)?;
         fs::rename(&tmp, self.skips_path())?;
         Ok(true)
+    }
+
+    /// Take back a skip, because its other half turned up.
+    ///
+    /// ★★★ Only ever called on a REFERENCE match. Amount and merchant say two
+    /// texts could be the same movement; a shared reference says they are, and
+    /// nothing weaker is allowed to overturn a decision he made. A genuine
+    /// "not a transaction" — a promo, a balance notice — quotes no reference
+    /// that another message shares, so it stays skipped for good.
+    pub fn reclaim(&self, id: &str) -> StoreResult<bool> {
+        let Some(mut m) = self.current()?.into_iter().find(|m| m.id == id) else {
+            return Ok(false);
+        };
+        if !m.ignored {
+            return Ok(false);
+        }
+        m.ignored = false;
+        m.reclaimed = true;
+        self.append_message(&m)?;
+        Ok(true)
+    }
+
+    /// Was this set aside by a person, rather than answered or netted?
+    pub fn was_skipped(m: &IngestedMessage) -> bool {
+        m.ignored && m.netted_with.is_none() && !m.resolved
     }
 
     /// Set a message aside as not a transaction.
@@ -1374,6 +1443,8 @@ pub struct NettingReport {
     /// before filings were recorded, or by an operator with no known inverse.
     /// Reported rather than guessed at.
     pub uncompensable: u32,
+    /// ★★ Skipped messages a reference brought back into play.
+    pub reclaimed: u32,
     /// ★★★ Case 3: no charge anywhere to match. The money came back and
     /// nobody can say from where, so it stays in the queue as a question
     /// rather than being quietly absorbed.
@@ -1407,15 +1478,29 @@ impl Ingested {
 
         // Reversals still waiting on an answer. One already paired or set aside
         // has had its answer.
-        let reversals: Vec<&IngestedMessage> =
-            all.iter().filter(|m| m.needs_attention() && looks_like_reversal(&m.raw_payload)).collect();
+        let reversals: Vec<&IngestedMessage> = all
+            .iter()
+            .filter(|m| looks_like_reversal(&m.raw_payload))
+            .filter(|m| {
+                m.needs_attention() || (Self::was_skipped(m) && m.reference().is_some())
+            })
+            .collect();
 
         // ★★ Two pools, searched in this order. An unfiled charge cancels for
         //    free and records nothing, so it is always the better match when
         //    both are available.
+        //
+        // ★★★ A charge he SKIPPED joins the first pool, but only if it quotes
+        //     a reference — and the reference test below is the only one that
+        //     may reach it. A refund whose charge he waved past is still a
+        //     refund; a promo he waved past is still a promo, and nothing in
+        //     here can drag it back.
         let unfiled: Vec<&IngestedMessage> = all
             .iter()
-            .filter(|m| m.needs_attention() && !looks_like_reversal(&m.raw_payload))
+            .filter(|m| !looks_like_reversal(&m.raw_payload))
+            .filter(|m| {
+                m.needs_attention() || (Self::was_skipped(m) && m.reference().is_some())
+            })
             .collect();
         let filed: Vec<&IngestedMessage> = all
             .iter()
@@ -1452,7 +1537,11 @@ impl Ingested {
                         return exact;
                     }
                 }
+                // ★★★ Resemblance may only be asked of messages still in the
+                //     queue. Overturning his decision on a likeness rather
+                //     than an identity is exactly the mistake this guards.
                 open.iter()
+                    .filter(|c| !Self::was_skipped(c))
                     .filter(|c| c.amount().map(|a| same_amount(a, amount)).unwrap_or(false))
                     .filter(|c| c.counterparty().map(|x| same_counterparty(x, who)).unwrap_or(false))
                     .map(|c| c.id.clone())
@@ -1526,6 +1615,13 @@ impl Ingested {
         let Some(mut m) = self.current()?.into_iter().find(|m| m.id == id) else {
             return Ok(());
         };
+        // ★★ A pair only ever forms on a reference once a skip is involved,
+        //    so settling one is also the moment the skip is overturned. The
+        //    record keeps both facts: it was set aside, and then it came back.
+        if m.ignored {
+            m.ignored = false;
+            m.reclaimed = true;
+        }
         m.netted_with = Some(partner.to_string());
         self.append_message(&m)
     }
@@ -2781,6 +2877,7 @@ mod reference_tests {
             resolved: false,
             netted_with: None,
             same_event_as: None,
+            reclaimed: false,
             filed: Vec::new(),
             ignored: false,
             sent_at_ms: None,
@@ -3025,5 +3122,176 @@ mod skip_rule_tests {
         let Capture::Stored(later) = ing.capture("h", "kcb", &card("999.00", "Shell"), &rules)
             .expect("later") else { panic!("stored") };
         assert!(!ing.is_skipped(&later).expect("check"), "it asks again");
+    }
+}
+
+#[cfg(test)]
+mod reclaim_tests {
+    use super::*;
+    use std::env;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-reclaim-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let ing = Ingested::at(scratch(name)).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    const REF: &str = "UHPB9480T9";
+    const HIS_KCB: &str = "135***140";
+    const HIS_MPESA: &str = "254***143";
+
+    fn knows_his_numbers(ing: &Ingested) {
+        ing.set_own_identifiers(&OwnIdentifiers {
+            mpesa: vec!["254700000143".into()],
+            kcb: vec!["1350000140".into()],
+        })
+        .expect("own");
+    }
+
+    fn kcb_leg(reference: &str) -> String {
+        format!(
+            "SEND TO M-PESA request of KES 2,000 from {HIS_KCB} to {HIS_MPESA} - \
+             BONVENTURE NGUGI MAINA has been received for processing. M-PESA REF: {reference}"
+        )
+    }
+
+    fn charge(amount: &str, who: &str) -> String {
+        format!(
+            "KES {amount} transaction made on KCB card 1234XXXXXXXX5678 at {who} \
+             on 1/8/26 12:25pm, Avail balance KES 59,055.00"
+        )
+    }
+
+    fn reversal(amount: &str, who: &str) -> String {
+        format!(
+            "Your card transaction of KES {amount} at {who} on 1/8/26 has been reversed. \
+             Avail balance KES 59,155.00"
+        )
+    }
+
+    #[test]
+    fn a_skipped_transfer_comes_back_when_its_reference_matches() {
+        // ★★★ Exactly what happened to him: he waved both halves past
+        //     impatiently, and under the old rule they were gone for good.
+        let (ing, rules) = store("transfer");
+        knows_his_numbers(&ing);
+        let Capture::Stored(m) = ing.capture("h", "kcb", &kcb_leg(REF), &rules).expect("capture")
+            else { panic!("stored") };
+        assert!(ing.ignore(&m.id).expect("skip"), "he set it aside");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert_eq!(r.self_moves.len(), 1, "the reference brought it back");
+        assert!(r.self_moves[0].reclaimed_from_skip);
+        assert_eq!(r.reclaimed, 1, "and it is counted, not silent");
+    }
+
+    #[test]
+    fn a_genuine_not_a_transaction_stays_skipped_for_good() {
+        // ★★★ The property that makes this safe. A promo quotes no reference
+        //     another message shares, so nothing in here can drag it back.
+        let (ing, rules) = store("promo");
+        knows_his_numbers(&ing);
+        let Capture::Stored(m) = ing
+            .capture("h", "kcb", "Dear customer, get a loan today. Reply STOP to opt out.", &rules)
+            .expect("capture") else { panic!("stored") };
+        assert!(ing.ignore(&m.id).expect("skip"));
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert!(r.self_moves.is_empty());
+        assert_eq!(r.reclaimed, 0);
+        let after = ing.current().expect("current");
+        assert!(after.iter().find(|x| x.id == m.id).expect("there").ignored, "still set aside");
+    }
+
+    #[test]
+    fn a_resemblance_never_overturns_a_skip() {
+        // ★★★ The heart of it. Amount and merchant say two texts COULD be the
+        //     same movement; only a reference says they ARE. A skip is his
+        //     judgement, and a likeness is not enough to undo one.
+        let (ing, rules) = store("resemblance");
+        let Capture::Stored(c) = ing.capture("h", "kcb", &charge("100.00", "Bolt KE"), &rules)
+            .expect("charge") else { panic!("stored") };
+        assert!(ing.ignore(&c.id).expect("skip"), "he set the charge aside");
+        ing.capture("h", "kcb", &reversal("100.00", "Bolt KE"), &rules).expect("refund");
+
+        let r = ing.net_reversals("h").expect("net");
+        assert!(
+            r.netted.is_empty(),
+            "same amount, same merchant, no reference — his decision stands"
+        );
+        let after = ing.current().expect("current");
+        assert!(after.iter().find(|x| x.id == c.id).expect("there").ignored);
+    }
+
+    #[test]
+    fn reclaiming_records_that_it_was_set_aside_and_came_back() {
+        // ★★ Both facts kept. "Why is this here again?" has an answer.
+        let (ing, rules) = store("record");
+        knows_his_numbers(&ing);
+        let Capture::Stored(m) = ing.capture("h", "kcb", &kcb_leg(REF), &rules).expect("capture")
+            else { panic!("stored") };
+        ing.ignore(&m.id).expect("skip");
+
+        assert!(ing.reclaim(&m.id).expect("reclaim"));
+        let after = ing.current().expect("current");
+        let x = after.iter().find(|x| x.id == m.id).expect("there");
+        assert!(!x.ignored, "back in play");
+        assert!(x.reclaimed, "and the record says why");
+        assert!(x.needs_attention(), "so it asks again");
+    }
+
+    #[test]
+    fn reclaiming_something_that_was_never_skipped_does_nothing() {
+        let (ing, rules) = store("noop");
+        let Capture::Stored(m) = ing.capture("h", "kcb", &charge("100.00", "Java"), &rules)
+            .expect("capture") else { panic!("stored") };
+        assert!(!ing.reclaim(&m.id).expect("reclaim"), "there was no decision to overturn");
+    }
+
+    #[test]
+    fn settling_a_reclaimed_pair_keeps_both_facts_on_the_record() {
+        // ★★ Netting a pair is also the moment a skip is overturned, and the
+        //    message keeps both: it was set aside, and then it came back.
+        let (ing, rules) = store("settle");
+        let Capture::Stored(c) = ing.capture("h", "kcb", &charge("100.00", "Java"), &rules)
+            .expect("charge") else { panic!("stored") };
+        let Capture::Stored(r) = ing.capture("h", "kcb", &reversal("100.00", "Java"), &rules)
+            .expect("refund") else { panic!("stored") };
+        ing.ignore(&c.id).expect("skip");
+
+        // Settle them by hand, as the caller does once the gate has spoken.
+        ing.mark_compensated(&r.id, &c.id).expect("settle");
+        let after = ing.current().expect("current");
+        let x = after.iter().find(|x| x.id == c.id).expect("there");
+        assert!(!x.ignored);
+        assert!(x.reclaimed, "it says it came back");
+        assert_eq!(x.netted_with.as_deref(), Some(r.id.as_str()));
+    }
+
+    #[test]
+    fn a_skipped_message_with_no_reference_is_not_even_a_candidate() {
+        // ★★ The pool is filtered on HAVING a reference, so a skipped message
+        //    without one never reaches the matching logic at all.
+        let (ing, rules) = store("noref");
+        knows_his_numbers(&ing);
+        let no_ref = format!(
+            "SEND TO M-PESA request of KES 2,000 from {HIS_KCB} to {HIS_MPESA} - \
+             BONVENTURE NGUGI MAINA has been received for processing."
+        );
+        let Capture::Stored(m) = ing.capture("h", "kcb", &no_ref, &rules).expect("capture")
+            else { panic!("stored") };
+        assert_eq!(m.reference(), None);
+        ing.ignore(&m.id).expect("skip");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert!(r.self_moves.is_empty(), "no reference, no way back");
+        assert_eq!(r.reclaimed, 0);
     }
 }
