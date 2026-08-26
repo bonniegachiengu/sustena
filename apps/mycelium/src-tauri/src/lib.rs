@@ -79,6 +79,8 @@ pub fn specta_builder() -> Builder {
         commands::learn_skip,
         commands::reclassify_spend,
         commands::defer_message,
+        commands::person_hint,
+        commands::link_number,
         commands::learn_rule,
         commands::get_feed,
         commands::orchie_infer,

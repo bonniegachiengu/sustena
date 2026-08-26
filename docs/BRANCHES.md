@@ -13,7 +13,42 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Live
 
-*(none open right now.)*
+### `feat/person-pockets` — open, off `dev` at `66af726`
+
+**State:** built, gate green (core 1,404 · host 214), frontend builds, installing.
+
+**A pocket can now be somebody, not just something.** `vendor.link_number` ties a
+real phone number to a pocket, and from then on money to that number comes OUT of
+that pocket and money from it goes BACK IN — one running tab that nets, rather
+than a spend in one place and an unrelated lump of income in another.
+
+Three findings, none of them visible from reading the code:
+
+- **`budget.unspend` was reporting success on a mutation that never happened.**
+  It called `state.decrement(..., allow_negative = false)` and discarded the
+  `Result`. Where the decrement was refused, the operator still returned `ok`:
+  the card said filed and the ledger said nothing. Found by a test that expected
+  a number to move and watched it stay. Now the refusal is returned.
+
+- **An envelope and a tab need different rules, and it is the pocket that
+  decides.** Taking back more than ever went out is meaningless for spending and
+  ordinary for a person — she sends first, or sends back more than she was sent.
+  `allow_negative` now follows `is_person_pocket`, which is derived from a link
+  existing rather than stored as a second flag that could disagree with it.
+
+- **A mask and a key are written in different dialects.** Messages print
+  `0726***961`; the key is the bare nine digits. Matching them straight fails on
+  the leading zero alone, which would have made the link useless for exactly the
+  messages it exists to route.
+
+**The design call worth disagreeing with:** a receive from a linked number is
+REDIRECTED automatically (it was already going to be applied — only *where* was
+in question, and filing it as income while her tab still showed everything
+outstanding made both halves wrong). A send is only PRE-FILLED and still waits
+for his tap. Nothing new started applying itself.
+
+**Left open:** the tab is a pocket like any other on screen. It nets correctly,
+but nothing yet says "this one is a person" or shows the two sides separately.
 
 ---
 

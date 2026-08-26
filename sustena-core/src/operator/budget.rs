@@ -409,10 +409,20 @@ fn unspend(
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
 
+    // ★★★ A person's tab runs both ways, and an envelope does not.
+    //
+    // For a spending pocket, taking back more than ever went out is
+    // meaningless — there is no such refund — and refusing is right. For a
+    // pocket tied to somebody's number it is an ordinary Tuesday: she sends
+    // before he does, or sends back more than he sent, and the tab is simply in
+    // his favour. Holding both to the envelope rule would make the commonest
+    // real case impossible to record, so the rule follows what the pocket IS.
+    let two_way = crate::operator::vendor::is_person_pocket(state, &pocket_name);
+
     // ★★★ The second clause of §V: an inverse that refuses at the states the
     // forward move produces is not an inverse. This refuses only where there
     // was never that much spending to undo, which is a different thing.
-    if amount > spent {
+    if amount > spent && !two_way {
         let mut result = OperatorResult::fail(
             format!(
                 "Refund of KES {amount:.0} is more than '{pocket_name}' has recorded as spent (KES {spent:.0})."
@@ -428,7 +438,15 @@ fn unspend(
         return result;
     }
 
-    let _ = state.decrement(&format!("{pocket_path}.spent"), &json!(amount), false);
+    // ★★★ Reporting success on a mutation that did not happen is the worst
+    //     kind of lie a money operator can tell — the card says filed, the
+    //     ledger says nothing. `allow_negative` follows what the pocket is, and
+    //     whatever the state refuses is refused out loud.
+    if let Err(e) =
+        state.decrement(&format!("{pocket_path}.spent"), &json!(amount), two_way)
+    {
+        return OperatorResult::fail(e.to_string(), "pocket_spent_sufficient");
+    }
     // The mirror of the spend: the money is back in the account it left.
     if let Some(a) = account_of(params) {
         move_account(state, &a, amount);
@@ -1189,5 +1207,92 @@ mod tests {
         assert_eq!(normalize_pocket_name("  Car-Repair!!  "), "Car_Repair");
         assert_eq!(normalize_pocket_name("food"), "food");
         assert_eq!(normalize_pocket_name("!!!"), "");
+    }
+}
+
+#[cfg(test)]
+mod person_tab_tests {
+    use super::*;
+    use crate::operator::{execute, Enforcement, Execution, Registry as Reg};
+
+    fn run(state: &Value, op: &str, ps: &[(&str, Value)]) -> Execution {
+        let reg = Reg::default();
+        let params: Map<String, Value> =
+            ps.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect();
+        execute(&reg, &reg.names(), &Enforcement::default(), state, op, &params)
+    }
+
+    fn household() -> Value {
+        json!({"finances": {
+            "liquid": {"balance": 10000.0},
+            "pockets": {"Aida": {"allocated": 3000.0, "spent": 0.0, "limit": 0.0},
+                        "food": {"allocated": 3000.0, "spent": 0.0, "limit": 0.0}},
+            "accounts": {}, "income": {"monthly_total": 0.0, "sources": []}}})
+    }
+
+    fn linked() -> Value {
+        let ex = run(&household(), "vendor.link_number",
+                     &[("number", json!("0726123961")), ("pocket_name", json!("Aida"))]);
+        assert!(ex.committed(), "{:?}", ex.result.reason);
+        ex.state
+    }
+
+    fn tab(state: &Value, pocket: &str) -> f64 {
+        let p = state.pointer(&format!("/finances/pockets/{pocket}")).unwrap();
+        p["allocated"].as_f64().unwrap() - p["spent"].as_f64().unwrap()
+    }
+
+    #[test]
+    fn a_send_and_a_receive_net_against_each_other_in_one_tab() {
+        // ★★★ The thing he actually asked for: a running tab with one person,
+        //     backed by real transactions, not a spend here and an unrelated
+        //     lump of income there.
+        let sent = run(&linked(), "budget.spend",
+                       &[("pocket_name", json!("Aida")), ("amount", json!(2000.0))]);
+        assert!(sent.committed(), "{:?}", sent.result.reason);
+        assert_eq!(tab(&sent.state, "Aida"), 1000.0, "3000 allocated, 2000 gone to her");
+
+        let back = run(&sent.state, "budget.unspend",
+                       &[("pocket_name", json!("Aida")), ("amount", json!(500.0))]);
+        assert!(back.committed(), "{:?}", back.result.reason);
+        assert_eq!(tab(&back.state, "Aida"), 1500.0, "she sent 500 back");
+    }
+
+    #[test]
+    fn she_can_send_before_he_does_and_the_tab_runs_in_his_favour() {
+        // ★★★ The case an envelope cannot express. Nothing has gone out yet, so
+        //     the envelope rule would refuse — but a person sending first is an
+        //     ordinary Tuesday, and refusing would make the commonest real
+        //     arrival impossible to record at all.
+        let ex = run(&linked(), "budget.unspend",
+                     &[("pocket_name", json!("Aida")), ("amount", json!(1000.0))]);
+        assert!(ex.committed(), "{:?}", ex.result.reason);
+        assert_eq!(tab(&ex.state, "Aida"), 4000.0, "3000 budgeted plus 1000 she sent");
+        assert_eq!(
+            ex.state.pointer("/finances/pockets/Aida/spent").and_then(Value::as_f64),
+            Some(-1000.0),
+            "a tab in his favour is negative spending, and says so plainly",
+        );
+    }
+
+    #[test]
+    fn an_ordinary_envelope_still_refuses_a_refund_that_never_happened() {
+        // ★★★ The rule follows what the pocket IS. Relaxing it everywhere would
+        //     let a typo invent money in a spending pocket, which is exactly
+        //     what the guard is for.
+        let ex = run(&household(), "budget.unspend",
+                     &[("pocket_name", json!("food")), ("amount", json!(1000.0))]);
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("pocket_spent_sufficient"));
+    }
+
+    #[test]
+    fn a_tab_in_his_favour_still_balances() {
+        // ★★ Both sides of the ledger agree even when the envelope reads
+        //    negative — otherwise the gate would refuse the very case above.
+        let ex = run(&linked(), "budget.unspend",
+                     &[("pocket_name", json!("Aida")), ("amount", json!(1000.0))]);
+        assert!(ex.committed());
+        assert!(!ex.movements.is_empty(), "it declared what it moved");
     }
 }

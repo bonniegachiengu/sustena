@@ -480,6 +480,36 @@ async deferMessage(sustainId: string, messageId: string) : Promise<Result<boolea
 }
 },
 /**
+ * Does this message carry a number, and is that number already somebody's tab?
+ */
+async personHint(sustainId: string, messageId: string) : Promise<Result<PersonHint, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("person_hint", { sustainId, messageId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **Tie a phone number to a pocket, so money both ways lands in that tab.**
+ * 
+ * ★★★ Through the gate like everything else. The link changes what future
+ * money does, which makes it a decision the household records, not a setting
+ * tucked into a preferences file where the fold could never see it.
+ * 
+ * ★★ The number is typed in full on purpose. Messages print it masked, and a
+ * mask is missing its middle — linking one would claim an identity nobody
+ * actually gave, and every later match would inherit the guess.
+ */
+async linkNumber(sustainId: string, pocketName: string, number: string) : Promise<Result<GateResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("link_number", { sustainId, pocketName, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * **Remember this format** — synthesise a rule from a confirmed correction.
  * 
  * ★★ Verified before it is ever added: it must be well-typed, must match the
@@ -1647,6 +1677,21 @@ export type PeerShelfDto = { peer: string; handle: string; address: string; pack
  * it does not appear as a peer with nothing to offer.
  */
 unreachable?: string | null }
+/**
+ * What a message says about whose tab it might be.
+ * 
+ * ★★ Asked by the card rather than carried on every capture, because it is
+ * only ever needed at the moment somebody is looking at one message.
+ */
+export type PersonHint = { 
+/**
+ * The number as the message printed it — usually masked.
+ */
+printed: string | null; 
+/**
+ * The pocket it is already tied to, if it is tied to one.
+ */
+pocket: string | null }
 /**
  * A pocket, at summary scale.
  * 

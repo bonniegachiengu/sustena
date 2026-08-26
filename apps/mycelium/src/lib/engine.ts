@@ -58,10 +58,12 @@ import {
   type SustainSummary,
   type TemplateId,
   type WorldDto,
+  type PersonHint,
 } from "../bindings";
 
 export type {
   AccessDto,
+  PersonHint,
   AuthoredDefinition,
   Branch,
   CouncilOutcomeDto,
@@ -198,6 +200,16 @@ export const engine = {
     amount: number,
   ): Promise<GateResult> =>
     unwrap(await commands.reclassifySpend(sustainId, messageId, fromPocket, toPocket, amount)),
+  /** Does this message carry a number, and is it already somebody's tab? */
+  personHint: async (sustainId: string, messageId: string): Promise<PersonHint> =>
+    unwrap(await commands.personHint(sustainId, messageId)),
+  /** Tie a phone number to a pocket, so money both ways lands in that tab. */
+  linkNumber: async (
+    sustainId: string,
+    pocketName: string,
+    number: string,
+  ): Promise<GateResult> =>
+    unwrap(await commands.linkNumber(sustainId, pocketName, number)),
   /** Put a message off until he remembers. It returns at the top next open. */
   deferMessage: async (sustainId: string, messageId: string): Promise<boolean> =>
     unwrap(await commands.deferMessage(sustainId, messageId)),

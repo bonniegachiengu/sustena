@@ -302,6 +302,7 @@ pub use operative::{
     Dominance, LegalMove, NashOutcome, Objective, Omega, Operative, OperativeError, Proposal,
     Ranking, Sense, Shared, StatePoint, Utility,
 };
+pub use operator::vendor::{is_person_pocket, person_key, pocket_for_number};
 pub use operator::{
     execute, execute_admitted, execute_afforded, execute_as, Authorization, Enforcement, Execution,
     OperatorMeta,
