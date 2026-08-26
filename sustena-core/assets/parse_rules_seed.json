@@ -1,10 +1,10 @@
 {
  "mpesa": [
   {
-   "id": "mpesa_received",
+   "id": "mpesa_fuliza_borrow",
    "source": "mpesa",
    "version": 1,
-   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s+You have received\\s+Ksh(?P<amount>[\\d,]+\\.?\\d*)\\s+from\\s+(?P<name>[A-Za-z ]+?)(?:\\s+(?P<phone>2\\d{9,11}))?\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}\\s*[APap][Mm])\\.?\\s+New M-PESA balance is Ksh(?P<balance>[\\d,]+\\.?\\d*)",
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s*Fuliza M-PESA amount is Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\.\\s*Access Fee charged Ksh\\s*(?P<fee>[\\d,]+(?:\\.\\d{1,2})?)\\.\\s*Total Fuliza M-PESA outstanding amount is Ksh\\s*(?P<outstanding>[\\d,]+(?:\\.\\d{1,2})?)",
    "extract": {
     "ref": {
      "type": "string",
@@ -16,9 +16,204 @@
      "group": "amount",
      "value": null
     },
-    "balance_after": {
+    "access_fee": {
      "type": "amount",
-     "group": "balance",
+     "group": "fee",
+     "value": null
+    },
+    "outstanding": {
+     "type": "amount",
+     "group": "outstanding",
+     "value": null
+    },
+    "counterparty": {
+     "type": "literal",
+     "group": null,
+     "value": "Fuliza M-PESA"
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "received"
+    },
+    "instrument": {
+     "type": "literal",
+     "group": null,
+     "value": "fuliza"
+    }
+   },
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "Fuliza covered {amount} with an access fee of {access_fee}. Outstanding {outstanding}.",
+   "trust": "shipped",
+   "provenance": "learned_from_real_corpus_2026_08_26",
+   "examples": [
+    "ABC1234567 Confirmed. Fuliza M-PESA amount is Ksh500.00. Access Fee charged Ksh35.00. Total Fuliza M-PESA outstanding amount is Ksh535.00 due on 2/9/26."
+   ]
+  },
+  {
+   "id": "mpesa_fuliza_interest",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s*Fuliza M-PESA amount is Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\.\\s*Interest charged Ksh\\s*(?P<fee>[\\d,]+(?:\\.\\d{1,2})?)\\.\\s*Total Fuliza M-PESA outstanding amount is Ksh\\s*(?P<outstanding>[\\d,]+(?:\\.\\d{1,2})?)",
+   "extract": {
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
+    },
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "interest": {
+     "type": "amount",
+     "group": "fee",
+     "value": null
+    },
+    "outstanding": {
+     "type": "amount",
+     "group": "outstanding",
+     "value": null
+    },
+    "counterparty": {
+     "type": "literal",
+     "group": null,
+     "value": "Fuliza M-PESA"
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "received"
+    },
+    "instrument": {
+     "type": "literal",
+     "group": null,
+     "value": "fuliza"
+    }
+   },
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "Fuliza covered {amount} with interest of {interest}. Outstanding {outstanding}.",
+   "trust": "shipped",
+   "provenance": "learned_from_real_corpus_2026_08_26",
+   "examples": [
+    "ABC1234567 Confirmed. Fuliza M-PESA amount is Ksh500.00. Interest charged Ksh10.00. Total Fuliza M-PESA outstanding amount is Ksh510.00 due on 2/9/26."
+   ]
+  },
+  {
+   "id": "mpesa_fuliza_repay",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+from\\s+(?P<name>.+?)\\s*to\\s+.*?M-PESA\\.\\s*(?:Your\\s+)?[Aa]vailable Fuliza M-PESA limit is Ksh\\s*(?P<limit>[\\d,]+(?:\\.\\d{1,2})?)",
+   "extract": {
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
+    },
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "fuliza_limit": {
+     "type": "amount",
+     "group": "limit",
+     "value": null
+    },
+    "counterparty": {
+     "type": "literal",
+     "group": null,
+     "value": "Fuliza M-PESA"
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "sent"
+    },
+    "instrument": {
+     "type": "literal",
+     "group": null,
+     "value": "fuliza"
+    }
+   },
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "{amount} went to Fuliza. Your limit is back to {fuliza_limit}.",
+   "trust": "shipped",
+   "provenance": "learned_from_real_corpus_2026_08_26",
+   "examples": [
+    "ABC1234567 Confirmed. Ksh200.00 from JOHN DOE to Fuliza M-PESA. Your available Fuliza M-PESA limit is Ksh1,000.00. Your M-PESA balance is 50.00."
+   ]
+  },
+  {
+   "id": "mpesa_fuliza_statement",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "Dear\\s+\\S+,\\s*your outstanding Fuliza M-PESA amount is Ksh\\s*(?P<outstanding>[\\d,]+(?:\\.\\d{1,2})?)",
+   "extract": {
+    "outstanding": {
+     "type": "amount",
+     "group": "outstanding",
+     "value": null
+    },
+    "counterparty": {
+     "type": "literal",
+     "group": null,
+     "value": "Fuliza M-PESA"
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "none"
+    },
+    "instrument": {
+     "type": "literal",
+     "group": null,
+     "value": "fuliza"
+    }
+   },
+   "status": "informational",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "Fuliza reminder: {outstanding} outstanding. Nothing moved.",
+   "trust": "shipped",
+   "provenance": "learned_from_real_corpus_2026_08_26",
+   "examples": [
+    "Dear DOREEN, your outstanding Fuliza M-PESA amount is Ksh535.00 due on 2/9/26. Your available Fuliza M-PESA limit is Ksh1,000.00."
+   ]
+  },
+  {
+   "id": "mpesa_pochi_received",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.?\\s*You have received Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+from\\s+(?P<name>.+?)\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>[\\d:]+\\s*[APap]\\.?[Mm]\\.?)\\s*New business balance is Ksh\\s*(?P<balance>[\\d,]+(?:\\.\\d{1,2})?)",
+   "extract": {
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
+    },
+    "amount": {
+     "type": "amount",
+     "group": "amount",
      "value": null
     },
     "counterparty": {
@@ -26,38 +221,40 @@
      "group": "name",
      "value": null
     },
-    "phone": {
-     "type": "string",
-     "group": "phone",
+    "balance_after": {
+     "type": "amount",
+     "group": "balance",
      "value": null
     },
     "direction": {
      "type": "literal",
      "group": null,
      "value": "received"
+    },
+    "instrument": {
+     "type": "literal",
+     "group": null,
+     "value": "pochi"
     }
    },
-   "status": "mapped",
-   "operator": "budget.record_income",
-   "params": {
-    "amount": "$amount",
-    "source": "M-Pesa: {counterparty}",
-    "frequency": "once"
-   },
-   "flags": [],
-   "reason_template": "Money received — mapped to budget.record_income (unambiguous; income always credits liquid balance).",
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "{amount} into your Pochi business balance from {counterparty}.",
    "trust": "shipped",
-   "provenance": "sustena_core",
+   "provenance": "learned_from_real_corpus_2026_08_26",
    "examples": [
-    "QGH7XJ4P2Q Confirmed. You have received Ksh1,500.00 from JOHN KAMAU 254712345678 on 2/8/26 at 10:15 AM. New M-PESA balance is Ksh12,050.00",
-    "UHIE73CBRB Confirmed. You have received Ksh1,000.00 from mary ngigi on 26/8/26 at 9:15 AM. New M-PESA balance is Ksh5,000.00"
+    "ABC1234567 Confirmed.You have received Ksh300.00 from JANE DOE on 2/8/26 at 4:30 PM New business balance is Ksh1,200.00."
    ]
   },
   {
-   "id": "mpesa_paybill",
+   "id": "mpesa_pochi_withdraw",
    "source": "mpesa",
    "version": 1,
-   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s+Ksh(?P<amount>[\\d,]+\\.?\\d*)\\s+paid to\\s+(?P<business>[A-Za-z0-9 ]+?)\\s+for account\\s+(?P<account>\\S+)\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}\\s*[APap][Mm])\\.?\\s+New M-PESA balance is Ksh(?P<balance>[\\d,]+\\.?\\d*)",
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed,?\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+has been moved from\\s+(?P<what>.+?)\\s+on\\s+(?P<date>\\S+).*?New (?:Pochi|business) balance is Ksh\\s*(?P<pochi>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
    "extract": {
     "ref": {
      "type": "string",
@@ -69,43 +266,50 @@
      "group": "amount",
      "value": null
     },
-    "balance_after": {
+    "pochi_balance": {
      "type": "amount",
-     "group": "balance",
+     "group": "pochi",
+     "value": null
+    },
+    "transaction_cost": {
+     "type": "amount",
+     "group": "cost",
      "value": null
     },
     "counterparty": {
-     "type": "string",
-     "group": "business",
-     "value": null
-    },
-    "account": {
-     "type": "string",
-     "group": "account",
-     "value": null
+     "type": "literal",
+     "group": null,
+     "value": "Pochi la Biashara"
     },
     "direction": {
      "type": "literal",
      "group": null,
-     "value": "sent"
+     "value": "none"
+    },
+    "instrument": {
+     "type": "literal",
+     "group": null,
+     "value": "pochi"
     }
    },
    "status": "parsed_unmapped",
    "operator": null,
    "params": {},
-   "flags": [],
-   "reason_template": "Paybill payment of KES {amount:,.2f} to {counterparty} recognised, but which pocket to spend from isn't determined automatically — resolve manually.",
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "{amount} moved between your Pochi and M-PESA. Both are yours.",
    "trust": "shipped",
-   "provenance": "sustena_core",
+   "provenance": "learned_from_real_corpus_2026_08_26",
    "examples": [
-    "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIROBI WATER for account 998877 on 2/8/26 at 4:30 PM. New M-PESA balance is Ksh12,050.00"
+    "ABC1234567 Confirmed, Ksh500.00 has been moved from your Pochi to your M-PESA account on 2/8/26 at 4:30 PM.. New Pochi balance is Ksh700.00. New M-PESA balance is Ksh900.00. Transaction cost, Ksh0.00."
    ]
   },
   {
-   "id": "mpesa_buygoods",
+   "id": "mpesa_mshwari_withdraw",
    "source": "mpesa",
    "version": 1,
-   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s+Ksh(?P<amount>[\\d,]+\\.?\\d*)\\s+paid to\\s+(?P<business>[A-Za-z0-9 ]+?)\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}\\s*[APap][Mm])\\.?\\s+New M-PESA balance is Ksh(?P<balance>[\\d,]+\\.?\\d*)",
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.?\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+transferred from\\s+(?P<what>.+?)\\s+on\\s+(?P<date>\\S+).*?M-Shwari balance is Ksh\\s*(?P<mshwari>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
    "extract": {
     "ref": {
      "type": "string",
@@ -117,38 +321,50 @@
      "group": "amount",
      "value": null
     },
-    "balance_after": {
+    "mshwari_balance": {
      "type": "amount",
-     "group": "balance",
+     "group": "mshwari",
+     "value": null
+    },
+    "transaction_cost": {
+     "type": "amount",
+     "group": "cost",
      "value": null
     },
     "counterparty": {
-     "type": "string",
-     "group": "business",
-     "value": null
+     "type": "literal",
+     "group": null,
+     "value": "M-Shwari"
     },
     "direction": {
      "type": "literal",
      "group": null,
-     "value": "sent"
+     "value": "none"
+    },
+    "instrument": {
+     "type": "literal",
+     "group": null,
+     "value": "mshwari"
     }
    },
    "status": "parsed_unmapped",
    "operator": null,
    "params": {},
-   "flags": [],
-   "reason_template": "Till payment of KES {amount:,.2f} to {counterparty} recognised, but which pocket to spend from isn't determined automatically — resolve manually.",
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "{amount} out of M-Shwari savings. Both accounts are yours.",
    "trust": "shipped",
-   "provenance": "sustena_core",
+   "provenance": "learned_from_real_corpus_2026_08_26",
    "examples": [
-    "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIVAS SUPERMARKET on 20/7/26 at 4:30 PM. New M-PESA balance is Ksh12,050.00"
+    "ABC1234567 Confirmed.Ksh1,000.00 transferred from M-Shwari on 2/8/26 at 4:30 PM. M-Shwari balance is Ksh500.00 .M-PESA balance is Ksh1,500.00 .Transaction cost Ksh.0.00"
    ]
   },
   {
-   "id": "mpesa_sent",
+   "id": "mpesa_mshwari_deposit",
    "source": "mpesa",
    "version": 1,
-   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s+Ksh(?P<amount>[\\d,]+\\.?\\d*)\\s+sent to\\s+(?P<name>[A-Za-z ]+?)\\s+(?P<phone>2\\d{9,11})\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}\\s*[APap][Mm])\\.?\\s+New M-PESA balance is Ksh(?P<balance>[\\d,]+\\.?\\d*)",
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.?\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+transferred to\\s+(?P<what>.+?)\\s+on\\s+(?P<date>\\S+).*?M-Shwari saving account balance is Ksh\\s*(?P<mshwari>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
    "extract": {
     "ref": {
      "type": "string",
@@ -160,86 +376,50 @@
      "group": "amount",
      "value": null
     },
-    "balance_after": {
+    "mshwari_balance": {
      "type": "amount",
-     "group": "balance",
+     "group": "mshwari",
+     "value": null
+    },
+    "transaction_cost": {
+     "type": "amount",
+     "group": "cost",
      "value": null
     },
     "counterparty": {
-     "type": "string",
-     "group": "name",
-     "value": null
-    },
-    "phone": {
-     "type": "string",
-     "group": "phone",
-     "value": null
+     "type": "literal",
+     "group": null,
+     "value": "M-Shwari"
     },
     "direction": {
      "type": "literal",
      "group": null,
-     "value": "sent"
+     "value": "none"
+    },
+    "instrument": {
+     "type": "literal",
+     "group": null,
+     "value": "mshwari"
     }
    },
    "status": "parsed_unmapped",
    "operator": null,
    "params": {},
-   "flags": [],
-   "reason_template": "Money sent of KES {amount:,.2f} to {counterparty} recognised, but which pocket to spend from isn't determined automatically — resolve manually.",
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "{amount} into M-Shwari savings. Both accounts are yours.",
    "trust": "shipped",
-   "provenance": "sustena_core",
+   "provenance": "learned_from_real_corpus_2026_08_26",
    "examples": [
-    "QGH7XJ4P2Q Confirmed. Ksh1,000.00 sent to MARY WANJIRU 254798765432 on 2/8/26 at 9:00 AM. New M-PESA balance is Ksh12,050.00"
-   ]
-  },
-  {
-   "id": "mpesa_withdraw",
-   "source": "mpesa",
-   "version": 1,
-   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s+Ksh(?P<amount>[\\d,]+\\.?\\d*)\\s+withdrawn from\\s+(?P<agent>[A-Za-z0-9 \\-]+?)\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}\\s*[APap][Mm])\\.?\\s+New M-PESA balance is Ksh(?P<balance>[\\d,]+\\.?\\d*)",
-   "extract": {
-    "ref": {
-     "type": "string",
-     "group": "ref",
-     "value": null
-    },
-    "amount": {
-     "type": "amount",
-     "group": "amount",
-     "value": null
-    },
-    "balance_after": {
-     "type": "amount",
-     "group": "balance",
-     "value": null
-    },
-    "counterparty": {
-     "type": "prefix_if_missing",
-     "group": "agent",
-     "value": "Agent"
-    },
-    "direction": {
-     "type": "literal",
-     "group": null,
-     "value": "sent"
-    }
-   },
-   "status": "parsed_unmapped",
-   "operator": null,
-   "params": {},
-   "flags": [],
-   "reason_template": "Cash withdrawal of KES {amount:,.2f} to {counterparty} recognised, but which pocket to spend from isn't determined automatically — resolve manually.",
-   "trust": "shipped",
-   "provenance": "sustena_core",
-   "examples": [
-    "QGH7XJ4P2Q Confirmed. Ksh2,000.00 withdrawn from Agent 123456 - TOWN SHOP on 2/8/26 at 1:00 PM. New M-PESA balance is Ksh10,050.00"
+    "ABC1234567 Confirmed.Ksh1,000.00 transferred to M-Shwari on 2/8/26 at 4:30 PM. M-PESA balance is Ksh500.00 .New M-Shwari saving account balance is Ksh2,500.00. Transaction cost Ksh.0.00"
    ]
   },
   {
    "id": "mpesa_paybill_sent",
    "source": "mpesa",
    "version": 1,
-   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s+Ksh(?P<amount>[\\d,]+\\.?\\d*)\\s+sent to\\s+(?P<business>[A-Za-z0-9 ]+?)\\s+for account\\s+(?P<account>\\S+)\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}\\s*[APap][Mm])\\.?\\s+New M-PESA balance is Ksh(?P<balance>[\\d,]+\\.?\\d*)(?:\\.\\s*Transaction cost,?\\s*Ksh(?P<cost>[\\d,]+\\.?\\d*))?",
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+sent to\\s+(?P<business>.+?)\\s+for account\\s+(?P<account>\\S+)\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>[\\d:]+\\s*[APap]\\.?[Mm]\\.?).*?New M-PESA balance is Ksh\\s*(?P<balance>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
    "extract": {
     "ref": {
      "type": "string",
@@ -292,10 +472,262 @@
    ]
   },
   {
+   "id": "mpesa_paybill",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s+Ksh(?P<amount>[\\d,]+\\.?\\d*)\\s+paid to\\s+(?P<business>[A-Za-z0-9 ]+?)\\s+for account\\s+(?P<account>\\S+)\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}\\s*[APap][Mm])\\.?\\s+New M-PESA balance is Ksh(?P<balance>[\\d,]+\\.?\\d*)",
+   "extract": {
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
+    },
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "balance_after": {
+     "type": "amount",
+     "group": "balance",
+     "value": null
+    },
+    "counterparty": {
+     "type": "string",
+     "group": "business",
+     "value": null
+    },
+    "account": {
+     "type": "string",
+     "group": "account",
+     "value": null
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "sent"
+    }
+   },
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [],
+   "reason_template": "Paybill payment of KES {amount:,.2f} to {counterparty} recognised, but which pocket to spend from isn't determined automatically — resolve manually.",
+   "trust": "shipped",
+   "provenance": "sustena_core",
+   "examples": [
+    "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIROBI WATER for account 998877 on 2/8/26 at 4:30 PM. New M-PESA balance is Ksh12,050.00"
+   ]
+  },
+  {
+   "id": "mpesa_sent",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+sent to\\s+(?P<name>.+?)\\s+(?P<phone>(?:254|\\+254|0)\\d{8,11})\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>[\\d:]+\\s*[APap]\\.?[Mm]\\.?).*?New M-PESA balance is Ksh\\s*(?P<balance>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
+   "extract": {
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
+    },
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "balance_after": {
+     "type": "amount",
+     "group": "balance",
+     "value": null
+    },
+    "counterparty": {
+     "type": "string",
+     "group": "name",
+     "value": null
+    },
+    "phone": {
+     "type": "string",
+     "group": "phone",
+     "value": null
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "sent"
+    },
+    "transaction_cost": {
+     "type": "amount",
+     "group": "cost",
+     "value": null
+    }
+   },
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [],
+   "reason_template": "Money sent of KES {amount:,.2f} to {counterparty} recognised, but which pocket to spend from isn't determined automatically — resolve manually.",
+   "trust": "shipped",
+   "provenance": "sustena_core",
+   "examples": [
+    "QGH7XJ4P2Q Confirmed. Ksh1,000.00 sent to MARY WANJIRU 254798765432 on 2/8/26 at 9:00 AM. New M-PESA balance is Ksh12,050.00"
+   ]
+  },
+  {
+   "id": "mpesa_buygoods",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+paid to\\s+(?P<business>.+?)\\.?\\s*on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>[\\d:]+\\s*[APap]\\.?[Mm]\\.?)\\s*New M-PESA balance is Ksh\\s*(?P<balance>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
+   "extract": {
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
+    },
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "balance_after": {
+     "type": "amount",
+     "group": "balance",
+     "value": null
+    },
+    "counterparty": {
+     "type": "string",
+     "group": "business",
+     "value": null
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "sent"
+    },
+    "transaction_cost": {
+     "type": "amount",
+     "group": "cost",
+     "value": null
+    }
+   },
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [],
+   "reason_template": "Till payment of KES {amount:,.2f} to {counterparty} recognised, but which pocket to spend from isn't determined automatically — resolve manually.",
+   "trust": "shipped",
+   "provenance": "sustena_core",
+   "examples": [
+    "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIVAS SUPERMARKET on 20/7/26 at 4:30 PM. New M-PESA balance is Ksh12,050.00"
+   ]
+  },
+  {
+   "id": "mpesa_sent_business",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+sent to\\s+(?P<name>.+?)\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>[\\d:]+\\s*[APap]\\.?[Mm]\\.?).*?New M-PESA balance is Ksh\\s*(?P<balance>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
+   "extract": {
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
+    },
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "counterparty": {
+     "type": "string",
+     "group": "name",
+     "value": null
+    },
+    "balance_after": {
+     "type": "amount",
+     "group": "balance",
+     "value": null
+    },
+    "transaction_cost": {
+     "type": "amount",
+     "group": "cost",
+     "value": null
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "sent"
+    }
+   },
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "{amount} sent to {counterparty}. Which pocket is yours to decide.",
+   "trust": "shipped",
+   "provenance": "learned_from_real_corpus_2026_08_26",
+   "examples": [
+    "ABC1234567 Confirmed. Ksh150.00 sent to SAFARICOM DATA BUNDLES on 2/8/26 at 4:30 PM. New M-PESA balance is Ksh900.00. Transaction cost, Ksh0.00."
+   ]
+  },
+  {
+   "id": "mpesa_received",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.?\\s*You have received Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+from\\s+(?P<name>[A-Za-z][A-Za-z .'-]*?)\\s*(?P<phone>[\\d*][\\d*\\s]{2,18})?\\s*on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>[\\d:]+\\s*[APap]\\.?[Mm]\\.?)\\s*New M-PESA balance is Ksh\\s*(?P<balance>[\\d,]+(?:\\.\\d{1,2})?)",
+   "extract": {
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
+    },
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "balance_after": {
+     "type": "amount",
+     "group": "balance",
+     "value": null
+    },
+    "counterparty": {
+     "type": "string",
+     "group": "name",
+     "value": null
+    },
+    "phone": {
+     "type": "string",
+     "group": "phone",
+     "value": null
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "received"
+    }
+   },
+   "status": "mapped",
+   "operator": "budget.record_income",
+   "params": {
+    "amount": "$amount",
+    "source": "M-Pesa: {counterparty}",
+    "frequency": "once"
+   },
+   "flags": [],
+   "reason_template": "Money received — mapped to budget.record_income (unambiguous; income always credits liquid balance).",
+   "trust": "shipped",
+   "provenance": "sustena_core",
+   "examples": [
+    "QGH7XJ4P2Q Confirmed. You have received Ksh1,500.00 from JOHN KAMAU 254712345678 on 2/8/26 at 10:15 AM. New M-PESA balance is Ksh12,050.00",
+    "UHIE73CBRB Confirmed. You have received Ksh1,000.00 from mary ngigi on 26/8/26 at 9:15 AM. New M-PESA balance is Ksh5,000.00"
+   ]
+  },
+  {
    "id": "mpesa_airtime",
    "source": "mpesa",
    "version": 1,
-   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+confirmed\\.\\s+You bought\\s+Ksh(?P<amount>[\\d,]+\\.?\\d*)\\s+of airtime\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}\\s*[APap][Mm])\\.?\\s+New M-PESA balance is Ksh(?P<balance>[\\d,]+\\.?\\d*)(?:\\.\\s*Transaction cost,?\\s*Ksh(?P<cost>[\\d,]+\\.?\\d*))?",
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+[Cc]onfirmed\\.?\\s*You bought Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+of airtime\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>[\\d:]+\\s*[APap]\\.?[Mm]\\.?)\\s*New M-PESA balance is Ksh\\s*(?P<balance>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
    "extract": {
     "ref": {
      "type": "string",
@@ -340,6 +772,164 @@
    "provenance": "sustena_core",
    "examples": [
     "QGH7XJ4P2Q confirmed. You bought Ksh50.00 of airtime on 1/8/26 at 11:15 PM. New M-PESA balance is Ksh13,654.47. Transaction cost, Ksh0.00."
+   ]
+  },
+  {
+   "id": "mpesa_withdraw",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s+Ksh(?P<amount>[\\d,]+\\.?\\d*)\\s+withdrawn from\\s+(?P<agent>[A-Za-z0-9 \\-]+?)\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}\\s*[APap][Mm])\\.?\\s+New M-PESA balance is Ksh(?P<balance>[\\d,]+\\.?\\d*)",
+   "extract": {
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
+    },
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "balance_after": {
+     "type": "amount",
+     "group": "balance",
+     "value": null
+    },
+    "counterparty": {
+     "type": "prefix_if_missing",
+     "group": "agent",
+     "value": "Agent"
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "sent"
+    }
+   },
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [],
+   "reason_template": "Cash withdrawal of KES {amount:,.2f} to {counterparty} recognised, but which pocket to spend from isn't determined automatically — resolve manually.",
+   "trust": "shipped",
+   "provenance": "sustena_core",
+   "examples": [
+    "QGH7XJ4P2Q Confirmed. Ksh2,000.00 withdrawn from Agent 123456 - TOWN SHOP on 2/8/26 at 1:00 PM. New M-PESA balance is Ksh10,050.00"
+   ]
+  },
+  {
+   "id": "mpesa_agent_withdraw",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.?\\s*on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>[\\d:]+\\s*[APap]?\\.?[Mm]?)\\s*Withdraw Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+from\\s+(?P<agent>.+?)\\s*New M-PESA balance is Ksh\\s*(?P<balance>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
+   "extract": {
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
+    },
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "counterparty": {
+     "type": "string",
+     "group": "agent",
+     "value": null
+    },
+    "balance_after": {
+     "type": "amount",
+     "group": "balance",
+     "value": null
+    },
+    "transaction_cost": {
+     "type": "amount",
+     "group": "cost",
+     "value": null
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "none"
+    }
+   },
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "{amount} withdrawn as cash. It left M-PESA but it is still yours.",
+   "trust": "shipped",
+   "provenance": "learned_from_real_corpus_2026_08_26",
+   "examples": [
+    "ABC1234567 Confirmed.on 2/8/26 at 4:30 PMWithdraw Ksh1,000.00 from 123456 - SOME AGENT New M-PESA balance is Ksh500.00. Transaction cost, Ksh29.00."
+   ]
+  },
+  {
+   "id": "mpesa_balance_enquiry",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s*Your account balance was:.*?Ksh\\s*(?P<balance>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
+   "extract": {
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
+    },
+    "balance_after": {
+     "type": "amount",
+     "group": "balance",
+     "value": null
+    },
+    "transaction_cost": {
+     "type": "amount",
+     "group": "cost",
+     "value": null
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "none"
+    }
+   },
+   "status": "informational",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "A balance check. Nothing moved.",
+   "trust": "shipped",
+   "provenance": "learned_from_real_corpus_2026_08_26",
+   "examples": [
+    "ABC1234567 Confirmed. Your account balance was: M-PESA Account : Ksh1,500.00 on 2/8/26 at 4:30 PM. Transaction cost, Ksh0.00."
+   ]
+  },
+  {
+   "id": "mpesa_failed",
+   "source": "mpesa",
+   "version": 1,
+   "pattern": "(?:^Failed\\.|Transaction failed|you do not have (?:sufficient|enough)|You have entered the wrong PIN)",
+   "extract": {
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "none"
+    }
+   },
+   "status": "informational",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "This one did not go through. Nothing moved.",
+   "trust": "shipped",
+   "provenance": "learned_from_real_corpus_2026_08_26",
+   "examples": [
+    "Failed. Insufficient funds in your M-PESA account as well as Fuliza M-PESA to send."
    ]
   }
  ],

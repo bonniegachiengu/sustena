@@ -480,7 +480,11 @@ mod tests {
 
     #[test]
     fn the_shipped_set_is_the_expected_shape() {
-        assert_eq!(seed_rules("mpesa").len(), 7);
+        // 19 = the original 7, plus 12 shapes learned from his own 2,716
+        // real M-Pesa messages on 26 Aug: Fuliza (borrow, interest, repay,
+        // statement), Pochi la Biashara (in, moved), M-Shwari (in, out),
+        // send-to-a-business, agent withdrawal, balance enquiry, failures.
+        assert_eq!(seed_rules("mpesa").len(), 19);
         // 17 = 15 original shapes, + kcb_reversal for refund netting, and
         // + kcb_send_to_mpesa, the real shape his KCB app sends when he moves
         // his own money to his own M-Pesa.
