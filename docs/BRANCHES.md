@@ -19,6 +19,46 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/reclassify` — merged into `dev` 26 Aug at `30b0e34`
+
+**Off:** `dev` at `4f69c7d`
+**State:** merged, gate green (core clean, 202 host tests), installed
+
+**There was no way to fix a wrong pocket.** "pick another pocket" existed only
+inside the refusal branch, before anything was recorded, and once a spend landed
+there was no list of recorded transactions anywhere in Orchie to reach it by.
+
+`budget.reclassify` is a correction, never an edit — the original filing stays
+and the move is appended after it, so the log says both. Semantically it is
+`unspend(from)` then `spend(to)`, and it is ONE operator only for atomicity:
+nothing runs two calls as a single gate decision yet, and a half-landed
+reclassify would leave the money in neither pocket. **When the graph runner
+arrives with transactional semantics this becomes a two-node path**, which is
+the point of building it as an operator.
+
+It refuses with the same numbers a spend does when the destination has no room,
+so a screen can reuse the fund-or-backfill branch rather than growing a second
+answer for the same situation. Assets from that purchase move with it; assets
+from other purchases do not.
+
+### `feat/vendor-operator` — merged into `dev` 26 Aug at `4f69c7d`
+
+**Off:** `dev` at `0d700db`
+**State:** merged, gate green, **not yet wired into the classify UI**
+
+Three operators — `identify`, `suggest`, `remember` — because they are three
+kinds of act, and one call would make a lookup and a write indistinguishable to
+anything composing them. `identify` and `suggest` are read-only and are
+operators anyway: a node in a DAG has to be one.
+
+**Closes an audit deviation.** Merchant memory lived in a side JSON file beside
+the log, so a rebuild could not reproduce it and no other Sustain could read it.
+It is a `vendors` state dimension now.
+
+**Open:** the classify UI still reads the old side-file history. Swapping it is
+small but changes behaviour in the thing he uses daily, so it is deliberate work
+rather than a drive-by.
+
 ### `feat/inventory-consume` — merged into `dev` 26 Aug at `aaf2586`
 
 **Off:** `dev` at `d029d60`
@@ -199,6 +239,40 @@ balance each text reports, and internal-transfer detection. See
 `Projects/IO/design/Orchie_Onboarding_UX.md` §5c and §5d.
 
 ---
+
+## Architecture audit, 26 Aug
+
+Asked: are we on track for "everything is an operator, operators compose into
+operative-DAGs, the operatives ARE those DAGs"?
+
+**On track.** Every capability that mutates state is a registered operator
+through the gate — verified by the inverse: `transducer.rs`, `effect_capture.rs`,
+`curated.rs` and the app's `ingest.rs` contain zero state writes between them.
+Three write sites exist in the app: `World::call` (the operator path),
+`World::reload` (replays the log), and `World::transfer` (cross-sustain atomic
+move via `holon.rs`, which a single-sustain operator cannot express).
+
+**Deviated.**
+
+1. **No operative-DAG layer in Rust.** `operative.rs` is the game-theoretic
+   operative (utility vector, Ω ranking), a different thing entirely. There is
+   no `OperativeGraph`, no node/edge runner, no Mentor or Attaché — those names
+   appear only as test fixture strings in `agent.rs` and `cynefin.rs`.
+2. **A composition layer exists with zero callers.** `compose.rs` implements
+   Hoare sequencing over operator Steps and produces a checked `Pathway`;
+   `try_chain` is called from nowhere outside its own tests. `semantic.rs::
+   replay_under` runs a linear sequence through registry and gate and is reached
+   only from `enzyme.rs` tests.
+3. **The deciding logic is bespoke.** Parsing, inference, transfer detection,
+   reversal netting, skip learning, reclaim, merchant history, curated compose —
+   none registered, none able to be a DAG node.
+4. **`egress` is not ported.** It exists in Rust only as a capability string in
+   a `learned.rs` test.
+
+**Realignment, in order:** (1) read-only operator wrappers for the decision
+functions so they can be nodes — `vendor.*` is the first; (2) port the DAG
+runner; (3) declare Mentor and Attaché as DAG specs; (4) wire `compose.rs` so a
+DAG's linear segments are checked before they run.
 
 ## Known flake
 
