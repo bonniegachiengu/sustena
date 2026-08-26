@@ -163,9 +163,20 @@ fn record_income(
         move_account(state, &a, amount);
     }
 
-    // ★ The declared crossing: money arrived from `source`. Whether `source`
-    // is outside B is μ's question, not this operator's — see `crate::flow`.
-    movements.push(Movement::new("money", amount, &source, "finances.liquid"));
+    // ★★★ The crossing names where the money actually LANDED, not the
+    //     envelope it was counted against. It arrives in a cash account; that
+    //     account's balance is what rose, and double entry reconciles the two.
+    //     Naming `finances.liquid` here described the purpose view and left
+    //     the account side of the entry undeclared.
+    //
+    // ★ Whether `source` is outside B is μ's question, not this operator's.
+    let landed = match account_of(params) {
+        Some(a) => format!("finances.accounts.{a}"),
+        // No account named: nothing moved in the location ledger, so the
+        // envelope is the only true thing to say.
+        None => "finances.liquid".to_string(),
+    };
+    movements.push(Movement::new("money", amount, &source, &landed));
 
     events.push(EmittedEvent {
         name: "event.finances.income_received".into(),
@@ -337,12 +348,15 @@ fn spend(
         let p = text(params, "payee");
         if p.is_empty() { "unknown".to_string() } else { p }
     };
-    movements.push(Movement::new(
-        "money",
-        amount,
-        &format!("finances.pockets.{pocket_name}"),
-        &payee,
-    ));
+    // ★★★ Money leaves the ACCOUNT and goes to the payee. The pocket records
+    //     what it was for, which is the other reading and has its own law.
+    //     Declaring the pocket as the source left the account's fall
+    //     undeclared, which is a single-sided entry.
+    let left_from = match account_of(params) {
+        Some(a) => format!("finances.accounts.{a}"),
+        None => format!("finances.pockets.{pocket_name}"),
+    };
+    movements.push(Movement::new("money", amount, &left_from, &payee));
 
     events.push(EmittedEvent {
         name: "event.finances.pocket_spent".into(),
@@ -426,12 +440,12 @@ fn unspend(
         let p = text(params, "payer");
         if p.is_empty() { "unknown".to_string() } else { p }
     };
-    movements.push(Movement::new(
-        "money",
-        amount,
-        &payer,
-        &format!("finances.pockets.{pocket_name}"),
-    ));
+    // The mirror of the spend: back from the payer into the account it left.
+    let landed = match account_of(params) {
+        Some(a) => format!("finances.accounts.{a}"),
+        None => format!("finances.pockets.{pocket_name}"),
+    };
+    movements.push(Movement::new("money", amount, &payer, &landed));
 
     events.push(EmittedEvent {
         name: "event.finances.pocket_refunded".into(),
@@ -660,7 +674,7 @@ fn place_unaccounted(
     state: &mut State,
     params: &Map<String, Value>,
     events: &mut Vec<EmittedEvent>,
-    _movements: &mut Vec<Movement>,
+    movements: &mut Vec<Movement>,
 ) -> OperatorResult {
     // ★ "Not sure yet" is a real answer, and it gets a real name he can see
     //   and move later, because this is a deliberate act rather than a default.
@@ -675,6 +689,18 @@ fn place_unaccounted(
     }
 
     move_account(state, &account, gap);
+
+    // ★★★ The other side, named honestly. This money was always held — the
+    //     household simply could not say WHERE. So the counterpart is exactly
+    //     that: money whose place was unknown. It is not a ledger account, so
+    //     it does not balance against anything, and the account side of the
+    //     entry is declared rather than left silent.
+    movements.push(Movement::new(
+        "money",
+        gap,
+        "unaccounted",
+        &format!("finances.accounts.{account}"),
+    ));
 
     events.push(EmittedEvent {
         name: "event.finances.unaccounted_placed".into(),
@@ -772,9 +798,16 @@ fn unrecord_income(
         move_account(state, &a, -amount);
     }
 
-    // The mirror of the arrival: back out to wherever it came from.
+    // The mirror of the arrival: back out of the account it landed in, to
+    // wherever it came from. Naming the envelope here would leave the
+    // account's fall undeclared — the same single-sided entry the arrival
+    // itself used to make.
     let source = entry.get("label").and_then(Value::as_str).unwrap_or("unknown").to_string();
-    movements.push(Movement::new("money", amount, "finances.liquid", &source));
+    let left_from = match account_of(params) {
+        Some(a) => format!("finances.accounts.{a}"),
+        None => "finances.liquid".to_string(),
+    };
+    movements.push(Movement::new("money", amount, &left_from, &source));
 
     events.push(EmittedEvent {
         name: "event.finances.income_unrecorded".into(),

@@ -111,6 +111,8 @@ fn refusal(operator: &str, reason: &str, rule: &'static str) -> Execution {
         result: OperatorResult::fail(reason.to_string(), rule),
         mutations: vec![],
         events: vec![],
+        // A run that did not happen declared nothing.
+        movements: vec![],
         state: Value::Null,
     }
 }
@@ -465,6 +467,7 @@ impl World {
                     ),
                     mutations: vec![],
                     events: vec![],
+                    movements: vec![],
                     state: Value::Null,
                 },
                 0,

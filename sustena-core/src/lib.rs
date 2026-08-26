@@ -130,6 +130,7 @@ pub mod enzyme;
 pub mod error;
 pub mod event;
 pub mod flow;
+pub mod ledger;
 pub mod fold;
 pub mod goodhart;
 pub mod governance;

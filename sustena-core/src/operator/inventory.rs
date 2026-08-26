@@ -158,6 +158,17 @@ fn consume(
         );
     }
 
+    // ★★★ THE expense, declared. Goods held became goods used: the asset
+    //     falls and the value goes to consumption. Without this the asset's
+    //     fall was a single-sided entry — value leaving the household with
+    //     nothing saying where it went.
+    _movements.push(Movement::new(
+        "money",
+        used,
+        &format!("inventory.assets[{idx}]"),
+        "expense:consumption",
+    ));
+
     events.push(EmittedEvent {
         name: "event.inventory.consumed".into(),
         payload: json!({"asset": asset_id, "item": item, "used": used, "pocket": pocket}),

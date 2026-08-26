@@ -70,6 +70,14 @@ pub struct Execution {
     /// Empty whenever the call did not commit — a refusal changes nothing.
     pub mutations: Vec<Mutation>,
     pub events: Vec<EmittedEvent>,
+    /// ★★★ What the operator SAID it moved, and where.
+    ///
+    /// Kept on the outcome rather than consumed by the firewall and dropped,
+    /// because double entry needs to reconcile it against what actually
+    /// changed. An operator that lowers a balance and declares nothing is
+    /// exactly the single-sided entry the ledger exists to refuse, and it is
+    /// invisible without this.
+    pub movements: Vec<Movement>,
     /// Resulting state, or the untouched original if refused.
     pub state: Value,
 }
@@ -300,6 +308,7 @@ pub fn execute_afforded(
         ),
         mutations: vec![],
         events: vec![],
+        movements: Vec::new(),
         state: state.clone(),
     };
 
@@ -319,6 +328,7 @@ pub fn execute_afforded(
                 ),
                 mutations: vec![],
                 events: vec![],
+                movements: Vec::new(),
                 state: state.clone(),
             }
         }
@@ -355,6 +365,7 @@ pub fn execute_afforded(
             result: OperatorResult::fail(denial.to_string(), rule),
             mutations: vec![],
             events: vec![],
+            movements: Vec::new(),
             state: state.clone(),
         };
     }
@@ -383,6 +394,7 @@ pub fn execute_afforded(
                 result: OperatorResult::fail(err.to_string(), "approval_token"),
                 mutations: vec![],
                 events: vec![],
+                movements: Vec::new(),
                 state: state.clone(),
             };
         }
@@ -396,6 +408,7 @@ pub fn execute_afforded(
                 ),
                 mutations: vec![],
                 events: vec![],
+                movements: Vec::new(),
                 state: state.clone(),
             };
         }
@@ -412,6 +425,7 @@ pub fn execute_afforded(
                     ),
                     mutations: vec![],
                     events: vec![],
+                    movements: Vec::new(),
                     state: state.clone(),
                 }
             }
@@ -423,6 +437,7 @@ pub fn execute_afforded(
                     ),
                     mutations: vec![],
                     events: vec![],
+                    movements: Vec::new(),
                     state: state.clone(),
                 }
             }
@@ -444,6 +459,7 @@ pub fn execute_afforded(
             result,
             mutations: vec![],
             events: vec![],
+            movements: movements.clone(),
             state: state.clone(),
         };
     }
@@ -480,6 +496,7 @@ pub fn execute_afforded(
             result: OperatorResult::fail(err.to_string(), tag),
             mutations: vec![],
             events: vec![],
+            movements: movements.clone(),
             state: state.clone(),
         };
     }
@@ -498,6 +515,7 @@ pub fn execute_afforded(
                         ),
                         mutations: vec![],
                         events: vec![],
+                        movements: movements.clone(),
                         state: state.clone(),
                     }
                 }
@@ -509,6 +527,7 @@ pub fn execute_afforded(
                         ),
                         mutations: vec![],
                         events: vec![],
+                        movements: movements.clone(),
                         state: state.clone(),
                     }
                 }
@@ -527,6 +546,7 @@ pub fn execute_afforded(
                     ),
                     mutations: vec![],
                     events: vec![],
+                    movements: movements.clone(),
                     state: state.clone(),
                 }
             }
@@ -538,6 +558,7 @@ pub fn execute_afforded(
                     ),
                     mutations: vec![],
                     events: vec![],
+                    movements: movements.clone(),
                     state: state.clone(),
                 }
             }
@@ -559,8 +580,48 @@ pub fn execute_afforded(
             result: OperatorResult::fail(v.to_string(), "transition_constraint"),
             mutations: vec![],
             events: vec![],
+            movements: movements.clone(),
             state: state.clone(),
         };
+    }
+
+    // ── Double entry (Money Model §1, §5) ────────────────────────────────
+    //
+    // ★★★ **Every transaction is postings that sum to zero.** Money is never
+    // created or destroyed, only moved. Until this check the rule lived in the
+    // tests, which meant it held for the cases someone had thought to write
+    // and nowhere else.
+    //
+    // What is reconciled is not "do the declared postings sum to zero" — a
+    // movement is two-sided by construction, so that would prove nothing. It
+    // is the stronger question: **does what actually changed match what was
+    // declared?** An operator that lowers a balance and says nothing about
+    // where the money went is a single-sided entry, and it is invisible to a
+    // sum-to-zero check.
+    //
+    // ★★ Only the LOCATION ledger — cash, liabilities, people's tabs, goods
+    // held. Liquid and pockets are the envelope reading of money a cash
+    // account already holds, and balancing them here would count every
+    // shilling twice. An endpoint outside the household is the counterpart
+    // that makes a spend two-sided, not an imbalance.
+    //
+    // ★★★ Refused rather than reported. A transaction whose sides do not
+    // agree is one whose story about itself is wrong, and letting it commit
+    // means the ledger is wrong from then on with nothing to point at.
+    {
+        let imbalances = crate::ledger::reconcile(&working.mutations(), &movements);
+        if let Some(first) = imbalances.first() {
+            return Execution {
+                result: OperatorResult::fail(
+                    format!("The two sides of this do not agree: {first}."),
+                    "double_entry",
+                ),
+                mutations: Vec::new(),
+                events: Vec::new(),
+                movements: Vec::new(),
+                state: state.clone(),
+            };
+        }
     }
 
     // The firewall (Constraint §I–II):
@@ -584,6 +645,7 @@ pub fn execute_afforded(
                     result: OperatorResult::fail(refusal.to_string(), "firewall"),
                     mutations: vec![],
                     events: vec![],
+                    movements: movements.clone(),
                     state: state.clone(),
                 };
             }
@@ -609,6 +671,7 @@ pub fn execute_afforded(
                 ),
                 mutations: vec![],
                 events: vec![],
+                movements: movements.clone(),
                 state: state.clone(),
             };
         }
@@ -625,6 +688,7 @@ pub fn execute_afforded(
                 result: OperatorResult::fail(err.to_string(), "approval_token"),
                 mutations: vec![],
                 events: vec![],
+                movements: movements.clone(),
                 state: state.clone(),
             };
         }
@@ -634,6 +698,7 @@ pub fn execute_afforded(
         result,
         mutations: working.mutations().to_vec(),
         events,
+        movements: movements.clone(),
         state: candidate,
     };
 
@@ -2440,6 +2505,94 @@ mod tests {
         let cement = assets.iter().find(|a| a["item"] == json!("cement")).expect("cement");
         assert_eq!(beans["pocket"], json!("food"), "moved");
         assert_eq!(cement["pocket"], json!("rent"), "left alone");
+    }
+
+
+    // ── does every operator say what it did? ──────────────────────────────────
+
+    /// Run one operator and report any account that moved undeclared.
+    fn imbalances(state: &Value, op: &str, ps: &[(&str, Value)]) -> Vec<String> {
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &armed(), state, op, &params(ps));
+        if !ex.committed() {
+            return vec![];  // a refusal changes nothing, so there is nothing to balance
+        }
+        crate::ledger::reconcile(&ex.mutations, &ex.movements)
+            .iter()
+            .map(|i| i.to_string())
+            .collect()
+    }
+
+    /// ★★★ THE double-entry check, applied to every money operator there is.
+    ///
+    /// This is the measurement that has to come before enforcement: turning the
+    /// gate on without knowing which operators already fail it would refuse
+    /// real transactions the moment it shipped.
+    #[test]
+    fn every_money_operator_declares_what_it_moved() {
+        let base = run_all(
+            empty(),
+            &[
+                ("budget.record_income",
+                 vec![("amount", json!(1000.0)), ("source", json!("pay")),
+                      ("account", json!("mpesa"))]),
+                ("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(400.0))]),
+                ("budget.allocate", vec![("pocket_name", json!("rent")), ("amount", json!(300.0))]),
+                ("budget.spend",
+                 vec![("pocket_name", json!("food")), ("amount", json!(100.0)),
+                      ("account", json!("mpesa"))]),
+            ],
+        );
+
+        let cases: Vec<(&str, Vec<(&str, Value)>)> = vec![
+            ("budget.record_income",
+             vec![("amount", json!(50.0)), ("source", json!("s")), ("account", json!("mpesa"))]),
+            ("budget.allocate",
+             vec![("pocket_name", json!("food")), ("amount", json!(50.0))]),
+            ("budget.spend",
+             vec![("pocket_name", json!("food")), ("amount", json!(50.0)), ("account", json!("mpesa"))]),
+            ("budget.unspend",
+             vec![("pocket_name", json!("food")), ("amount", json!(50.0)), ("account", json!("mpesa"))]),
+            ("budget.unallocate",
+             vec![("pocket_name", json!("rent")), ("amount", json!(50.0))]),
+            ("budget.transfer",
+             vec![("from_account", json!("mpesa")), ("to_account", json!("kcb")), ("amount", json!(50.0))]),
+            ("budget.add_pocket", vec![("pocket_name", json!("newone"))]),
+            ("budget.open_account", vec![("account", json!("brandnew"))]),
+            ("budget.reclassify",
+             vec![("from_pocket", json!("food")), ("to_pocket", json!("rent")), ("amount", json!(50.0))]),
+            ("budget.unrecord_income",
+             vec![("entry_id", json!("nope"))]),
+            ("budget.place_unaccounted", vec![("account", json!("mpesa"))]),
+            ("inventory.itemize",
+             vec![("pocket_name", json!("food")), ("source_tx", json!("t1")),
+                  ("lines", json!([{"item":"beans","value":20.0}]))]),
+            ("vendor.remember",
+             vec![("vendor", json!("shop")), ("pocket_name", json!("food"))]),
+        ];
+
+        let mut offenders: Vec<String> = Vec::new();
+        for (op, ps) in &cases {
+            for bad in imbalances(&base, op, ps) {
+                offenders.push(format!("{op}: {bad}"));
+            }
+        }
+        // Consuming needs something held first.
+        let held = run_all(
+            base.clone(),
+            &[("inventory.itemize",
+               vec![("pocket_name", json!("food")), ("source_tx", json!("t9")),
+                    ("lines", json!([{"item":"rice","value":30.0}]))])],
+        );
+        for bad in imbalances(&held, "inventory.consume", &[("asset_id", json!("t9-0"))]) {
+            offenders.push(format!("inventory.consume: {bad}"));
+        }
+
+        assert!(
+            offenders.is_empty(),
+            "these operators moved money without saying where it went:\n  {}",
+            offenders.join("\n  ")
+        );
     }
 
 }
