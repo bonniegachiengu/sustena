@@ -662,31 +662,7 @@ export default function Orchie(props: { onFace?: () => void }) {
                   the card whenever anything refetched and throw away answers
                   given halfway through. The id changes exactly when the
                   subject does, which is exactly when a new card is right. */}
-              <Show when={f().queueHead?.id} keyed>
-                {(headId) => (
-                  <div class={O.cardPrimary}>
-                    <div class={O.cardHead}>
-                      <h2 class={O.cardTitle}>
-                        {waiting(f()) > 1
-                          ? `${waiting(f())} to classify`
-                          : "one to classify"}
-                      </h2>
-                    </div>
-                    {/* ★★★ WHAT is being filed, before being asked where it
-                        goes. The card used to ask for a pocket without showing
-                        the message, so a person was filing something they could
-                        not see. */}
-                    <CaptureFacts head={f().queueHead!} />
-                    <Classify
-                      sustain={f().sustainId}
-                      messageId={headId}
-                      autoStart
-                      backfill
-                      onDone={() => void refetch()}
-                    />
-                  </div>
-                )}
-              </Show>
+              <QueueCard feed={f()} onChanged={() => void refetch()} />
 
               {/* ═══ the calm read ═══════════════════════════════════════ */}
               <Summary feed={f()} />
@@ -913,6 +889,129 @@ function DeviceCard(props: { device: DeviceDto }) {
             {props.device.queueDepth} text{props.device.queueDepth === 1 ? "" : "s"} caught and
             waiting to be handed over.
           </p>
+        </Show>
+      </div>
+    </Show>
+  );
+}
+
+/**
+ * One message at a time, and a way to walk between them.
+ *
+ * ★★★ The card used to show whatever was oldest and nothing else. There was no
+ * way back to something just filed and no way past something he could not
+ * answer — so a message he did not understand blocked the whole queue, and a
+ * filing he got wrong was unreachable the moment it landed.
+ *
+ * ★★ Still ONE card. The queue is a list to STEP THROUGH, never a list to
+ * render: showing them all is the flood the attention budget exists to
+ * prevent, and it froze the app once already.
+ */
+function QueueCard(props: { feed: FeedDto; onChanged: () => void }) {
+  const queue = () => props.feed.queue;
+  // ★★ The index is held here and only reset when the queue's own identity
+  //    changes, so a background refetch does not throw away where he is.
+  const [at, setAt] = createSignal<number | null>(null);
+  const idx = () => {
+    const i = at();
+    const max = Math.max(0, queue().length - 1);
+    if (i === null) return Math.min(props.feed.queueStart, max);
+    return Math.min(Math.max(0, i), max);
+  };
+  const current = () => queue()[idx()];
+  const [busy, setBusy] = createSignal(false);
+
+  const back = () => setAt(Math.max(0, idx() - 1));
+
+  /**
+   * Forward IS the honest defer.
+   *
+   * ★★★ Not a separate button, because they are one act: "I cannot answer this
+   * yet, show me the next one." Deferring puts it at the TOP next time he
+   * opens the app — otherwise putting something off would be
+   * indistinguishable from throwing it away.
+   *
+   * ★★ Already-answered messages just advance. There is nothing to defer about
+   * a decision he has made.
+   */
+  const forward = async () => {
+    const c = current();
+    const next = Math.min(queue().length - 1, idx() + 1);
+    if (c && c.status !== "processed") {
+      setBusy(true);
+      try {
+        await engine.deferMessage(props.feed.sustainId, c.id);
+      } catch {
+        // Nothing to say: the card moves on either way, and the message is
+        // still in the queue.
+      } finally {
+        setBusy(false);
+      }
+    }
+    setAt(next);
+  };
+
+  const label = () => {
+    const c = current();
+    if (!c) return "";
+    if (c.status === "processed") return "processed";
+    if (c.status === "deferred") return "you put this off";
+    return "";
+  };
+
+  return (
+    <Show when={queue().length > 0}>
+      <div class={O.cardPrimary}>
+        <div class={O.row}>
+          {/* ★★ Back is plain navigation and never changes anything. */}
+          <button
+            class={O.linkish}
+            disabled={idx() === 0}
+            onClick={back}
+            aria-label="previous message"
+          >
+            ‹ back
+          </button>
+          <span class={O.spacer} />
+          <span class={O.caption}>
+            {idx() + 1} of {queue().length}
+            <Show when={label()}> · {label()}</Show>
+          </span>
+          <span class={O.spacer} />
+          <button
+            class={O.linkish}
+            disabled={busy() || idx() >= queue().length - 1}
+            onClick={() => void forward()}
+            aria-label="skip for later and go to the next"
+          >
+            {busy() ? "…" : "later ›"}
+          </button>
+        </div>
+
+        <Show when={current()} keyed>
+          {(c) => (
+            <>
+              {/* ★★★ A processed message stays fully editable. Saying
+                  "processed" and then refusing to change it would be a status
+                  that punishes him for having answered. */}
+              <Show when={c.status === "processed"}>
+                <p class={O.caption}>
+                  Filed
+                  <Show when={c.filedPocket}>{(p) => <> to {p()}</>}</Show>
+                  <Show when={c.filedAmount}>{(a) => <> · {fmt(a())}</>}</Show>. You can change it
+                  below — the first filing stays on the record and the change is added after it.
+                </p>
+              </Show>
+              <CaptureFacts head={c} />
+              <Classify
+                sustain={props.feed.sustainId}
+                messageId={c.id}
+                autoStart={c.status !== "processed"}
+                backfill
+                onDone={props.onChanged}
+              />
+            </>
+          )}
         </Show>
       </div>
     </Show>
@@ -1543,9 +1642,17 @@ function Itemize(props: {
   onDone: () => void;
 }) {
   const [open, setOpen] = createSignal(false);
-  const [lines, setLines] = createSignal<{ item: string; value: string }[]>([
-    { item: "", value: "" },
+  const [lines, setLines] = createSignal<{ item: string; value: string; subpocket: string }[]>([
+    { item: "", value: "", subpocket: "" },
   ]);
+  /**
+   * ★★★ Grouping is off until asked for.
+   *
+   * Most shopping is a flat list and a third field on every row would tax
+   * every basket to serve the few that want grouping. The operator has always
+   * stored a subpocket per line; this is the switch that lets him fill it in.
+   */
+  const [grouped, setGrouped] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [failed, setFailed] = createSignal<string | null>(null);
   const [done, setDone] = createSignal<{ count: number; unlisted: number } | null>(null);
@@ -1556,7 +1663,7 @@ function Itemize(props: {
   const usable = () =>
     lines().filter((l) => l.item.trim() !== "" && (Number.parseFloat(l.value) || 0) > 0);
 
-  const set = (i: number, k: "item" | "value", v: string) =>
+  const set = (i: number, k: "item" | "value" | "subpocket", v: string) =>
     setLines((ls) => ls.map((l, n) => (n === i ? { ...l, [k]: v } : l)));
 
   const save = async () => {
@@ -1572,7 +1679,12 @@ function Itemize(props: {
           pocket_name: props.pocket,
           source_tx: props.sourceTx,
           limit: props.limit,
-          lines: rows.map((l) => ({ item: l.item.trim(), value: Number.parseFloat(l.value) })),
+          lines: rows.map((l) => ({
+            item: l.item.trim(),
+            value: Number.parseFloat(l.value),
+            // Omitted rather than sent empty: an empty group is not a group.
+            ...(l.subpocket.trim() !== "" ? { subpocket: l.subpocket.trim() } : {}),
+          })),
         },
         null,
         null,
@@ -1622,15 +1734,29 @@ function Itemize(props: {
                   value={l.value}
                   onInput={(e) => set(i(), "value", e.currentTarget.value)}
                 />
+                <Show when={grouped()}>
+                  <input
+                    class={O.input}
+                    placeholder="group"
+                    value={l.subpocket}
+                    onInput={(e) => set(i(), "subpocket", e.currentTarget.value)}
+                  />
+                </Show>
               </div>
             )}
           </For>
           <div class={O.row}>
             <button
               class={O.linkish}
-              onClick={() => setLines((ls) => [...ls, { item: "", value: "" }])}
+              onClick={() => setLines((ls) => [...ls, { item: "", value: "", subpocket: "" }])}
             >
               + another
+            </button>
+            {/* ★★ Subpockets: Food into Vegetables and Grains. The card says
+                what it is for rather than naming the concept, because "group
+                these" is the thing he wants and "subpocket" is our word. */}
+            <button class={O.linkish} onClick={() => setGrouped((g) => !g)}>
+              {grouped() ? "no grouping" : "group these"}
             </button>
             <span class={O.spacer} />
             <button class={O.linkish} onClick={() => setOpen(false)}>

@@ -974,20 +974,48 @@ pub fn learn_rule(
 /// rather than a different one on every refresh. One id, never a list: the
 /// card works the queue one message at a time, which is the disclosure machine
 /// of Curated UI VII and the reason the screen cannot grow with the queue.
-fn oldest_waiting(queued: &[crate::ingest::IngestedMessage]) -> Option<CaptureContextDto> {
-    let m = queued.iter().min_by_key(|m| m.seq)?;
+/// How many answered messages the back arrow can reach.
+///
+/// ★★ A short tail. Changing your mind about this morning is a real need;
+/// walking back through a year is a different screen and nobody asked for it.
+const REACHABLE_DONE: usize = 15;
+/// How far forward the queue runs in one sitting.
+const QUEUE_AHEAD: usize = 60;
+
+/// One message, as the card needs to show it.
+fn context_of(m: &crate::ingest::IngestedMessage) -> CaptureContextDto {
     let f = |k: &str| m.parsed_fields.get(k);
-    Some(CaptureContextDto {
+    // Where it currently sits, read off what it recorded it DID.
+    let filed = m.filed.iter().rev().find(|x| x.operator == "budget.spend");
+    CaptureContextDto {
         id: m.id.clone(),
         raw: m.raw_payload.clone(),
         source: m.source_id.clone(),
-        // A number the transducer wrote as text is still a number.
         amount: f("amount")
             .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))),
         counterparty: f("counterparty").and_then(|v| v.as_str()).map(str::to_string),
         direction: f("direction").and_then(|v| v.as_str()).map(str::to_string),
         reason: m.reason.clone(),
-    })
+        status: if m.resolved {
+            "processed"
+        } else if m.deferred_at.is_some() {
+            "deferred"
+        } else {
+            "pending"
+        }
+        .to_string(),
+        filed_pocket: filed
+            .and_then(|x| x.params.get("pocket_name"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        filed_amount: filed.and_then(|x| x.params.get("amount")).and_then(|v| v.as_f64()),
+    }
+}
+
+fn oldest_waiting(queued: &[crate::ingest::IngestedMessage]) -> Option<CaptureContextDto> {
+    // ★ One builder for one shape. Two hand-written copies of the same DTO is
+    //   how one of them quietly stops carrying a field the other has.
+    queued.iter().min_by_key(|m| m.seq).map(context_of)
 }
 
 /// ★★★ `(async)`, because this reads the whole ingest log.
@@ -1131,6 +1159,14 @@ pub fn get_feed(
     // them one at a time, which is the disclosure machine of Curated UI VII.
     let queue_head = oldest_waiting(&queued);
 
+    // The walkable queue: what he has just done, then what is waiting.
+    let walk = world
+        .ingest()
+        .navigable(&sustain_id, REACHABLE_DONE, QUEUE_AHEAD)
+        .unwrap_or_default();
+    let queue_start = walk.iter().position(|m| !m.resolved).unwrap_or(walk.len()) as u32;
+    let queue: Vec<CaptureContextDto> = walk.iter().map(context_of).collect();
+
     // ★★ Folded in AFTER the view is composed, so one render is one reading.
     //    Observing inside the compose path would count a re-render as new
     //    evidence and let the series drift on nothing happening at all.
@@ -1183,6 +1219,8 @@ pub fn get_feed(
         label,
         cards,
         queue_head,
+        queue,
+        queue_start,
         quiet,
         budget: view.budget as u32,
         spent: view.spent as u32,
@@ -1603,6 +1641,26 @@ pub fn reclassify_spend(
         let _ = world.ingest().record_reclassification(&message_id, &to_pocket, amount);
     }
     Ok(result)
+}
+
+/// **Put this off until he remembers what it was.**
+///
+/// ★★★ An honest defer, and a different act from setting something aside as
+/// not a transaction. That one says there is nothing here; this says there is
+/// something here and he cannot answer it yet. It stays in the queue and comes
+/// back at the TOP next time he opens the app, because burying it under new
+/// arrivals would make deferring indistinguishable from discarding.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn defer_message(
+    world: State<'_, World>,
+    sustain_id: String,
+    message_id: String,
+) -> Result<bool, String> {
+    // The capture seq is the household's own monotonic tick, so "deferred
+    // longest ago" is answerable without a clock.
+    let at = world.with(|i| i.get(&sustain_id).map(|s| s.next_seq)).unwrap_or(0);
+    world.ingest().defer(&message_id, at).map_err(|e| e.to_string())
 }
 
 /// Set a captured message aside as not a transaction.
@@ -2573,6 +2631,7 @@ mod feed_surface_tests {
             netted_with: None,
             same_event_as: None,
             reclaimed: false,
+            deferred_at: None,
             filed: Vec::new(),
             sent_at_ms: None,
             seq,

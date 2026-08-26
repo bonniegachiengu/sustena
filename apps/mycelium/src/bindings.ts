@@ -463,6 +463,23 @@ async reclassifySpend(sustainId: string, messageId: string, fromPocket: string, 
 }
 },
 /**
+ * **Put this off until he remembers what it was.**
+ * 
+ * ★★★ An honest defer, and a different act from setting something aside as
+ * not a transaction. That one says there is nothing here; this says there is
+ * something here and he cannot answer it yet. It stays in the queue and comes
+ * back at the TOP next time he opens the app, because burying it under new
+ * arrivals would make deferring indistinguishable from discarding.
+ */
+async deferMessage(sustainId: string, messageId: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("defer_message", { sustainId, messageId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * **Remember this format** — synthesise a rule from a confirmed correction.
  * 
  * ★★ Verified before it is ever added: it must be well-typed, must match the
@@ -876,7 +893,19 @@ amount: number | null; counterparty: string | null; direction: string | null;
 /**
  * The transducer's own words about why this is waiting.
  */
-reason: string }
+reason: string; 
+/**
+ * `pending`, `deferred`, or `processed`.
+ * 
+ * ★★ A processed message stays in the list on purpose: the back arrow
+ * has to reach a filing he wants to change, and a correction path with
+ * nothing to correct from is not a path.
+ */
+status: string; 
+/**
+ * Where a processed one currently sits, so the card can say so.
+ */
+filedPocket: string | null; filedAmount: number | null }
 /**
  * What one capture did, on the wire.
  */
@@ -1097,6 +1126,19 @@ export type ExclusionDto = { sustainId: string; label: string; isHousehold: bool
  * The whole curated view.
  */
 export type FeedDto = { sustainId: string; label: string; cards: CardDto[]; 
+/**
+ * ★★★ The queue he can walk, in the order he should meet it.
+ * 
+ * Recently answered first — so the back arrow reaches them — then what is
+ * waiting, with anything he deferred at the head of that. ONE card renders
+ * at a time; this is the list it steps through, not a list to display.
+ */
+queue: CaptureContextDto[]; 
+/**
+ * Where in `queue` the first unanswered message sits, so the card opens
+ * on work rather than on history.
+ */
+queueStart: number; 
 /**
  * The oldest capture still needing a person, if there is one.
  * 

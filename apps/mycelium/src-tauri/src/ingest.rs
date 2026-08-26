@@ -93,6 +93,18 @@ pub struct IngestedMessage {
     /// which one got there first.
     #[serde(default)]
     pub same_event_as: Option<String>,
+    /// ★★★ Put off honestly, because he does not remember yet.
+    ///
+    /// A different act from setting something aside as not a transaction. That
+    /// one says "there is nothing here"; this one says "there is something
+    /// here and I cannot answer it right now". Collapsing the two would either
+    /// lose real transactions or fill the queue with junk, and the difference
+    /// is the whole reason not to guess.
+    ///
+    /// The value is the capture seq it was deferred at, so the ones he has been
+    /// putting off longest come back first.
+    #[serde(default)]
+    pub deferred_at: Option<u64>,
     /// ★★★ Set aside once, then overturned by evidence.
     ///
     /// A skip is a person's judgement, and overturning one quietly would be
@@ -638,6 +650,7 @@ impl Ingested {
             netted_with: None,
             same_event_as: None,
             reclaimed: false,
+            deferred_at: None,
             filed: Vec::new(),
             sent_at_ms,
             seq,
@@ -1190,6 +1203,56 @@ impl Ingested {
     /// Was this set aside by a person, rather than answered or netted?
     pub fn was_skipped(m: &IngestedMessage) -> bool {
         m.ignored && m.netted_with.is_none() && !m.resolved
+    }
+
+    /// Put a message off until he remembers what it was.
+    ///
+    /// ★★ It stays in the queue. Deferring is not answering, so
+    /// `needs_attention` is deliberately untouched — what changes is only the
+    /// ORDER it comes back in.
+    pub fn defer(&self, id: &str, at_seq: u64) -> StoreResult<bool> {
+        let Some(mut m) = self.current()?.into_iter().find(|m| m.id == id) else {
+            return Ok(false);
+        };
+        m.deferred_at = Some(at_seq);
+        self.append_message(&m)?;
+        Ok(true)
+    }
+
+    /// The queue in the order he should meet it.
+    ///
+    /// ★★★ Deferred first, oldest deferral first. He put those off because he
+    /// could not answer them yet; bringing them back at the top next time he
+    /// opens the app is the whole point of an honest defer, and burying them
+    /// under new arrivals would make deferring indistinguishable from
+    /// discarding.
+    ///
+    /// ★★ Recently answered messages come BEFORE both, so the back arrow
+    /// reaches them. A filing he wants to change is otherwise unreachable, and
+    /// a correction path with nothing to correct from is not a path.
+    pub fn navigable(&self, sustain_id: &str, done: usize, limit: usize) -> StoreResult<Vec<IngestedMessage>> {
+        let all: Vec<IngestedMessage> =
+            self.current()?.into_iter().filter(|m| m.sustain_id == sustain_id).collect();
+
+        let mut processed: Vec<IngestedMessage> = all
+            .iter()
+            .filter(|m| m.resolved && m.netted_with.is_none())
+            .cloned()
+            .collect();
+        processed.sort_by_key(|m| m.seq);
+        // Only the tail of what he has done: the back arrow is for changing his
+        // mind about something recent, not for browsing a year.
+        if processed.len() > done {
+            processed.drain(..processed.len() - done);
+        }
+
+        let mut waiting: Vec<IngestedMessage> =
+            all.into_iter().filter(|m| m.needs_attention()).collect();
+        waiting.sort_by_key(|m| (m.deferred_at.is_none(), m.deferred_at, m.seq));
+
+        let mut out = processed;
+        out.extend(waiting.into_iter().take(limit));
+        Ok(out)
     }
 
     /// Set a message aside as not a transaction.
@@ -2948,6 +3011,7 @@ mod reference_tests {
             netted_with: None,
             same_event_as: None,
             reclaimed: false,
+            deferred_at: None,
             filed: Vec::new(),
             ignored: false,
             sent_at_ms: None,
@@ -3480,5 +3544,132 @@ mod filed_tests {
         let filed = ing.filed_spends("h", 3).expect("filed");
         assert_eq!(filed.len(), 3, "bounded");
         assert!(filed[0].seq > filed[1].seq, "newest first");
+    }
+}
+
+#[cfg(test)]
+mod queue_tests {
+    use super::*;
+    use std::env;
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let dir = env::temp_dir().join(format!("sustena-queue-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        let ing = Ingested::at(dir).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    fn capture(ing: &Ingested, rules: &[ParseRule], who: &str) -> String {
+        let raw = format!(
+            "QGH7XJ4P2Q Confirmed. Ksh90.00 paid to {who} on 20/7/26 at 4:30 PM. \
+             New M-PESA balance is Ksh12,050.00"
+        );
+        let Capture::Stored(m) = ing.capture("h", "mpesa", &raw, rules).expect("capture")
+            else { panic!("stored") };
+        m.id
+    }
+
+    fn ids(ms: &[IngestedMessage]) -> Vec<String> {
+        ms.iter().map(|m| m.id.clone()).collect()
+    }
+
+    #[test]
+    fn the_queue_runs_oldest_first_when_nothing_has_been_put_off() {
+        let (ing, rules) = store("plain");
+        let a = capture(&ing, &rules, "SHOPA");
+        let b = capture(&ing, &rules, "SHOPB");
+        assert_eq!(ids(&ing.navigable("h", 5, 50).expect("q")), vec![a, b]);
+    }
+
+    #[test]
+    fn something_he_put_off_comes_back_at_the_top() {
+        // ★★★ The whole point of an honest defer. Burying it under new
+        //     arrivals would make putting something off indistinguishable from
+        //     throwing it away.
+        let (ing, rules) = store("defer-first");
+        let first = capture(&ing, &rules, "SHOPA");
+        let second = capture(&ing, &rules, "SHOPB");
+        let third = capture(&ing, &rules, "SHOPC");
+        assert!(ing.defer(&second, 7).expect("defer"));
+
+        let q = ids(&ing.navigable("h", 5, 50).expect("q"));
+        assert_eq!(q[0], second, "the one he put off is first next time");
+        assert_eq!(q[1..], [first, third][..], "the rest keep their order");
+    }
+
+    #[test]
+    fn the_longest_put_off_comes_back_before_the_rest() {
+        let (ing, rules) = store("defer-order");
+        let a = capture(&ing, &rules, "SHOPA");
+        let b = capture(&ing, &rules, "SHOPB");
+        ing.defer(&b, 3).expect("deferred earlier");
+        ing.defer(&a, 9).expect("deferred later");
+        assert_eq!(ids(&ing.navigable("h", 5, 50).expect("q"))[0], b);
+    }
+
+    #[test]
+    fn putting_something_off_is_not_answering_it() {
+        // ★★★ It stays in the queue. Deferring changes the ORDER, never
+        //     whether it still needs him — which is what separates it from
+        //     "not a transaction".
+        let (ing, rules) = store("still-waiting");
+        let id = capture(&ing, &rules, "SHOPA");
+        ing.defer(&id, 5).expect("defer");
+        let m = ing.current().expect("cur").into_iter().find(|m| m.id == id).expect("there");
+        assert!(m.needs_attention(), "still his to answer");
+        assert!(!m.ignored, "and not marked as junk");
+        assert_eq!(m.deferred_at, Some(5));
+    }
+
+    #[test]
+    fn what_he_has_answered_stays_reachable_by_going_back() {
+        // ★★★ Without this the back arrow has nowhere to go and a filing he
+        //     got wrong is unreachable the moment it lands.
+        let (ing, rules) = store("reachable");
+        let done = capture(&ing, &rules, "SHOPA");
+        ing.record_outcome(&done, true, None).expect("answered");
+        let pending = capture(&ing, &rules, "SHOPB");
+
+        let q = ing.navigable("h", 5, 50).expect("q");
+        assert_eq!(ids(&q), vec![done.clone(), pending.clone()]);
+        // And the card opens on work, not on history.
+        assert_eq!(q.iter().position(|m| !m.resolved), Some(1));
+    }
+
+    #[test]
+    fn only_a_short_tail_of_answered_messages_is_reachable() {
+        // ★★ Changing your mind about this morning is a real need; walking
+        //    back through a year is a different screen.
+        let (ing, rules) = store("tail");
+        for n in 0..8 {
+            let id = capture(&ing, &rules, &format!("SHOP{n}"));
+            ing.record_outcome(&id, true, None).expect("answered");
+        }
+        let q = ing.navigable("h", 3, 50).expect("q");
+        assert_eq!(q.len(), 3, "the three most recent");
+    }
+
+    #[test]
+    fn a_cancelled_pair_is_not_offered_for_review() {
+        // ★★ A charge that netted against its refund is not a filing anyone
+        //    needs to revisit.
+        let (ing, rules) = store("netted");
+        let a = capture(&ing, &rules, "SHOPA");
+        let b = capture(&ing, &rules, "SHOPB");
+        ing.record_outcome(&a, true, None).expect("answered");
+        ing.mark_compensated(&a, &b).expect("netted");
+        assert!(ing.navigable("h", 5, 50).expect("q").iter().all(|m| m.id != a));
+    }
+
+    #[test]
+    fn the_queue_does_not_cross_households() {
+        let (ing, rules) = store("scoped");
+        let mine = capture(&ing, &rules, "SHOPA");
+        let raw = "QGH7XJ4P2Q Confirmed. Ksh10.00 paid to OTHER on 20/7/26 at 4:30 PM. \
+                   New M-PESA balance is Ksh1.00";
+        ing.capture("other", "mpesa", raw, &rules).expect("theirs");
+        assert_eq!(ids(&ing.navigable("h", 5, 50).expect("q")), vec![mine]);
     }
 }
