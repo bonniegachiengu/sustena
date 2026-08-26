@@ -32,6 +32,7 @@ import {
   type DeviceDto,
   type NettingDto,
   type OwnIdentifiersDto,
+  type FiledSpendDto,
   type SkipLearnedDto,
   type TransferDto,
   type SmsSweep,
@@ -84,6 +85,7 @@ export type {
   DeviceDto,
   NettingDto,
   OwnIdentifiersDto,
+  FiledSpendDto,
   SkipLearnedDto,
   TransferDto,
   SmsSweep,
@@ -187,6 +189,15 @@ export const engine = {
   /** Cancel refunds against their charges. Returns what it did. */
   netReversals: async (sustainId: string): Promise<NettingDto> =>
     unwrap(await commands.netReversals(sustainId)),
+  /** Move a spend filed to the wrong pocket. Appends a correction. */
+  reclassify: async (
+    sustainId: string,
+    messageId: string,
+    fromPocket: string,
+    toPocket: string,
+    amount: number,
+  ): Promise<GateResult> =>
+    unwrap(await commands.reclassifySpend(sustainId, messageId, fromPocket, toPocket, amount)),
   /** "Never ask me about these again" — learn a skip from one message. */
   learnSkip: async (sustainId: string, messageId: string): Promise<SkipLearnedDto> =>
     unwrap(await commands.learnSkip(sustainId, messageId)),

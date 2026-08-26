@@ -2270,4 +2270,176 @@ mod tests {
         conserved(&after);
     }
 
+
+    // ── correcting a wrong filing ─────────────────────────────────────────────
+
+    /// A household with two funded pockets, KES 90 wrongly filed to rent.
+    fn misfiled() -> Value {
+        run_all(
+            empty(),
+            &[
+                ("budget.record_income",
+                 vec![("amount", json!(1000.0)), ("source", json!("pay")),
+                      ("account", json!("mpesa"))]),
+                ("budget.allocate", vec![("pocket_name", json!("rent")), ("amount", json!(400.0))]),
+                ("budget.allocate", vec![("pocket_name", json!("food")), ("amount", json!(300.0))]),
+                ("budget.spend",
+                 vec![("pocket_name", json!("rent")), ("amount", json!(90.0)),
+                      ("account", json!("mpesa"))]),
+            ],
+        )
+    }
+
+    #[test]
+    fn a_wrong_filing_moves_to_the_right_pocket() {
+        let before = misfiled();
+        assert_eq!(at(&before, "finances.pockets.rent.spent"), 90.0);
+
+        let after = run_all(
+            before.clone(),
+            &[("budget.reclassify",
+               vec![("from_pocket", json!("rent")), ("to_pocket", json!("food")),
+                    ("amount", json!(90.0))])],
+        );
+        assert_eq!(at(&after, "finances.pockets.rent.spent"), 0.0, "off the wrong one");
+        assert_eq!(at(&after, "finances.pockets.food.spent"), 90.0, "onto the right one");
+    }
+
+    #[test]
+    fn correcting_a_filing_moves_no_money() {
+        // ★★★ The cash left the account when it was spent. Which pocket it is
+        //     counted against is a change of description, not of position.
+        let before = misfiled();
+        let after = run_all(
+            before.clone(),
+            &[("budget.reclassify",
+               vec![("from_pocket", json!("rent")), ("to_pocket", json!("food")),
+                    ("amount", json!(90.0))])],
+        );
+        assert_eq!(
+            at(&after, "finances.accounts.mpesa.balance"),
+            at(&before, "finances.accounts.mpesa.balance"),
+            "the account is untouched"
+        );
+        assert_eq!(at(&after, "finances.liquid.balance"), at(&before, "finances.liquid.balance"));
+        conserved(&after);
+    }
+
+    #[test]
+    fn a_correction_is_appended_rather_than_rewriting_the_original() {
+        // ★★★ State is the fold of events. The original filing is not edited
+        //     and not deleted, so the log says both things it should: it was
+        //     filed to rent, and it was later moved to food. A household that
+        //     cannot show it changed its mind cannot be audited.
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &armed(), &misfiled(), "budget.reclassify",
+                         &params(&[("from_pocket", json!("rent")), ("to_pocket", json!("food")),
+                                   ("amount", json!(90.0))]));
+        assert!(ex.committed());
+        assert_eq!(ex.events.len(), 1);
+        assert_eq!(ex.events[0].name, "event.finances.spend_reclassified");
+        assert_eq!(ex.events[0].payload["from"], json!("rent"));
+        assert_eq!(ex.events[0].payload["to"], json!("food"));
+        // The correction is a MOVE of what is counted, not a re-run of a spend.
+        assert!(!ex.mutations.is_empty(), "and the fold replays it");
+    }
+
+    #[test]
+    fn a_pocket_cannot_have_spending_taken_off_it_that_it_never_carried() {
+        // ★★★ Otherwise a correction invents spending in reverse and drives a
+        //     pocket's `spent` below zero.
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &armed(), &misfiled(), "budget.reclassify",
+                         &params(&[("from_pocket", json!("food")), ("to_pocket", json!("rent")),
+                                   ("amount", json!(50.0))]));
+        assert!(!ex.committed(), "food has spent nothing");
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("from_pocket_carries_it"));
+    }
+
+    #[test]
+    fn moving_into_a_pocket_with_no_room_refuses_with_the_same_numbers_a_spend_would() {
+        // ★★ So a surface can offer the same fund-or-backfill choice it
+        //    already offers a refused spend, rather than a second kind of
+        //    answer for the same situation.
+        let state = run_all(
+            empty(),
+            &[
+                ("budget.record_income", vec![("amount", json!(1000.0)), ("source", json!("p"))]),
+                ("budget.allocate", vec![("pocket_name", json!("rent")), ("amount", json!(400.0))]),
+                ("budget.add_pocket", vec![("pocket_name", json!("food"))]),
+                ("budget.spend", vec![("pocket_name", json!("rent")), ("amount", json!(90.0))]),
+            ],
+        );
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &armed(), &state, "budget.reclassify",
+                         &params(&[("from_pocket", json!("rent")), ("to_pocket", json!("food")),
+                                   ("amount", json!(90.0))]));
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("pocket_balance_sufficient"));
+        assert_eq!(ex.result.data["shortfall"].as_f64(), Some(90.0));
+        assert_eq!(ex.result.data["remaining"].as_f64(), Some(0.0));
+    }
+
+    #[test]
+    fn refiling_to_the_same_pocket_is_refused_rather_than_doing_nothing_loudly() {
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &armed(), &misfiled(), "budget.reclassify",
+                         &params(&[("from_pocket", json!("rent")), ("to_pocket", json!("rent")),
+                                   ("amount", json!(90.0))]));
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("pockets_differ"));
+    }
+
+    #[test]
+    fn what_the_purchase_brought_in_moves_with_it() {
+        // ★★★ An asset still pointing at the old pocket would make "what did
+        //     the food money buy" answer with someone else's shopping.
+        let state = run_all(
+            misfiled(),
+            &[("inventory.itemize",
+               vec![("pocket_name", json!("rent")), ("source_tx", json!("msg-1")),
+                    ("limit", json!(90.0)),
+                    ("lines", json!([{"item":"beans","value":30.0},{"item":"rice","value":60.0}]))])],
+        );
+        let after = run_all(
+            state,
+            &[("budget.reclassify",
+               vec![("from_pocket", json!("rent")), ("to_pocket", json!("food")),
+                    ("amount", json!(90.0)), ("source_tx", json!("msg-1"))])],
+        );
+        let assets = after.pointer("/inventory/assets").and_then(Value::as_array).expect("assets");
+        assert_eq!(assets.len(), 2);
+        for a in assets {
+            assert_eq!(a["pocket"], json!("food"), "the shopping followed the spend");
+        }
+    }
+
+    #[test]
+    fn assets_from_other_purchases_are_left_where_they_are() {
+        // ★★ Only what this transaction brought in moves. Anything else in the
+        //    old pocket belongs to a different purchase.
+        let state = run_all(
+            misfiled(),
+            &[
+                ("inventory.itemize",
+                 vec![("pocket_name", json!("rent")), ("source_tx", json!("mine")),
+                      ("lines", json!([{"item":"beans","value":30.0}]))]),
+                ("inventory.itemize",
+                 vec![("pocket_name", json!("rent")), ("source_tx", json!("someone-else")),
+                      ("lines", json!([{"item":"cement","value":10.0}]))]),
+            ],
+        );
+        let after = run_all(
+            state,
+            &[("budget.reclassify",
+               vec![("from_pocket", json!("rent")), ("to_pocket", json!("food")),
+                    ("amount", json!(90.0)), ("source_tx", json!("mine"))])],
+        );
+        let assets = after.pointer("/inventory/assets").and_then(Value::as_array).expect("assets");
+        let beans = assets.iter().find(|a| a["item"] == json!("beans")).expect("beans");
+        let cement = assets.iter().find(|a| a["item"] == json!("cement")).expect("cement");
+        assert_eq!(beans["pocket"], json!("food"), "moved");
+        assert_eq!(cement["pocket"], json!("rent"), "left alone");
+    }
+
 }

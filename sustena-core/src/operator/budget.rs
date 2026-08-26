@@ -788,6 +788,140 @@ fn unrecord_income(
     }))
 }
 
+// ── budget.reclassify ────────────────────────────────────────────────────────
+
+/// Move a spend that was filed to the wrong pocket.
+///
+/// ★★★ **A correction, never an edit.** State is the fold of events, so the
+/// original filing is not rewritten and not deleted — it stays exactly as it
+/// was recorded, and this appends the move that puts it right. The log
+/// therefore says both things it should: that it was filed to rent, and that
+/// he later moved it to food. An edit would leave only the second, and a
+/// household that cannot show it changed its mind cannot be audited.
+///
+/// ★★ Semantically this is `unspend(from)` followed by `spend(to)`, and it is
+/// ONE operator rather than that pair for one reason: atomicity. Nothing today
+/// runs two calls as a single gate decision, and a reclassify that half-landed
+/// would leave the money in neither pocket. When the graph runner arrives with
+/// transactional semantics this can become a two-node path without changing
+/// what it means.
+///
+/// ★★★ No money moves. The cash left the account when it was spent; which
+/// pocket it is counted against is a change of description, not of position.
+fn reclassify(
+    state: &mut State,
+    params: &Map<String, Value>,
+    events: &mut Vec<EmittedEvent>,
+    _movements: &mut Vec<Movement>,
+) -> OperatorResult {
+    let from = text(params, "from_pocket");
+    let to = text(params, "to_pocket");
+    let amount = num(params, "amount");
+
+    if from.is_empty() || to.is_empty() {
+        return OperatorResult::fail(
+            "A correction needs both the pocket it was filed to and the one it belongs in.",
+            "both_pockets_named",
+        );
+    }
+    if from == to {
+        return OperatorResult::fail(
+            format!("It is already filed to '{from}'."),
+            "pockets_differ",
+        );
+    }
+    for p in [&from, &to] {
+        if !state.exists(&format!("finances.pockets.{p}.allocated")) {
+            return OperatorResult::fail(format!("Pocket '{p}' does not exist."), "pocket_exists");
+        }
+    }
+
+    // ★★ It can only be taken off a pocket that really carries it. Otherwise a
+    //    correction could invent spending in reverse and drive `spent` below
+    //    zero for a pocket that never held it.
+    let from_spent = state
+        .get(&format!("finances.pockets.{from}.spent"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    if amount > from_spent + 0.005 {
+        let mut result = OperatorResult::fail(
+            format!("'{from}' only has KES {from_spent:.0} recorded as spent."),
+            "from_pocket_carries_it",
+        );
+        result.data = json!({"pocket": from, "spent": money(from_spent), "requested": money(amount)});
+        return result;
+    }
+
+    // ★★★ And the new pocket has to have room, exactly as an ordinary spend
+    //     would. The same numbers come back, so a surface can offer the same
+    //     fund-or-backfill choice it already offers a refused spend, rather
+    //     than needing a second kind of answer for the same situation.
+    let to_allocated = state
+        .get(&format!("finances.pockets.{to}.allocated"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let to_spent = state
+        .get(&format!("finances.pockets.{to}.spent"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let remaining = to_allocated - to_spent;
+    if amount > remaining {
+        let mut result = OperatorResult::fail(
+            format!(
+                "Moving KES {amount:.0} into '{to}' needs KES {amount:.0} of room, and it has KES {remaining:.0}."
+            ),
+            "pocket_balance_sufficient",
+        );
+        result.data = json!({
+            "pocket": to,
+            "remaining": money(remaining),
+            "requested": money(amount),
+            "shortfall": money(((amount - remaining) * 100.0).round() / 100.0),
+        });
+        return result;
+    }
+
+    let _ = state.decrement(&format!("finances.pockets.{from}.spent"), &json!(amount), false);
+    let _ = state.increment(&format!("finances.pockets.{to}.spent"), &json!(amount));
+
+    // ★★★ Anything the purchase brought in moves with it. An asset still
+    //     pointing at the old pocket would make "what did the food money buy"
+    //     answer with someone else's shopping.
+    let source_tx = text(params, "source_tx");
+    let mut moved_assets = 0usize;
+    if !source_tx.is_empty() {
+        let assets = state
+            .get("inventory.assets")
+            .and_then(|v| v.as_array().cloned())
+            .unwrap_or_default();
+        for (i, a) in assets.iter().enumerate() {
+            if a.get("source_tx").and_then(Value::as_str) == Some(source_tx.as_str()) {
+                if state.set(&format!("inventory.assets[{i}].pocket"), json!(to)).is_ok() {
+                    moved_assets += 1;
+                }
+            }
+        }
+    }
+
+    events.push(EmittedEvent {
+        name: "event.finances.spend_reclassified".into(),
+        payload: json!({
+            "from": from,
+            "to": to,
+            "amount": money(amount),
+            "source_tx": if source_tx.is_empty() { Value::Null } else { json!(source_tx) },
+            "assets_moved": moved_assets,
+        }),
+    });
+
+    OperatorResult::ok(json!({
+        "from": from,
+        "to": to,
+        "amount": money(amount),
+        "assets_moved": moved_assets,
+    }))
+}
+
 // ── registration ─────────────────────────────────────────────────────────────
 
 pub fn register(registry: &mut Registry) {
@@ -962,6 +1096,25 @@ pub fn register(registry: &mut Registry) {
         min_privilege: 1,
         effect: None,
         run: unrecord_income,
+    });
+
+    registry.register(OperatorMeta {
+        name: "budget.reclassify",
+        description: "Move a spend filed to the wrong pocket, as an appended correction.",
+        params: vec![
+            ParamDecl::naming("from_pocket", "finances.pockets"),
+            ParamDecl::naming("to_pocket", "finances.pockets"),
+            ParamDecl::number("amount"),
+            ParamDecl::text("source_tx").optional(),
+        ],
+        constraints: vec!["params.amount > 0".into()],
+        post_constraints: vec![],
+        side_effects: vec!["event.finances.spend_reclassified"],
+        pawa_cost: 0,
+        protocol: Protocol::Rpc,
+        min_privilege: 1,
+        effect: None,
+        run: reclassify,
     });
 
     // Test-only: mutates state in a way no guard would catch, so the gate is
