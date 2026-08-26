@@ -19,6 +19,43 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `fix/compact-pocket-chips` — merged into `dev` 26 Aug at `8058b02`
+
+**Off:** `dev` at `31a797e`
+**State:** merged, verified on the device
+
+Bonnie said the pocket pills were still too large, twice. They had already
+become 34px chips; that was still too big for fifteen of them, because what
+costs him is reading the list rather than hitting the target. Now 28px at 12px,
+with long names trimmed instead of setting the row width.
+
+The change that matters more: compactness is decided by **how many options there
+are**, not by whether the field is called `pocket_name`. The old check failed
+silently and open — any other long list got full-size buttons, and a rename
+would have landed straight back in the wall of buttons.
+
+**Verified on his phone over CDP**, not asserted: chips render at 28px, and
+eight pockets fit in two rows of a 393px container. Previously four rows.
+
+### `feat/skip-all-like-this` — merged into `dev` 26 Aug at `f065725`
+
+**Off:** `dev` at `8058b02`
+**State:** merged, gate green (core clean, 187 host tests)
+**Touches:** `ingest.rs`, `world.rs`, `commands.rs`, `dto.rs`, `lib.rs`, `Orchie.tsx`
+
+Design doc §5 item 8, outstanding since 25 Aug. One answer clears a whole shape
+instead of the same decision made hundreds of times.
+
+Keyed on source plus parser name — the shape the transducer recognised — never
+on raw text, which never repeats exactly. An unparsed message can never teach
+one: `parser_name` is empty there, so the rule would mean "skip everything I
+cannot read", which is the pile that most needs his eyes. Retroactive, because
+he answers this in the middle of the pile it is meant to clear.
+
+**New file on disk:** `skip_rules.json` in the ingest directory. No schema
+change, so nothing to migrate.
+
+
 ### `feat/shared-ref-join` — merged into `dev` 26 Aug at `31a797e`
 
 **Off:** `dev` at `4ef4168`
