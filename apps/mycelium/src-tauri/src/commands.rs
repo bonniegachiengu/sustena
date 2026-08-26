@@ -11,7 +11,8 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::dto::{
-    AccessDto, AccountDto, Branch, BranchStep, DeviceDto, OwnIdentifiersDto, TransferDto, TrendDto, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
+    AccessDto, AccountDto, Branch, BranchStep, DeviceDto, OwnIdentifiersDto, SkipLearnedDto,
+    TransferDto, TrendDto, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
     AttentionDto, CaptureContextDto, NettingDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
@@ -1490,6 +1491,25 @@ pub fn apply_transfers(
         trace!("recorded {} transfer(s) between his own accounts", out.moved);
     }
     Ok(out)
+}
+
+/// **Never ask me about these again** — learn a skip from one message.
+///
+/// ★★ Retroactive by design. He answers this in the middle of a backlog full
+/// of the same shape, so a rule that only covered future messages would leave
+/// the pile it was meant to clear exactly as it was.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn learn_skip(
+    world: State<'_, World>,
+    sustain_id: String,
+    message_id: String,
+) -> Result<SkipLearnedDto, String> {
+    let out = world.ingest().learn_skip(&sustain_id, &message_id).map_err(|e| e.to_string())?;
+    if out.cleared > 0 {
+        trace!("learned a skip, cleared {} waiting", out.cleared);
+    }
+    Ok(SkipLearnedDto { cleared: out.cleared, unlearnable: out.unlearnable })
 }
 
 /// Set a captured message aside as not a transaction.

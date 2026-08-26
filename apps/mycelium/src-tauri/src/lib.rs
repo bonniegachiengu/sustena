@@ -76,6 +76,7 @@ pub fn specta_builder() -> Builder {
         commands::get_own_identifiers,
         commands::set_own_identifiers,
         commands::apply_transfers,
+        commands::learn_skip,
         commands::learn_rule,
         commands::get_feed,
         commands::orchie_infer,

@@ -433,6 +433,21 @@ async applyTransfers(sustainId: string) : Promise<Result<TransferDto, string>> {
 }
 },
 /**
+ * **Never ask me about these again** — learn a skip from one message.
+ * 
+ * ★★ Retroactive by design. He answers this in the middle of a backlog full
+ * of the same shape, so a rule that only covered future messages would leave
+ * the pile it was meant to clear exactly as it was.
+ */
+async learnSkip(sustainId: string, messageId: string) : Promise<Result<SkipLearnedDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("learn_skip", { sustainId, messageId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * **Remember this format** — synthesise a rule from a confirmed correction.
  * 
  * ★★ Verified before it is ever added: it must be well-typed, must match the
@@ -1667,6 +1682,20 @@ status: string; operator: string | null;
  * `shipped` | `user_corrected` | `proposed_confirmed`.
  */
 trust: string; examples: number }
+/**
+ * What "skip all like this" did.
+ */
+export type SkipLearnedDto = { 
+/**
+ * How many already-waiting messages the new rule cleared.
+ */
+cleared: number; 
+/**
+ * ★★ True when nothing could be learned: no rule recognised this message,
+ * so the only shape it could describe is "everything I cannot read" — and
+ * that pile is exactly the one that needs a person's eyes.
+ */
+unlearnable: boolean }
 /**
  * What one sweep did. Every number is counted from a real outcome.
  */

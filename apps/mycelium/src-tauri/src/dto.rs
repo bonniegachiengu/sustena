@@ -1103,6 +1103,18 @@ pub struct DeviceDto {
     pub app_version: String,
 }
 
+/// What "skip all like this" did.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SkipLearnedDto {
+    /// How many already-waiting messages the new rule cleared.
+    pub cleared: u32,
+    /// ★★ True when nothing could be learned: no rule recognised this message,
+    /// so the only shape it could describe is "everything I cannot read" — and
+    /// that pile is exactly the one that needs a person's eyes.
+    pub unlearnable: bool,
+}
+
 /// One account, on the wire.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

@@ -32,6 +32,7 @@ import {
   type DeviceDto,
   type NettingDto,
   type OwnIdentifiersDto,
+  type SkipLearnedDto,
   type TransferDto,
   type SmsSweep,
   type CaptureContextDto,
@@ -83,6 +84,7 @@ export type {
   DeviceDto,
   NettingDto,
   OwnIdentifiersDto,
+  SkipLearnedDto,
   TransferDto,
   SmsSweep,
   CaptureContextDto,
@@ -185,6 +187,9 @@ export const engine = {
   /** Cancel refunds against their charges. Returns what it did. */
   netReversals: async (sustainId: string): Promise<NettingDto> =>
     unwrap(await commands.netReversals(sustainId)),
+  /** "Never ask me about these again" — learn a skip from one message. */
+  learnSkip: async (sustainId: string, messageId: string): Promise<SkipLearnedDto> =>
+    unwrap(await commands.learnSkip(sustainId, messageId)),
   /** Set a captured message aside as not a transaction. Keeps the record. */
   ignoreMessage: async (id: string): Promise<boolean> =>
     unwrap(await commands.ignoreMessage(id)),

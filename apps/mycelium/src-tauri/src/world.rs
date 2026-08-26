@@ -790,6 +790,28 @@ impl World {
             return Ok(captured);
         };
 
+        // ★★★ A shape he has already said he never wants to see.
+        //
+        //     Applied here, on the way in, so the answer he gave once holds
+        //     for every message like it afterwards. It sets aside rather than
+        //     discards: the text is kept, the record says a learned rule did
+        //     it, and forgetting the rule is a real thing he can do.
+        //
+        //     ★★ Only for messages that need a person. A MAPPED message is
+        //     one the transducer understood well enough to act on, and
+        //     skipping those would silently stop recording real money.
+        if m.needs_attention() && self.ingest.is_skipped(m)? {
+            self.ingest.ignore(&m.id)?;
+            let updated = self
+                .ingest
+                .current()?
+                .into_iter()
+                .find(|x| x.id == m.id)
+                .map(Box::new)
+                .unwrap_or_else(|| m.clone());
+            return Ok(Capture::Stored(updated));
+        }
+
         // ★★★ One real transaction, two texts, one application.
         //
         //     M-Pesa and a bank can both send about the same movement of
