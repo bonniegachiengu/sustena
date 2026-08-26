@@ -35,6 +35,7 @@
 pub mod budget;
 pub mod device;
 pub mod inventory;
+pub mod vendor;
 pub mod meta;
 
 use serde_json::{Map, Value};

@@ -221,6 +221,7 @@ impl Registry {
         crate::operator::budget::register(&mut r);
         crate::operator::device::register(&mut r);
         crate::operator::inventory::register(&mut r);
+        crate::operator::vendor::register(&mut r);
         r
     }
 }
