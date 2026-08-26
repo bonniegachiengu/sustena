@@ -198,6 +198,9 @@ export const engine = {
     amount: number,
   ): Promise<GateResult> =>
     unwrap(await commands.reclassifySpend(sustainId, messageId, fromPocket, toPocket, amount)),
+  /** Put a message off until he remembers. It returns at the top next open. */
+  deferMessage: async (sustainId: string, messageId: string): Promise<boolean> =>
+    unwrap(await commands.deferMessage(sustainId, messageId)),
   /** "Never ask me about these again" — learn a skip from one message. */
   learnSkip: async (sustainId: string, messageId: string): Promise<SkipLearnedDto> =>
     unwrap(await commands.learnSkip(sustainId, messageId)),

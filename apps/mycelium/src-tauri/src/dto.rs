@@ -983,6 +983,15 @@ pub struct FeedDto {
     pub sustain_id: String,
     pub label: String,
     pub cards: Vec<CardDto>,
+    /// ★★★ The queue he can walk, in the order he should meet it.
+    ///
+    /// Recently answered first — so the back arrow reaches them — then what is
+    /// waiting, with anything he deferred at the head of that. ONE card renders
+    /// at a time; this is the list it steps through, not a list to display.
+    pub queue: Vec<CaptureContextDto>,
+    /// Where in `queue` the first unanswered message sits, so the card opens
+    /// on work rather than on history.
+    pub queue_start: u32,
     /// The oldest capture still needing a person, if there is one.
     ///
     /// ★★ ONE message rather than a list. The classify card works the queue one
@@ -1200,6 +1209,15 @@ pub struct CaptureContextDto {
     pub direction: Option<String>,
     /// The transducer's own words about why this is waiting.
     pub reason: String,
+    /// `pending`, `deferred`, or `processed`.
+    ///
+    /// ★★ A processed message stays in the list on purpose: the back arrow
+    /// has to reach a filing he wants to change, and a correction path with
+    /// nothing to correct from is not a path.
+    pub status: String,
+    /// Where a processed one currently sits, so the card can say so.
+    pub filed_pocket: Option<String>,
+    pub filed_amount: Option<f64>,
 }
 
 /// What a netting pass did.
