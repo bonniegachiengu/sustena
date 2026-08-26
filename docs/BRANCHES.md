@@ -13,10 +13,16 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Live
 
-### `feat/shared-ref-join`
+*(none open right now.)*
+
+---
+
+## Merged
+
+### `feat/shared-ref-join` — merged into `dev` 26 Aug at `31a797e`
 
 **Off:** `dev` at `4ef4168`
-**State:** complete, gate green (core clean, 179 host tests), **not yet merged**
+**State:** merged, gate green at merge (core clean, 179 host tests)
 **Touches:** `sustena-core/assets/parse_rules_seed.json`,
 `apps/mycelium/src-tauri/src/{ingest.rs, world.rs, commands.rs}`
 
@@ -44,15 +50,11 @@ second.
    the money twice. `same_event_as` records which got there first; the second
    keeps its text and stops asking.
 
-**Merge notes.** Adds `same_event_as` to `IngestedMessage`, `#[serde(default)]`,
-so old records read back fine. Extends `kcb_send_to_mpesa`'s pattern with an
-*optional* ref group, so the earlier example without one still matches — that is
-asserted by the rule's own two examples. No conflict expected with anything on
-`dev`; it is the only branch touching `ingest.rs` right now.
-
----
-
-## Merged
+**Merge notes.** Added `same_event_as` to `IngestedMessage`,
+`#[serde(default)]`, so records written before it read back fine. Extended
+`kcb_send_to_mpesa`'s pattern with an *optional* ref group, so the earlier
+example without one still matches — asserted by the rule carrying both. It was
+the only branch touching `ingest.rs`, so the merge was clean.
 
 ### `feat/orchie-imc` — P1 to P4 (merged into `dev`, 26 Aug)
 
