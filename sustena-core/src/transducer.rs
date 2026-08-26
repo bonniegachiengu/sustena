@@ -456,6 +456,29 @@ mod tests {
     }
 
     #[test]
+    fn received_money_is_recognised_with_or_without_a_phone_number() {
+        // ★★★ From his phone, 26 Aug. "You have received Ksh1,000.00 from mary
+        //     ngigi" — no number after the name — matched nothing, so a plainly
+        //     received KES 1,000 fell through to the classify card and was
+        //     asked which POCKET it belonged to, exactly as a spend would be.
+        //
+        //     The anchors that make this rule safe are "You have received Ksh"
+        //     and "New M-PESA balance". The phone bought no precision and cost
+        //     a whole shape, so it is optional now.
+        for raw in [
+            "UHIE73CBRB Confirmed. You have received Ksh1,000.00 from mary ngigi \
+             on 26/8/26 at 9:15 AM. New M-PESA balance is Ksh5,000.00",
+            "QGH7XJ4P2Q Confirmed. You have received Ksh1,500.00 from JOHN KAMAU 254712345678 \
+             on 2/8/26 at 10:15 AM. New M-PESA balance is Ksh12,050.00",
+        ] {
+            let t = parse_message(raw, Some("mpesa"), &[]);
+            assert_eq!(t.status(), "mapped", "money in files itself: {raw}");
+            assert_eq!(t.operator(), Some("budget.record_income"));
+            assert_eq!(t.parsed_fields().get("direction").and_then(|v| v.as_str()), Some("received"));
+        }
+    }
+
+    #[test]
     fn the_shipped_set_is_the_expected_shape() {
         assert_eq!(seed_rules("mpesa").len(), 7);
         // 17 = 15 original shapes, + kcb_reversal for refund netting, and

@@ -4,7 +4,7 @@
    "id": "mpesa_received",
    "source": "mpesa",
    "version": 1,
-   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s+You have received\\s+Ksh(?P<amount>[\\d,]+\\.?\\d*)\\s+from\\s+(?P<name>[A-Za-z ]+?)\\s+(?P<phone>2\\d{9,11})\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}\\s*[APap][Mm])\\.?\\s+New M-PESA balance is Ksh(?P<balance>[\\d,]+\\.?\\d*)",
+   "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.\\s+You have received\\s+Ksh(?P<amount>[\\d,]+\\.?\\d*)\\s+from\\s+(?P<name>[A-Za-z ]+?)(?:\\s+(?P<phone>2\\d{9,11}))?\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}\\s*[APap][Mm])\\.?\\s+New M-PESA balance is Ksh(?P<balance>[\\d,]+\\.?\\d*)",
    "extract": {
     "ref": {
      "type": "string",
@@ -49,7 +49,8 @@
    "trust": "shipped",
    "provenance": "sustena_core",
    "examples": [
-    "QGH7XJ4P2Q Confirmed. You have received Ksh1,500.00 from JOHN KAMAU 254712345678 on 2/8/26 at 10:15 AM. New M-PESA balance is Ksh12,050.00"
+    "QGH7XJ4P2Q Confirmed. You have received Ksh1,500.00 from JOHN KAMAU 254712345678 on 2/8/26 at 10:15 AM. New M-PESA balance is Ksh12,050.00",
+    "UHIE73CBRB Confirmed. You have received Ksh1,000.00 from mary ngigi on 26/8/26 at 9:15 AM. New M-PESA balance is Ksh5,000.00"
    ]
   },
   {
