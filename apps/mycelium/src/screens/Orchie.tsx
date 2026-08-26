@@ -782,6 +782,7 @@ export default function Orchie(props: { onFace?: () => void }) {
               <Show when={f().device}>{(d) => <DeviceCard device={d()} />}</Show>
               <AccountsCard feed={f()} onChanged={() => void refetch()} />
               <InventoryCard feed={f()} onChanged={() => void refetch()} />
+              <FiledCard feed={f()} onChanged={() => void refetch()} />
               <OwnNumbersCard sustainId={f().sustainId} onChanged={() => void refetch()} />
 
               <Show when={moves()}>
@@ -912,6 +913,103 @@ function DeviceCard(props: { device: DeviceDto }) {
             {props.device.queueDepth} text{props.device.queueDepth === 1 ? "" : "s"} caught and
             waiting to be handed over.
           </p>
+        </Show>
+      </div>
+    </Show>
+  );
+}
+
+/**
+ * Spends already filed, so one filed to the wrong pocket can be reached.
+ *
+ * ★★★ This surface did not exist. A tx could be classified and then never
+ * touched again — there was no list of recorded spends anywhere in Orchie, so
+ * a wrong pocket was permanent no matter what the engine could do about it. A
+ * correction operator with nothing to correct FROM is not a correction path.
+ *
+ * ★★ Collapsed by default and short. Fixing last week's shopping is a real
+ * need; scrolling a year of it is a different screen nobody has asked for.
+ */
+function FiledCard(props: { feed: FeedDto; onChanged: () => void }) {
+  const [open, setOpen] = createSignal(false);
+  const [moving, setMoving] = createSignal<string | null>(null);
+  const [busy, setBusy] = createSignal(false);
+  const [failed, setFailed] = createSignal<string | null>(null);
+  const [done, setDone] = createSignal<string | null>(null);
+
+  const pockets = () => props.feed.inventory.map((g) => g.pocket);
+  /** Every pocket the household has, not only the ones holding something. */
+  const allPockets = () => {
+    const seen = new Set<string>([...pockets(), ...props.feed.filed.map((f) => f.pocket)]);
+    return [...seen].sort();
+  };
+
+  const move = async (f: { messageId: string; pocket: string; amount: number }, to: string) => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      const r = await engine.reclassify(props.feed.sustainId, f.messageId, f.pocket, to, f.amount);
+      if (r.verdict !== "admitted") {
+        // ★ The engine's own words. A pocket with no room says so here in the
+        //   same terms it does when a spend is first filed.
+        setFailed(r.reason ?? "the engine refused it");
+        return;
+      }
+      setDone(`moved to ${to}`);
+      setMoving(null);
+      props.onChanged();
+    } catch (e) {
+      setFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Show when={props.feed.filed.length > 0}>
+      <div class={O.card}>
+        <button class={O.linkish} onClick={() => setOpen((o) => !o)}>
+          {open() ? "▾" : "▸"} filed recently ({props.feed.filed.length})
+        </button>
+        <Show when={open()}>
+          <For each={props.feed.filed}>
+            {(f) => (
+              <>
+                <div class={O.row}>
+                  <span class={O.caption}>
+                    {f.counterparty || "a payment"} · {fmt(f.amount)} · {f.pocket}
+                  </span>
+                  <span class={O.spacer} />
+                  <button
+                    class={O.linkish}
+                    onClick={() => setMoving((m) => (m === f.messageId ? null : f.messageId))}
+                  >
+                    change pocket
+                  </button>
+                </div>
+                <Show when={moving() === f.messageId}>
+                  <div class={O.chips}>
+                    <For each={allPockets().filter((p) => p !== f.pocket)}>
+                      {(p) => (
+                        <button class={O.chip} disabled={busy()} onClick={() => void move(f, p)}>
+                          {p}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </>
+            )}
+          </For>
+          <Show when={failed()}>{(e) => <div class={O.errorBox}>{e()}</div>}</Show>
+          <Show when={done()}>
+            {(d) => (
+              <p class={O.caption}>
+                {d()}. The original filing stays on the record — this was added after it, not
+                instead of it.
+              </p>
+            )}
+          </Show>
         </Show>
       </div>
     </Show>

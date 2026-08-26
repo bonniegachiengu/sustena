@@ -12,7 +12,7 @@ use tauri_specta::Event;
 
 use crate::dto::{
     AccessDto, AccountDto, AssetDto, Branch, BranchStep, DeviceDto, InventoryGroupDto,
-    OwnIdentifiersDto, SkipLearnedDto,
+    FiledSpendDto, OwnIdentifiersDto, SkipLearnedDto,
     TransferDto, TrendDto, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
@@ -1195,6 +1195,18 @@ pub fn get_feed(
             .unwrap_or_default()),
         device: device_of(&world, &sustain_id),
         inventory: inventory_of(&state),
+        filed: world
+            .ingest()
+            .filed_spends(&sustain_id, RECENT_FILED)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| FiledSpendDto {
+                message_id: f.message_id,
+                pocket: f.pocket,
+                amount: f.amount,
+                counterparty: f.counterparty,
+            })
+            .collect(),
         trend,
         unaccounted: unaccounted_in(&state),
     })
@@ -1222,6 +1234,12 @@ fn health_hue(reading: &sustena_core::monitor::Ingested) -> String {
     }
     .to_string()
 }
+
+/// How many recent filings to offer for correction.
+///
+/// ★★ A short list on purpose. Correcting last week's shopping is a real need;
+/// scrolling a year of it is a different screen, and one nobody has asked for.
+const RECENT_FILED: usize = 12;
 
 /// What the household holds, grouped by the pocket that bought it.
 fn inventory_of(state: &Value) -> Vec<InventoryGroupDto> {
@@ -1549,6 +1567,42 @@ pub fn learn_skip(
         trace!("learned a skip, cleared {} waiting", out.cleared);
     }
     Ok(SkipLearnedDto { cleared: out.cleared, unlearnable: out.unlearnable })
+}
+
+/// **Move a spend filed to the wrong pocket.**
+///
+/// ★★★ A correction, appended. The original filing is not rewritten: the
+/// operator moves what is counted, and the message records the move after the
+/// filing it corrects, so the log keeps both.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn reclassify_spend(
+    world: State<'_, World>,
+    sustain_id: String,
+    message_id: String,
+    from_pocket: String,
+    to_pocket: String,
+    amount: f64,
+) -> Result<GateResult, String> {
+    let mut params = Map::new();
+    params.insert("from_pocket".into(), Value::String(from_pocket));
+    params.insert("to_pocket".into(), Value::String(to_pocket.clone()));
+    params.insert("amount".into(), serde_json::json!(amount));
+    params.insert("source_tx".into(), Value::String(message_id.clone()));
+
+    let Some((x, _)) = world
+        .call(&sustain_id, "budget.reclassify", &params)
+        .map_err(|e| e.to_string())?
+    else {
+        return Err(format!("no Sustain called '{sustain_id}'"));
+    };
+    let result = GateResult::of("budget.reclassify", &x);
+    if x.committed() {
+        // ★ Only after the gate committed. Noting a correction that was
+        //   refused would show the list a move that never happened.
+        let _ = world.ingest().record_reclassification(&message_id, &to_pocket, amount);
+    }
+    Ok(result)
 }
 
 /// Set a captured message aside as not a transaction.

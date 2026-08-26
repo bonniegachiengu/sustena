@@ -448,6 +448,21 @@ async learnSkip(sustainId: string, messageId: string) : Promise<Result<SkipLearn
 }
 },
 /**
+ * **Move a spend filed to the wrong pocket.**
+ * 
+ * ★★★ A correction, appended. The original filing is not rewritten: the
+ * operator moves what is counted, and the message records the move after the
+ * filing it corrects, so the log keeps both.
+ */
+async reclassifySpend(sustainId: string, messageId: string, fromPocket: string, toPocket: string, amount: number) : Promise<Result<GateResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reclassify_spend", { sustainId, messageId, fromPocket, toPocket, amount }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * **Remember this format** — synthesise a rule from a confirmed correction.
  * 
  * ★★ Verified before it is ever added: it must be well-typed, must match the
@@ -1122,6 +1137,10 @@ trend: TrendDto | null;
  */
 inventory: InventoryGroupDto[]; 
 /**
+ * Recent spends, so one filed to the wrong pocket can be reached at all.
+ */
+filed: FiledSpendDto[]; 
+/**
  * ★★★ Money the household holds that no account claims.
  * 
  * Zero once every shilling has a place. Non-zero means the pooled balance
@@ -1130,6 +1149,13 @@ inventory: InventoryGroupDto[];
  * honestly while some of it is nowhere.
  */
 unaccounted: number }
+/**
+ * A spend that landed, and where it currently sits.
+ * 
+ * ★★ Read off what the message recorded it DID, so the list is the log's own
+ * account of the filing rather than a guess reconstructed from a balance.
+ */
+export type FiledSpendDto = { messageId: string; pocket: string; amount: number; counterparty: string }
 /**
  * The gate's own words about one call.
  */

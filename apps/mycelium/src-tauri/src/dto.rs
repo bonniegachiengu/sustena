@@ -1011,6 +1011,8 @@ pub struct FeedDto {
     pub trend: Option<TrendDto>,
     /// What the household holds, grouped by the pocket that bought it.
     pub inventory: Vec<InventoryGroupDto>,
+    /// Recent spends, so one filed to the wrong pocket can be reached at all.
+    pub filed: Vec<FiledSpendDto>,
     /// ★★★ Money the household holds that no account claims.
     ///
     /// Zero once every shilling has a place. Non-zero means the pooled balance
@@ -1145,6 +1147,19 @@ pub struct InventoryGroupDto {
     pub pocket: String,
     pub total: f64,
     pub assets: Vec<AssetDto>,
+}
+
+/// A spend that landed, and where it currently sits.
+///
+/// ★★ Read off what the message recorded it DID, so the list is the log's own
+/// account of the filing rather than a guess reconstructed from a balance.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FiledSpendDto {
+    pub message_id: String,
+    pub pocket: String,
+    pub amount: f64,
+    pub counterparty: String,
 }
 
 /// One account, on the wire.

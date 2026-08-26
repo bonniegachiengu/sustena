@@ -388,6 +388,17 @@ pub struct SkipLearned {
     pub unlearnable: bool,
 }
 
+/// A spend that landed, and where it currently sits.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FiledSpend {
+    pub message_id: String,
+    pub pocket: String,
+    pub amount: f64,
+    pub counterparty: String,
+    pub raw: String,
+    pub seq: u64,
+}
+
 /// A balance a bank itself reported, and when.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Reported {
@@ -959,6 +970,65 @@ impl Ingested {
             .filter(|m| m.applied)
             .find(|m| m.reference() == Some(reference))
             .map(|m| m.id))
+    }
+
+    /// The spends this household has filed, newest first.
+    ///
+    /// ★★★ Built from what each message recorded it DID, not from the state
+    /// it produced. `filed` has carried the operator and its params since the
+    /// refund work needed to undo one; a spend that landed is therefore
+    /// already on the record with its pocket and its amount, and this reads it
+    /// back rather than inferring it from a balance.
+    ///
+    /// ★★ Only spends, and only the ones still standing. An allocation is not
+    /// a filing anyone can get wrong in this sense, and a message already
+    /// corrected or netted is not the one to correct again.
+    pub fn filed_spends(&self, sustain_id: &str, limit: usize) -> StoreResult<Vec<FiledSpend>> {
+        let mut out: Vec<FiledSpend> = Vec::new();
+        for m in self.current()? {
+            if m.sustain_id != sustain_id || !m.resolved || m.netted_with.is_some() {
+                continue;
+            }
+            // The LAST spend recorded against the message is where it stands
+            // now — a correction appends, so the newest one is current.
+            let Some(f) = m.filed.iter().rev().find(|f| f.operator == "budget.spend") else {
+                continue;
+            };
+            let Some(pocket) = f.params.get("pocket_name").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(amount) = f.params.get("amount").and_then(|v| v.as_f64()) else {
+                continue;
+            };
+            out.push(FiledSpend {
+                message_id: m.id.clone(),
+                pocket: pocket.to_string(),
+                amount,
+                counterparty: m.counterparty().unwrap_or("").to_string(),
+                raw: m.raw_payload.clone(),
+                seq: m.seq,
+            });
+        }
+        out.sort_by(|a, b| b.seq.cmp(&a.seq));
+        out.truncate(limit);
+        Ok(out)
+    }
+
+    /// Note that a filing was corrected, so the list shows where it stands now.
+    ///
+    /// ★★ Appended, like everything else here. The original filing stays in
+    /// `filed`; this adds the move after it, and `filed_spends` reads the last
+    /// one — so the record keeps both and the screen shows the current answer.
+    pub fn record_reclassification(
+        &self,
+        id: &str,
+        to_pocket: &str,
+        amount: f64,
+    ) -> StoreResult<()> {
+        let mut params: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+        params.insert("pocket_name".into(), serde_json::json!(to_pocket));
+        params.insert("amount".into(), serde_json::json!(amount));
+        self.record_filing(id, "budget.spend", &params)
     }
 
     /// Which account a captured message's money moved in.
@@ -3293,5 +3363,122 @@ mod reclaim_tests {
         let r = ing.find_transfers("h").expect("transfers");
         assert!(r.self_moves.is_empty(), "no reference, no way back");
         assert_eq!(r.reclaimed, 0);
+    }
+}
+
+#[cfg(test)]
+mod filed_tests {
+    use super::*;
+    use std::env;
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let dir = env::temp_dir().join(format!("sustena-filed-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        let ing = Ingested::at(dir).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    fn spend_params(pocket: &str, amount: f64) -> BTreeMap<String, serde_json::Value> {
+        BTreeMap::from([
+            ("pocket_name".to_string(), serde_json::json!(pocket)),
+            ("amount".to_string(), serde_json::json!(amount)),
+        ])
+    }
+
+    fn a_spend(ing: &Ingested, rules: &[ParseRule], who: &str) -> String {
+        let raw = format!(
+            "QGH7XJ4P2Q Confirmed. Ksh90.00 paid to {who} on 20/7/26 at 4:30 PM. \
+             New M-PESA balance is Ksh12,050.00"
+        );
+        let Capture::Stored(m) = ing.capture("h", "mpesa", &raw, rules).expect("capture")
+            else { panic!("stored") };
+        m.id
+    }
+
+    #[test]
+    fn a_filed_spend_can_be_found_again() {
+        // ★★★ Without this there is nothing to correct FROM. A tx could be
+        //     classified and then never touched again.
+        let (ing, rules) = store("find");
+        let id = a_spend(&ing, &rules, "NAIVAS");
+        ing.record_filing(&id, "budget.spend", &spend_params("rent", 90.0)).expect("filed");
+        ing.record_outcome(&id, true, None).expect("resolved");
+
+        let filed = ing.filed_spends("h", 12).expect("filed");
+        assert_eq!(filed.len(), 1);
+        assert_eq!(filed[0].pocket, "rent");
+        assert_eq!(filed[0].amount, 90.0);
+        assert_eq!(filed[0].counterparty, "NAIVAS");
+    }
+
+    #[test]
+    fn a_correction_appends_and_the_list_shows_where_it_stands_now() {
+        // ★★★ The original filing is not rewritten. `filed` keeps both, and
+        //     the list reads the last one — so the record can show he changed
+        //     his mind while the screen shows the current answer.
+        let (ing, rules) = store("append");
+        let id = a_spend(&ing, &rules, "NAIVAS");
+        ing.record_filing(&id, "budget.spend", &spend_params("rent", 90.0)).expect("filed");
+        ing.record_outcome(&id, true, None).expect("resolved");
+
+        ing.record_reclassification(&id, "food", 90.0).expect("corrected");
+
+        let m = ing.current().expect("current").into_iter().find(|m| m.id == id).expect("there");
+        assert_eq!(m.filed.len(), 2, "both filings are on the record");
+        assert_eq!(m.filed[0].params["pocket_name"], serde_json::json!("rent"), "the first stands");
+        assert_eq!(m.filed[1].params["pocket_name"], serde_json::json!("food"));
+
+        let filed = ing.filed_spends("h", 12).expect("filed");
+        assert_eq!(filed[0].pocket, "food", "and the list shows where it is now");
+    }
+
+    #[test]
+    fn an_allocation_is_not_something_to_correct() {
+        // ★★ Only spends. An allocation is not a filing anyone gets wrong in
+        //    this sense.
+        let (ing, rules) = store("alloc");
+        let id = a_spend(&ing, &rules, "NAIVAS");
+        ing.record_filing(&id, "budget.allocate", &spend_params("rent", 90.0)).expect("filed");
+        ing.record_outcome(&id, true, None).expect("resolved");
+        assert!(ing.filed_spends("h", 12).expect("filed").is_empty());
+    }
+
+    #[test]
+    fn a_netted_or_unresolved_message_is_not_offered() {
+        let (ing, rules) = store("skip");
+        // Still in the queue.
+        let open = a_spend(&ing, &rules, "PENDING");
+        ing.record_filing(&open, "budget.spend", &spend_params("rent", 90.0)).expect("filed");
+        assert!(ing.filed_spends("h", 12).expect("filed").is_empty(), "not resolved");
+
+        // Resolved, then netted against its refund.
+        let netted = a_spend(&ing, &rules, "REFUNDED");
+        ing.record_filing(&netted, "budget.spend", &spend_params("rent", 90.0)).expect("filed");
+        ing.record_outcome(&netted, true, None).expect("resolved");
+        ing.mark_compensated(&netted, &open).expect("netted");
+        assert!(
+            ing.filed_spends("h", 12).expect("filed").iter().all(|f| f.message_id != netted),
+            "a cancelled spend is not one to re-file"
+        );
+    }
+
+    #[test]
+    fn the_newest_filings_come_first_and_the_list_is_bounded() {
+        let (ing, rules) = store("order");
+        for n in 0..5 {
+            let raw = format!(
+                "QGH7XJ4P2Q Confirmed. Ksh{n}0.00 paid to SHOP{n} on 20/7/26 at 4:30 PM. \
+                 New M-PESA balance is Ksh12,050.00"
+            );
+            let Capture::Stored(m) = ing.capture("h", "mpesa", &raw, &rules).expect("capture")
+                else { panic!("stored") };
+            ing.record_filing(&m.id, "budget.spend", &spend_params("rent", 10.0)).expect("filed");
+            ing.record_outcome(&m.id, true, None).expect("resolved");
+        }
+        let filed = ing.filed_spends("h", 3).expect("filed");
+        assert_eq!(filed.len(), 3, "bounded");
+        assert!(filed[0].seq > filed[1].seq, "newest first");
     }
 }
