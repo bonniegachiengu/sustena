@@ -19,6 +19,50 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/inventory-consume` — merged into `dev` 26 Aug at `aaf2586`
+
+**Off:** `dev` at `d029d60`
+**State:** merged, gate green (core clean, 197 host tests), installed
+
+Buying rice left the household no poorer — cash became rice. Eating it is what
+does. Until now the ledger called the purchase the expense, which is off by
+however long the thing lasts: a month's shopping looks like a terrible week and
+the week it is eaten looks free.
+
+`inventory.consume` moves no money, for the same reason `itemize` does not. What
+changes is what the household still HAS. Partial by design, since half a sack is
+the normal case — an asset used in part keeps its identity and loses value,
+because splitting it would multiply the list every time anyone cooked.
+
+Consuming is not deleting: the asset keeps its name, pocket and purchase, so
+"what did the food money buy" still answers after the food is gone. It leaves
+the held total because it is no longer held, and stays on the record because it
+still happened.
+
+**UI ships whole-asset only.** Partial consumption is real and the operator
+handles it; asking for an amount before the loop is proven would be guessing at
+how he wants to say it. That is the next slice here.
+
+### `feat/recoverable-skips` — merged into `dev` 26 Aug at `d029d60`
+
+**Off:** `dev` at `e453a1c`
+**State:** merged, gate green, installed
+
+He waved both halves of a real self-transfer past impatiently and they were gone
+for good. A shared transaction reference now brings a skipped message back.
+
+**The line that makes it safe is which evidence may overturn a decision he
+made.** Amount and merchant say two texts COULD be the same movement; a shared
+reference says they ARE. Only the reference reaches a skipped message — the
+amount-and-merchant fallback is filtered to messages still in the queue, in both
+the transfer pass and the reversal pass. A promo, a balance notice, an advert:
+none quotes a reference another message shares, so a genuine "not a transaction"
+stays skipped for good, and one without a reference is not even a candidate.
+
+Both facts are kept: `reclaimed` sits alongside `ignored` cleared, so "why is
+this here again?" has an answer. Counted and said on screen, because a queue that
+GREW needs a reason as much as one that shrank.
+
 ### `feat/supplies-inventory` — merged into `dev` 26 Aug at `0016d5b`
 
 **Off:** `dev` at `b51f0cb`
@@ -155,6 +199,14 @@ balance each text reports, and internal-transfer detection. See
 `Projects/IO/design/Orchie_Onboarding_UX.md` §5c and §5d.
 
 ---
+
+## Known flake
+
+`wire::tests::a_sealed_frame_survives_the_round_trip_intact` failed once under a
+full parallel run on 26 Aug and passed alone, then twice more in full runs
+straight after. It does real crypto round trips and nothing in the inventory work
+touches `wire`. Recorded rather than ignored: a test that fails one run in four
+is worth knowing about before it fails on something that matters.
 
 ## Conventions
 
