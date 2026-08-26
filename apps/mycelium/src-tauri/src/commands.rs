@@ -1458,6 +1458,7 @@ pub fn apply_transfers(
 ) -> Result<TransferDto, String> {
     let found = world.ingest().find_transfers(&sustain_id).map_err(|e| e.to_string())?;
     let mut out = TransferDto {
+        reclaimed: found.reclaimed,
         unpaired: found.unpaired,
         ambiguous: found.ambiguous,
         blocked: found.blocked_by_applied_income,
@@ -2512,6 +2513,7 @@ mod feed_surface_tests {
             ignored: false,
             netted_with: None,
             same_event_as: None,
+            reclaimed: false,
             filed: Vec::new(),
             sent_at_ms: None,
             seq,

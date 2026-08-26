@@ -1093,6 +1093,17 @@ function OwnNumbersCard(props: { sustainId: string; onChanged: () => void }) {
                 place, not as spending or income.
               </p>
             </Show>
+            {/* ★★★ A queue that GREW needs a reason as much as one that
+                shrank. He set these aside; something overturned that, and he
+                should hear it from the app rather than find them back. */}
+            <Show when={t().reclaimed > 0}>
+              <p class={O.caption}>
+                {t().reclaimed} you had skipped turned out to be{" "}
+                {t().reclaimed === 1 ? "half of a real move" : "halves of real moves"} between
+                your accounts — the reference codes matched, so{" "}
+                {t().reclaimed === 1 ? "it is" : "they are"} back.
+              </p>
+            </Show>
             <Show when={t().unpaired > 0}>
               <p class={O.caption}>
                 {t().unpaired} looks like your own money moving but only one side of it is here,
