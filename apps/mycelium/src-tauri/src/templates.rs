@@ -80,7 +80,11 @@ pub fn definition(template: TemplateId) -> Definition {
             //    spend records money leaving; without this, nothing records
             //    that beans arrived, and a household that shops well looks
             //    identical to one that loses money.
-            .declare("inventory", DimType::Any),
+            .declare("inventory", DimType::Any)
+            // ★★ Who you paid, and what you usually call it. State rather
+            //    than a side file, so a rebuild reproduces it and anything
+            //    composing over the household can read it.
+            .declare("vendors", DimType::Any),
     )
         .with_operator("budget.record_income")
         .with_operator("budget.add_pocket")
@@ -109,6 +113,13 @@ pub fn definition(template: TemplateId) -> Definition {
         //    lasts — a month's shopping looks like a terrible week, and the
         //    week it is eaten looks free.
         .with_operator("inventory.consume")
+        // ★★★ Read-only nodes, so a finance operative can be a DAG whose
+        //    steps are operator calls rather than a function wired to a
+        //    screen. A capability that cannot appear in a graph cannot be
+        //    part of an operative.
+        .with_operator("vendor.identify")
+        .with_operator("vendor.suggest")
+        .with_operator("vendor.remember")
         // Every Sustain that holds money holds this one.
         .with_invariant("liquid_non_negative", "finances.liquid.balance >= 0");
 
