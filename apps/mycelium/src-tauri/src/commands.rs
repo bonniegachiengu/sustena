@@ -2458,6 +2458,7 @@ mod feed_surface_tests {
             resolved: false,
             ignored: false,
             netted_with: None,
+            same_event_as: None,
             filed: Vec::new(),
             sent_at_ms: None,
             seq,

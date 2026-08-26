@@ -85,6 +85,14 @@ pub struct IngestedMessage {
     /// is both of them in reverse.
     #[serde(default)]
     pub filed: Vec<Filing>,
+    /// ★★★ Another message, from another sender, about this same transaction.
+    ///
+    /// Two banks can both write about one movement of money. The texts differ,
+    /// so both are captured — correctly, they are two real messages — but only
+    /// one of them may be applied, or the money is counted twice. This records
+    /// which one got there first.
+    #[serde(default)]
+    pub same_event_as: Option<String>,
     /// ★★★ Set aside by a person as not a transaction.
     ///
     /// A real state, never a silent drop. The message stays in the log with
@@ -115,6 +123,9 @@ impl IngestedMessage {
         !self.resolved
             && !self.ignored
             && self.netted_with.is_none()
+            // ★ The other bank's account of something already recorded. Real,
+            //   kept, and not a decision anyone has to make.
+            && self.same_event_as.is_none()
             && matches!(self.status.as_str(), "parsed_unmapped" | "unparsed")
     }
 
@@ -128,6 +139,28 @@ impl IngestedMessage {
     /// Who it was with, as the transducer read it.
     pub fn counterparty(&self) -> Option<&str> {
         self.parsed_fields.get("counterparty").and_then(|v| v.as_str())
+    }
+
+    /// ★★★ The transaction's own reference code — the reliable join key.
+    ///
+    /// Both halves of one real movement of money carry it. A KCB
+    /// "SEND TO M-PESA" quotes `M-PESA REF: UHPB9480T9`, and the M-Pesa text
+    /// confirming the same transfer opens with that identical code. So do a
+    /// charge and the refund that reverses it, and so do the two texts two
+    /// banks send about one payment.
+    ///
+    /// ★★★ This is what amount-and-merchant was standing in for, and it is
+    /// strictly better. Amount plus merchant asks "could these be the same
+    /// thing?" and has to refuse whenever more than one candidate fits; a ref
+    /// asks "are these the same thing?" and the answer is yes or no. Two
+    /// identical KES 2,000 transfers to the same person on the same day are
+    /// hopeless for the first and trivial for the second.
+    pub fn reference(&self) -> Option<&str> {
+        self.parsed_fields
+            .get("ref")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|r| r.len() >= MIN_REF_LEN)
     }
 }
 
@@ -321,6 +354,14 @@ fn same_number(a: &str, b: &str) -> bool {
     //   coincidence. A four-digit card mask must never claim a phone.
     a.len() >= 9 && b.len() >= 9 && tail(a) == tail(b)
 }
+
+/// How many characters a reference must have to be worth joining on.
+///
+/// ★★ Real M-Pesa codes are ten characters. Anything much shorter is a field
+/// that happened to be called `ref` rather than a transaction's identity, and
+/// joining two unrelated movements of money would be worse than joining
+/// neither.
+const MIN_REF_LEN: usize = 8;
 
 /// A balance a bank itself reported, and when.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -555,6 +596,7 @@ impl Ingested {
             resolved: false,
             ignored: false,
             netted_with: None,
+            same_event_as: None,
             filed: Vec::new(),
             sent_at_ms,
             seq,
@@ -691,12 +733,25 @@ impl Ingested {
             //    M-Pesa "you have received" for the same money, captured first.
             //    Left standing it would count his own money as earnings, so the
             //    entry to undo is named here and undone by the caller.
-            mv.undo_income = everything
+            let candidates: Vec<&IngestedMessage> = everything
                 .iter()
                 .filter(|o| o.id != m.id && o.applied && o.netted_with.is_none())
-                .filter(|o| o.source_id == mv.to_account)
                 .filter(|o| o.operator.as_deref() == Some("budget.record_income"))
-                .find(|o| o.amount().map(|a| same_amount(a, mv.amount)).unwrap_or(false))
+                .collect();
+            // ★★★ The ref first, and it is not merely the better guess — it is
+            //     a different kind of answer. Amount plus account asks whether
+            //     these COULD be the same movement; a shared reference says
+            //     they ARE. Only when neither text quoted one does this fall
+            //     back to the weaker question.
+            mv.undo_income = m
+                .reference()
+                .and_then(|r| candidates.iter().find(|o| o.reference() == Some(r)))
+                .or_else(|| {
+                    candidates
+                        .iter()
+                        .filter(|o| o.source_id == mv.to_account)
+                        .find(|o| o.amount().map(|a| same_amount(a, mv.amount)).unwrap_or(false))
+                })
                 .map(|o| o.id.clone());
             taken.insert(m.id.clone());
             report.self_moves.push(mv);
@@ -723,13 +778,28 @@ impl Ingested {
                 .filter(|m| m.amount().map(|a| same_amount(a, amount)).unwrap_or(false))
                 .count();
 
-            let partners: Vec<&&IngestedMessage> = mine
+            let open: Vec<&&IngestedMessage> = mine
                 .iter()
                 .filter(|m| !taken.contains(&m.id) && m.id != out.id)
                 .filter(|m| dir(m).as_deref() == Some("received"))
                 .filter(|m| m.source_id != out.source_id)
-                .filter(|m| m.amount().map(|a| same_amount(a, amount)).unwrap_or(false))
                 .collect();
+
+            // ★★★ A shared reference is proof; amount alone is a coincidence
+            //     waiting to happen. Two identical transfers to the same person
+            //     on the same day are hopeless for the second test and trivial
+            //     for the first.
+            let by_ref: Vec<&&IngestedMessage> = match out.reference() {
+                Some(r) => open.iter().filter(|m| m.reference() == Some(r)).copied().collect(),
+                None => Vec::new(),
+            };
+            let partners: Vec<&&IngestedMessage> = if by_ref.is_empty() {
+                open.into_iter()
+                    .filter(|m| m.amount().map(|a| same_amount(a, amount)).unwrap_or(false))
+                    .collect()
+            } else {
+                by_ref
+            };
 
             match partners.len() {
                 1 => {
@@ -798,6 +868,40 @@ impl Ingested {
         Ok(out)
     }
 
+    /// A message already on file that describes this same real transaction.
+    ///
+    /// ★★★ The cross-source double count, and the reason it stayed open. One
+    /// payment can produce two texts from two senders — M-Pesa's own
+    /// confirmation and the bank's notice about the same movement. The dedup
+    /// key is a hash of source plus raw text, so the two hash differently and
+    /// both are captured and both applied: the money counted twice.
+    ///
+    /// It was deferred for want of a reliable correlation key, and the
+    /// reference IS that key. Two texts quoting the same transaction reference
+    /// are the same transaction, whoever sent them and however differently
+    /// they word it.
+    ///
+    /// ★★ Only ever ACROSS sources. The same source repeating a reference is
+    /// its own business — a balance notice quoting an earlier transaction, say
+    /// — and the raw-text dedup already covers a literal repeat.
+    pub fn same_event_already_applied(
+        &self,
+        sustain_id: &str,
+        source_id: &str,
+        reference: &str,
+    ) -> StoreResult<Option<String>> {
+        if reference.len() < MIN_REF_LEN {
+            return Ok(None);
+        }
+        Ok(self
+            .current()?
+            .into_iter()
+            .filter(|m| m.sustain_id == sustain_id && m.source_id != source_id)
+            .filter(|m| m.applied)
+            .find(|m| m.reference() == Some(reference))
+            .map(|m| m.id))
+    }
+
     /// Which account a captured message's money moved in.
     ///
     /// ★ The source id IS the account name: a text from M-Pesa is money moving
@@ -822,6 +926,22 @@ impl Ingested {
             return Ok(());
         };
         m.filed.push(Filing { operator: operator.to_string(), params: params.clone() });
+        self.append_message(&m)
+    }
+
+    /// Note that this message describes a transaction already applied.
+    ///
+    /// ★★ It keeps its text and its own reason. Nothing is deleted and nothing
+    /// is silently swallowed: "your other bank already told me about this" is
+    /// a real answer, and one worth being able to read.
+    pub fn note_same_event(&self, id: &str, first: &str) -> StoreResult<()> {
+        let Some(mut m) = self.current()?.into_iter().find(|m| m.id == id) else {
+            return Ok(());
+        };
+        m.same_event_as = Some(first.to_string());
+        m.reason = "Already recorded from your other bank — the same transaction, \
+                    reported twice."
+            .to_string();
         self.append_message(&m)
     }
 
@@ -1202,9 +1322,29 @@ impl Ingested {
                 report.unmatched += 1;
                 continue;
             };
+            // ★★★ The reference, where the refund quotes one. A reversal
+            //     names the charge it undoes, and that is an identity rather
+            //     than a resemblance — so where both texts carry it, two
+            //     identical charges to the same shop stop being ambiguous and
+            //     become a question with one right answer.
+            //
+            // ★★ Amount and merchant remain the fallback, unchanged, because
+            //    plenty of real texts quote no reference at all and the whole
+            //    captured backlog predates anyone looking for one.
             let matches = |pool: &[&IngestedMessage]| -> Vec<String> {
-                pool.iter()
-                    .filter(|c| !taken.contains(&c.id))
+                let open: Vec<&&IngestedMessage> =
+                    pool.iter().filter(|c| !taken.contains(&c.id)).collect();
+                if let Some(r) = r.reference() {
+                    let exact: Vec<String> = open
+                        .iter()
+                        .filter(|c| c.reference() == Some(r))
+                        .map(|c| c.id.clone())
+                        .collect();
+                    if !exact.is_empty() {
+                        return exact;
+                    }
+                }
+                open.iter()
                     .filter(|c| c.amount().map(|a| same_amount(a, amount)).unwrap_or(false))
                     .filter(|c| c.counterparty().map(|x| same_counterparty(x, who)).unwrap_or(false))
                     .map(|c| c.id.clone())
@@ -2386,5 +2526,231 @@ mod transfer_tests {
     fn a_household_with_no_identifiers_reads_as_empty_rather_than_failing() {
         let (ing, _) = store("fresh");
         assert!(ing.own_identifiers().expect("get").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod reference_tests {
+    use super::*;
+    use std::env;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-ref-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let ing = Ingested::at(scratch(name)).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    const REF: &str = "UHPB9480T9";
+    const HIS_KCB: &str = "135***140";
+    const HIS_MPESA: &str = "254***143";
+
+    fn knows_his_numbers(ing: &Ingested) {
+        ing.set_own_identifiers(&OwnIdentifiers {
+            mpesa: vec!["254700000143".into()],
+            kcb: vec!["1350000140".into()],
+        })
+        .expect("own");
+    }
+
+    /// His KCB app's text, quoting the M-Pesa reference.
+    fn kcb_leg(amount: &str, reference: &str) -> String {
+        format!(
+            "SEND TO M-PESA request of KES {amount} from {HIS_KCB} to {HIS_MPESA} - \
+             BONVENTURE NGUGI MAINA has been received for processing. M-PESA REF: {reference}"
+        )
+    }
+
+    /// M-Pesa's own text about the same money, opening with that same code.
+    fn mpesa_leg(amount: &str, reference: &str) -> String {
+        format!(
+            "{reference} Confirmed. You have received Ksh{amount} from KCB BANK \
+             254700000143 on 2/8/26 at 10:15 AM. New M-PESA balance is Ksh12,050.00"
+        )
+    }
+
+    #[test]
+    fn both_halves_of_one_transfer_quote_the_same_reference() {
+        // ★★★ The insight this whole join rests on, checked against the real
+        //     shapes rather than assumed: the code KCB prints as "M-PESA REF"
+        //     is the code M-Pesa's own confirmation opens with.
+        let (ing, rules) = store("shared");
+        let Capture::Stored(k) = ing.capture("h", "kcb", &kcb_leg("2,000", REF), &rules)
+            .expect("kcb") else { panic!("stored") };
+        let Capture::Stored(m) = ing.capture("h", "mpesa", &mpesa_leg("2,000.00", REF), &rules)
+            .expect("mpesa") else { panic!("stored") };
+
+        assert_eq!(k.reference(), Some(REF), "KCB quotes it");
+        assert_eq!(m.reference(), Some(REF), "and M-Pesa opens with it");
+    }
+
+    #[test]
+    fn the_income_to_undo_is_found_by_reference_not_by_amount() {
+        // ★★★ Why the ref is better rather than merely different. Here the
+        //     amounts are equal but so is a DECOY's, and only the reference
+        //     can say which of them was this transfer's other half.
+        let (ing, rules) = store("by-ref");
+        knows_his_numbers(&ing);
+
+        // A real, unrelated income of the same amount, applied first.
+        let Capture::Stored(decoy) = ing
+            .capture("h", "mpesa", &mpesa_leg("2,000.00", "QQQQQQQQQQ"), &rules)
+            .expect("decoy") else { panic!("stored") };
+        ing.record_outcome(&decoy.id, true, None).expect("applied");
+
+        // The transfer's own far side, also applied.
+        let Capture::Stored(real) = ing
+            .capture("h", "mpesa", &mpesa_leg("2,000.00", REF), &rules)
+            .expect("far side") else { panic!("stored") };
+        ing.record_outcome(&real.id, true, None).expect("applied");
+
+        ing.capture("h", "kcb", &kcb_leg("2,000", REF), &rules).expect("near side");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert_eq!(r.self_moves.len(), 1);
+        assert_eq!(
+            r.self_moves[0].undo_income.as_deref(),
+            Some(real.id.as_str()),
+            "the reference picked the right one out of two identical amounts"
+        );
+    }
+
+    #[test]
+    fn a_text_with_no_reference_still_matches_on_what_it_has() {
+        // ★★ The fallback is not dead code. Plenty of real texts quote no
+        //    reference, and the whole captured backlog predates anyone looking
+        //    for one.
+        let (ing, rules) = store("fallback");
+        knows_his_numbers(&ing);
+        let no_ref = format!(
+            "SEND TO M-PESA request of KES 2,000 from {HIS_KCB} to {HIS_MPESA} - \
+             BONVENTURE NGUGI MAINA has been received for processing."
+        );
+        let Capture::Stored(k) = ing.capture("h", "kcb", &no_ref, &rules).expect("kcb")
+            else { panic!("stored") };
+        assert_eq!(k.reference(), None, "there is none to read");
+
+        let Capture::Stored(inc) = ing
+            .capture("h", "mpesa", &mpesa_leg("2,000.00", "ZZZZZZZZZZ"), &rules)
+            .expect("income") else { panic!("stored") };
+        ing.record_outcome(&inc.id, true, None).expect("applied");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert_eq!(r.self_moves.len(), 1);
+        assert_eq!(
+            r.self_moves[0].undo_income.as_deref(),
+            Some(inc.id.as_str()),
+            "amount and account still answer it when no reference was quoted"
+        );
+    }
+
+    #[test]
+    fn a_reference_too_short_to_be_one_is_ignored() {
+        // ★★★ A four-character field called `ref` is a field that happens to
+        //     be called that, not a transaction's identity. Joining two
+        //     unrelated movements of money is worse than joining neither.
+        let mut m = IngestedMessage {
+            id: "x".into(),
+            sustain_id: "h".into(),
+            source_id: "kcb".into(),
+            raw_payload: "".into(),
+            dedup_key: "k".into(),
+            status: "parsed_unmapped".into(),
+            parser_name: "p".into(),
+            reason: "".into(),
+            parsed_fields: Default::default(),
+            external_ref: None,
+            operator: None,
+            params: Default::default(),
+            applied: false,
+            gate_reason: None,
+            resolved: false,
+            netted_with: None,
+            same_event_as: None,
+            filed: Vec::new(),
+            ignored: false,
+            sent_at_ms: None,
+            seq: 1,
+        };
+        m.parsed_fields.insert("ref".into(), serde_json::json!("AB12"));
+        assert_eq!(m.reference(), None);
+        m.parsed_fields.insert("ref".into(), serde_json::json!(REF));
+        assert_eq!(m.reference(), Some(REF));
+    }
+
+    // ── the cross-source double count ────────────────────────────────────────
+
+    #[test]
+    fn one_transaction_reported_by_two_banks_is_applied_once() {
+        // ★★★ The gap that stayed open for want of a reliable correlation key.
+        //     The dedup key hashes source plus raw text, so two banks writing
+        //     differently about one payment both get in, and both applying it
+        //     counts the money twice. The reference is that key.
+        let (ing, rules) = store("cross");
+        let Capture::Stored(first) = ing
+            .capture("h", "mpesa", &mpesa_leg("2,000.00", REF), &rules)
+            .expect("first") else { panic!("stored") };
+        assert_eq!(first.status, "mapped", "M-Pesa's own text applies itself");
+        ing.record_outcome(&first.id, true, None).expect("applied");
+
+        let already = ing
+            .same_event_already_applied("h", "kcb", REF)
+            .expect("lookup")
+            .expect("the same event, from the other bank");
+        assert_eq!(already, first.id);
+    }
+
+    #[test]
+    fn the_same_bank_repeating_a_reference_is_its_own_business() {
+        // ★★ Only ACROSS sources. One sender quoting an earlier transaction --
+        //    a balance notice, say -- is not a second report of it, and the
+        //    raw-text dedup already covers a literal repeat.
+        let (ing, rules) = store("same-source");
+        let Capture::Stored(first) = ing
+            .capture("h", "mpesa", &mpesa_leg("2,000.00", REF), &rules)
+            .expect("first") else { panic!("stored") };
+        ing.record_outcome(&first.id, true, None).expect("applied");
+
+        assert!(
+            ing.same_event_already_applied("h", "mpesa", REF).expect("lookup").is_none(),
+            "the same sender is not a second bank"
+        );
+    }
+
+    #[test]
+    fn an_unapplied_first_text_does_not_block_the_second() {
+        // ★★★ The guard is against double APPLYING, not against two texts
+        //     existing. If the first was never applied there is nothing to
+        //     double, and blocking the second would lose the transaction.
+        let (ing, rules) = store("unapplied");
+        ing.capture("h", "kcb", &kcb_leg("2,000", REF), &rules).expect("kcb, unapplied");
+        assert!(
+            ing.same_event_already_applied("h", "mpesa", REF).expect("lookup").is_none(),
+            "nothing has been recorded yet, so nothing would be recorded twice"
+        );
+    }
+
+    #[test]
+    fn a_second_report_stops_asking_but_keeps_its_text() {
+        let (ing, rules) = store("noted");
+        let Capture::Stored(first) = ing
+            .capture("h", "mpesa", &mpesa_leg("2,000.00", REF), &rules)
+            .expect("first") else { panic!("stored") };
+        ing.record_outcome(&first.id, true, None).expect("applied");
+        let Capture::Stored(second) = ing.capture("h", "kcb", &kcb_leg("2,000", REF), &rules)
+            .expect("second") else { panic!("stored") };
+
+        ing.note_same_event(&second.id, &first.id).expect("note");
+        let after = ing.current().expect("current");
+        let s = after.iter().find(|m| m.id == second.id).expect("still there");
+        assert_eq!(s.same_event_as.as_deref(), Some(first.id.as_str()));
+        assert!(!s.needs_attention(), "it is not a decision anyone has to make");
+        assert!(!s.raw_payload.is_empty(), "and the text is kept");
     }
 }
