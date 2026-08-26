@@ -103,6 +103,12 @@ pub fn definition(template: TemplateId) -> Definition {
         .with_operator("budget.unrecord_income")
         // Supplies bought with a spend, recorded as things now held.
         .with_operator("inventory.itemize")
+        // ★★★ The real expense. Buying rice left the household no poorer;
+        //    eating it is what does. Without this the ledger calls the
+        //    purchase the expense, which is off by however long the thing
+        //    lasts — a month's shopping looks like a terrible week, and the
+        //    week it is eaten looks free.
+        .with_operator("inventory.consume")
         // Every Sustain that holds money holds this one.
         .with_invariant("liquid_non_negative", "finances.liquid.balance >= 0");
 

@@ -781,7 +781,7 @@ export default function Orchie(props: { onFace?: () => void }) {
 
               <Show when={f().device}>{(d) => <DeviceCard device={d()} />}</Show>
               <AccountsCard feed={f()} onChanged={() => void refetch()} />
-              <InventoryCard feed={f()} />
+              <InventoryCard feed={f()} onChanged={() => void refetch()} />
               <OwnNumbersCard sustainId={f().sustainId} onChanged={() => void refetch()} />
 
               <Show when={moves()}>
@@ -929,8 +929,42 @@ function DeviceCard(props: { device: DeviceDto }) {
  * ★★ Silent until there is something in it. A card that says "nothing yet" on
  * every open is a card the eye learns to skip.
  */
-function InventoryCard(props: { feed: FeedDto }) {
+function InventoryCard(props: { feed: FeedDto; onChanged: () => void }) {
   const [open, setOpen] = createSignal<string | null>(null);
+  const [using, setUsing] = createSignal<string | null>(null);
+  const [failed, setFailed] = createSignal<string | null>(null);
+
+  /**
+   * ★★★ The real expense.
+   *
+   * Whole-asset by default, because "used up" is what someone says when a
+   * thing is finished. Using part of one is a real case the operator handles
+   * and this does not ask for yet — the amount field is the next slice, and
+   * offering a form here before the loop is proven would be guessing at how
+   * he wants to say it.
+   */
+  const useUp = async (a: { id: string; item: string }) => {
+    setUsing(a.id);
+    setFailed(null);
+    try {
+      const r = await engine.confirm(
+        props.feed.sustainId,
+        "inventory.consume",
+        { asset_id: a.id },
+        null,
+        null,
+      );
+      if (r.verdict !== "admitted") {
+        setFailed(r.reason ?? "the engine refused it");
+        return;
+      }
+      props.onChanged();
+    } catch (e) {
+      setFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setUsing(null);
+    }
+  };
   const groups = () => props.feed.inventory;
   const held = () =>
     Math.round(groups().reduce((t, g) => t + g.total, 0) * 100) / 100;
@@ -960,6 +994,15 @@ function InventoryCard(props: { feed: FeedDto }) {
                       </span>
                       <span class={O.spacer} />
                       <span class={O.caption}>{fmt(a.value)}</span>
+                      {/* ★★★ Where the money is really spent. Buying it left
+                          the household no poorer; using it up is what does. */}
+                      <button
+                        class={O.linkish}
+                        disabled={using() === a.id}
+                        onClick={() => void useUp(a)}
+                      >
+                        {using() === a.id ? "…" : "used up"}
+                      </button>
                     </div>
                   )}
                 </For>
@@ -967,6 +1010,7 @@ function InventoryCard(props: { feed: FeedDto }) {
             </>
           )}
         </For>
+        <Show when={failed()}>{(e) => <div class={O.errorBox}>{e()}</div>}</Show>
       </div>
     </Show>
   );
