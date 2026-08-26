@@ -13,9 +13,16 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Live
 
-### `feat/person-pockets` — open, off `dev` at `66af726`
+*(none open right now.)*
 
-**State:** built, gate green (core 1,404 · host 214), frontend builds, installing.
+---
+
+## Merged
+
+### `feat/person-pockets` — merged into `dev` 26 Aug at `111435b`
+
+**Off:** `dev` at `66af726`
+**State:** merged, gate green (core 1,404 · host 214), installed and verified on device.
 
 **A pocket can now be somebody, not just something.** `vendor.link_number` ties a
 real phone number to a pocket, and from then on money to that number comes OUT of
@@ -49,10 +56,6 @@ for his tap. Nothing new started applying itself.
 
 **Left open:** the tab is a pocket like any other on screen. It nets correctly,
 but nothing yet says "this one is a person" or shows the two sides separately.
-
----
-
-## Merged
 
 ### `feat/reclassify` — merged into `dev` 26 Aug at `30b0e34`
 
