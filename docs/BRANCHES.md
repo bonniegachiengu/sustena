@@ -99,6 +99,19 @@ Capture, the phone as a Sustain, the trend series, and drawing salience. See
 `docs/ORCHIE_IMC_PLAN.md`, which records what each step turned up as well as
 what it built.
 
+### Earlier, all fully merged into `dev`
+
+Confirmed with `git branch --merged dev`: none of these hold anything `dev` does
+not, so the local copies were deleted. Named here because a branch that existed
+and did something is worth being able to look up.
+
+| Branch | What it was for |
+|---|---|
+| `fix/orchie-android-label` | Renamed the Android app to Orchie, keeping the applicationId so it installed as an update |
+| `feat/orchie-face-toggle` | Made the cockpit's Ingest screen reachable from the phone |
+| `feat/sms-autoreader` | The on-device SMS reader: receiver, filters, local queue |
+| `fix/sms-bulk-freeze` | The freeze on a large inbox — a card per message, against the attention budget |
+
 ### Accounts and reversal netting (landed directly on `dev`, 25–26 Aug)
 
 Cases 1 to 3 of reversal netting, the accounts model, reconciliation against the
