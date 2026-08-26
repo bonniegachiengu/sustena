@@ -240,6 +240,45 @@ balance each text reports, and internal-transfer detection. See
 
 ---
 
+## Live — build resumed on the settled money model (26 Aug)
+
+Halt lifted; building to `Orchie_Money_Model.md` §8. Order: double entry →
+settled parser signs → person accounts → realignment → operative DAGs →
+inventory net worth.
+
+### `feat/double-entry` — merged into `dev` 26 Aug, installed
+
+**Step 1 of §8.** Every transaction is postings that sum to zero, and the check
+is now a **gate refusal** rather than a test.
+
+What is checked is not "do the declared postings sum to zero" — a movement is
+two-sided by construction, so that proves nothing. It is: **does what actually
+changed match what was declared?**
+
+**Measuring before enforcing found six single-sided entries**, which is the
+whole argument for measuring first: `record_income`, `spend`, `unspend` and
+`unrecord_income` declared the ENVELOPE (liquid or a pocket) while the money
+really moved in a cash account; `inventory.consume` lowered an asset and
+declared nothing; `place_unaccounted` credited an account out of nowhere.
+
+**Two modelling points the measurement forced**, both of which would have been
+wrong if assumed:
+
+- **Liquid and pockets are the envelope view** of money a cash account already
+  holds. Balancing them in the same ledger would count every shilling twice and
+  make allocating to a pocket look like acquiring money.
+- **`income.monthly_total` is a tally, not a balance.** Treating it as an
+  account would make one arrival look like two. The income side of the entry is
+  the outside party it came from.
+
+An endpoint outside the household is the counterpart that makes a spend
+two-sided, not an imbalance.
+
+**Next in order:** the settled parser signs (Fuliza as cash + liability, fee
+subpocket; M-Shwari as an account; cash-out to a Cash account; Pochi labelled
+and directional), which needs the liability and person account types the ledger
+now understands.
+
 ## Architecture audit
 
 Lives in `docs/OPERATOR_AUDIT.md`, completed 26 Aug. Short version: every state
