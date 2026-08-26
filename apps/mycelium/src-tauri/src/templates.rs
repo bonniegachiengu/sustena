@@ -31,6 +31,13 @@ pub enum TemplateId {
     Homestead,
     /// A person — the smallest Sustain that still holds its own money.
     Habitat,
+    /// ★★★ A capture device — the phone itself, as a Sustain.
+    ///
+    /// Ingest §IX: a sensor IS a Sustain, so noticing it has gone quiet needs
+    /// no alerting subsystem of its own. Staleness becomes an ordinary reading
+    /// of an ordinary child, and the connection panel is a view over its state
+    /// rather than a separate thing to build.
+    Device,
 }
 
 impl TemplateId {
@@ -38,12 +45,30 @@ impl TemplateId {
         match self {
             TemplateId::Homestead => "homestead",
             TemplateId::Habitat => "habitat",
+            TemplateId::Device => "device",
         }
     }
 
     pub fn all() -> Vec<TemplateId> {
-        vec![TemplateId::Homestead, TemplateId::Habitat]
+        vec![TemplateId::Homestead, TemplateId::Habitat, TemplateId::Device]
     }
+}
+
+/// `Σ` for a device: what it knows about itself, and nothing else.
+///
+/// ★★ No money dimensions, and no `liquid_non_negative`. A phone holds no
+/// money, and giving it the household's shape so the code could be shared
+/// would put a balance on a thing that has none.
+///
+/// ★★★ **No liveness invariant here, deliberately.** §IX's `now − t_last_ack
+/// <= theta` cannot be a rule the device carries: a phone that has stopped
+/// cannot evaluate anything, least of all whether it has stopped. It is
+/// evaluated by whoever is watching, over this child's own dimensions — which
+/// is why `queue_depth` and `last_ack_ms` are recorded here and judged nowhere
+/// near here.
+fn device_definition() -> Definition {
+    Definition::new(Schema::new().declare("device", DimType::Any))
+        .with_operator("device.heartbeat")
 }
 
 /// `Σ` for a template.
@@ -71,6 +96,9 @@ pub fn definition(template: TemplateId) -> Definition {
         // Every Sustain that holds money holds this one.
         .with_invariant("liquid_non_negative", "finances.liquid.balance >= 0");
 
+    if let TemplateId::Device = template {
+        return device_definition();
+    }
     match template {
         // ★ The household carries a shared pocket and the rule that guards it,
         //   and it is the one that declares what gets TOTALLED across the
@@ -106,6 +134,7 @@ pub fn definition(template: TemplateId) -> Definition {
         //   refuses *everything* on. Declaring rules for dimensions that do not
         //   exist yet is how a Sustain bricks itself.
         TemplateId::Habitat => base,
+        TemplateId::Device => unreachable!("device returns before this match"),
     }
 }
 
@@ -130,6 +159,12 @@ pub fn opening_state(template: TemplateId) -> Value {
                 "accounts": {},
                 "income": {"monthly_total": 0.0, "sources": []}
             }
+        }),
+        // ★ Zero and zero, not absent. A device that has never reported has a
+        //   real queue of nothing and a real last-contact of never, and both
+        //   are readings a watcher can act on.
+        TemplateId::Device => json!({
+            "device": {"queue_depth": 0.0, "last_ack_ms": 0.0, "app_version": ""}
         }),
     }
 }

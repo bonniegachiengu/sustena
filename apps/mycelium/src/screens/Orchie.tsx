@@ -64,6 +64,7 @@ import {
   type NettingDto,
   type OwnIdentifiersDto,
   type TransferDto,
+  type DeviceDto,
 } from "../lib/engine";
 import { world } from "../lib/live";
 import { keyboardAware, watchViewport } from "../lib/viewport";
@@ -760,6 +761,7 @@ export default function Orchie(props: { onFace?: () => void }) {
                 )}
               </Show>
 
+              <Show when={f().device}>{(d) => <DeviceCard device={d()} />}</Show>
               <AccountsCard feed={f()} onChanged={() => void refetch()} />
               <OwnNumbersCard sustainId={f().sustainId} onChanged={() => void refetch()} />
 
@@ -855,6 +857,48 @@ function FeedSkeleton() {
 }
 
 /** The calm read: one plain figure, never the machinery. */
+/**
+ * The phone, watching itself being watched.
+ *
+ * ★★★ Only ever appears when there is something to say. A card reporting that
+ * everything is fine, every time, is a card the eye learns to skip — and then
+ * it is skipped on the day it says something else. Silence is the healthy
+ * state; this speaks when the phone has gone quiet or fallen behind.
+ */
+function DeviceCard(props: { device: DeviceDto }) {
+  const quiet = () => props.device.quietForMinutes;
+  const howLong = () => {
+    const m = quiet();
+    if (m === null || m === undefined) return "since it was set up";
+    if (m < 90) return `for ${m} minutes`;
+    const h = Math.round(m / 60);
+    if (h < 48) return `for ${h} hours`;
+    return `for ${Math.round(h / 24)} days`;
+  };
+
+  return (
+    <Show when={props.device.stale || props.device.queueDepth > 0}>
+      <div class={O.card}>
+        <h2 class={O.cardTitle}>this phone</h2>
+        <Show when={props.device.stale}>
+          <p class={O.caption}>
+            Orchie has not caught a text {howLong()}. If that is not right, open the app and read
+            your texts to catch up.
+          </p>
+        </Show>
+        {/* ★★ The leading indicator. A phone that cannot deliver keeps
+            accepting, so this rises before anything else looks wrong. */}
+        <Show when={props.device.queueDepth > 0}>
+          <p class={O.caption}>
+            {props.device.queueDepth} text{props.device.queueDepth === 1 ? "" : "s"} caught and
+            waiting to be handed over.
+          </p>
+        </Show>
+      </div>
+    </Show>
+  );
+}
+
 /**
  * The numbers he calls his own.
  *

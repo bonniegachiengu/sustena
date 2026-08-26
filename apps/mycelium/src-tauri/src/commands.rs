@@ -11,7 +11,7 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::dto::{
-    AccessDto, AccountDto, Branch, BranchStep, OwnIdentifiersDto, TransferDto, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
+    AccessDto, AccountDto, Branch, BranchStep, DeviceDto, OwnIdentifiersDto, TransferDto, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
     AttentionDto, CaptureContextDto, NettingDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
@@ -1144,7 +1144,45 @@ pub fn get_feed(
         liquid: state.pointer("/finances/liquid/balance").and_then(Value::as_f64),
         accounts: accounts_of(&state, &world.ingest().reported_balances(&sustain_id)
             .unwrap_or_default()),
+        device: device_of(&world, &sustain_id),
         unaccounted: unaccounted_in(&state),
+    })
+}
+
+/// How long a device may be quiet before the watcher calls it late.
+///
+/// ★★ A decision, not an estimate, and Ingest §VIII is why: percentile
+/// staleness declares a false-alarm rate rather than discovering one, and on a
+/// bursty signal a confident alarm is necessarily a late one. A heartbeat every
+/// sweep removes the statistics — the phone reports whenever it reads, so
+/// silence past this is silence, not a quiet spell.
+const QUIET_BEFORE_LATE_MINUTES: u32 = 60 * 24;
+
+/// The device child's own reading, judged by the household that watches it.
+fn device_of(world: &World, household: &str) -> Option<DeviceDto> {
+    let id = World::device_id(household);
+    let state = world.with(|i| i.get(&id).map(|s| s.state.clone()))?;
+    let depth = state.pointer("/device/queue_depth").and_then(Value::as_f64).unwrap_or(0.0);
+    let last = state.pointer("/device/last_ack_ms").and_then(Value::as_f64).unwrap_or(0.0);
+
+    // ★★★ Never reported is NOT "quiet for zero minutes". A device that has
+    //     said nothing since it was created has no last-contact to measure
+    //     from, and reporting one would read as freshly heard from.
+    let quiet = if last <= 0.0 {
+        None
+    } else {
+        Some((((now_ms() as f64 - last).max(0.0)) / 60_000.0).round() as u32)
+    };
+    Some(DeviceDto {
+        sustain_id: id,
+        queue_depth: depth.max(0.0) as u32,
+        quiet_for_minutes: quiet,
+        stale: quiet.is_none_or(|m| m > QUIET_BEFORE_LATE_MINUTES),
+        app_version: state
+            .pointer("/device/app_version")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
     })
 }
 
@@ -2154,6 +2192,18 @@ fn source_of(sender: &str) -> Option<&'static str> {
     }
 }
 
+/// The host's clock, in epoch milliseconds.
+///
+/// ★ Time belongs to the host. The core takes it as a parameter so the same
+/// inputs always produce the same state, which is what lets a conformance
+/// vector pin an operator at all.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
     let mut out = SmsSweep {
         skipped_other_senders: batch.filtered_out,
@@ -2270,6 +2320,11 @@ pub fn sms_import_page(
         if let Some(ms) = newest.or(Some(since_ms)) {
             let _ = world.ingest().set_read_mark(&sustain_id, ANY_SOURCE, ms);
         }
+        // ★★ The phone says how it is doing, on the same pass that proves it
+        //    is working. `remaining` is the leading indicator §IX names: a
+        //    device that cannot deliver keeps accepting, so the queue rises
+        //    before anything else visibly breaks.
+        let _ = world.heartbeat(&sustain_id, out.remaining, now_ms());
     }
     Ok(out)
 }

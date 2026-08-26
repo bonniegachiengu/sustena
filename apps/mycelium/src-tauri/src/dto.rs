@@ -1003,6 +1003,9 @@ pub struct FeedDto {
     pub liquid: Option<f64>,
     /// Where the money is, as against what it is for.
     pub accounts: Vec<AccountDto>,
+    /// The phone, as a Sustain the household watches. `None` before it has
+    /// ever reported.
+    pub device: Option<DeviceDto>,
     /// ★★★ Money the household holds that no account claims.
     ///
     /// Zero once every shilling has a place. Non-zero means the pooled balance
@@ -1039,6 +1042,33 @@ pub struct TransferDto {
     /// taken back. Reported rather than left as a silent zero.
     pub blocked: u32,
     pub ambiguous: u32,
+}
+
+/// How the capture device is doing, as its WATCHER sees it.
+///
+/// ★★★ Judged here rather than on the device, and that is Ingest §IX rather
+/// than a convenience. A phone that has stopped cannot report that it has
+/// stopped, so a liveness clause evaluated by the phone is worthless exactly
+/// when it matters. The device records two plain readings; whether they add up
+/// to "fine" is the watcher's call.
+///
+/// ★★ Not a declared invariant either, and this is a real limit rather than a
+/// choice: the predicate DSL has no arithmetic and no notion of now, so
+/// `now − t_last_ack <= theta` cannot be written as a rule. It is computed
+/// here, against the same two dimensions a declared rule would have read.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceDto {
+    pub sustain_id: String,
+    /// Texts caught but not yet handed over. §IX's leading indicator: it rises
+    /// before anything else visibly breaks, because a device that cannot
+    /// deliver keeps accepting.
+    pub queue_depth: u32,
+    /// Minutes since it last said anything. `None` means it never has.
+    pub quiet_for_minutes: Option<u32>,
+    /// Whether the watcher considers it late.
+    pub stale: bool,
+    pub app_version: String,
 }
 
 /// One account, on the wire.

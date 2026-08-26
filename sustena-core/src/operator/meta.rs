@@ -219,6 +219,7 @@ impl Registry {
     pub fn with_builtins() -> Self {
         let mut r = Registry::new();
         crate::operator::budget::register(&mut r);
+        crate::operator::device::register(&mut r);
         r
     }
 }

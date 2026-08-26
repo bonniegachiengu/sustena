@@ -33,6 +33,7 @@
 //! reference engine grew one.
 
 pub mod budget;
+pub mod device;
 pub mod meta;
 
 use serde_json::{Map, Value};

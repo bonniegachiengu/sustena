@@ -971,6 +971,35 @@ export type DefinitionVerdict =
  */
 { kind: "wouldStrand"; instances: string[] }
 /**
+ * How the capture device is doing, as its WATCHER sees it.
+ * 
+ * ★★★ Judged here rather than on the device, and that is Ingest §IX rather
+ * than a convenience. A phone that has stopped cannot report that it has
+ * stopped, so a liveness clause evaluated by the phone is worthless exactly
+ * when it matters. The device records two plain readings; whether they add up
+ * to "fine" is the watcher's call.
+ * 
+ * ★★ Not a declared invariant either, and this is a real limit rather than a
+ * choice: the predicate DSL has no arithmetic and no notion of now, so
+ * `now − t_last_ack <= theta` cannot be written as a rule. It is computed
+ * here, against the same two dimensions a declared rule would have read.
+ */
+export type DeviceDto = { sustainId: string; 
+/**
+ * Texts caught but not yet handed over. §IX's leading indicator: it rises
+ * before anything else visibly breaks, because a device that cannot
+ * deliver keeps accepting.
+ */
+queueDepth: number; 
+/**
+ * Minutes since it last said anything. `None` means it never has.
+ */
+quietForMinutes: number | null; 
+/**
+ * Whether the watcher considers it late.
+ */
+stale: boolean; appVersion: string }
+/**
  * One dimension a person declared.
  */
 export type DimDecl = { path: string; 
@@ -1054,6 +1083,11 @@ rollup: RollupDto | null; liquid: number | null;
  * Where the money is, as against what it is for.
  */
 accounts: AccountDto[]; 
+/**
+ * The phone, as a Sustain the household watches. `None` before it has
+ * ever reported.
+ */
+device: DeviceDto | null; 
 /**
  * ★★★ Money the household holds that no account claims.
  * 
@@ -1797,7 +1831,16 @@ export type TemplateId =
 /**
  * A person — the smallest Sustain that still holds its own money.
  */
-"habitat"
+"habitat" | 
+/**
+ * ★★★ A capture device — the phone itself, as a Sustain.
+ * 
+ * Ingest §IX: a sensor IS a Sustain, so noticing it has gone quiet needs
+ * no alerting subsystem of its own. Staleness becomes an ordinary reading
+ * of an ordinary child, and the connection panel is a view over its state
+ * rather than a separate thing to build.
+ */
+"device"
 /**
  * What a transfer pass did.
  */

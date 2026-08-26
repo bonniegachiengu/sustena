@@ -816,6 +816,56 @@ impl World {
         Ok(Capture::Stored(updated))
     }
 
+    /// The id this household's capture device goes by.
+    ///
+    /// ★ Derived from the household rather than random, so the same phone
+    /// reporting twice is the same Sustain both times rather than a new one
+    /// every sweep.
+    pub fn device_id(household: &str) -> String {
+        format!("device-{household}")
+    }
+
+    /// Record that the phone is alive and how far behind it is, creating the
+    /// device Sustain the first time.
+    ///
+    /// ★★★ §IX in one call. The phone is not a special case wired into the
+    /// ingest path; it is a child Sustain whose state changes through the same
+    /// gate as any other, so everything already built for children — roll-up,
+    /// composition, the feed — reads it for free.
+    ///
+    /// ★★ Best-effort by design. A heartbeat that failed must never take a
+    /// real capture down with it: the texts are the point, and knowing how the
+    /// phone felt about delivering them is not worth losing one.
+    pub fn heartbeat(&self, household: &str, queue_depth: u32, at_ms: i64) -> StoreResult<()> {
+        let id = Self::device_id(household);
+        if self.with(|i| i.get(&id).is_none()) {
+            // ★★★ Owned by whoever owns the household it reports to. A device
+            //     created ownerless leaves its own household's principal with
+            //     viewer rights on it, and every heartbeat is then refused for
+            //     insufficient privilege -- silently, since a heartbeat must
+            //     never take a real capture down with it. Found by testing.
+            // Whoever owns the household, or failing that whoever is holding
+            // the phone -- which is the honest answer for a device anyway.
+            let owner = self
+                .with(|i| i.get(household).and_then(|s| s.record.owner.clone()))
+                .or_else(|| self.principal());
+            self.instantiate_owned(
+                &id,
+                "this phone",
+                TemplateId::Device,
+                None,
+                Some(household),
+                owner.as_deref(),
+            )?;
+        }
+        let mut params = Map::new();
+        params.insert("queue_depth".into(), serde_json::json!(queue_depth));
+        params.insert("at_ms".into(), serde_json::json!(at_ms));
+        params.insert("app_version".into(), Value::String(env!("CARGO_PKG_VERSION").to_string()));
+        let _ = self.call(&id, "device.heartbeat", &params)?;
+        Ok(())
+    }
+
     /// The rules in force for a source: the shipped set plus this household's
     /// own corrections. ★ A correction is tried FIRST — a person's answer wins
     /// over the shape it corrects.
@@ -2153,6 +2203,89 @@ fn leg_line(seq: u64, leg: &Leg) -> LoggedEvent {
         origin: None,
         lamport: None,
         clock: None,
+    }
+}
+
+#[cfg(test)]
+mod device_tests {
+    use super::*;
+    use crate::store::Store;
+
+    /// A household owned by the enrolling handle, as enrolment leaves it in
+    /// the real app.
+    fn own_household(w: &World, id: &str, label: &str) {
+        w.instantiate_owned(id, label, TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+    }
+
+    /// A real world on a scratch directory, enrolled so `call` has a principal.
+    fn test_world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-device-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w
+    }
+
+    /// ★★★ §IX in one assertion: the phone is a CHILD SUSTAIN, not a special
+    /// case bolted onto the ingest path. Everything already built for children
+    /// reads it for free, which is the whole reason for modelling it this way.
+    #[test]
+    fn the_phone_becomes_a_child_of_the_household_it_reports_to() {
+        let w = test_world("child");
+        own_household(&w, "home", "Home");
+        w.heartbeat("home", 3, 1_700_000_000_000).expect("heartbeat");
+
+        let id = World::device_id("home");
+        let rec = w.with(|i| i.get(&id).map(|s| s.record.clone())).expect("the device exists");
+        assert_eq!(rec.parent.as_deref(), Some("home"), "watched by the household");
+        assert_eq!(rec.template, TemplateId::Device);
+    }
+
+    #[test]
+    fn a_heartbeat_records_the_queue_and_the_moment() {
+        let w = test_world("records");
+        own_household(&w, "home", "Home");
+        w.heartbeat("home", 7, 1_700_000_000_000).expect("heartbeat");
+
+        let state = w
+            .with(|i| i.get(&World::device_id("home")).map(|s| s.state.clone()))
+            .expect("state");
+        assert_eq!(state.pointer("/device/queue_depth").and_then(Value::as_f64), Some(7.0));
+        assert_eq!(
+            state.pointer("/device/last_ack_ms").and_then(Value::as_f64),
+            Some(1_700_000_000_000.0)
+        );
+    }
+
+    #[test]
+    fn reporting_twice_is_the_same_phone_not_two() {
+        // ★★ The id is derived from the household, so a phone that reports on
+        //    every sweep does not leave a trail of dead Sustains behind it.
+        let w = test_world("twice");
+        own_household(&w, "home", "Home");
+        w.heartbeat("home", 1, 1_000).expect("first");
+        w.heartbeat("home", 0, 2_000).expect("second");
+
+        let devices = w.with(|i| {
+            i.order.iter().filter(|id| id.starts_with("device-")).count()
+        });
+        assert_eq!(devices, 1, "one phone, reporting twice");
+    }
+
+    #[test]
+    fn each_household_watches_its_own_phone() {
+        let w = test_world("scoped");
+        own_household(&w, "a", "A");
+        own_household(&w, "b", "B");
+        w.heartbeat("a", 5, 1_000).expect("a beat");
+
+        assert!(w.with(|i| i.get(&World::device_id("a")).is_some()));
+        assert!(
+            w.with(|i| i.get(&World::device_id("b")).is_none()),
+            "a household that has not reported has no device"
+        );
     }
 }
 
