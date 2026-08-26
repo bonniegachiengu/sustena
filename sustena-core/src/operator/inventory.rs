@@ -84,6 +84,94 @@ fn read_lines(params: &Map<String, Value>) -> Result<Vec<Line>, (String, &'stati
     Ok(out)
 }
 
+/// Use up something the household holds — the real expense.
+///
+/// ★★★ **This is where the money is actually spent.** Buying rice moved cash
+/// into a sack of rice and left the household no poorer; eating the rice is
+/// what makes it poorer. Until now the ledger called the purchase the expense,
+/// which is off by however long the thing lasts — a month's shopping looks
+/// like a terrible week and the week it is eaten looks free.
+///
+/// ★★ Partial by design. Half a sack is the normal case; an asset consumed in
+/// part keeps its identity and loses value, and only a fully used one is
+/// closed. Splitting it into a new asset for the remainder would multiply the
+/// list every time anyone cooked.
+///
+/// ★★★ It moves no money either, and for the same reason `itemize` does not:
+/// the cash left when it was bought. What changes is what the household still
+/// HAS. The pocket's `spent` already recorded the purchase; consumption is the
+/// falling value of what that purchase bought.
+fn consume(
+    state: &mut State,
+    params: &Map<String, Value>,
+    events: &mut Vec<EmittedEvent>,
+    _movements: &mut Vec<Movement>,
+) -> OperatorResult {
+    let asset_id = text(params, "asset_id");
+    if asset_id.is_empty() {
+        return OperatorResult::fail("Which thing was used up?", "asset_named");
+    }
+
+    let assets = state
+        .get("inventory.assets")
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+    let Some(idx) = assets
+        .iter()
+        .position(|a| a.get("id").and_then(Value::as_str) == Some(asset_id.as_str()))
+    else {
+        return OperatorResult::fail(
+            format!("Nothing called '{asset_id}' is held."),
+            "asset_exists",
+        );
+    };
+
+    let held = assets[idx].get("value").and_then(Value::as_f64).unwrap_or(0.0);
+    if held <= 0.0 {
+        return OperatorResult::fail(
+            "That was already used up.".to_string(),
+            "asset_not_already_used",
+        );
+    }
+
+    // ★★ No amount named means all of it, which is what "used up" usually
+    //    means when someone says it.
+    let asked = num(params, "amount");
+    let used = if asked > 0.0 { money(asked) } else { held };
+    if used > held + 0.005 {
+        let mut result = OperatorResult::fail(
+            format!("Only KES {held:.0} of that is left to use."),
+            "consume_within_holding",
+        );
+        result.data = json!({"held": money(held), "requested": used});
+        return result;
+    }
+
+    let item = assets[idx].get("item").and_then(Value::as_str).unwrap_or("").to_string();
+    let pocket = assets[idx].get("pocket").and_then(Value::as_str).unwrap_or("").to_string();
+    let left = money(held - used);
+    let path = format!("inventory.assets[{idx}].value");
+    if state.set(&path, json!(left)).is_err() {
+        return OperatorResult::fail(
+            "Could not reach that item to change it.".to_string(),
+            "asset_reachable",
+        );
+    }
+
+    events.push(EmittedEvent {
+        name: "event.inventory.consumed".into(),
+        payload: json!({"asset": asset_id, "item": item, "used": used, "pocket": pocket}),
+    });
+
+    OperatorResult::ok(json!({
+        "asset": asset_id,
+        "item": item,
+        "used": used,
+        "left": left,
+        "finished": left <= 0.0,
+    }))
+}
+
 /// Record what a spend brought into the household.
 fn itemize(
     state: &mut State,
@@ -209,6 +297,20 @@ pub fn register(registry: &mut Registry) {
         effect: None,
         run: itemize,
     });
+
+    registry.register(OperatorMeta {
+        name: "inventory.consume",
+        description: "Use up something held. This is the real expense, not the purchase.",
+        params: vec![ParamDecl::text("asset_id"), ParamDecl::number("amount").optional()],
+        constraints: vec![],
+        post_constraints: vec![],
+        side_effects: vec!["event.inventory.consumed"],
+        pawa_cost: 0,
+        protocol: Protocol::Rpc,
+        min_privilege: 1,
+        effect: None,
+        run: consume,
+    });
 }
 
 #[cfg(test)]
@@ -240,6 +342,102 @@ mod tests {
 
     fn assets(state: &Value) -> Vec<Value> {
         state.pointer("/inventory/assets").and_then(Value::as_array).cloned().unwrap_or_default()
+    }
+
+    // ── using it up ──────────────────────────────────────────────────────
+
+    fn consumed(state: &Value, ps: &[(&str, Value)]) -> Execution {
+        let reg = Reg::default();
+        let params: Map<String, Value> =
+            ps.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect();
+        execute(&reg, &reg.names(), &Enforcement::default(), state, "inventory.consume", &params)
+    }
+
+    /// A household holding one 120-shilling sack of rice.
+    fn holding() -> Value {
+        let ex = call(
+            &household(),
+            &[
+                ("pocket_name", json!("food")),
+                ("source_tx", json!("msg-1")),
+                ("lines", lines(&[("rice", 120.0)])),
+            ],
+        );
+        assert!(ex.committed());
+        ex.state
+    }
+
+    #[test]
+    fn using_something_up_is_the_real_expense_and_moves_no_money() {
+        // ★★★ Buying rice left the household no poorer — cash became rice.
+        //     Eating it is what makes it poorer, and that is this. The cash
+        //     already left when it was bought, so this must not take it again.
+        let before = holding();
+        let ex = consumed(&before, &[("asset_id", json!("msg-1-0"))]);
+        assert!(ex.committed(), "{:?}", ex.result.reason);
+        assert_eq!(assets(&ex.state)[0]["value"].as_f64(), Some(0.0), "the rice is gone");
+        assert_eq!(
+            ex.state.pointer("/finances").unwrap(),
+            before.pointer("/finances").unwrap(),
+            "and not one figure in finances moved"
+        );
+        assert_eq!(ex.result.data["finished"], json!(true));
+    }
+
+    #[test]
+    fn half_a_sack_is_the_normal_case() {
+        // ★★ An asset used in part keeps its identity and loses value.
+        //    Splitting it into a new asset for the remainder would multiply
+        //    the list every time anyone cooked.
+        let ex = consumed(&holding(), &[("asset_id", json!("msg-1-0")), ("amount", json!(50.0))]);
+        assert!(ex.committed());
+        assert_eq!(assets(&ex.state)[0]["value"].as_f64(), Some(70.0));
+        assert_eq!(assets(&ex.state).len(), 1, "still one thing, worth less");
+        assert_eq!(ex.result.data["finished"], json!(false));
+    }
+
+    #[test]
+    fn using_more_than_is_held_is_refused() {
+        // ★★★ Otherwise value leaves the household that was never in it, and
+        //     the running total of what is held goes negative.
+        let ex = consumed(&holding(), &[("asset_id", json!("msg-1-0")), ("amount", json!(200.0))]);
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("consume_within_holding"));
+        assert_eq!(ex.result.data["held"].as_f64(), Some(120.0));
+    }
+
+    #[test]
+    fn using_something_up_twice_is_refused() {
+        let once = consumed(&holding(), &[("asset_id", json!("msg-1-0"))]);
+        let twice = consumed(&once.state, &[("asset_id", json!("msg-1-0"))]);
+        assert!(!twice.committed());
+        assert_eq!(twice.result.constraint_violated.as_deref(), Some("asset_not_already_used"));
+    }
+
+    #[test]
+    fn something_not_held_cannot_be_used_up() {
+        let ex = consumed(&holding(), &[("asset_id", json!("nothing"))]);
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("asset_exists"));
+    }
+
+    #[test]
+    fn naming_nothing_to_use_is_refused_rather_than_guessed_at() {
+        let ex = consumed(&holding(), &[]);
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("asset_named"));
+    }
+
+    #[test]
+    fn the_purchase_stays_on_the_record_after_it_is_eaten() {
+        // ★★ Consuming is not deleting. The asset keeps its name, its pocket
+        //    and the purchase it came from, so "what did the food money buy"
+        //    still answers after the food is gone.
+        let ex = consumed(&holding(), &[("asset_id", json!("msg-1-0"))]);
+        let a = &assets(&ex.state)[0];
+        assert_eq!(a["item"], json!("rice"));
+        assert_eq!(a["source_tx"], json!("msg-1"));
+        assert_eq!(a["pocket"], json!("food"));
     }
 
     #[test]

@@ -1241,7 +1241,12 @@ fn inventory_of(state: &Value) -> Vec<InventoryGroupDto> {
             pocket: a.get("pocket").and_then(Value::as_str).unwrap_or("").to_string(),
             subpocket: a.get("subpocket").and_then(Value::as_str).map(str::to_string),
         };
-        by_pocket.entry(dto.pocket.clone()).or_default().push(dto);
+        // ★★ Used-up things stay on the record — the purchase they came from
+        //    is still a real fact — but they are not part of what is HELD, so
+        //    they do not swell the total or the list.
+        if dto.value > 0.0 {
+            by_pocket.entry(dto.pocket.clone()).or_default().push(dto);
+        }
     }
 
     by_pocket
