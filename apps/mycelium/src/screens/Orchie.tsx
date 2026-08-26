@@ -2094,10 +2094,13 @@ function Classify(props: {
                       )}
                     </Show>
 
+                    {/* ★★ No "start over" here. It cleared the answers and
+                        left the card with nothing to ask, which is a dead end
+                        rather than a way back — and every real way out is
+                        already on this card: pick a different pocket, make a
+                        new one, record it, or set it aside. `reset` itself
+                        stays; it is what runs after a successful record. */}
                     <div class={O.row}>
-                      <button class={O.linkish} onClick={reset}>
-                        start over
-                      </button>
                       <span class={O.spacer} />
                       {/* ★ Quiet on purpose. Most messages ARE transactions,
                           so this is the exception, not a peer of recording. */}
