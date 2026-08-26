@@ -1089,6 +1089,11 @@ accounts: AccountDto[];
  */
 device: DeviceDto | null; 
 /**
+ * Where the household is heading, not just where it is. `None` until the
+ * series has a reading in it.
+ */
+trend: TrendDto | null; 
+/**
  * ★★★ Money the household holds that no account claims.
  * 
  * Zero once every shilling has a place. Non-zero means the pooled balance
@@ -1885,6 +1890,33 @@ export type TransferResult =
  * got `total_before`. Exactly what the typed seam is for.
  */
 { kind: "committed"; path: string; amount: number; from: TransferLegDto; to: TransferLegDto; totalBefore: number; totalAfter: number } | { kind: "refused"; rule: string; reason: string }
+/**
+ * The household's own distance from where it wants to be, over time.
+ * 
+ * ★★★ One reading is a number; a series is a story. Monitor §V smooths it so
+ * a figure that jitters between reads does not train the eye to ignore it,
+ * and §VI watches for the case a threshold cannot see — a household spending
+ * slightly over every day for two weeks reads, on any single day, exactly
+ * like one that had a bad afternoon and recovered.
+ */
+export type TrendDto = { 
+/**
+ * `W` — the raw distance to the viable region on this reading.
+ */
+now: number; 
+/**
+ * The smoothed level, which is what salience is read off.
+ */
+smoothed: number; 
+/**
+ * ★★ True when the drift has accumulated past what a single bad day
+ * explains. Not the same as being far away today.
+ */
+drifting: boolean; 
+/**
+ * Whether that crossing is severe enough to hand to the Controller.
+ */
+escalates: boolean }
 /**
  * What the gate decided about one call.
  * 

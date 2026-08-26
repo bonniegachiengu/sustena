@@ -11,7 +11,7 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::dto::{
-    AccessDto, AccountDto, Branch, BranchStep, DeviceDto, OwnIdentifiersDto, TransferDto, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
+    AccessDto, AccountDto, Branch, BranchStep, DeviceDto, OwnIdentifiersDto, TransferDto, TrendDto, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
     AttentionDto, CaptureContextDto, NettingDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
@@ -1129,6 +1129,41 @@ pub fn get_feed(
     // them one at a time, which is the disclosure machine of Curated UI VII.
     let queue_head = oldest_waiting(&queued);
 
+    // ★★ Folded in AFTER the view is composed, so one render is one reading.
+    //    Observing inside the compose path would count a re-render as new
+    //    evidence and let the series drift on nothing happening at all.
+    let trend = world.observe(&sustain_id, &reading).map(|i| TrendDto {
+        now: i.reading.w,
+        smoothed: i.reading.smoothed,
+        drifting: i.reading.alert.is_some(),
+        escalates: i.reading.escalates(),
+    });
+    if trend.as_ref().is_some_and(|t| t.drifting) {
+        // ★★★ Worded as a direction rather than a breach, because that is what
+        //     CUSUM detects. "You are over budget" and "you have been drifting
+        //     over for a while now" are different facts and only one of them
+        //     is this one.
+        attention.insert(
+            0,
+            AttentionDto {
+                kind: "drift".into(),
+                // ★★ Worded for what the detector actually saw. It watches
+                //    the smoothed level, so this fires both for a small gap
+                //    that keeps repeating and in the wake of one big one —
+                //    and "still well outside" is true of both, where "this has
+                //    been building" would only be true of the first.
+                what: "still outside where you want to be".into(),
+                why: "Not just today — the gap has stayed open across recent changes."
+                    .into(),
+                // ★ Warning rather than danger. A drift is not yet a breach,
+                //   and calling it one would spend the loudest word on the
+                //   quieter fact.
+                severity: "warn".into(),
+                message_id: None,
+            },
+        );
+    }
+
     Ok(FeedDto {
         sustain_id: sustain_id.clone(),
         label,
@@ -1145,6 +1180,7 @@ pub fn get_feed(
         accounts: accounts_of(&state, &world.ingest().reported_balances(&sustain_id)
             .unwrap_or_default()),
         device: device_of(&world, &sustain_id),
+        trend,
         unaccounted: unaccounted_in(&state),
     })
 }

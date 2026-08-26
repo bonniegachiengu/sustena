@@ -1006,6 +1006,9 @@ pub struct FeedDto {
     /// The phone, as a Sustain the household watches. `None` before it has
     /// ever reported.
     pub device: Option<DeviceDto>,
+    /// Where the household is heading, not just where it is. `None` until the
+    /// series has a reading in it.
+    pub trend: Option<TrendDto>,
     /// ★★★ Money the household holds that no account claims.
     ///
     /// Zero once every shilling has a place. Non-zero means the pooled balance
@@ -1042,6 +1045,27 @@ pub struct TransferDto {
     /// taken back. Reported rather than left as a silent zero.
     pub blocked: u32,
     pub ambiguous: u32,
+}
+
+/// The household's own distance from where it wants to be, over time.
+///
+/// ★★★ One reading is a number; a series is a story. Monitor §V smooths it so
+/// a figure that jitters between reads does not train the eye to ignore it,
+/// and §VI watches for the case a threshold cannot see — a household spending
+/// slightly over every day for two weeks reads, on any single day, exactly
+/// like one that had a bad afternoon and recovered.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TrendDto {
+    /// `W` — the raw distance to the viable region on this reading.
+    pub now: f64,
+    /// The smoothed level, which is what salience is read off.
+    pub smoothed: f64,
+    /// ★★ True when the drift has accumulated past what a single bad day
+    /// explains. Not the same as being far away today.
+    pub drifting: bool,
+    /// Whether that crossing is severe enough to hand to the Controller.
+    pub escalates: bool,
 }
 
 /// How the capture device is doing, as its WATCHER sees it.

@@ -22,7 +22,9 @@ use sustena_core::{
     detect::CusumSpec,
     editing::Definition,
     juul::Affordability,
-    monitor::{MonitorEngine, SustainWatch},
+    // ★ `Ingested` is also the name of this app's capture store, so the trend
+    //   reading keeps a longer name rather than shadowing it.
+    monitor::{Ingested as TrendReading, MonitorEngine, SustainWatch},
     operator::{execute_admitted, execute_afforded, Authorization, Enforcement, Execution, Registry},
     pawa::{meter, Meter},
     predicate::check,
@@ -145,6 +147,17 @@ pub struct SyncReport {
     pub merge: Reconciliation,
 }
 
+/// One household's `W` series, and the last thing it said.
+///
+/// ★ `last` exists so a re-render can repeat the most recent verdict without
+/// manufacturing a new observation to produce one.
+struct Trend {
+    engine: Option<MonitorEngine>,
+    /// The sustain sequence this series last saw, so a render is not an event.
+    seen_seq: Option<u64>,
+    last: Option<TrendReading>,
+}
+
 pub struct World {
     pub operators: Registry,
     inner: Mutex<Inner>,
@@ -157,6 +170,11 @@ pub struct World {
     meter: Mutex<Meter>,
     /// Definitions a person authored, checked by the engine before landing.
     definitions: Mutex<Vec<AuthoredDefinition>>,
+    /// ★★★ The `W` series, per household. Without somewhere to live across
+    /// calls there is no series at all — the distance to V was computed on
+    /// every render and thrown away, so nothing could be smoothed and no drift
+    /// could be detected. See [`World::observe`].
+    monitors: Mutex<BTreeMap<String, Trend>>,
     /// ★★★ The unlocked identity, or `None`. **This is the authentication.**
     /// Every write path reads it; a locked world can decide nothing, because
     /// there is no principal to decide on behalf of.
@@ -242,6 +260,7 @@ impl World {
             economy: Mutex::new(Economy::open(DEFAULT_HANDLE)),
             meter: Mutex::new(Meter::new()),
             definitions: Mutex::new(definitions),
+            monitors: Mutex::new(BTreeMap::new()),
             identity: Mutex::new(None),
             identities: IdentityStore::at(&store_root),
             ingest: Ingested::at(&store_root)?,
@@ -268,6 +287,12 @@ impl World {
     }
 
     // ── reading ──────────────────────────────────────────────────────────────
+
+    /// Per-household trend engines. See [`observe`].
+    #[cfg(test)]
+    pub fn monitors_len(&self) -> usize {
+        self.monitors.lock().expect("monitor lock").len()
+    }
 
     pub fn with<T>(&self, f: impl FnOnce(&Inner) -> T) -> T {
         f(&self.inner.lock().expect("world lock"))
@@ -814,6 +839,52 @@ impl World {
             .map(Box::new)
             .unwrap_or_else(|| m.clone());
         Ok(Capture::Stored(updated))
+    }
+
+    /// Fold one reading into this household's trend, and say what it means.
+    ///
+    /// ★★★ The piece that was missing. `compose(r)` computed the distance to V
+    /// on every call and then forgot it, so there was no series — nothing to
+    /// smooth, and no drift to detect. Monitor §V and §VI both need a history
+    /// and neither had one.
+    ///
+    /// ★★ The engine lives here rather than in the feed because the feed is
+    /// rebuilt constantly and a series that resets on every render is not a
+    /// series. It is per-household, keyed by sustain, and holds only what the
+    /// detectors need.
+    ///
+    /// ★ In memory only, deliberately for now. A trend rebuilt from an empty
+    /// history after a restart understates drift rather than inventing it,
+    /// which is the safe direction to be wrong in; persisting the series is a
+    /// real follow-up and is called out rather than quietly assumed done.
+    pub fn observe(&self, sustain_id: &str, reading: &Value) -> Option<TrendReading> {
+        // ★★★ One reading per EVENT, not per render.
+        //
+        // Found by watching the series: the feed is rebuilt on every poll, so
+        // observing per call fed the detectors a fresh reading when nothing had
+        // happened at all. A household sitting still then "drifts" purely
+        // because it was looked at often, and one bad afternoon reads as a
+        // trend for as long as someone keeps the app open. The sustain's own
+        // sequence number is the honest tick: it moves when something really
+        // changed and not otherwise.
+        let seq = self.with(|i| i.get(sustain_id).map(|s| s.next_seq))?;
+        let mut monitors = self.monitors.lock().expect("monitor lock");
+        let entry = monitors.entry(sustain_id.to_string()).or_insert_with(|| {
+            let watch = crate::orchie::watch_for(sustain_id, reading);
+            Trend {
+                engine: MonitorEngine::watching(watch).ok(),
+                seen_seq: None,
+                last: None,
+            }
+        });
+        if entry.seen_seq == Some(seq) {
+            // Nothing new happened; report what the last real reading said.
+            return entry.last.clone();
+        }
+        entry.seen_seq = Some(seq);
+        let out = entry.engine.as_mut()?.ingest(sustain_id, reading).ok();
+        entry.last = out.clone();
+        out
     }
 
     /// The id this household's capture device goes by.
@@ -2203,6 +2274,143 @@ fn leg_line(seq: u64, leg: &Leg) -> LoggedEvent {
         origin: None,
         lamport: None,
         clock: None,
+    }
+}
+
+#[cfg(test)]
+mod trend_tests {
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-trend-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    /// Make something really happen, so the sustain's sequence moves.
+    ///
+    /// ★★ The series ticks on events. A test that called `observe` repeatedly
+    /// without changing anything would be testing the very thing the seq gate
+    /// exists to prevent.
+    fn something_happens(w: &World, n: usize) {
+        let mut params = Map::new();
+        params.insert("pocket_name".into(), Value::String(format!("p{n}")));
+        let _ = w.call("home", "budget.add_pocket", &params);
+    }
+
+    /// Inside its own limits.
+    fn calm() -> Value {
+        json!({"liquid": 5000.0, "worst_spent": 100.0, "worst_allocated": 1000.0,
+               "unclassified": 0.0})
+    }
+
+    /// Over its own limit by `by`.
+    fn over(by: f64) -> Value {
+        json!({"liquid": 5000.0, "worst_spent": 1000.0 + by, "worst_allocated": 1000.0,
+               "unclassified": 0.0})
+    }
+
+    #[test]
+    fn a_reading_now_has_a_history_to_be_read_against() {
+        // ★★★ The whole of P3. Before this the distance was computed on every
+        //     render and thrown away, so there was nothing to smooth.
+        let w = world("series");
+        something_happens(&w, 0);
+        let first = w.observe("home", &calm()).expect("a reading");
+        something_happens(&w, 1);
+        let second = w.observe("home", &over(200.0)).expect("a reading");
+        assert!(second.reading.w > first.reading.w, "it really did get worse");
+        assert!(
+            second.reading.smoothed < second.reading.w,
+            "the level lags the jump rather than chasing it, which is what smoothing is for"
+        );
+    }
+
+    #[test]
+    fn looking_again_is_not_something_happening() {
+        // ★★★ The bug this gate exists for, found by watching the series. The
+        //     feed rebuilds on every poll, so observing per call fed the
+        //     detectors fresh readings when nothing had changed — and a
+        //     household sitting still would "drift" purely because someone had
+        //     the app open.
+        let w = world("renders");
+        something_happens(&w, 0);
+        let first = w.observe("home", &over(300.0)).expect("a reading");
+        let again = w.observe("home", &over(300.0)).expect("the same reading");
+        let third = w.observe("home", &over(300.0)).expect("still the same");
+        assert_eq!(first.reading.smoothed, again.reading.smoothed);
+        assert_eq!(first.reading.smoothed, third.reading.smoothed);
+
+        // ★ And when something really does happen, the series moves again.
+        //   Checked with a DIFFERENT reading: the level seeds from the first
+        //   observation, so repeating an identical one correctly leaves it
+        //   exactly where it was, which would prove nothing either way.
+        something_happens(&w, 1);
+        let moved = w.observe("home", &over(900.0)).expect("a new reading");
+        assert!(
+            moved.reading.smoothed > first.reading.smoothed,
+            "a real change moves the level"
+        );
+    }
+
+    #[test]
+    fn a_household_inside_its_limits_is_never_told_it_is_drifting() {
+        let w = world("calm");
+        let mut alerted = false;
+        for n in 0..20 {
+            something_happens(&w, n);
+            if let Some(r) = w.observe("home", &calm()) {
+                alerted |= r.reading.alert.is_some();
+            }
+        }
+        assert!(!alerted, "nothing was ever wrong, so nothing should have been said");
+    }
+
+    #[test]
+    fn a_small_persistent_gap_is_caught_though_no_single_day_looks_bad() {
+        // ★★★ The case a threshold cannot see, and the reason CUSUM is here:
+        //     each of these readings on its own is unremarkable, and the
+        //     household's own allocation is what makes "small" mean anything.
+        let w = world("drift");
+        let mut alerted = false;
+        for n in 0..20 {
+            something_happens(&w, n);
+            if let Some(r) = w.observe("home", &over(60.0)) {
+                alerted |= r.reading.alert.is_some();
+            }
+        }
+        assert!(alerted, "a gap that keeps repeating is a real signal, whatever one day says");
+    }
+
+    #[test]
+    fn the_threshold_scales_to_what_the_household_itself_set_aside() {
+        // ★★★ A fixed threshold would shout forever at a household budgeting
+        //     hundreds of thousands and stay silent for one budgeting hundreds.
+        let small = crate::orchie::drift_spec(&json!({"worst_allocated": 1000.0}));
+        let large = crate::orchie::drift_spec(&json!({"worst_allocated": 100000.0}));
+        assert!(large.delta > small.delta * 50.0, "the bigger household needs a bigger shift");
+    }
+
+    #[test]
+    fn each_household_has_its_own_history() {
+        let w = world("scoped");
+        for n in 0..20 {
+            something_happens(&w, n);
+            w.observe("home", &over(60.0));
+        }
+        // A second household, calm, sharing nothing.
+        w.instantiate_owned("other", "Other", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("other");
+        let b = w.observe("other", &calm()).expect("a reading");
+        assert!(b.reading.alert.is_none(), "it has been calm and knows nothing of the first");
+        assert_eq!(w.monitors_len(), 2);
     }
 }
 

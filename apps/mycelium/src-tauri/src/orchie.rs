@@ -74,6 +74,8 @@ use sustena_core::editing::Definition;
 use sustena_core::schema::{DimType, Schema};
 use sustena_core::event::Event;
 use sustena_core::operator::Registry;
+use sustena_core::detect::CusumSpec;
+use sustena_core::monitor::SustainWatch;
 
 /// The household's declared attention budget. ★ Cowan's four chunks — the
 /// engine's own default, not a number this file picked.
@@ -223,6 +225,52 @@ pub fn region_from(reading: &Value) -> Region {
             .weighing("unclassified", 1.0);
     }
     region
+}
+
+/// How hard the EWMA leans on the newest reading (Monitor §V).
+///
+/// ★★ 0.3 is a deliberate middle. High and the level chases every jump, which
+/// is the flicker §V opens by arguing against — a figure that jitters between
+/// reads trains the eye to ignore it. Low and a real change takes days to show,
+/// which on a household's money is worse than useless.
+pub const TREND_ALPHA: f64 = 0.3;
+
+/// What counts as a shift worth saying out loud (Monitor §VI).
+///
+/// ★★★ CUSUM exists for the case a threshold cannot see: a household a little
+/// over its own allocation every day for two weeks looks identical, on any one
+/// reading, to one that had a single bad afternoon and recovered. §VI names
+/// that as the more alarming of the two.
+///
+/// ★★★ **Scaled to the household's own numbers, never fixed.** A distance is
+/// in shillings, so a constant here would mean "10 shillings matters" for a
+/// household budgeting hundreds and for one budgeting hundreds of thousands
+/// alike — the first would never stop shouting and the second would never
+/// start. `delta` is a twentieth of what the household itself set aside for
+/// the pocket under most strain, which is the same move `region_from` makes:
+/// use their number rather than declare one.
+///
+/// ★★ `mu_0` is zero because zero is the honest baseline. The distance to the
+/// viable region is not a quantity a household drifts around; being inside it
+/// is exactly zero, and any sustained positive value is already a departure.
+pub fn drift_spec(reading: &Value) -> CusumSpec {
+    let scale = reading
+        .get("worst_allocated")
+        .and_then(Value::as_f64)
+        .filter(|a| *a > 0.0)
+        // With nothing allocated there is no scale of theirs to borrow, so the
+        // detector is set where a single shilling of persistent gap counts.
+        .unwrap_or(20.0);
+    let delta = scale / 20.0;
+    // Two deltas of accumulated excess. A gap of twice delta says so in two
+    // readings; a gap of a tenth of delta takes twenty. That ratio is the
+    // trade §VI is about, and it is written here rather than tuned by feel.
+    CusumSpec::new(0.0, delta, delta * 2.0)
+}
+
+/// The watch this household's own numbers declare.
+pub fn watch_for(sustain_id: &str, reading: &Value) -> SustainWatch {
+    SustainWatch::new(sustain_id, region_from(reading), TREND_ALPHA, drift_spec(reading))
 }
 
 /// **The feed.** Everything `compose(r)` decided, for one household.
