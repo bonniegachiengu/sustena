@@ -73,7 +73,15 @@ fn device_definition() -> Definition {
 
 /// `Σ` for a template.
 pub fn definition(template: TemplateId) -> Definition {
-    let base = Definition::new(Schema::new().declare("finances", DimType::Any))
+    let base = Definition::new(
+        Schema::new()
+            .declare("finances", DimType::Any)
+            // ★★ What the household HOLDS, as against what it has spent. A
+            //    spend records money leaving; without this, nothing records
+            //    that beans arrived, and a household that shops well looks
+            //    identical to one that loses money.
+            .declare("inventory", DimType::Any),
+    )
         .with_operator("budget.record_income")
         .with_operator("budget.add_pocket")
         .with_operator("budget.allocate")
@@ -93,6 +101,8 @@ pub fn definition(template: TemplateId) -> Definition {
         //    anything can tell; when the other half says otherwise it has to
         //    come back off, or his earnings grow every time he moves his money.
         .with_operator("budget.unrecord_income")
+        // Supplies bought with a spend, recorded as things now held.
+        .with_operator("inventory.itemize")
         // Every Sustain that holds money holds this one.
         .with_invariant("liquid_non_negative", "finances.liquid.balance >= 0");
 
@@ -150,7 +160,8 @@ pub fn opening_state(template: TemplateId) -> Value {
                 //   one it came from anyway.
                 "accounts": {},
                 "income": {"monthly_total": 0.0, "sources": []}
-            }
+            },
+            "inventory": {"assets": []}
         }),
         TemplateId::Habitat => json!({
             "finances": {
@@ -158,7 +169,8 @@ pub fn opening_state(template: TemplateId) -> Value {
                 "pockets": {},
                 "accounts": {},
                 "income": {"monthly_total": 0.0, "sources": []}
-            }
+            },
+            "inventory": {"assets": []}
         }),
         // ★ Zero and zero, not absent. A device that has never reported has a
         //   real queue of nothing and a real last-contact of never, and both

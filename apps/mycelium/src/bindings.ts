@@ -760,6 +760,15 @@ value: number | null;
  */
 grounded: boolean; included: ContributionDto[]; excluded: ExclusionDto[]; includesHouseholdOwn: boolean }
 /**
+ * One thing the household holds, bought with a spend.
+ */
+export type AssetDto = { id: string; item: string; value: number; 
+/**
+ * The purchase it came out of, so a pocket can show what its spending
+ * actually bought.
+ */
+sourceTx: string; pocket: string; subpocket: string | null }
+/**
  * One standing thing that needs a person, and why.
  */
 export type AttentionDto = { kind: string; what: string; why: string; severity: string; 
@@ -1109,6 +1118,10 @@ device: DeviceDto | null;
  */
 trend: TrendDto | null; 
 /**
+ * What the household holds, grouped by the pocket that bought it.
+ */
+inventory: InventoryGroupDto[]; 
+/**
  * ★★★ Money the household holds that no account claims.
  * 
  * Zero once every shilling has a place. Non-zero means the pooled balance
@@ -1238,6 +1251,13 @@ export type InvariantDecl = { id: string; expression: string }
  * A rule the household declared it must stay within.
  */
 export type InvariantDto = { id: string; expression: string }
+/**
+ * What the household holds, and what it is grouped under.
+ * 
+ * ★★ Grouped by pocket rather than listed flat, because the question people
+ * actually ask is "what did the food money buy", not "what do I own".
+ */
+export type InventoryGroupDto = { pocket: string; total: number; assets: AssetDto[] }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 /**
  * One line of the juul ledger.

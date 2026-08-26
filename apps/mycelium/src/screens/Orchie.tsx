@@ -781,6 +781,7 @@ export default function Orchie(props: { onFace?: () => void }) {
 
               <Show when={f().device}>{(d) => <DeviceCard device={d()} />}</Show>
               <AccountsCard feed={f()} onChanged={() => void refetch()} />
+              <InventoryCard feed={f()} />
               <OwnNumbersCard sustainId={f().sustainId} onChanged={() => void refetch()} />
 
               <Show when={moves()}>
@@ -912,6 +913,60 @@ function DeviceCard(props: { device: DeviceDto }) {
             waiting to be handed over.
           </p>
         </Show>
+      </div>
+    </Show>
+  );
+}
+
+/**
+ * What the household holds.
+ *
+ * ★★★ The other half of every spend, and the half nothing recorded until now.
+ * A pocket says what left; this says what came back the other way. Grouped by
+ * the pocket that bought it, because the question people actually ask is "what
+ * did the food money buy", not "what do I own".
+ *
+ * ★★ Silent until there is something in it. A card that says "nothing yet" on
+ * every open is a card the eye learns to skip.
+ */
+function InventoryCard(props: { feed: FeedDto }) {
+  const [open, setOpen] = createSignal<string | null>(null);
+  const groups = () => props.feed.inventory;
+  const held = () =>
+    Math.round(groups().reduce((t, g) => t + g.total, 0) * 100) / 100;
+
+  return (
+    <Show when={groups().length > 0}>
+      <div class={O.card}>
+        <span class={O.figureLabel}>what you hold</span>
+        <span class={O.figure}>{fmt(held())}</span>
+        <For each={groups()}>
+          {(g) => (
+            <>
+              <button
+                class={O.linkish}
+                onClick={() => setOpen((o) => (o === g.pocket ? null : g.pocket))}
+              >
+                {open() === g.pocket ? "▾" : "▸"} {g.pocket} · {fmt(g.total)} ·{" "}
+                {g.assets.length} {g.assets.length === 1 ? "thing" : "things"}
+              </button>
+              <Show when={open() === g.pocket}>
+                <For each={g.assets}>
+                  {(a) => (
+                    <div class={O.row}>
+                      <span class={O.caption}>
+                        {a.item}
+                        <Show when={a.subpocket}>{(sp) => <> · {sp()}</>}</Show>
+                      </span>
+                      <span class={O.spacer} />
+                      <span class={O.caption}>{fmt(a.value)}</span>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </>
+          )}
+        </For>
       </div>
     </Show>
   );
@@ -1316,6 +1371,150 @@ function PlainCard(props: { feed: FeedDto; card: { id: string } }) {
  * a card that exists *because* something needs classifying, the first question
  * should already be on screen when you get there.
  */
+/**
+ * What the money turned into.
+ *
+ * ★★★ "Food, KES 90" records that money left. It does not record that beans,
+ * onions and carrots arrived — and those are real things the household now
+ * holds. Without them the only account of the week is money going out, which
+ * makes a household that shops well look identical to one that loses money.
+ *
+ * ★★ Offered, never required. Most spends are not baskets, and a step that
+ * had to be dismissed every time would cost more attention than it earns.
+ */
+function Itemize(props: {
+  sustain: string;
+  pocket: string;
+  limit: number;
+  sourceTx: string;
+  onDone: () => void;
+}) {
+  const [open, setOpen] = createSignal(false);
+  const [lines, setLines] = createSignal<{ item: string; value: string }[]>([
+    { item: "", value: "" },
+  ]);
+  const [busy, setBusy] = createSignal(false);
+  const [failed, setFailed] = createSignal<string | null>(null);
+  const [done, setDone] = createSignal<{ count: number; unlisted: number } | null>(null);
+
+  const listed = () =>
+    lines().reduce((t, l) => t + (Number.parseFloat(l.value) || 0), 0);
+  const left = () => Math.round((props.limit - listed()) * 100) / 100;
+  const usable = () =>
+    lines().filter((l) => l.item.trim() !== "" && (Number.parseFloat(l.value) || 0) > 0);
+
+  const set = (i: number, k: "item" | "value", v: string) =>
+    setLines((ls) => ls.map((l, n) => (n === i ? { ...l, [k]: v } : l)));
+
+  const save = async () => {
+    const rows = usable();
+    if (rows.length === 0) return;
+    setBusy(true);
+    setFailed(null);
+    try {
+      const r = await engine.confirm(
+        props.sustain,
+        "inventory.itemize",
+        {
+          pocket_name: props.pocket,
+          source_tx: props.sourceTx,
+          limit: props.limit,
+          lines: rows.map((l) => ({ item: l.item.trim(), value: Number.parseFloat(l.value) })),
+        },
+        null,
+        null,
+      );
+      if (r.verdict !== "admitted") {
+        setFailed(r.reason ?? "the engine refused it");
+        return;
+      }
+      const d = r.data as { count?: number; unlisted?: number } | null;
+      setDone({ count: d?.count ?? rows.length, unlisted: d?.unlisted ?? 0 });
+      props.onDone();
+    } catch (e) {
+      setFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Show when={done()} fallback={
+      <Show
+        when={open()}
+        fallback={
+          <button class={O.linkish} onClick={() => setOpen(true)}>
+            + what did this buy?
+          </button>
+        }
+      >
+        <div class={O.stack}>
+          <p class={O.caption}>
+            What {fmt(props.limit)} in {props.pocket} brought in. {fmt(left())} left to account
+            for — anything you leave out just stays a plain spend.
+          </p>
+          <For each={lines()}>
+            {(l, i) => (
+              <div class={O.row}>
+                <input
+                  class={O.input}
+                  placeholder="what"
+                  value={l.item}
+                  onInput={(e) => set(i(), "item", e.currentTarget.value)}
+                />
+                <input
+                  class={O.inputNumeric}
+                  placeholder="how much"
+                  inputmode="decimal"
+                  value={l.value}
+                  onInput={(e) => set(i(), "value", e.currentTarget.value)}
+                />
+              </div>
+            )}
+          </For>
+          <div class={O.row}>
+            <button
+              class={O.linkish}
+              onClick={() => setLines((ls) => [...ls, { item: "", value: "" }])}
+            >
+              + another
+            </button>
+            <span class={O.spacer} />
+            <button class={O.linkish} onClick={() => setOpen(false)}>
+              not now
+            </button>
+          </div>
+          {/* ★★ Refused before it is sent when the list already overruns, so
+              he is not told no by the engine for something visible here. */}
+          <Show when={left() < 0}>
+            <p class={O.caption}>
+              That is {fmt(Math.abs(left()))} more than was spent.
+            </p>
+          </Show>
+          <Show when={failed()}>{(f) => <div class={O.errorBox}>{f()}</div>}</Show>
+          <button
+            class={`${O.action.primary} ${O.actionWide}`}
+            disabled={busy() || usable().length === 0 || left() < 0}
+            onClick={() => void save()}
+          >
+            {busy() ? "adding…" : `add ${usable().length || ""} to what you hold`}
+          </button>
+        </div>
+      </Show>
+    }>
+      {(d) => (
+        <p class={O.caption}>
+          {d().count} {d().count === 1 ? "thing" : "things"} added to what you hold.
+          <Show when={d().unlisted > 0}>
+            {" "}
+            {fmt(d().unlisted)} of it stays a plain spend.
+          </Show>
+        </p>
+      )}
+    </Show>
+  );
+}
+
 function Classify(props: {
   sustain: string;
   messageId: string | null;
@@ -1341,6 +1540,7 @@ function Classify(props: {
   //    THESE — the confirmed amount has to be findable in the message text, so
   //    sending an empty object would teach nothing and say it learned.
   const [confirmed, setConfirmed] = createSignal<JsonValue | null>(null);
+  const [confirmedOp, setConfirmedOp] = createSignal<string | null>(null);
   const [failure, setFailure] = createSignal<string | null>(null);
   // ★★★ Optimistic: the option a thumb just landed on, held lit while the
   //     engine answers. Without this a tap produced NOTHING visible until the
@@ -1434,6 +1634,29 @@ function Classify(props: {
     }
   };
 
+  /**
+   * The spend that just landed, if what landed was a spend.
+   *
+   * ★★ Read off the params he actually confirmed, not off the inference —
+   * an inference can be edited before it is sent, and it is the confirmed
+   * call that moved the money and therefore bought the things.
+   *
+   * ★★★ `budget.allocate` is deliberately excluded. Moving money into a
+   * pocket buys nothing, so offering to itemize it would be asking what a
+   * transfer between his own intentions brought home.
+   */
+  const spentJustNow = () => {
+    // Only a spend buys anything.
+    if (confirmedOp() !== "budget.spend") return null;
+    const p = confirmed() as Record<string, unknown> | null;
+    if (!p) return null;
+    const pocket = typeof p.pocket_name === "string" ? p.pocket_name : null;
+    const amount = typeof p.amount === "number" ? p.amount : null;
+    const tx = props.messageId ?? null;
+    if (!pocket || !amount || !tx) return null;
+    return { pocket, amount, sourceTx: tx };
+  };
+
   /** Is the whole pocket list showing, or just the leading few? */
   const [allPockets, setAllPockets] = createSignal(false);
 
@@ -1519,6 +1742,10 @@ function Classify(props: {
       );
       setVerdict(v);
       setConfirmed(s.params as JsonValue);
+      // ★ Which operator ran, not only with what. A spend and an allocation
+      //   carry identical params and mean opposite things about whether
+      //   anything was bought.
+      setConfirmedOp(s.operator);
       if (v.verdict === "admitted") {
         reset();
         setText("");
@@ -1931,6 +2158,20 @@ function Classify(props: {
                     <Show when={v().reason}>{(r) => <p class={O.caption}>{r()}</p>}</Show>
                     <Show when={v().verdict !== "admitted"}>
                       <p class={O.caption}>nothing moved, nothing recorded</p>
+                    </Show>
+                    {/* ★★★ Only after a spend really landed, and only for a
+                        spend: allocating money into a pocket buys nothing, so
+                        there is nothing it could have brought in. */}
+                    <Show when={v().verdict === "admitted" && spentJustNow()}>
+                      {(s) => (
+                        <Itemize
+                          sustain={props.sustain}
+                          pocket={s().pocket}
+                          limit={s().amount}
+                          sourceTx={s().sourceTx}
+                          onDone={props.onDone}
+                        />
+                      )}
                     </Show>
                   </>
                 }
