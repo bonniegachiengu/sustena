@@ -838,6 +838,7 @@ mod tests {
                                 from mary ngigi on 26/8/26 at 9:15 AM. \
                                 New M-PESA balance is Ksh5,000.00";
 
+
     #[test]
     fn money_that_came_in_is_never_offered_as_a_spend() {
         // ★★★ The money-safety rule, and the reason it is separate from the
