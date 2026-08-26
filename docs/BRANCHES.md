@@ -240,39 +240,28 @@ balance each text reports, and internal-transfer detection. See
 
 ---
 
-## Architecture audit, 26 Aug
+## Architecture audit
 
-Asked: are we on track for "everything is an operator, operators compose into
-operative-DAGs, the operatives ARE those DAGs"?
+Lives in `docs/OPERATOR_AUDIT.md`, completed 26 Aug. Short version: every state
+change is an operator behind the gate and that holds without exception; nothing
+composes those operators into a graph and no operative is declared as one. The
+realignment plan is in that document, in dependency order.
 
-**On track.** Every capability that mutates state is a registered operator
-through the gate — verified by the inverse: `transducer.rs`, `effect_capture.rs`,
-`curated.rs` and the app's `ingest.rs` contain zero state writes between them.
-Three write sites exist in the app: `World::call` (the operator path),
-`World::reload` (replays the log), and `World::transfer` (cross-sustain atomic
-move via `holon.rs`, which a single-sustain operator cannot express).
+**One live inconsistency it found, worth knowing before resuming:** vendor
+memory now exists twice — the `vendors` state dimension written by
+`vendor.remember`, and `history.json` written by `ingest.rs::remember`, which is
+what the classify UI still reads. Nothing is corrupt; they simply disagree about
+who knows what. Resolving it is step 1 of the realignment.
 
-**Deviated.**
+## Halt point, 26 Aug
 
-1. **No operative-DAG layer in Rust.** `operative.rs` is the game-theoretic
-   operative (utility vector, Ω ranking), a different thing entirely. There is
-   no `OperativeGraph`, no node/edge runner, no Mentor or Attaché — those names
-   appear only as test fixture strings in `agent.rs` and `cynefin.rs`.
-2. **A composition layer exists with zero callers.** `compose.rs` implements
-   Hoare sequencing over operator Steps and produces a checked `Pathway`;
-   `try_chain` is called from nowhere outside its own tests. `semantic.rs::
-   replay_under` runs a linear sequence through registry and gate and is reached
-   only from `enzyme.rs` tests.
-3. **The deciding logic is bespoke.** Parsing, inference, transfer detection,
-   reversal netting, skip learning, reclaim, merchant history, curated compose —
-   none registered, none able to be a DAG node.
-4. **`egress` is not ported.** It exists in Rust only as a capability string in
-   a `learned.rs` test.
+Building stopped here by Bonnie's call, to finish designing the money model
+before more is built on it. State at the halt:
 
-**Realignment, in order:** (1) read-only operator wrappers for the decision
-functions so they can be nodes — `vendor.*` is the first; (2) port the DAG
-runner; (3) declare Mentor and Attaché as DAG specs; (4) wire `compose.rs` so a
-DAG's linear segments are checked before they run.
+- `dev` = `origin/dev`, `main` = `origin/main`, working tree clean.
+- `git branch --no-merged dev` is empty: nothing stranded, nothing half-built.
+- Core suite clean; 202 host tests pass.
+- His phone is running the build installed 09:56 on 26 Aug.
 
 ## Known flake
 
