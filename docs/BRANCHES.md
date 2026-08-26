@@ -19,6 +19,42 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/supplies-inventory` — merged into `dev` 26 Aug at `0016d5b`
+
+**Off:** `dev` at `b51f0cb`
+**State:** merged, gate green (core clean, 190 host tests), installed
+**Touches:** `sustena-core/src/operator/inventory.rs` (new), `operator/{mod,meta}.rs`,
+`templates.rs`, `dto.rs`, `commands.rs`, `Orchie.tsx`
+
+**Purpose.** A spend records money leaving. It does not record that beans,
+onions and carrots arrived, and those are real things the household holds.
+`inventory.itemize` takes a spend that has already landed and records what it
+turned into.
+
+**The design decision worth keeping.** Itemizing moves **no money**. The spend
+already took it out of the account; if this took it again the same shilling
+would leave twice. Net worth is unchanged at the moment of buying, because cash
+became beans — the expense is later, when they are used up. That is `consume`,
+designed for and deliberately not built.
+
+`inventory` is a state dimension, itemize is an operator through the gate, the
+log is append-only, and asset ids are derived from the purchase rather than
+minted — so a replay lands byte-identical and this embroiders into a Sustain
+later without rework.
+
+**Refusals, all real:** a list that exceeds the spend (value from nowhere); the
+same purchase itemized twice (doubles the shopping while the spend stands); a
+line with no name or no amount, named by position; supplies with no purchase
+behind them. A list *under* the spend is allowed and reports what stays a plain
+spend, because a receipt half remembered is still worth recording.
+
+**No migration.** Households opened before this dimension existed create the
+list on the way in. Verified with a test that strips the key first, which is
+exactly how his state is on disk.
+
+**Deferred by the timebox:** consumption, and subpockets are stored per line and
+grouped in the view but have no dedicated picker yet.
+
 ### `fix/compact-pocket-chips` — merged into `dev` 26 Aug at `8058b02`
 
 **Off:** `dev` at `31a797e`
