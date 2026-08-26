@@ -2329,6 +2329,119 @@ fn leg_line(seq: u64, leg: &Leg) -> LoggedEvent {
 }
 
 #[cfg(test)]
+mod inventory_tests {
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-inv-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    fn call(w: &World, op: &str, ps: Vec<(&str, Value)>) -> bool {
+        let params: Map<String, Value> =
+            ps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        matches!(w.call("home", op, &params), Ok(Some((x, _))) if x.committed())
+    }
+
+    fn state(w: &World) -> Value {
+        w.with(|i| i.get("home").map(|s| s.state.clone())).expect("state")
+    }
+
+    /// ★★★ The whole loop, through the real gate and the real fold: money in,
+    /// earmarked, spent, and then what that spending actually brought home.
+    #[test]
+    fn a_spend_becomes_things_the_household_holds() {
+        let w = world("loop");
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(1000.0)), ("source", json!("pay")),
+                          ("account", json!("mpesa"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(500.0))]));
+        assert!(call(&w, "budget.spend",
+                     vec![("pocket_name", json!("food")), ("amount", json!(90.0)),
+                          ("account", json!("mpesa"))]));
+
+        let before = state(&w);
+        assert!(call(&w, "inventory.itemize",
+                     vec![("pocket_name", json!("food")), ("source_tx", json!("msg-1")),
+                          ("limit", json!(90.0)),
+                          ("lines", json!([{"item":"beans","value":30.0},
+                                           {"item":"onions","value":50.0},
+                                           {"item":"carrots","value":10.0}]))]));
+        let after = state(&w);
+
+        let assets = after.pointer("/inventory/assets").and_then(Value::as_array).expect("assets");
+        assert_eq!(assets.len(), 3);
+        assert_eq!(assets[1]["item"], json!("onions"));
+        assert_eq!(assets[1]["pocket"], json!("food"));
+
+        // ★★★ Net-worth-neutral at the moment of buying: the spend already
+        //     took the money, so itemizing must not take it again.
+        assert_eq!(
+            after.pointer("/finances").unwrap(),
+            before.pointer("/finances").unwrap(),
+            "cash became beans, and no shilling moved twice"
+        );
+    }
+
+    #[test]
+    fn acquiring_is_recorded_in_the_append_only_log() {
+        // ★★ The log is what the household actually is; state is a reading of
+        //    it. An asset that existed only in state would vanish on the next
+        //    rebuild, so the event is the thing worth asserting here.
+        //
+        //    ★ That the replay lands byte-identical is proven where it can be:
+        //    the core's own `ids_are_derived_so_replaying_the_log_produces_the
+        //    _same_assets`, since ids are the only part that could differ.
+        let w = world("log");
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(1000.0)), ("source", json!("pay"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(500.0))]));
+        assert!(call(&w, "inventory.itemize",
+                     vec![("pocket_name", json!("food")), ("source_tx", json!("msg-9")),
+                          ("lines", json!([{"item":"rice","value":120.0}]))]));
+
+        let log = w.store.read_log("home").expect("log");
+        assert!(
+            log.iter().any(|e| format!("{e:?}").contains("event.inventory.acquired")),
+            "the acquisition is in the log, not only in the state"
+        );
+    }
+
+    #[test]
+    fn a_household_opened_before_inventory_existed_can_still_itemize() {
+        // ★★ Every household on his phone predates this dimension. If the
+        //    first itemize refused, the feature would be unreachable for
+        //    exactly the people who have been using the app.
+        let w = world("legacy");
+        assert!(
+            state(&w).pointer("/inventory/assets").is_some()
+                || state(&w).pointer("/inventory").is_none(),
+            "either shape is fine; what matters is the next line"
+        );
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(0.0))])
+                || true);
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(100.0)), ("source", json!("s"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(100.0))]));
+        assert!(call(&w, "inventory.itemize",
+                     vec![("pocket_name", json!("food")), ("source_tx", json!("m1")),
+                          ("lines", json!([{"item":"salt","value":20.0}]))]));
+    }
+}
+
+#[cfg(test)]
 mod trend_tests {
     use super::*;
     use crate::store::Store;

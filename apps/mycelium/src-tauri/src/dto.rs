@@ -1009,6 +1009,8 @@ pub struct FeedDto {
     /// Where the household is heading, not just where it is. `None` until the
     /// series has a reading in it.
     pub trend: Option<TrendDto>,
+    /// What the household holds, grouped by the pocket that bought it.
+    pub inventory: Vec<InventoryGroupDto>,
     /// ★★★ Money the household holds that no account claims.
     ///
     /// Zero once every shilling has a place. Non-zero means the pooled balance
@@ -1113,6 +1115,32 @@ pub struct SkipLearnedDto {
     /// so the only shape it could describe is "everything I cannot read" — and
     /// that pile is exactly the one that needs a person's eyes.
     pub unlearnable: bool,
+}
+
+/// One thing the household holds, bought with a spend.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetDto {
+    pub id: String,
+    pub item: String,
+    pub value: f64,
+    /// The purchase it came out of, so a pocket can show what its spending
+    /// actually bought.
+    pub source_tx: String,
+    pub pocket: String,
+    pub subpocket: Option<String>,
+}
+
+/// What the household holds, and what it is grouped under.
+///
+/// ★★ Grouped by pocket rather than listed flat, because the question people
+/// actually ask is "what did the food money buy", not "what do I own".
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct InventoryGroupDto {
+    pub pocket: String,
+    pub total: f64,
+    pub assets: Vec<AssetDto>,
 }
 
 /// One account, on the wire.

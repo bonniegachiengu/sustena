@@ -220,6 +220,7 @@ impl Registry {
         let mut r = Registry::new();
         crate::operator::budget::register(&mut r);
         crate::operator::device::register(&mut r);
+        crate::operator::inventory::register(&mut r);
         r
     }
 }

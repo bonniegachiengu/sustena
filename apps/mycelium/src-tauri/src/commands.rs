@@ -11,7 +11,8 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::dto::{
-    AccessDto, AccountDto, Branch, BranchStep, DeviceDto, OwnIdentifiersDto, SkipLearnedDto,
+    AccessDto, AccountDto, AssetDto, Branch, BranchStep, DeviceDto, InventoryGroupDto,
+    OwnIdentifiersDto, SkipLearnedDto,
     TransferDto, TrendDto, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
@@ -1193,6 +1194,7 @@ pub fn get_feed(
         accounts: accounts_of(&state, &world.ingest().reported_balances(&sustain_id)
             .unwrap_or_default()),
         device: device_of(&world, &sustain_id),
+        inventory: inventory_of(&state),
         trend,
         unaccounted: unaccounted_in(&state),
     })
@@ -1219,6 +1221,37 @@ fn health_hue(reading: &sustena_core::monitor::Ingested) -> String {
         None => "green",
     }
     .to_string()
+}
+
+/// What the household holds, grouped by the pocket that bought it.
+fn inventory_of(state: &Value) -> Vec<InventoryGroupDto> {
+    let assets = state
+        .pointer("/inventory/assets")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut by_pocket: std::collections::BTreeMap<String, Vec<AssetDto>> = Default::default();
+    for a in assets {
+        let dto = AssetDto {
+            id: a.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
+            item: a.get("item").and_then(Value::as_str).unwrap_or("").to_string(),
+            value: a.get("value").and_then(Value::as_f64).unwrap_or(0.0),
+            source_tx: a.get("source_tx").and_then(Value::as_str).unwrap_or("").to_string(),
+            pocket: a.get("pocket").and_then(Value::as_str).unwrap_or("").to_string(),
+            subpocket: a.get("subpocket").and_then(Value::as_str).map(str::to_string),
+        };
+        by_pocket.entry(dto.pocket.clone()).or_default().push(dto);
+    }
+
+    by_pocket
+        .into_iter()
+        .map(|(pocket, assets)| InventoryGroupDto {
+            total: ((assets.iter().map(|a| a.value).sum::<f64>()) * 100.0).round() / 100.0,
+            pocket,
+            assets,
+        })
+        .collect()
 }
 
 /// How long a device may be quiet before the watcher calls it late.
