@@ -85,6 +85,31 @@ const VERBS: &[(&str, &str)] = &[
 /// there is no question here that would fill it in.
 const ASKABLE_FIELDS: &[&str] = &["pocket_name", "amount"];
 
+/// Phrases that mean the money came IN, read off the raw text.
+///
+/// ★★★ A last line of defence, and it exists because the first one failed in a
+/// way that could have cost real money. A plainly-received KES 1,000 whose
+/// shape no rule matched arrived with no `direction` at all, and the classify
+/// card then offered "spend it" as the first answer to "which pocket does this
+/// belong to?" — one tap from recording −1,000 for money that had come in.
+///
+/// ★★★ Wording is weaker evidence than a parsed field, so this may only ever
+/// REMOVE spending from the options, never add anything. Being wrong here
+/// costs a question; the alternative cost the sign of a transaction.
+const RECEIVED_PHRASES: &[&str] = &[
+    "you have received",
+    "has been received",
+    "money received",
+    "credited to",
+    "received from",
+];
+
+/// Does the message itself say money came in?
+pub fn reads_as_money_in(raw: &str) -> bool {
+    let t = raw.to_lowercase();
+    RECEIVED_PHRASES.iter().any(|p| t.contains(p))
+}
+
 /// Humanised labels, for the one question that asks *which action*.
 fn label_for(operator: &str) -> &str {
     match operator {
@@ -376,7 +401,19 @@ pub fn infer<P: OperatorParams>(universe: &P, c: &Capture) -> Inference {
             // was earned; a refund gives back what was spent and adds to no
             // total at all. Narrowing to both leaves the choice with the
             // person, which is the only one who can tell them apart.
-            let direction = c.parsed_fields.get("direction").and_then(|v| v.as_str());
+            // ★★★ The parsed direction first, and the message's own words as a
+            //     fallback when nothing parsed it. An unrecognised shape is
+            //     exactly when this matters: there is no field to trust, and
+            //     the text is still saying plainly that money arrived.
+            let spoken = c
+                .raw_text
+                .filter(|r| reads_as_money_in(r))
+                .map(|_| "received");
+            let direction = c
+                .parsed_fields
+                .get("direction")
+                .and_then(|v| v.as_str())
+                .or(spoken);
             let suffixes: &[&str] = match direction {
                 Some("sent") => &["spend"],
                 Some("received") => &["record_income", "unspend"],
@@ -474,6 +511,20 @@ pub fn infer<P: OperatorParams>(universe: &P, c: &Capture) -> Inference {
             options: None,
             why: "couldn't find an amount in the message — enter it to continue".into(),
         };
+    }
+
+    // ★★★ MONEY IN IS NEVER A SPEND.
+    //
+    // Belt and braces over the narrowing above, and deliberately not folded
+    // into it. The narrowing is a preference — it gives way when a hint would
+    // eliminate every candidate. This does not give way. A message that says
+    // money arrived may not be offered spending, even if that leaves nothing
+    // to offer, because "I cannot tell you what to do with this" is a fine
+    // answer and "you spent it" is a false one.
+    if c.raw_text.is_some_and(reads_as_money_in)
+        && !c.known.contains_key("operator")
+    {
+        ops.retain(|op| op.rsplit('.').next() != Some("spend"));
     }
 
     // 6 · which action, if more than one still fits
@@ -775,6 +826,92 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect()
+    }
+
+    /// The three operators the classify card actually offers.
+    fn card_offers() -> Vec<String> {
+        ["budget.spend", "budget.allocate", "budget.unspend"]
+            .iter().map(|s| s.to_string()).collect()
+    }
+
+    const HIS_RECEIVED: &str = "UHIE73CBRB Confirmed. You have received Ksh1,000.00 \
+                                from mary ngigi on 26/8/26 at 9:15 AM. \
+                                New M-PESA balance is Ksh5,000.00";
+
+    #[test]
+    fn money_that_came_in_is_never_offered_as_a_spend() {
+        // ★★★ The money-safety rule, and the reason it is separate from the
+        //     ordinary narrowing: the narrowing gives way when a hint would
+        //     eliminate every candidate, and this must not. A message saying
+        //     money arrived may not be offered spending even if that leaves
+        //     nothing to offer — "I cannot tell you what to do with this" is a
+        //     fine answer and "you spent it" is a false one.
+        let (u, ops, p) = (universe(), card_offers(), pockets());
+        let mut c = Capture { candidates: &ops, pockets: &p, ..Default::default() };
+        c.raw_text = Some(HIS_RECEIVED);
+        c.known.insert("pocket_name".into(), json!("food"));
+
+        match infer(&u, &c) {
+            Inference::Ready { operator, .. } => {
+                assert_ne!(operator, "budget.spend", "money in recorded as money out");
+                assert_eq!(operator, "budget.unspend", "it credits the pocket instead");
+            }
+            Inference::NeedsDisambiguation { options, .. } => {
+                let offered = options.expect("tap options");
+                let vs: Vec<&str> = offered.iter().map(|o| o.value.as_str()).collect();
+                assert!(!vs.contains(&"budget.spend"), "spending was still on offer: {vs:?}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_message_s_own_words_are_read_when_nothing_parsed_a_direction() {
+        // ★★ An unrecognised shape is exactly when this matters: there is no
+        //    field to trust, and the text still says plainly that money came in.
+        assert!(reads_as_money_in(HIS_RECEIVED));
+        assert!(reads_as_money_in("Ksh500 has been received on your account"));
+        assert!(!reads_as_money_in("Ksh450.00 paid to NAIVAS SUPERMARKET"));
+        assert!(!reads_as_money_in("Ksh2,000 sent to MARY WANJIRU"));
+    }
+
+    #[test]
+    fn wording_may_only_ever_remove_spending_never_add_anything() {
+        // ★★★ Wording is weaker evidence than a parsed field, so it is allowed
+        //     to take an option away and never to put one there. Being wrong
+        //     costs a question; the alternative cost the sign of a transaction.
+        let u = universe();
+        let only_spend: Vec<String> = vec!["budget.spend".to_string()];
+        let p = pockets();
+        let mut c = Capture { candidates: &only_spend, pockets: &p, ..Default::default() };
+        c.raw_text = Some(HIS_RECEIVED);
+        c.known.insert("pocket_name".into(), json!("food"));
+        c.known.insert("amount".into(), json!(1000.0));
+
+        // Nothing is invented to fill the gap: it refuses rather than spending.
+        match infer(&u, &c) {
+            Inference::Ready { operator, .. } => {
+                panic!("it found something to do anyway: {operator}")
+            }
+            Inference::CannotInfer { .. } | Inference::NeedsDisambiguation { .. } => {}
+        }
+    }
+
+    #[test]
+    fn an_explicit_answer_still_wins_over_the_wording() {
+        // ★★ If he has said outright what this should do, that is a person
+        //    overriding a guess about their own money, and it stands.
+        let (u, ops, p) = (universe(), card_offers(), pockets());
+        let mut c = Capture { candidates: &ops, pockets: &p, ..Default::default() };
+        c.raw_text = Some(HIS_RECEIVED);
+        c.known.insert("pocket_name".into(), json!("food"));
+        c.known.insert("amount".into(), json!(1000.0));
+        c.known.insert("operator".into(), json!("budget.spend"));
+
+        match infer(&u, &c) {
+            Inference::Ready { operator, .. } => assert_eq!(operator, "budget.spend"),
+            other => panic!("a person's own answer was overruled: {other:?}"),
+        }
     }
 
     #[test]
