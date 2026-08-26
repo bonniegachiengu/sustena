@@ -63,6 +63,7 @@ import {
   type ChoiceDto,
   type NettingDto,
   type OwnIdentifiersDto,
+  type TransferDto,
 } from "../lib/engine";
 import { world } from "../lib/live";
 import { keyboardAware, watchViewport } from "../lib/viewport";
@@ -109,7 +110,11 @@ const RAW_CLAMP = 220;
  * ★★ Four, the same number the attention budget uses. More choices at once is
  * a slower decision, not a better-informed one, and the rest are one tap away.
  */
-const SUGGESTIONS = 4;
+// ★★ Eight rather than four, now that a pocket is a chip. The cap is about
+//    how much there is to READ before choosing, and eight chips is about two
+//    wrapped rows -- roughly the same amount of reading four full-width
+//    buttons used to be, in a fraction of the height.
+const SUGGESTIONS = 8;
 
 /** The pocket names in a state document, in the engine's own spelling. */
 function pocketNames(state: unknown): string[] {
@@ -486,6 +491,18 @@ export default function Orchie(props: { onFace?: () => void }) {
       } catch {
         // Nothing to say. The queue is unchanged.
       }
+      // ★★ And his own money moving, for the same reason netting runs here:
+      //    the texts were captured before he had said which numbers are his,
+      //    so without this pass they would wait for an import that never comes.
+      try {
+        const t = await engine.applyTransfers(id);
+        if (t.moved > 0) {
+          moved += t.moved;
+          setMoves(t);
+        }
+      } catch {
+        // No numbers declared yet, which is the ordinary first run.
+      }
       if (handled > 0 || moved > 0) await refetch();
     } catch {
       // No permission yet, or not an Android build. Nothing to say.
@@ -509,6 +526,8 @@ export default function Orchie(props: { onFace?: () => void }) {
    * removed two questions and touched no money, the other put money back.
    */
   const [netting, setNetting] = createSignal<NettingDto | null>(null);
+  /** His own moves recognised on this open, so a count never drops unexplained. */
+  const [moves, setMoves] = createSignal<TransferDto | null>(null);
 
   onMount(watchViewport);
 
@@ -742,7 +761,22 @@ export default function Orchie(props: { onFace?: () => void }) {
               </Show>
 
               <AccountsCard feed={f()} onChanged={() => void refetch()} />
-              <OwnNumbersCard sustainId={f().sustainId} />
+              <OwnNumbersCard sustainId={f().sustainId} onChanged={() => void refetch()} />
+
+              <Show when={moves()}>
+                {(t) => (
+                  <div class={O.card}>
+                    <p class={O.caption}>
+                      {t().moved} of your own {t().moved === 1 ? "move" : "moves"} between your
+                      accounts {t().moved === 1 ? "was" : "were"} recognised and recorded as money
+                      changing place. Neither spending nor income.
+                    </p>
+                    <button class={O.linkish} onClick={() => setMoves(null)}>
+                      got it
+                    </button>
+                  </div>
+                )}
+              </Show>
 
               {/* ═══ read the phone's own texts ══════════════════════════ */}
               <SmsCard sustainId={f().sustainId} onSwept={() => void refetch()} />
@@ -830,13 +864,14 @@ function FeedSkeleton() {
  * other side is his. So it has to be asked, and it is asked here, on the phone,
  * and stored on the phone. Nothing sends it anywhere.
  */
-function OwnNumbersCard(props: { sustainId: string }) {
+function OwnNumbersCard(props: { sustainId: string; onChanged: () => void }) {
   const [own, setOwn] = createSignal<OwnIdentifiersDto | null>(null);
   const [open, setOpen] = createSignal(false);
   const [mpesa, setMpesa] = createSignal("");
   const [kcb, setKcb] = createSignal("");
   const [saving, setSaving] = createSignal(false);
   const [failed, setFailed] = createSignal<string | null>(null);
+  const [found, setFound] = createSignal<TransferDto | null>(null);
 
   const load = async () => {
     try {
@@ -863,8 +898,16 @@ function OwnNumbersCard(props: { sustainId: string }) {
       const o = await engine.setOwnIdentifiers({ mpesa: split(mpesa()), kcb: split(kcb()) });
       setOwn(o);
       setOpen(false);
-      // Now that it knows which numbers are his, look for his own moves.
-      await engine.applyTransfers(props.sustainId).catch(() => undefined);
+      // ★★ Now that it knows which numbers are his, look for his own moves --
+      //    and say what it found. Doing this silently would leave a question
+      //    disappearing from the list with no explanation.
+      try {
+        const t = await engine.applyTransfers(props.sustainId);
+        setFound(t);
+        if (t.moved > 0) props.onChanged();
+      } catch {
+        // Nothing found is the ordinary case on a first run.
+      }
     } catch (e) {
       setFailed(String(e).replace(/^Error:\s*/, ""));
     } finally {
@@ -920,6 +963,35 @@ function OwnNumbersCard(props: { sustainId: string }) {
         <Show when={failed()}>
           <p class={O.caption}>{failed()}</p>
         </Show>
+      </Show>
+
+      {/* ★★★ A question that vanished from the list needs a reason on screen. */}
+      <Show when={found()}>
+        {(t) => (
+          <>
+            <Show when={t().moved > 0}>
+              <p class={O.caption}>
+                {t().moved} of your own {t().moved === 1 ? "move" : "moves"} between accounts
+                recognised. {t().moved === 1 ? "It is" : "They are"} recorded as money changing
+                place, not as spending or income.
+              </p>
+            </Show>
+            <Show when={t().unpaired > 0}>
+              <p class={O.caption}>
+                {t().unpaired} looks like your own money moving but only one side of it is here,
+                so {t().unpaired === 1 ? "it stays" : "they stay"} in the list.
+              </p>
+            </Show>
+            <Show when={t().blocked > 0}>
+              <p class={O.caption}>
+                {t().blocked} could not be undone from what was already filed.
+              </p>
+            </Show>
+            <Show when={t().moved === 0 && t().unpaired === 0 && t().blocked === 0}>
+              <p class={O.caption}>Nothing in the list looks like your own money moving.</p>
+            </Show>
+          </>
+        )}
       </Show>
     </div>
   );
@@ -1539,7 +1611,7 @@ function Classify(props: {
                       }
                     >
                       {(opts) => (
-                        <div class={O.options}>
+                        <div class={q().field === "pocket_name" ? O.chips : O.options}>
                           {/* ★★★ A few, then the rest on request.
                               Every pocket as a full-width button stops fitting
                               somewhere around ten and asks him to read the lot
@@ -1548,15 +1620,27 @@ function Classify(props: {
                               of the list is the answer most of the time and
                               the tail is one tap away. */}
                           <For each={shortlist(opts(), q().field)}>
-                            {(o) => (
-                              <button
-                                class={pending() === o.value ? O.optionChosen : O.option}
-                                disabled={busy()}
-                                onClick={() => answer(q().field, o.value)}
-                              >
-                                {o.label}
-                              </button>
-                            )}
+                            {(o) => {
+                              const small = q().field === "pocket_name";
+                              const chosen = pending() === o.value;
+                              return (
+                                <button
+                                  class={
+                                    small
+                                      ? chosen
+                                        ? O.chipChosen
+                                        : O.chip
+                                      : chosen
+                                        ? O.optionChosen
+                                        : O.option
+                                  }
+                                  disabled={busy()}
+                                  onClick={() => answer(q().field, o.value)}
+                                >
+                                  {o.label}
+                                </button>
+                              );
+                            }}
                           </For>
                           <Show when={hidden(opts(), q().field) > 0 && !allPockets()}>
                             <button class={O.linkish} onClick={() => setAllPockets(true)}>
@@ -1571,11 +1655,11 @@ function Classify(props: {
                               when={newPocket() !== null}
                               fallback={
                                 <button
-                                  class={O.option}
+                                  class={O.chipNew}
                                   disabled={busy()}
                                   onClick={() => setNewPocket("")}
                                 >
-                                  + new pocket
+                                  + new
                                 </button>
                               }
                             >

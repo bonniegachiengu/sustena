@@ -344,6 +344,51 @@
  ],
  "kcb": [
   {
+   "id": "kcb_send_to_mpesa",
+   "source": "kcb",
+   "version": 1,
+   "pattern": "SEND\\s+TO\\s+M-?PESA\\s+request\\s+of\\s+KES\\s*(?P<amount>[\\d,]+\\.?\\d*)\\s+from\\s+(?P<from_account>[\\d*]{4,})\\s+to\\s+(?P<to_account>[\\d*]{4,})\\s*[-–]\\s*(?P<name>[A-Za-z .'-]+?)\\s+has been received",
+   "extract": {
+    "amount": {
+     "type": "amount",
+     "group": "amount",
+     "value": null
+    },
+    "from_account": {
+     "type": "string",
+     "group": "from_account",
+     "value": null
+    },
+    "to_account": {
+     "type": "string",
+     "group": "to_account",
+     "value": null
+    },
+    "counterparty": {
+     "type": "string",
+     "group": "name",
+     "value": null
+    },
+    "direction": {
+     "type": "literal",
+     "group": null,
+     "value": "sent"
+    }
+   },
+   "status": "parsed_unmapped",
+   "operator": null,
+   "params": {},
+   "flags": [
+    "IGNORECASE"
+   ],
+   "reason_template": "KES {amount:,.2f} moving from {from_account} to {to_account}. If both are yours this is one move between your own accounts, not a spend.",
+   "trust": "shipped",
+   "provenance": "sustena_core",
+   "examples": [
+    "SEND TO M-PESA request of KES 2,000 from 135***140 to 254***143 - BONVENTURE NGUGI MAINA has been received for processing."
+   ]
+  },
+  {
    "id": "kcb_reversal",
    "source": "kcb",
    "version": 1,

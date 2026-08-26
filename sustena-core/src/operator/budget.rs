@@ -689,6 +689,105 @@ fn place_unaccounted(
     }))
 }
 
+// ── budget.unrecord_income ───────────────────────────────────────────────────
+
+/// The declared inverse of `budget.record_income`.
+///
+/// ★★★ This exists for one situation, and it is worth naming: money arriving
+/// from his own other account is not income. Every bank text saying money
+/// arrived reads the same whether it came from an employer or from his own
+/// KCB account, so the arrival is filed as income the moment it is captured,
+/// long before anything reveals which it was. When the other half turns up and
+/// says it was his own money moving, the income has to come back off the books
+/// -- otherwise his income grows every time he moves his own money between his
+/// own accounts.
+///
+/// ★★★ It requires `entry_id`, and refuses without one. `income.sources` is a
+/// list, and taking the wrong entry out of it would delete a real income he
+/// really received. An entry recorded before ids were carried cannot be
+/// identified, so this refuses rather than guessing at which one to remove --
+/// the same answer the refund path gives a charge filed before filings were
+/// recorded.
+fn unrecord_income(
+    state: &mut State,
+    params: &Map<String, Value>,
+    events: &mut Vec<EmittedEvent>,
+    movements: &mut Vec<Movement>,
+) -> OperatorResult {
+    let entry_id = text(params, "entry_id");
+    if entry_id.is_empty() {
+        return OperatorResult::fail(
+            "Which income to take back cannot be told without the id of the entry that recorded it.",
+            "entry_id_present",
+        );
+    }
+
+    let entries = state
+        .get("finances.income.sources")
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default();
+    let found = entries.iter().find(|e| {
+        e.get("id").and_then(Value::as_str) == Some(entry_id.as_str())
+    });
+    let Some(entry) = found.cloned() else {
+        return OperatorResult::fail(
+            format!("No income entry '{entry_id}' to take back."),
+            "income_entry_exists",
+        );
+    };
+
+    let amount = entry.get("amount").and_then(Value::as_f64).unwrap_or(0.0);
+    if amount <= 0.0 {
+        return OperatorResult::fail(
+            format!("Income entry '{entry_id}' records no amount to take back."),
+            "income_entry_has_amount",
+        );
+    }
+
+    // ★★ Liquid first, because it is the one that can refuse. Money already
+    //    allocated out of liquid cannot be un-received without leaving the
+    //    balance negative, and the gate would refuse the whole call anyway --
+    //    better to say why here than to be stopped with a generic reason.
+    let liquid = state.get("finances.liquid.balance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    if amount > liquid {
+        let mut result = OperatorResult::fail(
+            format!(
+                "KES {amount:.0} came in as income but only KES {liquid:.0} is unspoken for, \
+                 so it cannot simply be taken back."
+            ),
+            "liquid_sufficient_to_unrecord",
+        );
+        result.data = json!({
+            "entry_id": entry_id,
+            "amount": money(amount),
+            "liquid": money(liquid),
+        });
+        return result;
+    }
+
+    let _ = state.decrement("finances.liquid.balance", &json!(amount), false);
+    let _ = state.decrement("finances.income.monthly_total", &json!(amount), false);
+    let _ = state.remove("finances.income.sources", &entry_id);
+    if let Some(a) = account_of(params) {
+        move_account(state, &a, -amount);
+    }
+
+    // The mirror of the arrival: back out to wherever it came from.
+    let source = entry.get("label").and_then(Value::as_str).unwrap_or("unknown").to_string();
+    movements.push(Movement::new("money", amount, "finances.liquid", &source));
+
+    events.push(EmittedEvent {
+        name: "event.finances.income_unrecorded".into(),
+        payload: json!({"entry_id": entry_id, "amount": money(amount), "source": source}),
+    });
+
+    OperatorResult::ok(json!({
+        "entry_id": entry_id,
+        "amount": money(amount),
+        "new_balance": state.get("finances.liquid.balance").cloned().unwrap_or(Value::Null),
+    }))
+}
+
 // ── registration ─────────────────────────────────────────────────────────────
 
 pub fn register(registry: &mut Registry) {
@@ -849,6 +948,20 @@ pub fn register(registry: &mut Registry) {
         min_privilege: 1,
         effect: None,
         run: place_unaccounted,
+    });
+
+    registry.register(OperatorMeta {
+        name: "budget.unrecord_income",
+        description: "Undo an income entry that turned out not to be income.",
+        params: vec![ParamDecl::text("entry_id"), ParamDecl::text("account").optional()],
+        constraints: vec![],
+        post_constraints: vec![],
+        side_effects: vec!["event.finances.income_unrecorded"],
+        pawa_cost: 0,
+        protocol: Protocol::Rpc,
+        min_privilege: 1,
+        effect: None,
+        run: unrecord_income,
     });
 
     // Test-only: mutates state in a way no guard would catch, so the gate is

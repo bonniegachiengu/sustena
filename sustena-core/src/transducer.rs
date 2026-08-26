@@ -458,8 +458,10 @@ mod tests {
     #[test]
     fn the_shipped_set_is_the_expected_shape() {
         assert_eq!(seed_rules("mpesa").len(), 7);
-        // 16 = 15 original shapes + kcb_reversal, added for refund netting.
-        assert_eq!(seed_rules("kcb").len(), 16);
+        // 17 = 15 original shapes, + kcb_reversal for refund netting, and
+        // + kcb_send_to_mpesa, the real shape his KCB app sends when he moves
+        // his own money to his own M-Pesa.
+        assert_eq!(seed_rules("kcb").len(), 17);
         assert_eq!(seed_rules("nobody").len(), 0);
     }
 

@@ -765,7 +765,33 @@ impl World {
             return Ok(captured);
         };
 
-        let params: Map<String, Value> = m.params.clone().into_iter().collect();
+        let mut params: Map<String, Value> = m.params.clone().into_iter().collect();
+
+        // ★★★ The message that caused it, carried into the entry it creates.
+        //
+        // Money arriving from his own other account reads exactly like money
+        // arriving from an employer, so it is filed as income here, before
+        // anything can reveal which it was. When the other half turns up and
+        // says it was his own money moving, that income has to come back off
+        // the books -- and taking the right entry out of a list needs the entry
+        // to be identifiable. Without this the only options are to remove the
+        // wrong one or to leave a false income standing, and both are worse
+        // than the cost of one extra field.
+        if operator == "budget.record_income" {
+            params.entry("entry_id".to_string()).or_insert_with(|| Value::String(m.id.clone()));
+        }
+        // ★★ Which account it landed in, from the source of the text itself.
+        //    Free attribution, and the same fact the transfer pass needs.
+        if !params.contains_key("account") {
+            let takes_account = self
+                .operators
+                .get(&operator)
+                .is_some_and(|meta| meta.params.iter().any(|p| p.name == "account"));
+            if takes_account {
+                params.insert("account".to_string(), Value::String(source_id.to_string()));
+            }
+        }
+
         match self.call(sustain_id, &operator, &params)? {
             Some((x, _)) => {
                 let reason = x.result.reason.clone();

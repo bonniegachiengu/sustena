@@ -1814,7 +1814,12 @@ refused: number;
 /**
  * A leg to one of his own numbers whose other half is not here.
  */
-unpaired: number; ambiguous: number }
+unpaired: number; 
+/**
+ * A partner leg that had already been filed as income and could not be
+ * taken back. Reported rather than left as a silent zero.
+ */
+blocked: number; ambiguous: number }
 /**
  * One side of a settled transfer, as the cockpit shows it.
  */

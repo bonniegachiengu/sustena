@@ -343,6 +343,71 @@ export const options = style({
   gap: "10px",
 });
 
+/**
+ * The pocket picker, and only it.
+ *
+ * ★★★ A pocket list is a different shape of question from "what should this
+ * do?". That one has two or three answers and each deserves a proper target;
+ * this one has as many answers as he has pockets, and rendering them all as
+ * full-size buttons turns one question into a wall to read. Chips wrap, so
+ * fifteen pockets are a paragraph rather than a page.
+ *
+ * ★★ Still a real target. 34px is above the floor where a thumb starts
+ * missing, and the wrapping row keeps neighbours far enough apart that a near
+ * miss lands on nothing rather than on the wrong pocket -- which matters more
+ * here than size does, because the wrong pocket is a wrong record.
+ */
+export const chips = style({
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "6px",
+  alignItems: "center",
+});
+
+export const chip = style({
+  fontFamily: vars.font.ui,
+  fontSize: "13px",
+  fontWeight: 500,
+  minHeight: "34px",
+  padding: "6px 11px",
+  borderRadius: "999px",
+  color: vars.color.textPrimary,
+  background: vars.color.bgRaised,
+  border: `1px solid ${vars.color.borderMid}`,
+  cursor: "pointer",
+  textAlign: "center",
+  lineHeight: 1.2,
+  whiteSpace: "nowrap",
+  transition: "transform 90ms ease, background 140ms ease, border-color 140ms ease",
+  selectors: {
+    "&:active:not(:disabled)": {
+      transform: "scale(0.94)",
+      background: vars.color.amberGlow,
+      borderColor: vars.color.amberBorder,
+    },
+    "&:disabled": { opacity: 0.4, cursor: "default" },
+  },
+});
+
+export const chipChosen = style([
+  chip,
+  {
+    background: vars.color.amberGlow,
+    borderColor: vars.color.amberBorder,
+    color: vars.color.amber,
+  },
+]);
+
+/** The odd one out: creating a pocket is a different act from picking one. */
+export const chipNew = style([
+  chip,
+  {
+    background: "transparent",
+    borderStyle: "dashed",
+    color: vars.color.textMuted,
+  },
+]);
+
 export const option = style({
   fontFamily: vars.font.ui,
   fontSize: "16px",

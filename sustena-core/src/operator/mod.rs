@@ -2133,4 +2133,138 @@ mod tests {
         conserved(&after);
     }
 
+
+    // ── taking back an income that was never income ───────────────────────────
+
+    #[test]
+    fn unrecording_income_undoes_every_trace_of_it() {
+        let after = run_all(
+            empty(),
+            &[
+                ("budget.record_income",
+                 vec![("amount", json!(2000.0)), ("source", json!("KCB")),
+                      ("entry_id", json!("msg-1")), ("account", json!("mpesa"))]),
+                ("budget.unrecord_income",
+                 vec![("entry_id", json!("msg-1")), ("account", json!("mpesa"))]),
+            ],
+        );
+        assert_eq!(at(&after, "finances.liquid.balance"), 0.0);
+        assert_eq!(at(&after, "finances.income.monthly_total"), 0.0, "it was never earnings");
+        assert_eq!(at(&after, "finances.accounts.mpesa.balance"), 0.0, "and never arrived");
+        let sources = after.pointer("/finances/income/sources").and_then(Value::as_array).unwrap();
+        assert!(sources.is_empty(), "the entry is gone, not left as a false record");
+        conserved(&after);
+    }
+
+    #[test]
+    fn the_right_entry_comes_out_and_the_others_stay() {
+        // ★★★ The reason an id is required at all. Two incomes of the same
+        //     amount are indistinguishable without one, and removing the wrong
+        //     one deletes money he really received.
+        let after = run_all(
+            empty(),
+            &[
+                ("budget.record_income",
+                 vec![("amount", json!(2000.0)), ("source", json!("salary")),
+                      ("entry_id", json!("real"))]),
+                ("budget.record_income",
+                 vec![("amount", json!(2000.0)), ("source", json!("KCB")),
+                      ("entry_id", json!("moved"))]),
+                ("budget.unrecord_income", vec![("entry_id", json!("moved"))]),
+            ],
+        );
+        assert_eq!(at(&after, "finances.income.monthly_total"), 2000.0, "the real one stands");
+        let sources = after.pointer("/finances/income/sources").and_then(Value::as_array).unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].get("id").and_then(Value::as_str), Some("real"));
+    }
+
+    #[test]
+    fn an_income_with_no_id_cannot_be_taken_back_and_says_so() {
+        // ★★★ Anything recorded before ids were carried. Guessing which entry
+        //     to remove is worse than refusing, so it refuses.
+        let reg = Registry::default();
+        let state = run_all(
+            empty(),
+            &[("budget.record_income",
+               vec![("amount", json!(500.0)), ("source", json!("old"))])],
+        );
+        let ex = execute(&reg, &allowed(), &armed(), &state, "budget.unrecord_income",
+                         &params(&[]));
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("entry_id_present"));
+    }
+
+    #[test]
+    fn an_entry_that_is_not_there_is_refused_rather_than_silently_doing_nothing() {
+        let reg = Registry::default();
+        let ex = execute(&reg, &allowed(), &armed(), &empty(), "budget.unrecord_income",
+                         &params(&[("entry_id", json!("ghost"))]));
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("income_entry_exists"));
+    }
+
+    #[test]
+    fn income_already_spoken_for_cannot_simply_be_taken_back() {
+        // ★★★ The honest refusal. Once the money has been allocated into
+        //     pockets, un-receiving it would drive liquid negative -- the gate
+        //     would refuse anyway, and this says which figure is the problem.
+        let reg = Registry::default();
+        let state = run_all(
+            empty(),
+            &[
+                ("budget.record_income",
+                 vec![("amount", json!(2000.0)), ("source", json!("KCB")),
+                      ("entry_id", json!("msg-1"))]),
+                ("budget.allocate", vec![("pocket_name", json!("rent")), ("amount", json!(1800.0))]),
+            ],
+        );
+        let ex = execute(&reg, &allowed(), &armed(), &state, "budget.unrecord_income",
+                         &params(&[("entry_id", json!("msg-1"))]));
+        assert!(!ex.committed(), "there is only 200 unspoken for");
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("liquid_sufficient_to_unrecord"));
+        assert_eq!(ex.result.data.get("liquid").and_then(|v| v.as_f64()), Some(200.0));
+    }
+
+    #[test]
+    fn his_own_money_moving_costs_him_no_income_at_all() {
+        // ★★★ The whole point, end to end. M-Pesa files the arrival as income
+        //     before anything knows better; the KCB text then reveals it was
+        //     his own money; the income comes off and the move goes on. What
+        //     he holds is unchanged and his earnings never moved.
+        let start = run_all(
+            empty(),
+            &[("budget.record_income",
+               vec![("amount", json!(50000.0)), ("source", json!("salary")),
+                    ("entry_id", json!("pay")), ("account", json!("kcb"))])],
+        );
+        let earnings_before = at(&start, "finances.income.monthly_total");
+        let held_before = at(&start, "finances.liquid.balance");
+
+        let after = run_all(
+            start,
+            &[
+                // M-Pesa's own "you have received", filed on arrival.
+                ("budget.record_income",
+                 vec![("amount", json!(2000.0)), ("source", json!("KCB BANK")),
+                      ("entry_id", json!("msg-in")), ("account", json!("mpesa"))]),
+                // Then the KCB text says it was his own money moving.
+                ("budget.unrecord_income",
+                 vec![("entry_id", json!("msg-in")), ("account", json!("mpesa"))]),
+                ("budget.transfer",
+                 vec![("from_account", json!("kcb")), ("to_account", json!("mpesa")),
+                      ("amount", json!(2000.0))]),
+            ],
+        );
+        assert_eq!(
+            at(&after, "finances.income.monthly_total"),
+            earnings_before,
+            "moving his own money earned him nothing"
+        );
+        assert_eq!(at(&after, "finances.liquid.balance"), held_before, "and he holds the same");
+        assert_eq!(at(&after, "finances.accounts.kcb.balance"), 48000.0);
+        assert_eq!(at(&after, "finances.accounts.mpesa.balance"), 2000.0);
+        conserved(&after);
+    }
+
 }

@@ -142,6 +142,24 @@ pub struct Filing {
     pub params: BTreeMap<String, serde_json::Value>,
 }
 
+/// One text that describes a whole move between his own accounts.
+///
+/// ★★★ The shape that unsticks the real case. A KCB "SEND TO M-PESA request of
+/// KES X from <his account> to <his number>" names BOTH ends in one sentence,
+/// so it does not have to wait for a partner text to arrive before it can be
+/// recognised. Two-leg matching stays for the shapes that only ever describe
+/// their own side.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SelfMove {
+    pub message: String,
+    pub from_account: String,
+    pub to_account: String,
+    pub amount: f64,
+    /// An income already filed for the other side of this same move, if the
+    /// partner text arrived first and applied itself.
+    pub undo_income: Option<String>,
+}
+
 /// Two texts that are one move between his own accounts.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MatchedTransfer {
@@ -182,6 +200,8 @@ pub struct TransferReport {
     /// and that needs each applied income to carry the id of the message that
     /// caused it so the right entry can be taken back out.
     pub blocked_by_applied_income: u32,
+    /// Moves recognised from a single text that names both ends.
+    pub self_moves: Vec<SelfMove>,
 }
 
 /// The numbers a household recognises as its own.
@@ -216,6 +236,19 @@ impl OwnIdentifiers {
             return false;
         }
         self.mpesa.iter().chain(self.kcb.iter()).any(|own| same_number(own, &c))
+            || self.mpesa.iter().chain(self.kcb.iter()).any(|own| mask_matches(candidate, own))
+    }
+
+    /// Is this one of his M-Pesa numbers specifically?
+    pub fn is_mpesa(&self, candidate: &str) -> bool {
+        let c = digits_of(candidate);
+        self.mpesa.iter().any(|own| same_number(own, &c) || mask_matches(candidate, own))
+    }
+
+    /// Is this one of his KCB accounts specifically?
+    pub fn is_kcb(&self, candidate: &str) -> bool {
+        let c = digits_of(candidate);
+        self.kcb.iter().any(|own| same_number(own, &c) || mask_matches(candidate, own))
     }
 }
 
@@ -225,7 +258,9 @@ impl OwnIdentifiers {
 /// a paybill -- because which one a text carries depends on how the money was
 /// sent, and a transfer is a transfer either way.
 fn addresses_own(m: &IngestedMessage, own: &OwnIdentifiers) -> bool {
-    ["phone", "account", "paybill"].iter().any(|f| {
+    // ★ Every field a rule can put an identifier in. `from_account` and
+    //   `to_account` come from the shapes that name both ends of a move.
+    ["phone", "account", "paybill", "from_account", "to_account"].iter().any(|f| {
         m.parsed_fields
             .get(*f)
             .and_then(|v| v.as_str())
@@ -235,6 +270,39 @@ fn addresses_own(m: &IngestedMessage, own: &OwnIdentifiers) -> bool {
 
 fn digits_of(s: &str) -> String {
     s.chars().filter(char::is_ascii_digit).collect()
+}
+
+/// The smallest number of visible digits a masked identifier must show.
+///
+/// ★★★ A mask hides its middle, so all it proves is a prefix and a suffix.
+/// Six visible digits is roughly a one-in-a-million coincidence for a number
+/// of ordinary length, and it is what his own bank actually shows
+/// (`135***140`, `254***143`). Below that the match is a guess, and a guess
+/// here would call a real payment to another person a move between his own
+/// accounts -- which would erase the expense entirely.
+const MASK_MIN_VISIBLE: usize = 6;
+
+/// Does a masked identifier describe this full number?
+///
+/// ★★ Only ever masked-against-full. Two masks are never compared to each
+/// other: both hide their middles, so agreeing on the ends says nothing about
+/// whether they are the same number.
+fn mask_matches(masked: &str, full_digits: &str) -> bool {
+    if !masked.contains('*') || full_digits.is_empty() {
+        return false;
+    }
+    let (head, tail) = match masked.split_once('*') {
+        Some((h, rest)) => (digits_of(h), digits_of(rest.trim_start_matches('*'))),
+        None => return false,
+    };
+    if head.len() + tail.len() < MASK_MIN_VISIBLE {
+        return false;
+    }
+    // The hidden middle must have somewhere to be.
+    if full_digits.len() < head.len() + tail.len() {
+        return false;
+    }
+    full_digits.starts_with(&head) && full_digits.ends_with(&tail)
 }
 
 /// Two written forms of the same number.
@@ -551,6 +619,36 @@ impl Ingested {
         Ok(())
     }
 
+    /// A text that names both ends of a move, where both ends are his.
+    ///
+    /// ★★★ BOTH must be his. A text saying money went from his account to
+    /// someone else's is a real payment, and calling it a transfer would erase
+    /// the expense. Requiring both ends is what keeps a masked number -- which
+    /// only ever proves a prefix and a suffix -- from being enough on its own.
+    fn self_move_of(&self, m: &IngestedMessage, own: &OwnIdentifiers) -> Option<SelfMove> {
+        let from = m.parsed_fields.get("from_account")?.as_str()?;
+        let to = m.parsed_fields.get("to_account")?.as_str()?;
+        let amount = m.amount()?;
+        if !own.claims(from) || !own.claims(to) {
+            return None;
+        }
+        // Which side is which, read off what he declared rather than assumed
+        // from the text's own wording.
+        let from_account = if own.is_kcb(from) { "kcb" } else { "mpesa" };
+        let to_account = if own.is_mpesa(to) { "mpesa" } else { "kcb" };
+        if from_account == to_account {
+            // Both ends resolved to the same account, so nothing would move.
+            return None;
+        }
+        Some(SelfMove {
+            message: m.id.clone(),
+            from_account: from_account.to_string(),
+            to_account: to_account.to_string(),
+            amount,
+            undo_income: None,
+        })
+    }
+
     /// Find the pairs of texts that are really one move between his own accounts.
     ///
     /// ★★★ A transfer is recognised by ADDRESS, not by wording. "Sent to
@@ -585,7 +683,26 @@ impl Ingested {
             m.parsed_fields.get("direction").and_then(|v| v.as_str()).map(str::to_string)
         };
 
+        // ── one text, both ends ──────────────────────────────────────────
         let mut taken: BTreeSet<String> = BTreeSet::new();
+        for m in &mine {
+            let Some(mut mv) = self.self_move_of(m, &own) else { continue };
+            // ★★ The other side may already have filed itself as income: an
+            //    M-Pesa "you have received" for the same money, captured first.
+            //    Left standing it would count his own money as earnings, so the
+            //    entry to undo is named here and undone by the caller.
+            mv.undo_income = everything
+                .iter()
+                .filter(|o| o.id != m.id && o.applied && o.netted_with.is_none())
+                .filter(|o| o.source_id == mv.to_account)
+                .filter(|o| o.operator.as_deref() == Some("budget.record_income"))
+                .find(|o| o.amount().map(|a| same_amount(a, mv.amount)).unwrap_or(false))
+                .map(|o| o.id.clone());
+            taken.insert(m.id.clone());
+            report.self_moves.push(mv);
+        }
+
+        // ── two texts, one each ──────────────────────────────────────────
         for out in mine.iter().filter(|m| dir(m).as_deref() == Some("sent")) {
             if taken.contains(&out.id) {
                 continue;
@@ -633,6 +750,13 @@ impl Ingested {
             }
         }
         Ok(report)
+    }
+
+    /// Record that a single text was a whole move, so it stops asking.
+    pub fn mark_self_moved(&self, id: &str) -> StoreResult<()> {
+        // ★ Paired with itself: the fact recorded is "this was a move", and
+        //   there is no second message to point at.
+        self.mark_netted(id, id)
     }
 
     /// Record that two texts were one move, so neither asks again.
@@ -1961,6 +2085,10 @@ mod transfer_tests {
     const OWN_PHONE: &str = "254712345678";
     const OWN_ACCT: &str = "112233";
 
+    fn waiting(ing: &Ingested) -> usize {
+        ing.current().expect("current").iter().filter(|m| m.needs_attention()).count()
+    }
+
     fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
         let ing = Ingested::at(scratch(name)).expect("ingest");
         let rules = ing.effective_rules().expect("rules");
@@ -2000,6 +2128,131 @@ mod transfer_tests {
         )
     }
 
+
+
+    // ── the real one, from his phone ─────────────────────────────────────────
+    //
+    // His KCB app sends this when he moves his own money to his own M-Pesa.
+    // It names both ends, which is what lets it be recognised on its own
+    // rather than waiting for a partner text that may never be read.
+    // The digits are masked here exactly as his bank masks them.
+    const HIS_KCB: &str = "135***140";
+    const HIS_MPESA_MASKED: &str = "254***143";
+
+    fn his_self_transfer(amount: &str) -> String {
+        format!(
+            "SEND TO M-PESA request of KES {amount} from {HIS_KCB} to {HIS_MPESA_MASKED} - \
+             BONVENTURE NGUGI MAINA has been received for processing."
+        )
+    }
+
+    /// The full numbers behind those masks, as he would type them in.
+    fn knows_his_real_numbers(ing: &Ingested) {
+        ing.set_own_identifiers(&OwnIdentifiers {
+            mpesa: vec!["254700000143".into()],
+            kcb: vec!["1350000140".into()],
+        })
+        .expect("own");
+    }
+
+    #[test]
+    fn his_stuck_transaction_is_recognised_as_a_move_between_his_own_accounts() {
+        // ★★★ The exact message he was stuck on, which was being asked "which
+        //     pocket?" -- a question with no right answer, because no pocket
+        //     was involved.
+        let (ing, rules) = store("his-real");
+        knows_his_real_numbers(&ing);
+        ing.capture("h", "kcb", &his_self_transfer("2,000"), &rules).expect("capture");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert_eq!(r.self_moves.len(), 1, "one move, recognised from one text");
+        let mv = &r.self_moves[0];
+        assert_eq!(mv.from_account, "kcb");
+        assert_eq!(mv.to_account, "mpesa");
+        assert_eq!(mv.amount, 2000.0);
+        assert!(mv.undo_income.is_none(), "nothing had filed the other side yet");
+    }
+
+    #[test]
+    fn the_same_transaction_is_an_ordinary_payment_before_he_says_the_numbers_are_his() {
+        // ★★★ Nothing about the wording says whose numbers those are. Without
+        //     his own, this is a payment to a stranger who shares his name, and
+        //     treating it as a transfer would erase a real expense.
+        let (ing, rules) = store("his-real-undeclared");
+        ing.capture("h", "kcb", &his_self_transfer("2,000"), &rules).expect("capture");
+        assert!(ing.find_transfers("h").expect("transfers").self_moves.is_empty());
+    }
+
+    #[test]
+    fn money_leaving_his_account_for_someone_elses_stays_a_payment() {
+        // ★★★ The failure that would cost him most: a real expense quietly
+        //     reclassified as his own money moving, and gone from his spending.
+        let (ing, rules) = store("outbound");
+        knows_his_real_numbers(&ing);
+        let to_someone_else = format!(
+            "SEND TO M-PESA request of KES 2,000 from {HIS_KCB} to 254***999 - \
+             JANE DOE has been received for processing."
+        );
+        ing.capture("h", "kcb", &to_someone_else, &rules).expect("capture");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert!(r.self_moves.is_empty(), "the far end is not his, so it is a payment");
+        assert_eq!(waiting(&ing), 1, "and it is still his to classify");
+    }
+
+    #[test]
+    fn a_mask_must_show_enough_digits_to_mean_anything() {
+        // ★★ A mask proves a prefix and a suffix and nothing else, so a short
+        //    one is a coincidence rather than an identity.
+        let own = OwnIdentifiers { mpesa: vec!["254700000143".into()], kcb: vec![] };
+        assert!(own.claims("254***143"), "six visible digits is his bank's own masking");
+        assert!(!own.claims("2***3"), "two digits could be anyone");
+        assert!(!own.claims("254***999"), "the tail has to match");
+        assert!(!own.claims("999***143"), "and so does the head");
+    }
+
+    #[test]
+    fn a_settled_self_move_stops_asking_and_is_not_moved_twice() {
+        let (ing, rules) = store("his-real-once");
+        knows_his_real_numbers(&ing);
+        ing.capture("h", "kcb", &his_self_transfer("2,000"), &rules).expect("capture");
+        let mv = ing.find_transfers("h").expect("first").self_moves[0].clone();
+
+        ing.mark_self_moved(&mv.message).expect("settle");
+        assert_eq!(waiting(&ing), 0, "it stops asking which pocket");
+        assert!(
+            ing.find_transfers("h").expect("second").self_moves.is_empty(),
+            "and a second pass does not move the money again"
+        );
+    }
+
+    #[test]
+    fn an_income_already_filed_for_the_far_side_is_named_for_undoing() {
+        // ★★★ The double count this exists to prevent. M-Pesa's own "you have
+        //     received" arrives and files itself as income before the KCB text
+        //     reveals the money was his all along.
+        let (ing, rules) = store("double");
+        knows_his_real_numbers(&ing);
+        let received = "QGH7XJ4P2Q Confirmed. You have received Ksh2,000.00 from KCB BANK \
+                        254700000143 on 2/8/26 at 10:15 AM. New M-PESA balance is Ksh12,050.00";
+        let Capture::Stored(inc) = ing.capture("h", "mpesa", received, &rules).expect("income")
+        else {
+            panic!("stored")
+        };
+        assert_eq!(inc.status, "mapped", "it files itself, which is the whole problem");
+        // Mark it applied, as the engine does once the operator commits.
+        ing.record_outcome(&inc.id, true, None).expect("applied");
+
+        ing.capture("h", "kcb", &his_self_transfer("2,000"), &rules).expect("the other half");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert_eq!(r.self_moves.len(), 1);
+        assert_eq!(
+            r.self_moves[0].undo_income.as_deref(),
+            Some(inc.id.as_str()),
+            "the income to take back is named, not left standing"
+        );
+    }
 
     #[test]
     fn nothing_is_a_transfer_until_he_says_which_numbers_are_his() {

@@ -1314,8 +1314,51 @@ pub fn apply_transfers(
     sustain_id: String,
 ) -> Result<TransferDto, String> {
     let found = world.ingest().find_transfers(&sustain_id).map_err(|e| e.to_string())?;
-    let mut out =
-        TransferDto { unpaired: found.unpaired, ambiguous: found.ambiguous, ..Default::default() };
+    let mut out = TransferDto {
+        unpaired: found.unpaired,
+        ambiguous: found.ambiguous,
+        blocked: found.blocked_by_applied_income,
+        ..Default::default()
+    };
+
+    // ── one text that names both ends ────────────────────────────────────────
+    //
+    // ★★★ The order matters and is not interchangeable. If the far side already
+    //     filed itself as income, that income must come off the books BEFORE
+    //     the transfer credits the same account, or the money is counted twice
+    //     -- once as earnings that never happened and once as the move it
+    //     really was. And if the undo is refused, the transfer must not run at
+    //     all: half of this is worse than none of it.
+    for mv in &found.self_moves {
+        if let Some(income_id) = &mv.undo_income {
+            let mut undo = Map::new();
+            undo.insert("entry_id".into(), Value::String(income_id.clone()));
+            undo.insert("account".into(), Value::String(mv.to_account.clone()));
+            match world.call(&sustain_id, "budget.unrecord_income", &undo) {
+                Ok(Some((x, _))) if x.committed() => {}
+                _ => {
+                    out.refused += 1;
+                    continue;
+                }
+            }
+        }
+
+        let mut params = Map::new();
+        params.insert("from_account".into(), Value::String(mv.from_account.clone()));
+        params.insert("to_account".into(), Value::String(mv.to_account.clone()));
+        params.insert("amount".into(), serde_json::json!(mv.amount));
+        match world.call(&sustain_id, "budget.transfer", &params) {
+            Ok(Some((x, _))) if x.committed() => {
+                world.ingest().mark_self_moved(&mv.message).map_err(|e| e.to_string())?;
+                // The income it replaced is settled too, so it stops asking.
+                if let Some(income_id) = &mv.undo_income {
+                    let _ = world.ingest().mark_self_moved(income_id);
+                }
+                out.moved += 1;
+            }
+            _ => out.refused += 1,
+        }
+    }
 
     for t in &found.matched {
         let mut params = Map::new();

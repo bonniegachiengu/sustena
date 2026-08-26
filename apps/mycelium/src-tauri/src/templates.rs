@@ -63,6 +63,11 @@ pub fn definition(template: TemplateId) -> Definition {
         //    M-Pesa" from a single pooled figure.
         .with_operator("budget.open_account")
         .with_operator("budget.transfer")
+        // ★★ The inverse of income. Money arriving from his own other account
+        //    reads exactly like earnings, so it is filed as income before
+        //    anything can tell; when the other half says otherwise it has to
+        //    come back off, or his earnings grow every time he moves his money.
+        .with_operator("budget.unrecord_income")
         // Every Sustain that holds money holds this one.
         .with_invariant("liquid_non_negative", "finances.liquid.balance >= 0");
 
