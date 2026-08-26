@@ -389,16 +389,20 @@ export const healthRed = edge(vars.color.danger);
 export const chips = style({
   display: "flex",
   flexWrap: "wrap",
-  gap: "6px",
+  gap: "5px",
   alignItems: "center",
 });
 
 export const chip = style({
   fontFamily: vars.font.ui,
-  fontSize: "13px",
+  fontSize: "12px",
   fontWeight: 500,
-  minHeight: "34px",
-  padding: "6px 11px",
+  // ★★ 28px. Below the 44px a lone button wants, and deliberately so: these
+  //    are not lone buttons. Fifteen of them at button size is a page to read
+  //    before choosing, and reading is what actually costs him here — the tap
+  //    is easy either way once he has found the word.
+  minHeight: "28px",
+  padding: "4px 9px",
   borderRadius: "999px",
   color: vars.color.textPrimary,
   background: vars.color.bgRaised,
@@ -407,6 +411,12 @@ export const chip = style({
   textAlign: "center",
   lineHeight: 1.2,
   whiteSpace: "nowrap",
+  // ★★ A long name is trimmed rather than allowed to set the row's width.
+  //    "Miscellaneous" was taking a whole line to itself and pushing three
+  //    short names onto the next one.
+  maxWidth: "10rem",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
   transition: "transform 90ms ease, background 140ms ease, border-color 140ms ease",
   selectors: {
     "&:active:not(:disabled)": {
