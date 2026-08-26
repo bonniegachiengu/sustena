@@ -1132,11 +1132,23 @@ pub fn get_feed(
     // ★★ Folded in AFTER the view is composed, so one render is one reading.
     //    Observing inside the compose path would count a re-render as new
     //    evidence and let the series drift on nothing happening at all.
-    let trend = world.observe(&sustain_id, &reading).map(|i| TrendDto {
+    let observed = world.observe(&sustain_id, &reading);
+    let trend = observed.as_ref().map(|i| TrendDto {
         now: i.reading.w,
         smoothed: i.reading.smoothed,
         drifting: i.reading.alert.is_some(),
         escalates: i.reading.escalates(),
+        // ★★★ Monitor §VII: hue is processed before attention engages, in
+        //     roughly 150 to 200ms, across the whole field at once. The
+        //     ranking was being computed correctly and then drawn flat, so it
+        //     existed in the data and never reached the eye. `encode_field`
+        //     has been in the core since it shipped, with nothing calling it.
+        //
+        //     One attribute, and deliberately only one. Hue has a settled
+        //     three-way meaning already in the palette; brightness and motion
+        //     are real and come later, and motion should stay rare because a
+        //     card that pulses without cause is the flicker §V warns about.
+        health: health_hue(i),
     });
     if trend.as_ref().is_some_and(|t| t.drifting) {
         // ★★★ Worded as a direction rather than a breach, because that is what
@@ -1183,6 +1195,29 @@ pub fn get_feed(
         trend,
         unaccounted: unaccounted_in(&state),
     })
+}
+
+/// The constraint-health hue for one reading, as §VII's encoder assigns it.
+///
+/// ★★ Read off `encode_field` rather than re-derived here. A second opinion
+/// about what counts as amber would drift from the core's, and then the colour
+/// on screen would stop meaning what the engine meant by it.
+fn health_hue(reading: &sustena_core::monitor::Ingested) -> String {
+    use sustena_core::preattentive::{encode_field, Hue, VisualAttribute};
+    let specs = encode_field(&[reading]);
+    let hue = specs.first().and_then(|s| {
+        s.attributes().iter().find_map(|a| match a {
+            VisualAttribute::Hue { value, .. } => Some(*value),
+            _ => None,
+        })
+    });
+    match hue {
+        Some(Hue::Green) => "green",
+        Some(Hue::Amber) => "amber",
+        Some(Hue::Red) => "red",
+        None => "green",
+    }
+    .to_string()
 }
 
 /// How long a device may be quiet before the watcher calls it late.

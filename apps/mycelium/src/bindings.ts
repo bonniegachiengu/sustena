@@ -1916,7 +1916,17 @@ drifting: boolean;
 /**
  * Whether that crossing is severe enough to hand to the Controller.
  */
-escalates: boolean }
+escalates: boolean; 
+/**
+ * ★★★ Constraint health as a colour: `green`, `amber` or `red`.
+ * 
+ * Monitor §VII rests on Treisman: some visual attributes are processed in
+ * parallel across the whole field before attention engages, in roughly
+ * 150 to 200ms. Hue is one, and it is the one with a settled three-way
+ * meaning already in the palette. Assigned by the core's own encoder, so
+ * the colour on screen means what the engine meant by it.
+ */
+health: string }
 /**
  * What the gate decided about one call.
  * 

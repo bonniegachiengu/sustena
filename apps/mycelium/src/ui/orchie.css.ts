@@ -357,6 +357,35 @@ export const options = style({
  * miss lands on nothing rather than on the wrong pocket -- which matters more
  * here than size does, because the wrong pocket is a wrong record.
  */
+/**
+ * Constraint health, as a colour on the card's own edge.
+ *
+ * ★★★ Monitor §VII rests on Treisman's Feature Integration Theory: some visual
+ * attributes are processed in parallel across the whole field BEFORE attention
+ * engages, in roughly 150 to 200ms. Hue is one of them. The ranking was already
+ * being computed correctly and then drawn flat — every card in one weight,
+ * whatever its score — so it existed in the data and never reached the eye.
+ *
+ * ★★ On the leading edge rather than the whole card. A tinted background
+ * competes with the text sitting on it, and the point is to be readable at a
+ * glance without making anything harder to read up close.
+ *
+ * ★★ Never the only signal. A colour alone would be invisible to anyone who
+ * cannot separate these hues, so every card that carries one also says the
+ * same thing in words. This makes the glance faster; it does not carry meaning
+ * on its own.
+ */
+const edge = (color: string) =>
+  style({
+    borderLeftWidth: "3px",
+    borderLeftStyle: "solid",
+    borderLeftColor: color,
+  });
+
+export const healthGreen = edge(vars.color.teal);
+export const healthAmber = edge(vars.color.amber);
+export const healthRed = edge(vars.color.danger);
+
 export const chips = style({
   display: "flex",
   flexWrap: "wrap",

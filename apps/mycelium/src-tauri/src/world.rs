@@ -2399,6 +2399,39 @@ mod trend_tests {
     }
 
     #[test]
+    fn health_is_read_off_the_core_encoder_not_re_derived() {
+        // ★★★ Monitor §VII, end to end. The ranking was computed correctly and
+        //     drawn flat, so it lived in the data and never reached the eye.
+        //     `encode_field` had been in the core since it shipped with nothing
+        //     calling it; this is the caller.
+        use sustena_core::preattentive::{encode_field, Hue, VisualAttribute};
+
+        let w = world("hue");
+        something_happens(&w, 0);
+        let calm_reading = w.observe("home", &calm()).expect("a reading");
+        let hue_of = |r: &TrendReading| {
+            encode_field(&[r])
+                .first()
+                .and_then(|s| {
+                    s.attributes().iter().find_map(|a| match a {
+                        VisualAttribute::Hue { value, .. } => Some(*value),
+                        _ => None,
+                    })
+                })
+                .expect("the encoder always assigns a hue")
+        };
+        assert_eq!(hue_of(&calm_reading), Hue::Green, "inside its limits reads calm");
+
+        let w2 = world("hue-bad");
+        for n in 0..8 {
+            something_happens(&w2, n);
+            w2.observe("home", &over(800.0));
+        }
+        let bad = w2.observe("home", &over(800.0)).expect("a reading");
+        assert_ne!(hue_of(&bad), Hue::Green, "well outside does not read as calm");
+    }
+
+    #[test]
     fn each_household_has_its_own_history() {
         let w = world("scoped");
         for n in 0..20 {

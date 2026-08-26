@@ -1158,13 +1158,27 @@ function AccountsCard(props: { feed: FeedDto; onChanged: () => void }) {
   );
 }
 
+/** The health hue for a card's leading edge, or nothing when unknown. */
+function healthEdge(feed: FeedDto): string {
+  switch (feed.trend?.health) {
+    case "red":
+      return O.healthRed;
+    case "amber":
+      return O.healthAmber;
+    case "green":
+      return O.healthGreen;
+    default:
+      return "";
+  }
+}
+
 function Summary(props: { feed: FeedDto }) {
   const total = () =>
     props.feed.rollup?.aggregates.find((a) => a.childPath === "finances.liquid.balance");
   const members = () => total()?.included.filter((c) => !c.isHousehold).length ?? 0;
 
   return (
-    <div class={O.card}>
+    <div class={`${O.card} ${healthEdge(props.feed)}`}>
       <span class={O.figureLabel}>
         {total()?.grounded ? "everything, together" : "liquid"}
       </span>
