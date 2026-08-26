@@ -115,7 +115,24 @@ const RAW_CLAMP = 220;
 //    how much there is to READ before choosing, and eight chips is about two
 //    wrapped rows -- roughly the same amount of reading four full-width
 //    buttons used to be, in a fraction of the height.
-const SUGGESTIONS = 8;
+const SUGGESTIONS = 12;
+
+/**
+ * Is this a list to READ rather than a couple of buttons to hit?
+ *
+ * ★★★ Keyed on how many there are, never on which field it is. The previous
+ * version asked whether the field was called `pocket_name`, which meant any
+ * other long list silently got full-size buttons and — worse — a rename or a
+ * new question with many answers would fail open, back to the wall of buttons
+ * this exists to prevent. Length is the thing that actually decides it.
+ *
+ * ★★ Four is the line because that is the attention budget: at or under it a
+ * person takes the options in at a glance and each deserves a proper target;
+ * past it they are scanning, and scanning wants density.
+ */
+function manyToRead(opts: ChoiceDto[]): boolean {
+  return opts.length > 4;
+}
 
 /** The pocket names in a state document, in the engine's own spelling. */
 function pocketNames(state: unknown): string[] {
@@ -1669,7 +1686,7 @@ function Classify(props: {
                       }
                     >
                       {(opts) => (
-                        <div class={q().field === "pocket_name" ? O.chips : O.options}>
+                        <div class={manyToRead(opts()) ? O.chips : O.options}>
                           {/* ★★★ A few, then the rest on request.
                               Every pocket as a full-width button stops fitting
                               somewhere around ten and asks him to read the lot
@@ -1679,7 +1696,7 @@ function Classify(props: {
                               the tail is one tap away. */}
                           <For each={shortlist(opts(), q().field)}>
                             {(o) => {
-                              const small = q().field === "pocket_name";
+                              const small = manyToRead(opts());
                               const chosen = pending() === o.value;
                               return (
                                 <button
