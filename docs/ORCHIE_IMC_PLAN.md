@@ -2,7 +2,12 @@
 
 *The work we can do on Orchie, in order, with each step traced to the article that specifies it.*
 
-**Status: P1 shipped and installed. P2, P3, P4 open.**
+**Status: P1 through P4 shipped and installed (26 Aug 2026).**
+
+What each one actually cost, and what it turned up, is in the section for
+that step. Three of the four found a real defect that reading the code had
+not — recorded there rather than smoothed over, because the finding is
+usually worth more than the feature.
 
 > Read this alongside `R2_BACKLOG.md`. The same rule applies here: the articles
 > are the spec and the code catches up to them. Where an article and the code
@@ -58,7 +63,7 @@ grant.
 
 ---
 
-## P2. The phone as a Sustain, and heartbeats
+## P2. The phone as a Sustain, and heartbeats (DONE)
 
 **Articles:** Ingest §IX (device-as-Sustain), Ingest §VIII (liveness and
 heartbeats), Monitor §VIII (belief state under silence).
@@ -134,9 +139,27 @@ Battery, connectivity and `app_version` come after, because they need platform
 calls and the first two do not. Heartbeats come after that, since a heartbeat is
 only meaningful once something is checking for its absence.
 
+### Shipped 2026-08-26
+
+`TemplateId::Device`, `device.heartbeat`, and a device child linked under the
+household, written on every sweep. `app_version` came free after all, since the
+host already knows its own.
+
+**The liveness clause is computed in the host, not declared.** The predicate DSL
+has no arithmetic and no notion of now, so `now − t_last_ack <= theta` cannot be
+written as a rule at all. It is evaluated over the same two dimensions a declared
+rule would have read, by the watcher rather than the device — which §IX requires
+anyway, since a phone that has stopped cannot evaluate whether it has stopped.
+There is a test that fails if the device ever gains a field like `stale`.
+
+**A real defect, found by testing.** The device was being created ownerless,
+which left its own household's principal at viewer tier on it, so every heartbeat
+was refused for insufficient privilege — silently, since a heartbeat must never
+take a real capture down with it. It now inherits the household's owner.
+
 ---
 
-## P3. Give urgency a history
+## P3. Give urgency a history (DONE)
 
 **Articles:** Monitor §VI (CUSUM), Monitor §V (EWMA), Monitor's ratified addition
 of 2026-08-05 (urgency is distance-to-V), Curated UI §IV (salience).
@@ -193,6 +216,32 @@ Give the household's own distance a history.
 4. Surface a CUSUM crossing as its own attention row, worded as a persistent drift
    rather than a threshold breach, because that is what it detects.
 
+### Shipped 2026-08-26
+
+The engine lives on the `World`, one per household, and the smoothed level is
+what salience reads.
+
+**Two findings, both from watching it run rather than reading it.**
+
+The series was ticking on every render. The feed rebuilds on a poll, so a
+household sitting still would "drift" purely because someone had the app open. It
+now ticks on the sustain's own sequence number; a re-render repeats the last
+verdict rather than manufacturing an observation to produce one.
+
+The thresholds were fixed constants, and a distance is in shillings. A constant
+means "ten shillings matters" equally for a household budgeting hundreds and one
+budgeting hundreds of thousands. `delta` is now a twentieth of what the household
+itself set aside — the same move `region_from` makes.
+
+**A correction to step 4's wording.** CUSUM here runs over the *smoothed* series,
+so it fires both for a small gap that keeps repeating and in the wake of one large
+one. "Still outside where you want to be" is true of both; "this has been
+building" would only have been true of the first, so that is what the row says.
+
+**Not persisted.** The series is in memory, so a restart rebuilds from an empty
+history and understates drift rather than inventing it — the safe direction to be
+wrong in. Persisting it is real follow-up work.
+
 The escalation boundary in §VI is where Monitor hands to Controller. Worth knowing
 before the slice: Monitor's own note frames that crossing as an economic decision,
 since surfacing something spends one of the four attention slots the Curated UI
@@ -200,7 +249,7 @@ budgets.
 
 ---
 
-## P4. Drawing salience
+## P4. Drawing salience (DONE)
 
 **Articles:** Monitor §VII (preattentive processing, `WidgetVisualEncoder`),
 Curated UI §IV.
@@ -260,6 +309,19 @@ Brightness for urgency is the natural second, and it is the one that makes the
 knapsack's ranking visible. Motion comes last and should stay rare, since a card
 that pulses without cause is the flicker §V warns about.
 
+### Shipped 2026-08-26
+
+Hue, on the card's leading edge rather than its background: a tint competes with
+the text sitting on it. Read off `encode_field` rather than re-derived, so the
+colour on screen means what the engine meant by it.
+
+**Never the only signal.** A colour alone would be invisible to anyone who cannot
+separate these hues, so every card carrying one says the same thing in words. It
+makes the glance faster; it does not carry meaning on its own.
+
+Step 4 of the slice — checking it at a glance on the phone rather than in a test —
+is Bonnie's to do. Discriminability is the claim and a test cannot make it.
+
 ---
 
 ## What this chain adds up to
@@ -276,6 +338,16 @@ Controller boundary is where they meet.
 
 ---
 
-*Last updated: 2026-08-25. P1 installed on the phone. P2 is the next slice, and the
-device Sustain is the piece to build first, because everything after it needs
-something real to watch.*
+## What is next
+
+The chain P1 to P4 is complete and on the phone. The open threads it leaves:
+
+- **Persist the `W` series.** Today a restart starts the history empty.
+- **Brightness for urgency**, the second preattentive attribute, which is what
+  makes the knapsack's ranking itself visible rather than only its health.
+- **Battery and connectivity** on the device Sustain, which need platform calls.
+- **A real heartbeat interval.** The phone reports when it sweeps, which is
+  frequent in use and silent when the app is closed — good enough to notice a
+  device that has stopped, not yet the declared cadence §VIII describes.
+
+*Last updated: 2026-08-26. P1 through P4 installed on the phone.*
