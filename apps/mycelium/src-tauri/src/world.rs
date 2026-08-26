@@ -790,6 +790,35 @@ impl World {
             return Ok(captured);
         };
 
+        // ★★★ One real transaction, two texts, one application.
+        //
+        //     M-Pesa and a bank can both send about the same movement of
+        //     money. Their texts differ, so the raw-text dedup lets both in --
+        //     correctly, they are two different messages -- and applying both
+        //     counts the money twice. A shared transaction reference is what
+        //     says they are one event, and it is checked here, before anything
+        //     is applied rather than after.
+        //
+        //     ★★ Not resolved and not hidden: the second text stays in the
+        //     queue with its own reason, because "already recorded from your
+        //     other bank" is something worth being able to see.
+        if let Some(reference) = m.reference() {
+            if let Some(first) = self
+                .ingest
+                .same_event_already_applied(sustain_id, source_id, reference)?
+            {
+                self.ingest.note_same_event(&m.id, &first)?;
+                let updated = self
+                    .ingest
+                    .current()?
+                    .into_iter()
+                    .find(|x| x.id == m.id)
+                    .map(Box::new)
+                    .unwrap_or_else(|| m.clone());
+                return Ok(Capture::Stored(updated));
+            }
+        }
+
         let mut params: Map<String, Value> = m.params.clone().into_iter().collect();
 
         // ★★★ The message that caused it, carried into the entry it creates.

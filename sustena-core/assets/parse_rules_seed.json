@@ -347,7 +347,7 @@
    "id": "kcb_send_to_mpesa",
    "source": "kcb",
    "version": 1,
-   "pattern": "SEND\\s+TO\\s+M-?PESA\\s+request\\s+of\\s+KES\\s*(?P<amount>[\\d,]+\\.?\\d*)\\s+from\\s+(?P<from_account>[\\d*]{4,})\\s+to\\s+(?P<to_account>[\\d*]{4,})\\s*[-–]\\s*(?P<name>[A-Za-z .'-]+?)\\s+has been received",
+   "pattern": "SEND\\s+TO\\s+M-?PESA\\s+request\\s+of\\s+KES\\s*(?P<amount>[\\d,]+\\.?\\d*)\\s+from\\s+(?P<from_account>[\\d*]{4,})\\s+to\\s+(?P<to_account>[\\d*]{4,})\\s*[-–]\\s*(?P<name>[A-Za-z .'-]+?)\\s+has been received(?:[^.]*\\.)?\\s*(?:M-?PESA\\s+REF:?\\s*(?P<ref>[A-Z0-9]{8,}))?",
    "extract": {
     "amount": {
      "type": "amount",
@@ -373,6 +373,11 @@
      "type": "literal",
      "group": null,
      "value": "sent"
+    },
+    "ref": {
+     "type": "string",
+     "group": "ref",
+     "value": null
     }
    },
    "status": "parsed_unmapped",
@@ -385,7 +390,8 @@
    "trust": "shipped",
    "provenance": "sustena_core",
    "examples": [
-    "SEND TO M-PESA request of KES 2,000 from 135***140 to 254***143 - BONVENTURE NGUGI MAINA has been received for processing."
+    "SEND TO M-PESA request of KES 2,000 from 135***140 to 254***143 - BONVENTURE NGUGI MAINA has been received for processing.",
+    "SEND TO M-PESA request of KES 2,000 from 135***140 to 254***143 - BONVENTURE NGUGI MAINA has been received for processing. M-PESA REF: UHPB9480T9"
    ]
   },
   {
