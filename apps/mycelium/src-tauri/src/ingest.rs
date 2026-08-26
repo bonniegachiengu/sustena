@@ -363,6 +363,17 @@ fn same_number(a: &str, b: &str) -> bool {
 /// neither.
 const MIN_REF_LEN: usize = 8;
 
+/// What learning a skip did.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct SkipLearned {
+    pub key: Option<String>,
+    /// How many already-waiting messages the new rule cleared.
+    pub cleared: u32,
+    /// ★★ True when this message cannot teach a rule: no parser recognised it,
+    /// so the only shape it could describe is "everything I cannot read".
+    pub unlearnable: bool,
+}
+
 /// A balance a bank itself reported, and when.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Reported {
@@ -441,6 +452,10 @@ impl Ingested {
     fn rules_path(&self) -> PathBuf {
         self.root.join("rules.jsonl")
     }
+    fn skips_path(&self) -> PathBuf {
+        self.root.join("skip_rules.json")
+    }
+
     fn own_path(&self) -> PathBuf {
         self.root.join("own_identifiers.json")
     }
@@ -943,6 +958,99 @@ impl Ingested {
                     reported twice."
             .to_string();
         self.append_message(&m)
+    }
+
+    // ── learned skips ────────────────────────────────────────────────────────
+    //
+    // ★★★ Across two and a half thousand messages, the same handful of shapes
+    // repeat: a promo, a balance notice, an advert. Setting each aside one at a
+    // time is the same decision made hundreds of times, and a person who has
+    // already answered it twice is right to be annoyed the third time.
+    //
+    // ★★ Keyed on the SOURCE and the PARSER, never on the raw text. Raw text
+    // never repeats exactly — the amounts and dates differ — so a text key
+    // would learn nothing. The parser name is the shape the transducer
+    // recognised, which is exactly "messages like this one".
+    //
+    // ★★★ An unparsed message can never teach a skip. `parser_name` is empty
+    // for anything no rule matched, so a rule keyed on it would mean "skip
+    // everything I cannot read" — which is precisely the pile that most needs
+    // a person's eyes.
+
+    /// The shapes this household has said it never wants to see.
+    pub fn skip_rules(&self) -> StoreResult<BTreeSet<String>> {
+        let path = self.skips_path();
+        if !path.exists() {
+            return Ok(BTreeSet::new());
+        }
+        Ok(serde_json::from_slice(&fs::read(&path)?).unwrap_or_default())
+    }
+
+    /// The key a message would be skipped by, if it can teach one at all.
+    pub fn skip_key(m: &IngestedMessage) -> Option<String> {
+        let parser = m.parser_name.trim();
+        if parser.is_empty() {
+            return None;
+        }
+        Some(format!("{}::{}", m.source_id, parser))
+    }
+
+    /// Learn "never ask me about these again", and apply it to what is already
+    /// waiting.
+    ///
+    /// ★★ Retroactive on purpose. He is answering this question in the middle
+    /// of a backlog full of the same shape; a rule that only applied to future
+    /// messages would leave the pile it was meant to clear exactly as it was.
+    /// Returns how many it cleared, because a silent sweep of the queue is
+    /// alarming.
+    pub fn learn_skip(&self, sustain_id: &str, from_message: &str) -> StoreResult<SkipLearned> {
+        let all = self.current()?;
+        let Some(source) = all.iter().find(|m| m.id == from_message) else {
+            return Ok(SkipLearned::default());
+        };
+        let Some(key) = Self::skip_key(source) else {
+            return Ok(SkipLearned { unlearnable: true, ..Default::default() });
+        };
+
+        let mut rules = self.skip_rules()?;
+        rules.insert(key.clone());
+        let text = serde_json::to_string_pretty(&rules)
+            .map_err(|e| StoreError::Io(e.to_string()))?;
+        let tmp = self.skips_path().with_extension("json.tmp");
+        fs::write(&tmp, text)?;
+        fs::rename(&tmp, self.skips_path())?;
+
+        let mut cleared = 0u32;
+        for m in all {
+            if m.sustain_id != sustain_id || !m.needs_attention() {
+                continue;
+            }
+            if Self::skip_key(&m).as_deref() == Some(key.as_str()) {
+                self.ignore(&m.id)?;
+                cleared += 1;
+            }
+        }
+        Ok(SkipLearned { key: Some(key), cleared, unlearnable: false })
+    }
+
+    /// Does a learned rule already cover this message?
+    pub fn is_skipped(&self, m: &IngestedMessage) -> StoreResult<bool> {
+        let Some(key) = Self::skip_key(m) else { return Ok(false) };
+        Ok(self.skip_rules()?.contains(&key))
+    }
+
+    /// Forget a learned skip. Nothing already set aside comes back on its own.
+    pub fn forget_skip(&self, key: &str) -> StoreResult<bool> {
+        let mut rules = self.skip_rules()?;
+        if !rules.remove(key) {
+            return Ok(false);
+        }
+        let text = serde_json::to_string_pretty(&rules)
+            .map_err(|e| StoreError::Io(e.to_string()))?;
+        let tmp = self.skips_path().with_extension("json.tmp");
+        fs::write(&tmp, text)?;
+        fs::rename(&tmp, self.skips_path())?;
+        Ok(true)
     }
 
     /// Set a message aside as not a transaction.
@@ -2752,5 +2860,170 @@ mod reference_tests {
         assert_eq!(s.same_event_as.as_deref(), Some(first.id.as_str()));
         assert!(!s.needs_attention(), "it is not a decision anyone has to make");
         assert!(!s.raw_payload.is_empty(), "and the text is kept");
+    }
+}
+
+#[cfg(test)]
+mod skip_rule_tests {
+    use super::*;
+    use std::env;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-skip-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let ing = Ingested::at(scratch(name)).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    /// A card purchase — a real shape, and one that repeats.
+    fn card(amount: &str, who: &str) -> String {
+        format!(
+            "KES {amount} transaction made on KCB card 1234XXXXXXXX5678 at {who} \
+             on 1/8/26 12:25pm, Avail balance KES 59,055.00"
+        )
+    }
+
+    fn waiting(ing: &Ingested) -> usize {
+        ing.current().expect("current").iter().filter(|m| m.needs_attention()).count()
+    }
+
+    #[test]
+    fn learning_a_skip_clears_the_ones_already_waiting() {
+        // ★★★ The whole point. He answers this in the middle of a pile of the
+        //     same shape, so a rule that only covered future messages would
+        //     leave the pile it was meant to clear exactly as it was.
+        let (ing, rules) = store("retro");
+        let mut first = None;
+        for who in ["Java", "Naivas", "Shell", "Uber"] {
+            let c = ing.capture("h", "kcb", &card("100.00", who), &rules).expect("capture");
+            if first.is_none() {
+                if let Capture::Stored(m) = c {
+                    first = Some(m.id);
+                }
+            }
+        }
+        assert_eq!(waiting(&ing), 4);
+
+        let out = ing.learn_skip("h", &first.expect("one")).expect("learn");
+        assert!(!out.unlearnable);
+        assert_eq!(out.cleared, 4, "all four, including the one he was looking at");
+        assert_eq!(waiting(&ing), 0);
+    }
+
+    #[test]
+    fn a_message_no_rule_could_read_teaches_nothing() {
+        // ★★★ The safety property. `parser_name` is empty for anything
+        //     unparsed, so a rule keyed on it would mean "skip everything I
+        //     cannot read" — and that pile is exactly the one that needs a
+        //     person's eyes.
+        let (ing, rules) = store("unparsed");
+        let Capture::Stored(m) = ing
+            .capture("h", "kcb", "some text no rule has ever seen", &rules)
+            .expect("capture") else { panic!("stored") };
+        assert_eq!(m.status, "unparsed");
+
+        let out = ing.learn_skip("h", &m.id).expect("learn");
+        assert!(out.unlearnable, "it refuses rather than learning the dangerous rule");
+        assert_eq!(out.cleared, 0);
+        assert_eq!(waiting(&ing), 1, "and it is still there for him to look at");
+        assert!(ing.skip_rules().expect("rules").is_empty(), "nothing was written");
+    }
+
+    #[test]
+    fn a_later_message_of_a_learned_shape_is_recognised() {
+        let (ing, rules) = store("future");
+        let Capture::Stored(m) = ing.capture("h", "kcb", &card("100.00", "Java"), &rules)
+            .expect("capture") else { panic!("stored") };
+        ing.learn_skip("h", &m.id).expect("learn");
+
+        let Capture::Stored(later) = ing.capture("h", "kcb", &card("250.00", "Carrefour"), &rules)
+            .expect("later") else { panic!("stored") };
+        assert!(ing.is_skipped(&later).expect("check"), "a different amount, the same shape");
+    }
+
+    #[test]
+    fn a_different_shape_is_untouched() {
+        // ★★★ The failure that would cost him most: one skip quietly
+        //     swallowing transactions he does care about.
+        let (ing, rules) = store("narrow");
+        let Capture::Stored(m) = ing.capture("h", "kcb", &card("100.00", "Java"), &rules)
+            .expect("capture") else { panic!("stored") };
+        ing.learn_skip("h", &m.id).expect("learn");
+
+        let spend = "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIVAS SUPERMARKET on 20/7/26 \
+                     at 4:30 PM. New M-PESA balance is Ksh12,050.00";
+        let Capture::Stored(other) = ing.capture("h", "mpesa", spend, &rules).expect("other")
+            else { panic!("stored") };
+        assert!(!ing.is_skipped(&other).expect("check"), "a real spend still asks");
+        assert!(other.needs_attention());
+    }
+
+    #[test]
+    fn the_same_shape_from_a_different_bank_is_a_different_rule() {
+        // ★★ The key carries the source. "I never want KCB's card notices" is
+        //    not "I never want anything shaped like that from anyone".
+        let (ing, rules) = store("per-source");
+        let Capture::Stored(m) = ing.capture("h", "kcb", &card("100.00", "Java"), &rules)
+            .expect("capture") else { panic!("stored") };
+        ing.learn_skip("h", &m.id).expect("learn");
+        let key = Ingested::skip_key(&m).expect("a key");
+        assert!(key.starts_with("kcb::"), "the source is part of it: {key}");
+    }
+
+    #[test]
+    fn learning_does_not_reach_into_another_household() {
+        let (ing, rules) = store("scoped");
+        let Capture::Stored(mine) = ing.capture("h", "kcb", &card("100.00", "Java"), &rules)
+            .expect("mine") else { panic!("stored") };
+        ing.capture("other", "kcb", &card("100.00", "Java"), &rules).expect("theirs");
+
+        let out = ing.learn_skip("h", &mine.id).expect("learn");
+        assert_eq!(out.cleared, 1, "only this household's");
+        let theirs = ing
+            .current()
+            .expect("current")
+            .into_iter()
+            .find(|m| m.sustain_id == "other")
+            .expect("still there");
+        assert!(theirs.needs_attention(), "another household is not his to clear");
+    }
+
+    #[test]
+    fn a_skipped_message_keeps_its_text_and_its_reason() {
+        // ★★ Set aside, never discarded. "Why did that vanish?" has an answer.
+        let (ing, rules) = store("kept");
+        let raw = card("100.00", "Java");
+        let Capture::Stored(m) = ing.capture("h", "kcb", &raw, &rules).expect("capture")
+            else { panic!("stored") };
+        ing.learn_skip("h", &m.id).expect("learn");
+
+        let after = ing.current().expect("current");
+        let s = after.iter().find(|x| x.id == m.id).expect("still on record");
+        assert!(s.ignored);
+        assert_eq!(s.raw_payload, raw);
+    }
+
+    #[test]
+    fn forgetting_a_rule_stops_it_applying_to_what_comes_next() {
+        // ★★ Reversible. Nothing already set aside comes back on its own,
+        //    because un-deciding a decision he made is not this to do.
+        let (ing, rules) = store("forget");
+        let Capture::Stored(m) = ing.capture("h", "kcb", &card("100.00", "Java"), &rules)
+            .expect("capture") else { panic!("stored") };
+        ing.learn_skip("h", &m.id).expect("learn");
+        let key = Ingested::skip_key(&m).expect("a key");
+
+        assert!(ing.forget_skip(&key).expect("forget"));
+        assert!(!ing.forget_skip(&key).expect("again"), "already gone");
+
+        let Capture::Stored(later) = ing.capture("h", "kcb", &card("999.00", "Shell"), &rules)
+            .expect("later") else { panic!("stored") };
+        assert!(!ing.is_skipped(&later).expect("check"), "it asks again");
     }
 }

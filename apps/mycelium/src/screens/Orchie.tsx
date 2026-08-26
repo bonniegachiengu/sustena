@@ -65,6 +65,7 @@ import {
   type OwnIdentifiersDto,
   type TransferDto,
   type DeviceDto,
+  type SkipLearnedDto,
 } from "../lib/engine";
 import { world } from "../lib/live";
 import { keyboardAware, watchViewport } from "../lib/viewport";
@@ -1395,6 +1396,44 @@ function Classify(props: {
     }
   };
 
+  /**
+   * "Never ask me about these again."
+   *
+   * ★★★ Across a backlog this size the same handful of shapes repeat, and
+   * setting each aside one at a time is the same decision made hundreds of
+   * times. Someone who has already answered it twice is right to be annoyed
+   * the third time.
+   *
+   * ★★ It clears what is already waiting, not only what arrives next: the
+   * question is being answered in the middle of the pile it is meant to clear.
+   */
+  const [skipLearned, setSkipLearned] = createSignal<SkipLearnedDto | null>(null);
+
+  /**
+   * ★★ Offered for any captured message, and answered by the engine.
+   *
+   * Whether a shape can be learned at all depends on whether a rule recognised
+   * it, which only the engine knows. Hiding the button would mean guessing
+   * that here; offering it and letting the answer come back explains WHY an
+   * unreadable message cannot teach a rule, which is worth more than a button
+   * that quietly is not there.
+   */
+  const skipAllLikeThis = async () => {
+    const id = props.messageId;
+    if (!id) return;
+    setSkipping(true);
+    setFailure(null);
+    try {
+      const out = await engine.learnSkip(props.sustain, id);
+      setSkipLearned(out);
+      if (!out.unlearnable) props.onDone();
+    } catch (e) {
+      setFailure(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setSkipping(false);
+    }
+  };
+
   /** Is the whole pocket list showing, or just the leading few? */
   const [allPockets, setAllPockets] = createSignal(false);
 
@@ -1788,6 +1827,27 @@ function Classify(props: {
                         >
                           {skipping() ? "setting aside…" : "not a transaction · skip"}
                         </button>
+                        {/* ★★★ The same answer, given once for the whole
+                            shape rather than once per message. This is the
+                            one that saves real time on a backlog. */}
+                        <button
+                          class={O.linkish}
+                          disabled={skipping()}
+                          onClick={() => void skipAllLikeThis()}
+                        >
+                          skip all like this
+                        </button>
+                      </Show>
+                      {/* ★★★ A queue that quietly shrank by forty would be
+                          alarming rather than helpful. */}
+                      <Show when={skipLearned()}>
+                        {(l) => (
+                          <p class={O.caption}>
+                            {l().unlearnable
+                              ? "Nothing to learn from this one — Orchie could not read it, and those are the ones worth your eyes."
+                              : `Set aside, and ${l().cleared} more like it. New ones like this will not ask again.`}
+                          </p>
+                        )}
                       </Show>
                     </div>
                   </div>
