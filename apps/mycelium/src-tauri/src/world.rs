@@ -209,6 +209,47 @@ pub struct Inner {
 
 impl World {
     /// Open the household from disk, folding every log.
+    /// One event that adds every declared-but-absent top-level dimension.
+    ///
+    /// ★★ `None` when there is nothing to add, so an ordinary open writes
+    /// nothing at all and the log does not grow a line per launch.
+    fn backfill_declared(
+        sustain_id: &str,
+        definition: &Definition,
+        state: &Value,
+        seq: u64,
+    ) -> Option<LoggedEvent> {
+        let missing: Vec<&String> = definition
+            .schema
+            .dimensions
+            .keys()
+            .filter(|name| state.get(name.as_str()).is_none())
+            .collect();
+        if missing.is_empty() {
+            return None;
+        }
+        let mutations = missing
+            .iter()
+            .map(|name| sustena_core::Mutation::Set {
+                path: (*name).clone(),
+                old: Value::Null,
+                new: serde_json::json!({}),
+            })
+            .collect();
+        Some(LoggedEvent {
+            seq,
+            operator: "system.backfill_declared".to_string(),
+            events: vec![EventDto {
+                name: "event.system.dimension_added".to_string(),
+                payload: serde_json::json!({"sustain": sustain_id}),
+            }],
+            mutations,
+            origin: None,
+            lamport: None,
+            clock: None,
+        })
+    }
+
     pub fn open(store: Store) -> StoreResult<World> {
         let store_root = store.root().to_path_buf();
         // ★★★ BEFORE anything is folded. A transfer a crash interrupted is
@@ -237,7 +278,32 @@ impl World {
                 None => templates::definition(record.template),
             };
             let enforcement = enforcement_of(&definition);
-            let (state, next_seq) = store.load_state(&record.id)?;
+            let (mut state, mut next_seq) = store.load_state(&record.id)?;
+            // ★★★ A dimension the definition declares and the instance lacks.
+            //
+            //     Introducing one is a SHAPE change, which organisational
+            //     closure refuses to any operator — rightly, because it changes
+            //     what the Sustain is rather than what it holds. So it happens
+            //     here, once, at the level shape changes belong to, and as a
+            //     real logged event: the fold reproduces it, and nothing is
+            //     repaired invisibly behind the log's back.
+            //
+            //     ★★ Empty, never invented. Backfilling a value would be this
+            //     code deciding something about a household it knows nothing
+            //     about; an empty dimension says only "this exists now", which
+            //     is the whole of what was missing.
+            if let Some(event) = Self::backfill_declared(&record.id, &definition, &state, next_seq) {
+                let added: Vec<&str> =
+                    event.mutations.iter().filter_map(|m| m.path()).collect();
+                eprintln!(
+                    "[mycelium] {} was missing declared dimensions {:?} — added",
+                    record.id, added
+                );
+                store.append(&record.id, &event)?;
+                let (s2, n2) = store.load_state(&record.id)?;
+                state = s2;
+                next_seq = n2;
+            }
             order.push(record.id.clone());
             sustains.insert(
                 record.id.clone(),
@@ -2843,5 +2909,128 @@ mod person_tab_tests {
         let (rebuilt, _) = w.store().load_state("home").expect("fold");
         assert_eq!(rebuilt.pointer("/finances/pockets/Aida"),
                    state(&w).pointer("/finances/pockets/Aida"));
+    }
+}
+
+#[cfg(test)]
+mod operative_layer_tests {
+    //! ★★★ The realignment, asserted end to end: the deciding step is the
+    //! operative's own graph running against the real registry, and the memory
+    //! it reads is the ONE place the gate writes.
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-oper-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    fn call(w: &World, op: &str, ps: Vec<(&str, Value)>) -> bool {
+        let params: Map<String, Value> = ps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        matches!(w.call("home", op, &params), Ok(Some((x, _))) if x.committed())
+    }
+
+    fn state(w: &World) -> Value {
+        w.with(|i| i.get("home").map(|s| s.state.clone())).expect("state")
+    }
+
+    fn funded(name: &str) -> World {
+        let w = world(name);
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(20000.0)), ("source", json!("pay")),
+                          ("account", json!("mpesa"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(5000.0))]));
+        w
+    }
+
+    #[test]
+    fn a_household_can_run_mentor_over_its_own_operators() {
+        // ★★★ The graph is checked against the SUSTAIN's allow-list, not just
+        //     against the registry — so an operative can never reach an
+        //     operator the household did not declare.
+        let w = funded("mentor-runs");
+        let allowed = w.with(|i| i.get("home").map(|s| s.definition.operators.clone())).unwrap();
+        assert!(call(&w, "vendor.remember",
+                     vec![("counterparty", json!("NAIVAS SUPERMARKET")),
+                          ("pocket_name", json!("food"))]));
+
+        // ★ Same words, different case and a company suffix — one vendor.
+        //   DROPPING a word would be a different vendor, which is the
+        //   conservative half of `vendor_key`'s only real tradeoff.
+        let input: Map<String, Value> = [
+            ("counterparty".to_string(), json!("Naivas Supermarket Ltd")),
+            ("amount".to_string(), json!(300.0)),
+        ]
+        .into_iter()
+        .collect();
+
+        let run = sustena_core::dag::run(
+            &sustena_core::mentor(),
+            &w.operators,
+            &allowed,
+            &sustena_core::Enforcement::default(),
+            &state(&w),
+            &input,
+        )
+        .expect("mentor typechecks against the real registry");
+        assert!(run.succeeded(), "{:?}", run.steps.last().map(|s| &s.result.reason));
+        assert_eq!(
+            run.state.pointer("/finances/pockets/food/spent").and_then(Value::as_f64),
+            Some(300.0),
+        );
+    }
+
+    #[test]
+    fn what_a_confirmation_remembers_is_state_and_only_state() {
+        // ★★★ The double-write, closed. The memory now lives in the `vendors`
+        //     dimension — through the gate, replayed by the fold — rather than
+        //     also in a file beside the log that nothing could reconcile it
+        //     against.
+        let w = funded("one-source");
+        assert!(call(&w, "vendor.remember",
+                     vec![("counterparty", json!("JAVA HOUSE")), ("pocket_name", json!("food"))]));
+        assert_eq!(state(&w).pointer("/vendors/java_house/pocket"), Some(&json!("food")));
+
+        // ★★ And it survives a rebuild, which a side file never could.
+        let (rebuilt, _) = w.store().load_state("home").expect("fold");
+        assert_eq!(rebuilt.pointer("/vendors/java_house/pocket"), Some(&json!("food")));
+    }
+
+    #[test]
+    fn attache_and_mentor_reach_opposite_conclusions_on_the_same_household() {
+        // ★★ Run against a REAL household rather than a fixture: the same
+        //    `suggest` reading, two operatives, one acts.
+        let w = funded("both");
+        let allowed = w.with(|i| i.get("home").map(|s| s.definition.operators.clone())).unwrap();
+        let reg = &w.operators;
+        let enf = sustena_core::Enforcement::default();
+
+        let unknown: Map<String, Value> = [
+            ("counterparty".to_string(), json!("SOMEWHERE NEW")),
+            ("amount".to_string(), json!(50.0)),
+            ("pocket_name".to_string(), json!("food")),
+        ]
+        .into_iter()
+        .collect();
+
+        let m = sustena_core::dag::run(
+            &sustena_core::mentor(), reg, &allowed, &enf, &state(&w), &unknown,
+        )
+        .expect("typechecks");
+        let a = sustena_core::dag::run(
+            &sustena_core::attache(), reg, &allowed, &enf, &state(&w), &unknown,
+        )
+        .expect("typechecks");
+
+        assert!(m.unreached.contains(&"spend".to_string()), "mentor stood down");
+        assert!(a.result_of("remember").is_some(), "attaché learned the counterparty");
     }
 }

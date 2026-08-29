@@ -1665,6 +1665,58 @@ pub fn reclassify_spend(
     Ok(result)
 }
 
+/// **What the household remembers about this counterparty.**
+///
+/// ★★★ Answered by running the head of Mentor's own graph —
+/// `vendor.identify → vendor.suggest` — rather than by a lookup written here.
+/// That is the realignment: the deciding step IS the operative's first two
+/// nodes, executing through the real registry, so the answer a screen shows and
+/// the answer an operative acts on cannot drift apart. They are the same call.
+///
+/// ★★★ **One source of truth.** The memory lives in the `vendors` dimension of
+/// state, written by `vendor.remember` through the gate, replayed by the fold.
+/// It used to live ALSO in a `history.json` beside the log, and two places that
+/// say what a vendor is for is one place too many — the day they disagreed
+/// there would be no way to say which was right.
+///
+/// ★★ The old file is still READ, and never written again. It drains itself:
+/// anything only it knows is offered once, and the next confirmation writes
+/// that answer into state where it belongs. Deleting it outright would have
+/// thrown away real classifications he had already made.
+fn vendor_memory(
+    world: &World,
+    sustain_id: &str,
+    state: &Value,
+    description: &str,
+) -> Option<(String, u32)> {
+    let head = sustena_core::mentor();
+    let input: Map<String, Value> =
+        [("counterparty".to_string(), Value::String(description.to_string()))]
+            .into_iter()
+            .collect();
+    // ★ The sustain's own allow-list, so a read-only head is held to exactly
+    //   the operators that sustain declares — same list `World::call` uses.
+    let allowed: Vec<String> =
+        world.with(|i| i.get(sustain_id).map(|s| s.definition.operators.clone()))?;
+    let run = sustena_core::dag::run(
+        &head,
+        &world.operators,
+        &allowed,
+        &sustena_core::Enforcement::default(),
+        state,
+        &input,
+    )
+    .ok()?;
+
+    let suggested = run.result_of("suggest").and_then(|r| {
+        let pocket = r.data.get("pocket")?.as_str()?.to_string();
+        let times = r.data.get("times").and_then(Value::as_u64).unwrap_or(1) as u32;
+        Some((pocket, times))
+    });
+    // ★ The legacy file only when state has nothing to say.
+    suggested.or_else(|| world.ingest().recall(sustain_id, description))
+}
+
 /// Show a number without giving it away.
 ///
 /// ★★★ He linked it as an identifier, not as something to put on a screen. The
@@ -1894,7 +1946,7 @@ pub fn orchie_infer(
     let history = if ignore_history {
         None
     } else {
-        description.as_ref().and_then(|d| world.ingest().recall(&sustain_id, d))
+        description.as_ref().and_then(|d| vendor_memory(&world, &sustain_id, &state, d))
     };
 
     // ★★★ Whose tab this is, if it is anyone's.
@@ -1923,7 +1975,22 @@ pub fn orchie_infer(
     // them, which is arbitrary. The classification history knows how many
     // times each pocket has been chosen, so the ones he uses lead and the
     // long tail follows. Real counts, not a guess at relevance.
-    let by_use = world.ingest().pocket_use_counts(&sustain_id).unwrap_or_default();
+    // ★★ Ordered by what he has actually done. State first — the one source
+    //    of truth — with the legacy file filling in anything only it still
+    //    knows, so the ordering does not lurch the day the last entry drains.
+    let mut by_use = world.ingest().pocket_use_counts(&sustain_id).unwrap_or_default();
+    if let Some(vendors) = state.pointer("/vendors").and_then(Value::as_object) {
+        for record in vendors.values() {
+            let (Some(p), times) = (
+                record.get("pocket").and_then(Value::as_str),
+                record.get("times").and_then(Value::as_u64).unwrap_or(1) as u32,
+            ) else {
+                continue;
+            };
+            let entry = by_use.entry(p.to_string()).or_insert(0);
+            *entry = (*entry).max(times);
+        }
+    }
 
     Ok(match sustena_core::infer(&world.operators, &capture) {
         sustena_core::Inference::Ready {
@@ -2029,11 +2096,23 @@ pub fn orchie_confirm(
         }
         // ★ Remember the classification only on a real success, and only when
         //   there is a pocket to remember — income has none.
+        //
+        // ★★★ Through the OPERATOR, so the memory is state: written by the
+        //     gate, replayed by the fold, readable by anything that can read a
+        //     dimension. It used to be a side file as well, and two places
+        //     saying what a vendor is for is one place too many.
+        //
+        // ★★ Best-effort on purpose. The money has already moved and been
+        //     recorded; failing to note who it was paid to is worth a lost
+        //     suggestion, never a lost transaction.
         if let (Some(d), Some(pocket)) = (
             description.as_deref(),
             params_map.get("pocket_name").and_then(|v| v.as_str()),
         ) {
-            let _ = world.ingest().remember(&sustain_id, d, pocket);
+            let mut remember = Map::new();
+            remember.insert("counterparty".into(), Value::String(d.to_string()));
+            remember.insert("pocket_name".into(), Value::String(pocket.to_string()));
+            let _ = world.call(&sustain_id, "vendor.remember", &remember);
         }
         if let Some(id) = &message_id {
             // ★★★ What was done, before whether it is finished. Filing a past

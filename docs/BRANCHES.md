@@ -19,6 +19,57 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/operative-dag` — merged into `dev` 29 Aug
+
+**Off:** `dev` at `1b7bcf0`
+**State:** merged, gate green (core 1,428 · host 223). APK built and verified; **not
+yet installed — the phone was disconnected from USB when the build finished.**
+
+**The keystone: operatives are graphs of operator calls, and the graph is data.**
+Every deciding step was already an operator — `vendor.identify`, `vendor.suggest`,
+`budget.spend` — called from a screen in an order written in a host function. An
+operative that lives in a screen cannot be inspected, cannot be checked before it
+runs, and cannot be changed without editing the app.
+
+`compose.rs` had held Hoare sequencing since it was written and **nothing had
+ever called it**. `Dag::typecheck` now runs every root-to-leaf path through
+`Pathway::try_chain`, so a chain whose third step can never fire is refused when
+the graph is *written*. `OperatorMeta::as_step` is the bridge that was missing.
+
+Three findings, each from testing rather than reading:
+
+- **`vendor.remember` could never commit on a real household.** `vendors` was
+  DECLARED in the schema and never seeded into the opening state, and
+  organisational closure refuses an operator that introduces a top-level
+  dimension — correctly, since that changes what the Sustain *is*. So the memory
+  had no choice but to live in a side file. That is the actual root of the
+  double-write, not carelessness. Fixed by seeding `vendors: {}`, plus a logged
+  one-time backfill at `World::open` for households that already exist —
+  a shape change made at the level shape changes belong to, never behind the
+  log's back.
+
+- **Ordering by topological position is not a promise.** Two nodes with no edge
+  between them have no order; a binding that reads a sibling works for exactly
+  as long as the sort keeps favouring it. The check is ancestry now, so only an
+  edge counts.
+
+- **My own test was wrong about vendor matching.** `NAIVAS` and
+  `NAIVAS SUPERMARKET` are deliberately different vendors — dropping a word is
+  the conservative half of the only tradeoff `vendor_key` makes, and the test
+  was asserting the loose behaviour we specifically refuse.
+
+**Mentor and Attaché read the same `suggest` step opposite ways** — Mentor acts
+when the household already knows a counterparty, Attaché when it does not — and
+a test asserts they never both act, because if that ever stopped being true one
+would be silently duplicating the other on real money.
+
+**Honestly missing:** graduation into a real child Sustain (§4) needs
+`holon.create_child`, which this engine does not have. Attaché takes a
+counterparty as far as linked-and-known and stops. There is no `parse` node
+either: the transducer runs at the ingest boundary and is not an operator.
+Naming nodes for either would make the picture prettier and the graph
+unrunnable.
+
 ### `feat/person-tab-display` — merged into `dev` 29 Aug
 
 **Off:** `dev` at `3f5b78c`
