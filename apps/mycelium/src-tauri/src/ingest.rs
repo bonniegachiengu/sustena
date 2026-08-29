@@ -449,6 +449,20 @@ pub struct Source {
     /// The capture seq this source was last seen at. `None` = never.
     #[serde(default)]
     pub last_seen_seq: Option<u64>,
+    /// When it last spoke, in real time rather than in sequence.
+    ///
+    /// ★★ A sequence number says which capture came last; it cannot say how
+    /// long ago. Staleness is a question about elapsed time, so it needs one.
+    #[serde(default)]
+    pub last_seen_ms: Option<i64>,
+    /// The gaps this source has actually kept between messages.
+    ///
+    /// ★★★ Its OWN history, which is what makes a learned threshold not a
+    /// guess. Bounded, because a source that has spoken ten thousand times does
+    /// not need all ten thousand gaps to say what its cadence is — and an
+    /// unbounded list is a file that grows forever.
+    #[serde(default)]
+    pub recent_gaps_ms: Vec<i64>,
     #[serde(default)]
     pub captures: u64,
 }
@@ -515,6 +529,38 @@ impl Ingested {
     }
     fn marks_path(&self) -> PathBuf {
         self.root.join("read_marks.json")
+    }
+
+    /// **Is this source still alive?**
+    ///
+    /// ★★★ A declared cadence wins over a learned one — a promise beats an
+    /// estimate. With neither, the answer is **unknown**: not healthy, because
+    /// that would hide a dead capture path, and not stale, because that would
+    /// cry wolf about a source that is simply new.
+    pub fn liveness_of(&self, source_id: &str, now_ms: i64) -> StoreResult<sustena_core::Liveness> {
+        let Some(source) = self.sources()?.into_iter().find(|s| s.id == source_id) else {
+            return Ok(sustena_core::Liveness::Unknown {
+                why: "no such source has ever reported".into(),
+            });
+        };
+        let Some(last) = source.last_seen_ms else {
+            return Ok(sustena_core::Liveness::Unknown {
+                why: "it has never reported a time".into(),
+            });
+        };
+        let heartbeat = source.expected_interval_minutes.map(|m| {
+            let every = m as i64 * 60_000;
+            // ★★ A tenth of the promised interval as grace. Declared here as a
+            //    policy of this node rather than defaulted inside the core,
+            //    where nobody would see it.
+            sustena_core::Heartbeat::new(every, every / 10)
+        });
+        Ok(sustena_core::source_liveness(
+            now_ms - last,
+            heartbeat,
+            &source.recent_gaps_ms,
+            STALENESS_PERCENTILE,
+        ))
     }
 
     /// The newest message already read from a source, as the device timestamps
@@ -674,7 +720,9 @@ impl Ingested {
             seq,
         };
         self.append_message(&message)?;
-        self.mark_seen(source_id, seq)?;
+        // ★★ When the message says it happened, falling back to when the
+        //    device read it. Either is a real reading; neither is invented.
+        self.mark_seen(source_id, seq, message.event_at_ms.or(message.sent_at_ms))?;
         Ok(Capture::Stored(Box::new(message)))
     }
 
@@ -1358,20 +1406,40 @@ impl Ingested {
                 label: label.to_string(),
                 expected_interval_minutes: interval,
                 last_seen_seq: None,
+                last_seen_ms: None,
+                recent_gaps_ms: Vec::new(),
                 captures: 0,
             }),
         }
         self.write_sources(&all)
     }
 
-    fn mark_seen(&self, id: &str, seq: u64) -> StoreResult<()> {
+    fn mark_seen(&self, id: &str, seq: u64, at_ms: Option<i64>) -> StoreResult<()> {
         let mut all = self.sources()?;
         match all.iter_mut().find(|s| s.id == id) {
             Some(s) => {
                 // ★ Stamped on EVERY capture — mapped, unmapped or unparsed
                 //   alike. Staleness is about whether a source is alive, not
                 //   whether any one message happened to parse.
+                // ★★ The gap BEFORE overwriting, or there is nothing to
+                //    subtract from.
+                if let (Some(previous), Some(now)) = (s.last_seen_ms, at_ms) {
+                    let gap = now - previous;
+                    // ★★★ A negative gap is a clock that moved backwards, not a
+                    //     cadence. Recording it would poison the percentile with
+                    //     a number no source ever kept.
+                    if gap > 0 {
+                        s.recent_gaps_ms.push(gap);
+                        if s.recent_gaps_ms.len() > MAX_TRACKED_GAPS {
+                            let excess = s.recent_gaps_ms.len() - MAX_TRACKED_GAPS;
+                            s.recent_gaps_ms.drain(..excess);
+                        }
+                    }
+                }
                 s.last_seen_seq = Some(seq);
+                if at_ms.is_some() {
+                    s.last_seen_ms = at_ms;
+                }
                 s.captures += 1;
             }
             None => all.push(Source {
@@ -1379,6 +1447,8 @@ impl Ingested {
                 label: id.to_string(),
                 expected_interval_minutes: None,
                 last_seen_seq: Some(seq),
+                last_seen_ms: at_ms,
+                recent_gaps_ms: Vec::new(),
                 captures: 1,
             }),
         }
@@ -1465,6 +1535,21 @@ fn message_amount(m: &IngestedMessage) -> Option<f64> {
     let v = m.parsed_fields.get("amount")?;
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
 }
+
+/// How many gaps a source's cadence is judged from.
+///
+/// ★★ Enough to have a distribution, few enough that the file does not grow
+/// forever and that a source which changed its habit last month is judged on
+/// what it does now rather than on what it used to.
+const MAX_TRACKED_GAPS: usize = 50;
+
+/// The percentile a learned staleness threshold is taken at.
+///
+/// ★★ High, because the cost of the two errors is not symmetric: a false
+/// "stale" sends somebody to check a phone that is fine, and they stop
+/// believing the next one. A missed staleness is caught by the next message
+/// that does not arrive.
+const STALENESS_PERCENTILE: f64 = 0.95;
 
 /// The offset the senders this node reads are in.
 ///
@@ -3900,5 +3985,89 @@ mod event_time_tests {
         let (ing, rules) = store("unreadable");
         let m = capture(&ing, &rules, "Dear customer, thank you for visiting our branch.");
         assert!(m.event_at_ms.is_none());
+    }
+}
+
+#[cfg(test)]
+mod liveness_tests {
+    //! Ingest §VIII — never guess a cadence, at the door.
+    use super::*;
+    use std::env;
+
+    const HOUR: i64 = 3_600_000;
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let dir = env::temp_dir().join(format!("sustena-live-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        let ing = Ingested::at(dir).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    /// A real M-Pesa text on a given day, so `event_at_ms` is genuinely parsed.
+    fn on(day: u32, reference: &str) -> String {
+        format!(
+            "{reference} Confirmed. Ksh10.00 paid to SHOP on {day}/7/26 at 9:00 AM. \
+             New M-PESA balance is Ksh1.00"
+        )
+    }
+
+    fn refs(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("QGH7XJ4P{i:02}")).collect()
+    }
+
+    #[test]
+    fn a_source_with_too_little_history_is_unknown_rather_than_healthy() {
+        // ★★★ Calling it healthy hides a dead capture path; calling it stale
+        //     cries wolf about a source that is simply new.
+        let (ing, rules) = store("new");
+        ing.capture("h", "mpesa", &on(1, "QGH7XJ4P01"), &rules).expect("capture");
+        let l = ing.liveness_of("mpesa", i64::MAX / 4).expect("reads");
+        assert!(matches!(l, sustena_core::Liveness::Unknown { .. }), "{l:?}");
+    }
+
+    #[test]
+    fn a_source_that_has_kept_a_cadence_can_be_judged_against_it() {
+        // ★★ Its OWN history, which is what makes the threshold not a guess.
+        let (ing, rules) = store("cadence");
+        for (i, r) in refs(8).into_iter().enumerate() {
+            ing.capture("h", "mpesa", &on(i as u32 + 1, &r), &rules).expect("capture");
+        }
+        let last = ing.sources().expect("sources")[0].last_seen_ms.expect("timed");
+
+        // A day later is what it always does; a fortnight is not.
+        assert!(!ing.liveness_of("mpesa", last + 24 * HOUR).expect("reads").is_stale());
+        assert!(ing.liveness_of("mpesa", last + 14 * 24 * HOUR).expect("reads").is_stale());
+    }
+
+    #[test]
+    fn a_declared_cadence_is_watchable_from_the_first_message() {
+        // ★★★ A promise beats an estimate, and needs no warm-up at all.
+        let (ing, rules) = store("promised");
+        ing.declare_source("mpesa", "M-Pesa", Some(60)).expect("declared");
+        ing.capture("h", "mpesa", &on(1, "QGH7XJ4P01"), &rules).expect("capture");
+        let last = ing.sources().expect("sources")[0].last_seen_ms.expect("timed");
+        assert!(ing.liveness_of("mpesa", last + 3 * HOUR).expect("reads").is_stale());
+        assert!(!ing.liveness_of("mpesa", last + 30 * 60_000).expect("reads").is_stale());
+    }
+
+    #[test]
+    fn a_source_nobody_has_heard_from_is_unknown_not_stale() {
+        let (ing, _) = store("silent");
+        let l = ing.liveness_of("kcb", 0).expect("reads");
+        assert!(matches!(l, sustena_core::Liveness::Unknown { .. }));
+    }
+
+    #[test]
+    fn a_message_nobody_could_parse_still_counts_as_the_source_speaking() {
+        // ★★★ Otherwise a source looks dead the moment its wording changes,
+        //     which sends somebody to check the phone when the answer is "the
+        //     format changed".
+        let (ing, rules) = store("unparsed");
+        ing.capture("h", "mpesa", "something no rule has ever seen", &rules).expect("capture");
+        let source = &ing.sources().expect("sources")[0];
+        assert_eq!(source.captures, 1);
+        assert!(source.last_seen_seq.is_some(), "it spoke, whatever it said");
     }
 }
