@@ -36,8 +36,11 @@
 
 use std::collections::BTreeMap;
 
+use serde_json::Value;
+
 use crate::flow::Movement;
 use crate::mutation::Mutation;
+use crate::state::State;
 
 /// What kind of thing an account is. Net worth depends only on this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -485,5 +488,243 @@ mod tests {
         let held: f64 = ps.iter().filter(|p| p.kind.counts_toward_net_worth()).map(|p| p.delta).sum();
         let owed: f64 = ps.iter().filter(|p| p.kind.is_owed()).map(|p| p.delta).sum();
         assert_eq!(held - owed, 0.0);
+    }
+}
+
+// ── the household's position ────────────────────────────────────────────────
+
+/// One line of the household's position, named so it can be shown.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Holding {
+    pub name: String,
+    pub kind: AccountKind,
+    pub amount: f64,
+}
+
+/// **What the household is actually worth**, not just what is in the bank.
+///
+/// ★★★ Money out is not money gone. A week's shopping leaves the account and
+/// becomes food in the cupboard; a payment to somebody who will pay it back
+/// leaves the account and becomes a claim. A position that counted only cash
+/// would call both of those a loss, and a household that shops well would look
+/// identical to one losing money — which is the exact failure `inventory` was
+/// added to fix, finished here.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Position {
+    /// Cash in accounts, plus anything unaccounted still sitting in liquid.
+    pub cash: f64,
+    /// Things the household holds, at the value it recorded for them.
+    pub things: f64,
+    /// Money other people owe it.
+    pub owed_to_you: f64,
+    /// Money it owes — debts, plus any person tab standing in their favour.
+    pub owed_by_you: f64,
+    /// Every line, so a total can always be taken apart.
+    pub lines: Vec<Holding>,
+}
+
+impl Position {
+    /// `cash + things + owed_to_you − owed_by_you`.
+    pub fn net(&self) -> f64 {
+        self.cash + self.things + self.owed_to_you - self.owed_by_you
+    }
+}
+
+fn number_at(v: &Value, path: &[&str]) -> Option<f64> {
+    let mut cur = v;
+    for seg in path {
+        cur = cur.get(seg)?;
+    }
+    cur.as_f64()
+}
+
+/// Read the household's position out of its own state.
+///
+/// ★★★ **A person pocket is a claim, and which way it points decides which
+/// side it lands on.** Sending somebody money turns cash into a receivable, so
+/// the position does not move — correctly, because nothing was lost. Their
+/// paying it back turns the receivable into cash, and again nothing moves.
+/// A tab standing in THEIR favour is money he is holding that is not his, and
+/// it lands on the other side.
+///
+/// ★★ ORDINARY pockets are not counted at all. An envelope is a view of money
+/// that is already in an account; adding it would count the same shilling
+/// twice. Only pockets tied to a person — which are claims, not envelopes —
+/// contribute, and `is_person_pocket` is what tells them apart.
+pub fn position(state: &Value) -> Position {
+    let mut p = Position::default();
+    let st = State::new(state.clone());
+
+    // Cash the household holds.
+    if let Some(accounts) = state.pointer("/finances/accounts").and_then(Value::as_object) {
+        for (name, account) in accounts {
+            let Some(amount) = account.get("balance").and_then(Value::as_f64) else { continue };
+            p.cash += amount;
+            p.lines.push(Holding { name: name.clone(), kind: AccountKind::Cash, amount });
+        }
+    }
+    // ★★ Money in the pooled balance that no account has claimed yet is still
+    //    money. Leaving it out would understate the position by exactly the
+    //    amount nobody has got round to attributing.
+    if let Some(liquid) = number_at(state, &["finances", "liquid", "balance"]) {
+        let unaccounted = liquid - p.cash;
+        if unaccounted.abs() > TOLERANCE {
+            p.cash += unaccounted;
+            p.lines.push(Holding {
+                name: "unaccounted".into(),
+                kind: AccountKind::Liquid,
+                amount: unaccounted,
+            });
+        }
+    }
+
+    // Things it holds.
+    if let Some(assets) = state.pointer("/inventory/assets").and_then(Value::as_array) {
+        for asset in assets {
+            let Some(amount) = asset.get("value").and_then(Value::as_f64) else { continue };
+            let name = asset
+                .get("item")
+                .and_then(Value::as_str)
+                .unwrap_or("something")
+                .to_string();
+            p.things += amount;
+            p.lines.push(Holding { name, kind: AccountKind::Inventory, amount });
+        }
+    }
+
+    // Claims, either way round.
+    if let Some(pockets) = state.pointer("/finances/pockets").and_then(Value::as_object) {
+        for (name, pocket) in pockets {
+            if !crate::operator::vendor::is_person_pocket(&st, name) {
+                continue;
+            }
+            let outstanding = pocket.get("spent").and_then(Value::as_f64).unwrap_or(0.0);
+            if outstanding.abs() <= TOLERANCE {
+                continue;
+            }
+            if outstanding > 0.0 {
+                p.owed_to_you += outstanding;
+            } else {
+                p.owed_by_you += -outstanding;
+            }
+            p.lines.push(Holding {
+                name: name.clone(),
+                kind: AccountKind::Person,
+                amount: outstanding,
+            });
+        }
+    }
+
+    // Debts.
+    if let Some(debts) = state.pointer("/finances/liabilities").and_then(Value::as_object) {
+        for (name, debt) in debts {
+            let Some(amount) = debt.get("balance").and_then(Value::as_f64) else { continue };
+            p.owed_by_you += amount;
+            p.lines.push(Holding { name: name.clone(), kind: AccountKind::Liability, amount });
+        }
+    }
+
+    p
+}
+
+#[cfg(test)]
+mod position_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn household() -> Value {
+        json!({
+            "finances": {
+                "liquid": {"balance": 5000.0},
+                "accounts": {"mpesa": {"balance": 5000.0}},
+                "pockets": {"food": {"allocated": 2000.0, "spent": 500.0},
+                            "Aida": {"allocated": 3000.0, "spent": 0.0}},
+                "links": {"726123961": "Aida"}
+            },
+            "inventory": {"assets": []}
+        })
+    }
+
+    #[test]
+    fn an_envelope_is_never_counted_beside_the_money_it_holds() {
+        // ★★★ A pocket is a VIEW of money already in an account. Counting both
+        //     would count the same shilling twice, and the total would grow
+        //     every time he budgeted — which is the opposite of what budgeting
+        //     does.
+        let p = position(&household());
+        assert_eq!(p.cash, 5000.0);
+        assert_eq!(p.net(), 5000.0);
+        assert!(p.lines.iter().all(|l| l.name != "food"));
+    }
+
+    #[test]
+    fn money_spent_on_things_the_household_still_has_is_not_a_loss() {
+        // ★★★ The whole reason inventory exists, finished. Without this a
+        //     household that shops well looks identical to one losing money.
+        let mut s = household();
+        s["finances"]["accounts"]["mpesa"]["balance"] = json!(4_000.0);
+        s["finances"]["liquid"]["balance"] = json!(4_000.0);
+        s["inventory"]["assets"] = json!([{"item": "rice", "value": 1_000.0}]);
+        let p = position(&s);
+        assert_eq!(p.things, 1_000.0);
+        assert_eq!(p.net(), 5_000.0, "the shopping moved, it did not vanish");
+    }
+
+    #[test]
+    fn lending_to_somebody_moves_the_position_nowhere() {
+        // ★★★ Cash became a claim. If this moved, every loan would read as a
+        //     loss and every repayment as income.
+        let mut s = household();
+        s["finances"]["accounts"]["mpesa"]["balance"] = json!(3_000.0);
+        s["finances"]["liquid"]["balance"] = json!(3_000.0);
+        s["finances"]["pockets"]["Aida"]["spent"] = json!(2_000.0);
+        let p = position(&s);
+        assert_eq!(p.owed_to_you, 2_000.0);
+        assert_eq!(p.net(), 5_000.0);
+    }
+
+    #[test]
+    fn a_tab_standing_in_their_favour_is_money_he_owes() {
+        // ★★ He is holding it, and it is not his.
+        let mut s = household();
+        s["finances"]["accounts"]["mpesa"]["balance"] = json!(6_000.0);
+        s["finances"]["liquid"]["balance"] = json!(6_000.0);
+        s["finances"]["pockets"]["Aida"]["spent"] = json!(-1_000.0);
+        let p = position(&s);
+        assert_eq!(p.owed_by_you, 1_000.0);
+        assert_eq!(p.net(), 5_000.0);
+    }
+
+    #[test]
+    fn a_debt_lowers_the_position_by_exactly_what_is_owed() {
+        let mut s = household();
+        s["finances"]["liabilities"] = json!({"fuliza": {"balance": 1_500.0}});
+        assert_eq!(position(&s).net(), 3_500.0);
+    }
+
+    #[test]
+    fn money_no_account_has_claimed_is_still_money() {
+        // ★★ Otherwise the position understates by exactly the amount nobody
+        //    has got round to attributing.
+        let mut s = household();
+        s["finances"]["accounts"] = json!({});
+        let p = position(&s);
+        assert_eq!(p.cash, 5_000.0);
+        assert!(p.lines.iter().any(|l| l.name == "unaccounted"));
+    }
+
+    #[test]
+    fn every_total_can_be_taken_apart() {
+        // ★★★ A single number nobody can explain is a number nobody should
+        //     act on. Each side is the sum of its own named lines.
+        let mut s = household();
+        s["inventory"]["assets"] = json!([{"item": "rice", "value": 200.0}]);
+        s["finances"]["pockets"]["Aida"]["spent"] = json!(300.0);
+        let p = position(&s);
+        let summed = |k: AccountKind| -> f64 {
+            p.lines.iter().filter(|l| l.kind == k).map(|l| l.amount).sum()
+        };
+        assert_eq!(summed(AccountKind::Inventory), p.things);
+        assert_eq!(summed(AccountKind::Person), p.owed_to_you - p.owed_by_you);
     }
 }

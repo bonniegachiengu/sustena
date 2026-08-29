@@ -19,6 +19,39 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/net-worth` — merged into `dev` 29 Aug
+
+**Off:** `dev` at `ca90fb7`
+**State:** merged, gate green (core 1,435 · host 223). APK built and verified;
+**not installed — the phone was off USB for this whole stretch.**
+
+**Money out is not money gone.** A week's shopping leaves the account and
+becomes food in the cupboard; a payment to somebody who will pay it back leaves
+the account and becomes a claim. A position that counted only cash calls both a
+loss, and a household that shops well looks identical to one losing money —
+which is the exact failure `inventory` was added to fix, finished here.
+
+`ledger::position` reads four sides off state: cash in accounts, things held,
+owed to you, owed by you. Two judgments:
+
+- **Ordinary pockets are not counted.** An envelope is a view of money already
+  in an account, so adding it would count the same shilling twice and the total
+  would grow every time he budgeted — the opposite of what budgeting does. Only
+  person pockets contribute, because those are claims rather than envelopes, and
+  `is_person_pocket` is what tells them apart.
+
+- **Money no account has claimed is still money.** Leaving the unattributed part
+  of liquid out would understate the position by exactly the amount nobody had
+  got round to filing.
+
+Three tests exist to pin the invariant that makes it worth having: lending,
+shopping and being repaid all move the position **nowhere**. If any of them
+moved it, a loan would read as a loss and a repayment as income.
+
+**The card draws four lines, never one number.** A single total hides the
+distinction that makes it true, and rows at zero are not drawn — a household
+with nothing lent out should not read past a row of noughts.
+
 ### `feat/operative-dag` — merged into `dev` 29 Aug
 
 **Off:** `dev` at `1b7bcf0`

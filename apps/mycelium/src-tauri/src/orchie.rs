@@ -129,6 +129,17 @@ pub fn widget_declarations() -> Vec<WidgetDecl> {
             emits: vec!["budget.spend".into(), "budget.unspend".into()],
             binding: BindingKey::Unit,
         },
+        // ★★ A calm read, and deliberately a quiet one. Its input has no
+        //   ceiling in `V`, so it scores no urgency and only wins a slot when
+        //   nothing else needs him — which is exactly when a household position
+        //   is worth looking at.
+        WidgetDecl {
+            id: "net_worth".into(),
+            inputs: vec!["worth".into()],
+            render: "net_worth".into(),
+            emits: vec![],
+            binding: BindingKey::Unit,
+        },
         // The calm read — the one card worth showing when nothing is wrong.
         WidgetDecl {
             id: "household_summary".into(),
@@ -166,7 +177,13 @@ pub fn view_definition() -> Definition {
             .declare("tab_sent", DimType::Number { lo: None, hi: None })
             .declare("tab_received", DimType::Number { lo: None, hi: None })
             .declare("tab_allocated", DimType::Number { lo: None, hi: None })
-            .declare("tab_out", DimType::Number { lo: None, hi: None }),
+            .declare("tab_out", DimType::Number { lo: None, hi: None })
+            // What the household is worth, not just what is in the bank.
+            .declare("worth", DimType::Number { lo: None, hi: None })
+            .declare("worth_cash", DimType::Number { lo: None, hi: None })
+            .declare("worth_things", DimType::Number { lo: None, hi: None })
+            .declare("worth_owed_to_you", DimType::Number { lo: None, hi: None })
+            .declare("worth_owed_by_you", DimType::Number { lo: None, hi: None }),
     )
     .with_operator("budget.allocate")
     .with_operator("budget.spend")
@@ -240,6 +257,20 @@ fn reading_base(state: &Value, unclassified: usize) -> Value {
     if unclassified > 0 {
         out.insert("unclassified".into(), serde_json::json!(unclassified));
     }
+
+    // ★★★ The position, not the balance. Money out is not money gone: a week's
+    //     shopping becomes food in the cupboard and a loan becomes a claim, and
+    //     a reading that counted only cash would call both a loss.
+    //
+    //     ★★ Always present, even at zero — unlike `worst_*` below. A household
+    //     with nothing is worth nothing, and that is a real answer rather than
+    //     an absence; there is no "we cannot tell" case here to withdraw for.
+    let worth = sustena_core::position(state);
+    out.insert("worth".into(), serde_json::json!(worth.net()));
+    out.insert("worth_cash".into(), serde_json::json!(worth.cash));
+    out.insert("worth_things".into(), serde_json::json!(worth.things));
+    out.insert("worth_owed_to_you".into(), serde_json::json!(worth.owed_to_you));
+    out.insert("worth_owed_by_you".into(), serde_json::json!(worth.owed_by_you));
 
     // The most-strained funded pocket: the largest (spent − allocated), or the
     // largest fraction when nothing is over. Its OWN allocation is the ceiling.
