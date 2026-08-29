@@ -188,6 +188,7 @@ pub mod domain_map;
 pub mod effect_journal;
 pub mod event_time;
 pub mod liveness;
+pub mod egress;
 pub mod outbox;
 pub mod sigma;
 pub mod strong_admit;
@@ -344,6 +345,10 @@ pub use effect_journal::{EffectJournal, JournalEntry, Phase as EffectPhase};
 pub use unscored::{unscored, Unscored, Unwatched};
 pub use event_time::{event_time, skew_ms, Local as LocalStamp};
 pub use liveness::{learned_theta, liveness as source_liveness, Heartbeat, Liveness};
+pub use egress::{
+    admit_egress, awaiting_a_human, dispose as dispose_egress, Delivery, EgressEffect,
+    Reversibility,
+};
 pub use outbox::{apply as apply_ack, delay_ms, queue_depth, Ack, Backoff, Disposition, Pending};
 pub use sigma::Sigma;
 pub use strong_admit::{admit_strong, doomed_but_viable, StrongVerdict};
