@@ -23,12 +23,22 @@
 //!
 //! ## What a retry is, and what it is not
 //!
-//! ★★★ **A failed send is not automatically re-sent.** The Ingest article's
-//! egress asymmetry is the reason: you cannot make somebody else's receiver
-//! idempotent, so a blind retry can pay twice and there is no way to find out
-//! from this side. A retry is therefore a **new decision** with its own event —
-//! which means a person made it, and the journal shows two decisions rather
-//! than pretending one attempt happened twice.
+//! ★★★ **A failed send is never re-sent without a NEW DECISION.** The Ingest
+//! article's egress asymmetry is the reason: you cannot make somebody else's
+//! receiver idempotent, so a blind retry can pay twice and there is no way to
+//! find out from this side. So a retry is a second `Decided` event with its own
+//! key, and the journal shows two decisions rather than pretending one attempt
+//! happened twice.
+//!
+//! ★★★ **Who may make that decision depends on the act, and the two questions
+//! are different.** This module fixes the *audit* rule — a retry is never
+//! invisible. [`crate::egress`] fixes the *authority* rule — an irreversible act
+//! needs a person, and one whose reversibility is declared, with the
+//! compensating act named, may be retried by the system a bounded number of
+//! times. An earlier draft of this file said a retry always required a person,
+//! which conflated the two and would have made the system interrupt somebody
+//! over a cancellable draft. Interrupting people about things that do not need
+//! them is how a gate stops being read.
 //!
 //! ★★ **The idempotency key is declared by whoever decided**, not derived here.
 //! Two payments of the same amount to the same person on one day are ordinary
