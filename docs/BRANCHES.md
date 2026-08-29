@@ -19,6 +19,38 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/meme-kinds` — merged into `dev` 29 Aug — **OPV-5, the last unstarted core row**
+
+**Off:** `dev` / gate green (core 1,909 / host 245).
+
+★★★ **Dawkins-Campbell: all three, and two out of three is not nearly.** A thing
+that copies perfectly and never varies cannot improve; one that varies and is
+never differentially retained is noise; one nobody copies is not transmitted at
+all. And when `selects()` refuses it **names the missing leg**, because "this is
+not a meme" is unactionable and "copies never differ, so it cannot improve" is a
+fix.
+
+★★★ **Popper-Deutsch, with the category error avoided.** Being unfalsifiable is
+not the fault; being unfalsifiable *and* retained is. A bag of rice makes no claim
+and cannot be wrong — a check that called it anti-rational would cry wolf at the
+entire pantry. So `makes_a_claim()` is false for Resource and Network, and
+`anti_rational()` needs claim-making, uncriticisable **and** actually retained,
+because each alone is ordinary: an untested idea nobody copies harms nobody, and a
+falsifiable idea that spreads is just an idea that is working.
+
+★★★ **The dangerous meme is not the wrong one.** A wrong Model loses to a better
+one on the evidence. A Model that admits no evidence never loses — it does not
+win on the evidence, it wins by admitting none. That sentence is the row.
+
+★★ `Criticism::Falsifiable` requires naming *by what* — "it is falsifiable" with
+nothing named is itself an unfalsifiable claim. And a claim with **no criticism
+declared** is a separate finding from one that escapes criticism: a blank somebody
+can fill in and a shape that resists filling need different fixes.
+
+★★ Deliberately distinct from `package::Kind`, which asks what can be
+*published*. This asks what is being *copied*, and a Resource is copied between
+households without being a publishable artifact.
+
 ### `feat/event-payload` — merged into `dev` 29 Aug — **EVT-1 complete**
 
 **Off:** `dev` / gate green (core 1,897 / host 245).
