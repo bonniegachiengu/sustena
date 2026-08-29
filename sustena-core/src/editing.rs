@@ -76,6 +76,7 @@ use crate::council::ProposalStatus;
 use crate::predicate::{self, parse_predicate};
 use crate::rollup::{AggregateDecl, RollupError};
 use crate::schema::{bind, DimType, Schema, TypeError};
+use crate::predicate::types::{typecheck as predicate_typecheck, Gamma};
 
 /// A definition **D** — the state of the meta-Sustain.
 ///
@@ -676,9 +677,29 @@ pub fn typecheck(d: &Definition) -> Result<(), Vec<TypeError>> {
                 detail: format!("invariant does not parse: {e}"),
             }),
             Ok(p) => {
-                for mut err in bind(&p, &d.schema) {
+                // ★★ Resolution first: an undeclared dimension has no type, so
+                //    typing it would produce a second complaint about the same
+                //    mistake in a different voice.
+                let unresolved = bind(&p, &d.schema);
+                let resolved = unresolved.is_empty();
+                for mut err in unresolved {
                     err.detail = format!("invariant '{id}': {}", err.detail);
                     errors.push(err);
+                }
+                // ★★★ **DSL-1's type-check half, and the reason it belongs
+                //     HERE.** The gate has three outcomes — refuse, clamp,
+                //     defer — and no fourth for "this rule is broken". Without
+                //     this, a rule that compares a pocket's NAME to a number
+                //     reaches the gate and is reported as a violated law, so
+                //     somebody goes looking for money that never moved. Caught
+                //     at author time it is what it always was: a document with
+                //     a mistake in it, named and fixable.
+                if resolved {
+                    let gamma = Gamma::new(&d.schema);
+                    for mut err in predicate_typecheck(&p, &gamma) {
+                        err.detail = format!("invariant '{id}': {}", err.detail);
+                        errors.push(err);
+                    }
                 }
             }
         }
@@ -1085,5 +1106,88 @@ mod tests {
         // The candidate is returned for display, but D itself is a separate
         // value the caller still holds, unchanged.
         assert_eq!(d.invariants.len(), 0, "the live definition is not mutated by a refusal");
+    }
+}
+
+#[cfg(test)]
+mod type_judgment_tests {
+    //! DSL-1's type-check half, at the door it actually guards.
+    use super::*;
+    use crate::schema::{DimType, Schema};
+
+    fn household() -> Schema {
+        Schema::new()
+            .declare(
+                "finances",
+                DimType::Record {
+                    fields: [(
+                        "liquid".to_string(),
+                        DimType::Record {
+                            fields: [(
+                                "balance".to_string(),
+                                DimType::Number { lo: None, hi: None },
+                            )]
+                            .into_iter()
+                            .collect(),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            )
+            .declare("label", DimType::Text)
+    }
+
+    fn with_invariant(expr: &str) -> Definition {
+        Definition::new(household()).with_invariant("rule", expr)
+    }
+
+    #[test]
+    fn a_well_typed_definition_loads() {
+        assert!(typecheck(&with_invariant("finances.liquid.balance >= 0")).is_ok());
+    }
+
+    #[test]
+    fn a_mistyped_rule_is_refused_at_the_door_rather_than_at_the_gate() {
+        // ★★★ The whole point of the slice. Before this the definition loaded,
+        //     and the first operator call that touched it came back as a
+        //     REFUSAL — the household reported as having broken a law it never
+        //     broke, because nothing happened except that a document was wrong.
+        let errors = typecheck(&with_invariant("label >= 5")).expect_err("must refuse");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].detail.contains("rule"), "names the rule: {:?}", errors[0]);
+        assert!(
+            errors[0].detail.contains("text") && errors[0].detail.contains("a number"),
+            "and says what is wrong with it, in words: {:?}",
+            errors[0],
+        );
+    }
+
+    #[test]
+    fn an_undeclared_dimension_is_reported_once_not_twice() {
+        // ★★ An undeclared path has no type, so typing it would produce a
+        //    second complaint about one mistake in a different voice — and a
+        //    person who reads two complaints for one error learns to read
+        //    neither carefully.
+        let errors = typecheck(&with_invariant("nowhere >= 5")).expect_err("must refuse");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].detail.contains("undeclared"));
+    }
+
+    #[test]
+    fn a_rule_that_does_not_parse_still_reports_as_unparseable() {
+        // ★ The three findings stay distinguishable: cannot read it, cannot
+        //   resolve it, cannot type it. Collapsing them would be the same loss
+        //   of information the gate's missing fourth outcome causes.
+        let errors = typecheck(&with_invariant("balance >>>")).expect_err("must refuse");
+        assert!(errors[0].detail.contains("does not parse"), "{:?}", errors[0]);
+    }
+
+    #[test]
+    fn an_edit_that_introduces_a_mistyped_rule_cannot_be_admitted() {
+        // ★★★ The door this guards is the EDIT path, so a definition already
+        //     in use cannot acquire a broken rule either.
+        let broken = with_invariant("label >= 5");
+        assert!(typecheck(&broken).is_err(), "the meta-gate's own check refuses it");
     }
 }
