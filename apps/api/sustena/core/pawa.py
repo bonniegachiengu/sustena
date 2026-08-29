@@ -14,8 +14,9 @@ Web3 Phase 3 mapping:
   charge()       → chargeRoyalty() Solidity function
 
 Royalty split on every component call:
-  70% → contributor
-  20% → network treasury
+  Pawa charge (usage):  70 / 15 / 5 / 5 / 5
+  Licence sale (access): 80 / 10 / 3 / 2 / 5
+  across contributor / treasury / validator / proposer / referrer
   5%  → referrer (if any)
   5%  → validator
 
@@ -29,7 +30,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Network treasury — receives 20% of all component charges
+# Network treasury — receives the treasury share of every settlement
 NETWORK_TREASURY_ID = "sustena.network_treasury" # TODO: Perhaps rename this an other siblings to sustena.mycelium.treasury i.e., others will be sustena.mycelium.market, etc.
 
 # Pawa granted to new users on signup
@@ -130,25 +131,60 @@ class PawaLedger:
 
     # ── Component charging (royalty split) ────────────────────────────────────
 
+    # The ratified two-revenue-type schedule (2026-08-04), as
+    # (contributor, treasury, validator, proposer, referrer) in per cent.
+    #
+    # ★★★ The earlier four-way 70/20/5/5 was not merely the wrong numbers — the
+    #     SIGNATURE could not hold the right ones. It had no proposer parameter,
+    #     so the ratified split was not expressible here at all, and a caller
+    #     wiring it up would have inherited a schedule that silently dropped a
+    #     role. Adding the parameter is the substance of this fix; changing the
+    #     percentages is the easy half.
+    #
+    # ★★★ Paying to RUN something is not paying to HAVE it, and one schedule
+    #     could not tell them apart. `revenue` is required rather than defaulted
+    #     for that reason: a caller that has not decided which of the two
+    #     happened has not decided what it is settling.
+    _SCHEDULES = {
+        "usage":  (70, 15, 5, 5, 5),
+        "access": (80, 10, 3, 2, 5),
+    }
+
     async def charge(
         self,
         caller_user_id: str,
         caller_sustain_id: str | None,
         pawa_cost: int,
         contributor_id: str,
+        revenue: str,
         referrer_id: str | None = None,
+        proposer_id: str | None = None,
+        validator_id: str | None = None,
     ) -> bool:
         """
-        Charge a component call and distribute royalties.
+        Charge a component call or a licence sale and distribute royalties.
 
-        Split:
-          70% → contributor
-          20% → network treasury
-           5% → referrer (if provided, else → treasury)
-           5% → validator (treasury for now; earmarked for Phase 3 nodes)
+        `revenue` is "usage" (a pawa charge — someone ran it) or "access"
+        (a licence sale — someone bought it). See `_SCHEDULES`.
 
-        Returns False if caller has insufficient balance (component call is blocked).
+        ★★★ Integer-floor arithmetic with the remainder assigned to the
+        validator share, so the split is EXACTLY conserving by construction.
+        A rounding leak here is not a cosmetic bug — it is a violation of the
+        conservation invariant, which is the one property this method must not
+        break.
+
+        ★★ An absent role's share folds into the treasury and is never dropped,
+        for the same reason: dropping it would break conservation, and the
+        treasury is the right destination because it *is* the commons.
+
+        Returns False if caller has insufficient balance (the call is blocked).
         """
+        if revenue not in self._SCHEDULES:
+            raise ValueError(
+                f"revenue must be one of {sorted(self._SCHEDULES)}, got {revenue!r} — "
+                "paying to run something is not paying to have it, and one schedule "
+                "cannot tell them apart"
+            )
         if pawa_cost <= 0:
             return True  # Free component
 
@@ -167,22 +203,37 @@ class PawaLedger:
             f"component_charge:contributor={contributor_id}"
         )
 
-        # Distribute royalties
-        contributor_share = int(pawa_cost * 0.70)
-        treasury_share    = int(pawa_cost * 0.20)
-        referrer_share    = int(pawa_cost * 0.05)
-        validator_share   = pawa_cost - contributor_share - treasury_share - referrer_share
+        # Distribute royalties on the ratified schedule.
+        c_pct, t_pct, v_pct, p_pct, r_pct = self._SCHEDULES[revenue]
+        contributor_share = pawa_cost * c_pct // 100
+        treasury_share    = pawa_cost * t_pct // 100
+        validator_share   = pawa_cost * v_pct // 100
+        proposer_share    = pawa_cost * p_pct // 100
+        referrer_share    = pawa_cost * r_pct // 100
 
-        await self.credit(contributor_id, None, contributor_share, f"royalty:caller={caller_user_id}")
-        await self.credit(NETWORK_TREASURY_ID, None, treasury_share, f"treasury_fee:caller={caller_user_id}")
+        # ★★★ The remainder is not discarded — it IS the validator's last unit.
+        #     This is the line that makes conservation a theorem rather than a
+        #     hope, and it mirrors sustena-core's `royalty::split` exactly.
+        assigned = (contributor_share + treasury_share + validator_share
+                    + proposer_share + referrer_share)
+        validator_share += pawa_cost - assigned
 
-        if referrer_id:
-            await self.credit(referrer_id, None, referrer_share, f"referral:caller={caller_user_id}")
-        else:
-            await self.credit(NETWORK_TREASURY_ID, None, referrer_share, f"treasury_referral:caller={caller_user_id}")
+        await self.credit(contributor_id, None, contributor_share,
+                          f"royalty:caller={caller_user_id}")
 
-        # Validator share → treasury for Phase 1; earmarked for validator nodes in Phase 3
-        await self.credit(NETWORK_TREASURY_ID, None, validator_share, f"treasury_validator:caller={caller_user_id}")
+        # ★★ An absent role folds into the treasury; never dropped.
+        to_treasury = treasury_share
+        for share, who, label in (
+            (validator_share, validator_id, "validator"),
+            (proposer_share, proposer_id, "proposer"),
+            (referrer_share, referrer_id, "referrer"),
+        ):
+            if who:
+                await self.credit(who, None, share, f"{label}:caller={caller_user_id}")
+            else:
+                to_treasury += share
+        await self.credit(NETWORK_TREASURY_ID, None, to_treasury,
+                          f"treasury:caller={caller_user_id}")
 
         logger.debug(
             "Charge: caller=%s cost=%d → contributor=%s gets %d pawa",
