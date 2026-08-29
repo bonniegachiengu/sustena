@@ -19,6 +19,50 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/vector-utility` — merged into `dev` 29 Aug — **OPV-25 + OPV-21**
+
+**Off:** `dev` · gate green (core 1,816 · host 245). OPV-21's own row predicted it
+would close the moment `u` became a vector, and it did — in the same branch,
+without a new object.
+
+**Arrow's wall is real and the escape is an assumption, not a trick.** No ordinal
+rule over three or more options satisfies unrestricted domain, Pareto,
+independence and non-dictatorship together. Sen and Harsanyi's escape is cardinal
+*interpersonally comparable* utilities — and that comparability is a claim
+somebody makes, never a property the numbers have.
+
+★★★ **So `Comparability::Undeclared` refuses interpersonal aggregation.** Without
+the claim, adding one person's 0.8 to another's 0.6 is arithmetic on two scales
+that happen to share a font. ★★★ **And the wall is in the right place**: a person
+weighing their own money against their own quiet needs no claim about a
+neighbour, and refusing that would be a wall in the wrong place — tested
+explicitly, because it is the easy over-correction.
+
+★★★ **`u` is a vector all the way to presentation.** `scalarise` is named so a
+reader sees where it is flattened rather than discovering it later. A test shows
+two genuinely different options — good for the money, good for the quiet —
+collapsing to one identical number: once summed, the disagreement that made it a
+choice is gone and nothing downstream can recover it.
+
+★★★ **`Ranked` has no `winner()`.** Reaching one option is
+`presentation::collapse`'s job, with its declared rule and its report of what it
+dropped. A top id handed back here would route around exactly the discipline
+§XIII asks for.
+
+★★ **An axis nobody weighed contributes nothing**, and `unweighted_axes()` makes
+that askable. A default weight of one would let an axis nobody thought about
+decide an outcome — a preference expressed by forgetting.
+
+★★ **The frontier is computed weightlessly**, from dominance alone, so it
+survives disagreement about the weights themselves. That is why a frontier can be
+honest where a total cannot.
+
+★★★ **Russell's caution, structural.** `APPRAISAL_AXES` is a `const` list, not an
+enum — an enum would make those ten the only expressible axes, which is the claim
+the caution says nobody may make. A `Utility` may carry "the way the kitchen feels
+on a Sunday", and a test says so. An emotion here is an appraisal with a sign and
+a weight, and there is no type that could hold anything more.
+
 ### `feat/domain-engine-matrix` — merged into `dev` 29 Aug — **CAP-13**
 
 **Off:** `dev` · gate green (core 1,804 · host 245).
