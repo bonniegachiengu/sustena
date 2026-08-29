@@ -138,6 +138,7 @@ pub mod harmonics;
 pub mod horizon;
 pub mod holarchy;
 pub mod holon;
+pub mod independence;
 pub mod inverse;
 pub mod issuance;
 pub mod juul;

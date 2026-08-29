@@ -19,6 +19,43 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/council-independence` — merged into `dev` 29 Aug — **OPV-12 + OPV-26**
+
+**Off:** `dev` · gate green (core 1,779 · host 245).
+
+**Condorcet needs independent votes, and a council of forks does not have them.**
+Five councillors reasoning under one world model are not five draws from the
+world; they are one draw reported five times. The comfort of a large `N` with the
+accuracy of a small one — and it is invisible from inside, because a unanimous
+council looks like strong evidence whether the agreement came from the world or
+from the model they were all handed.
+
+★★★ **Forks buy independence of sampling, not of assumptions**, and a test proves
+it rather than the docs asserting it: three councillors, three genuinely distinct
+sandboxes, effective N of one. OPV-12 was blocked on `M_world` existing; a
+`WorldModel` with a declared fidelity claim is that object.
+
+★★★ **`effective_n` is a ceiling and is named so.** `at_most()` exists so a
+caller reading the number aloud says the qualification with it. Distinct models
+may still share assumptions — written by one person, from one dataset, on one
+afternoon — and nobody inside the system can say by how much. That is §XIII's own
+words, and a number presented here as a measurement would be the very failure it
+is reporting.
+
+★★★ **A unanimous single-model council reads as `TheModelTalking`.** Not as weak
+evidence — as no evidence about the world at all. The dangerous case is the one
+that looks best.
+
+★★ **Both of §XIII's mitigations are objects rather than advice.** `Fidelity` is
+declared per model, and `Undeclared` covers **nothing** rather than everything:
+the undeclared claim is the one that never gets checked, so a councillor whose
+model never claimed to know about this topic is named — it is adding a number,
+not a judgment. Letting councillors legitimately differ in `M_world` is the only
+thing that raises the effective N at all.
+
+★★ **A reused sandbox is reported as a separate, cruder failure.** Sharing a
+model is subtle; sharing a fork means they did not even reason separately.
+
 ### `feat/scenario-probe` — merged into `dev` 29 Aug — **OPV-15**
 
 **Off:** `dev` · gate green (core 1,768 · host 245).
