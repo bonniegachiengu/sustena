@@ -19,6 +19,19 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `chore/verify-opv29` — merged into `dev` 29 Aug — **OPV-29 verified**
+
+**Docs only.** The row said *"route is OPV-28 and stays unbuilt"*. OPV-28 has since
+landed (`mixture.rs`, 16 Aug), and `presentation::discharged_by_this_build()`
+reports all three of Orchie's duties as `Discharge::Built` — route, hold the
+whole, and present the frontier. Nothing needed building; the row needed reading.
+
+Third stale row found this session, after IMM-7 and EVT-14. The pattern is worth
+naming: a row that names a dependency ("blocked on X") does not update itself when
+X lands, so the tracker drifts pessimistic and work gets rebuilt. `Discharge` is
+the antidote that already existed here — the code says what it discharged, so
+checking took a grep rather than a judgment.
+
 ### `feat/duality-and-depth` — merged into `dev` 29 Aug — **OPV-9 + OPV-10**
 
 **Off:** `dev` / gate green (core 1,838 / host 245).
