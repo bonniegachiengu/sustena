@@ -19,6 +19,44 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/domain-engine-matrix` — merged into `dev` 29 Aug — **CAP-13**
+
+**Off:** `dev` · gate green (core 1,804 · host 245).
+
+**Sixteen cells, and the two that say DO NOT are why it is a matrix and not a
+sentence.** Three of the four engines run in all four regimes with only a change
+of manner. `Model` and `Learn` have a regime where the honest output is a
+refusal: a model of a chaotic system produces a confident wrong answer and a
+person acts on it, which is strictly worse than having none; learning from one
+fits noise and then carries the noise into every later decision that reads the
+parameter.
+
+★★★ **Refusing is not degrading.** A "reduced-confidence model" in chaos is the
+same wrong number in a smaller font, so `Behaviour::Refuse` has no value in it to
+read at all.
+
+★★★ **Disorder arrives exactly as §VII asks — as confidence over the estimate.**
+`Estimate` has no constructor that omits confidence, and a `Known(Complicated)`
+at 51% is disorder *however definite its label looks*: the label is not evidence
+of itself. A bare majority over four options is barely above chance, and routing
+an expert method on it is the failure the fifth state exists to name. Below the
+floor the matrix cannot be indexed and the answer is `Surface` — never a default
+row, because picking one anyway is how an unrecognised situation gets handled as
+a familiar one.
+
+★★ **`Model × Complex` is `Bounded`, carrying OPV-13's `H*` as its limit.** "It
+works, with a limit" and "it works" are different promises, and one variant for
+both loses the limit at the first call site that does not read the prose.
+
+★★ **`Observe` survives every regime**, because it assumes nothing about the
+regime — it reports what the log holds. That is why it is the thing left standing
+when the rest stops, and `refused_in()` makes "what can we still do here" askable
+as a set rather than one engine at a time.
+
+⬜ The classifier half — a Monitor producing the estimate from CUSUM
+regime-change detection — stays open. This branch builds what consumes it, and
+`cynefin.rs`'s "supplied, never computed here" discipline is untouched.
+
 ### `feat/device-as-sustain` — merged into `dev` 29 Aug — **ING-9**
 
 **Off:** `dev` · gate green (core 1,793 · host 245). Desktop installers rebuilt
