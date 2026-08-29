@@ -159,6 +159,7 @@ pub mod mixture;
 pub mod models;
 pub mod monitor;
 pub mod mutation;
+pub mod network;
 pub mod obligation;
 pub mod operative;
 pub mod operator;
