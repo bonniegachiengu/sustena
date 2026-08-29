@@ -13,9 +13,32 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Live
 
-*(none open right now.)*
+Nothing in flight. `dev` = `origin/dev`, working tree clean.
 
----
+**29 Aug 2026 — the WBD closed: 227 done, 0 open, 3 declined, 38 parked.**
+The 38 parked rows are the economy layer, parked by standing decision. The 3
+declined are positions that were argued for, now carrying a marker that says so.
+
+What that day turned up, beyond the rows themselves:
+
+- **Six stale rows**, all pessimistic — IMM-7, EVT-14, OPV-29, CAP-7, CAP-11, and
+  CAP-10/19 closing on re-read. CAP-7 was the worst: it said only the boundary
+  firewall remained while **IMM-1 own status had recorded `F` as shipped for
+  twelve days**. Two rows in one tracker disagreeing with each other, and neither
+  noticing. A row that names a dependency does not update itself when the
+  dependency lands, so the tracker drifts toward understating what exists and work
+  gets rebuilt.
+- **The same failure pointed the other way**: `⬜` on a declined row reads as
+  *open*, and the natural response to an open row is to close it. Three of those
+  now carry `🚫`.
+- **A contradiction between two modules landed an hour apart** — `effect_journal`
+  said a retry always needs a person, `egress` said a declared-reversible act may
+  retry itself. They were answering different questions (audit vs authority) and
+  the journal wording ran them together.
+- **Three genuine defects found by writing the checks**: a test that passed for the
+  wrong reason (`before == after` can never be refused), a region that cannot
+  measure a missing dimension (so a phone that stopped reporting its battery is
+  *unjudgeable*, not healthy), and a council seat with no operator to act through.
 
 ## Merged
 
