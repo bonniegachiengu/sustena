@@ -19,6 +19,40 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/dsl-surface` — merged into `dev` 29 Aug — **DSL-14**
+
+**Off:** `dev` at `616a48f` · gate green (core 1,538 · host 223).
+
+**JSON was the only way to write an Enzyme, and JSON is a terrible thing to ask
+a person to write a rule in** — quoting, commas, nesting, and a shape that
+obscures the one thing that matters: *when this, do that*. The row sits last in
+the phase for a good reason: a friendlier surface built before the AST was
+settled would have been a friendlier way to write the wrong thing.
+
+**The theorem, executed:** text and builder produce a value that is `==`. Many
+surfaces over ONE core is a feature; many surfaces over two cores is two
+languages wearing one name, which is exactly what DSL-6 forbids. And
+`parse(render(e)) == e` runs, which is what makes this a surface rather than an
+importer.
+
+★★★ **The guard is handed to the one predicate parser, untouched.** A second
+predicate parser here would be the two-evaluator failure in miniature, arriving
+silently — the same words meaning two things depending on which file they were
+written in.
+
+Judgments: **line-oriented, no nesting** (total by construction, and every error
+gets a real line number — "invalid syntax" for forty lines makes somebody re-read
+all forty); **quoting is the only thing separating a literal from a path**,
+because guessing would make one string mean two things on one line; and
+**letting money go below zero has to be typed out** (`or below zero`) rather than
+defaulted.
+
+**A real defect found on the way:** `ParamDecl::name` was `&'static str`, so a
+parameter named at run time could only be obtained by **leaking** it. A person
+editing their own rule ten times would leak ten times — a defect that grows with
+use rather than one a test sees. It is a `Cow` now; every compile-time
+registration still borrows.
+
 ### `feat/dsl-authored-enzymes` — merged into `dev` 29 Aug — **DSL-13 (the large one)**
 
 **Off:** `dev` at `2e75491` · gate green (core 1,525 · host 223).

@@ -98,7 +98,15 @@ pub enum ParamKind {
 /// guessing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParamDecl {
-    pub name: &'static str,
+    /// ★★★ `Cow` rather than `&'static str`, and the reason is DSL-14.
+    ///
+    /// Every Enzyme this crate ships names its parameters at compile time, and
+    /// a borrowed static was right while that was the only way an Enzyme could
+    /// exist. An Enzyme **authored in Embroidery** names them at run time, from
+    /// text somebody typed — and the only way to get a `&'static str` from that
+    /// is to leak it. A person editing their own rule ten times would leak ten
+    /// times, which is a defect that grows with use rather than one a test sees.
+    pub name: std::borrow::Cow<'static, str>,
     pub kind: ParamKind,
     /// Whether `θ` is incomplete without it.
     pub required: bool,
@@ -113,18 +121,31 @@ pub struct ParamDecl {
 }
 
 impl ParamDecl {
-    pub fn number(name: &'static str) -> Self {
-        ParamDecl { name, kind: ParamKind::Number, required: true, names_within: None }
+    pub fn number(name: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+        ParamDecl {
+            name: name.into(),
+            kind: ParamKind::Number,
+            required: true,
+            names_within: None,
+        }
     }
 
-    pub fn text(name: &'static str) -> Self {
-        ParamDecl { name, kind: ParamKind::Text, required: true, names_within: None }
+    pub fn text(name: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+        ParamDecl {
+            name: name.into(),
+            kind: ParamKind::Text,
+            required: true,
+            names_within: None,
+        }
     }
 
     /// A name drawn from a live-state collection.
-    pub fn naming(name: &'static str, within: &'static str) -> Self {
+    pub fn naming(
+        name: impl Into<std::borrow::Cow<'static, str>>,
+        within: &'static str,
+    ) -> Self {
         ParamDecl {
-            name,
+            name: name.into(),
             kind: ParamKind::Text,
             required: true,
             names_within: Some(within),

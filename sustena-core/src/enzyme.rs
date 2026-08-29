@@ -256,7 +256,7 @@ pub fn propose_call(
 
     for decl in &meta.params {
         // 1 — already known. Recorded, never silent.
-        if let Some(v) = effect.known.get(decl.name) {
+        if let Some(v) = effect.known.get(decl.name.as_ref()) {
             if let Some(rejection) = reject_unknown_name(decl, v, &reader) {
                 return rejection;
             }
@@ -435,12 +435,13 @@ mod tests {
     fn a_proposal_never_carries_a_field_the_operator_does_not_declare() {
         let p = propose_from("allocate 40 to food");
         let ready = p.ready().unwrap_or_else(|| panic!("{}", p.describe()));
-        let declared: BTreeSet<&str> = registry()
+        let reg = registry();
+        let declared: BTreeSet<&str> = reg
             .get("budget.allocate")
             .unwrap()
             .params
             .iter()
-            .map(|d| d.name)
+            .map(|d| d.name.as_ref())
             .collect();
         assert!(ready.call.params.keys().all(|k| declared.contains(k.as_str())));
     }
