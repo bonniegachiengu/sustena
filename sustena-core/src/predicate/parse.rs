@@ -35,6 +35,25 @@ pub fn parse_predicate(expr: &str) -> PResult<Predicate> {
     Ok(node)
 }
 
+/// Parse a bare dot-path — `finances.pockets.food.allocated`.
+///
+/// ★★★ Exposed so anything that needs to know what a path MEANS asks the one
+/// parser. A second spelling — a `split('.')` somewhere convenient — is how two
+/// parts of one language drift, and the drift is silent until a path resolves
+/// differently in an invariant than in the surface that wrote it.
+pub fn parse_path(expr: &str) -> PResult<Vec<PathSegment>> {
+    let tokens = lex::tokenize(expr);
+    let mut p = Parser { tokens, pos: 0 };
+    let path = p.parse_path(true, true)?;
+    if p.pos != p.tokens.len() {
+        return Err(p.err(format!(
+            "Unexpected trailing token '{}'",
+            p.peek().unwrap_or_default()
+        )));
+    }
+    Ok(path.segments)
+}
+
 struct Parser {
     tokens: Vec<String>,
     pos: usize,

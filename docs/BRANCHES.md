@@ -19,6 +19,36 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/dsl-typed-overlay` — merged into `dev` 29 Aug — **DSL-9**
+
+**Off:** `dev` at `6f8bc11` · gate green (core 1,491 · host 223).
+
+**`ρ`: you hand a person the overlay, never the definition.** A definition says
+what a Sustain *is*; an overlay says only what some of its values *are*. A
+surface that had to hand out the definition would have to decide, per field,
+whether this person may change this thing — a judgment made in the UI, where it
+cannot be checked. As a type, the check runs once before anybody sees a form.
+
+**The finding, and it is the interesting one: per-path typing is not enough.**
+Every path in an overlay can be a declared dimension of exactly the right type
+and the RESULT can still be malformed — setting one field of a new open-map key
+invents half a pocket, a name with no allocation. The shape changes anyway, one
+key at a time, which is precisely what the Curated UI leans on an overlay not to
+allow. A test found it, not a reading. `apply` now validates the whole candidate;
+the per-path judgment stays because it gives the better message when it is the
+one that fails.
+
+Two more judgments: **right-biased** because somebody who types a value, thinks
+again and types another has changed their mind — left-bias would make the first
+edit of a session unchangeable. And **type-correct is not the same word as
+permitted**: an overlay putting a balance below zero is perfectly well-typed and
+still refused by the gate. A test pins that distinction.
+
+★★ `predicate::parse_path` was exposed rather than splitting on `.` somewhere
+convenient — a second spelling of what a path means is how two parts of one
+language drift, silently, until a path resolves differently in an invariant than
+in the surface that wrote it.
+
 ### `feat/dsl-typed-params` — merged into `dev` 29 Aug — **DSL-8**
 
 **Off:** `dev` at `5e2aaa7` · gate green (core 1,476 · host builds clean).
