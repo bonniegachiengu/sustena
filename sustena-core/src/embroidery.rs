@@ -81,7 +81,7 @@ impl Expr {
             Expr::Literal(_) => Ty::Unknown,
             Expr::Param(name) => params
                 .iter()
-                .find(|p| p.name == name)
+                .find(|p| p.name.as_ref() == name.as_str())
                 .map(|p| match p.kind {
                     ParamKind::Number => Ty::Number,
                     ParamKind::Text => Ty::Text,
