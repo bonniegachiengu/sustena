@@ -244,6 +244,8 @@ impl World {
                 payload: serde_json::json!({"sustain": sustain_id}),
             }],
             mutations,
+            // ★ A backfill is not an Enzyme call either.
+            params: None,
             origin: None,
             lamport: None,
             clock: None,
@@ -634,7 +636,12 @@ impl World {
         //   it would imply events that were never written.
         let seq = sustain.next_seq;
         if x.committed() {
-            let line = self.stamped(sustain_id, seq, LoggedEvent::of(seq, operator, &x));
+            // ★★ With the call, so semantic replay has something real to read.
+            let line = self.stamped(
+                sustain_id,
+                seq,
+                LoggedEvent::called(seq, operator, &x, params.clone()),
+            );
             self.store.append(sustain_id, &line)?;
             let sustain = inner.sustains.get_mut(sustain_id).expect("checked above");
             sustain.state = x.state.clone();
@@ -2425,6 +2432,11 @@ fn leg_line(seq: u64, leg: &Leg) -> LoggedEvent {
         operator: "holon.transfer".to_string(),
         events: vec![EventDto::from(leg.event())],
         mutations: leg.mutations().to_vec(),
+        // ★★ A transfer leg is written by the transfer itself, not by an
+        //    ordinary Enzyme call, so there is no single call to record. Named
+        //    rather than filled with an empty map, which would claim the leg
+        //    was called with nothing.
+        params: None,
         origin: None,
         lamport: None,
         clock: None,
@@ -3106,5 +3118,99 @@ mod state_hash_tests {
         assert!(call(&b, "budget.allocate",
                      vec![("pocket_name", json!("food")), ("amount", json!(1.0))]));
         assert_ne!(ha, b.store().state_hash("home").unwrap());
+    }
+}
+
+#[cfg(test)]
+mod durable_call_tests {
+    //! CELL §III — the log records the CALL, not only what it did.
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-calls-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    fn call(w: &World, op: &str, ps: Vec<(&str, Value)>) -> bool {
+        let params: Map<String, Value> = ps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        matches!(w.call("home", op, &params), Ok(Some((x, _))) if x.committed())
+    }
+
+    #[test]
+    fn a_committed_call_is_recorded_with_what_it_was_called_with() {
+        // ★★★ `semantic::replay_under` re-runs the logged CALLS, and the log
+        //     recorded only the operator and the resulting mutations — half the
+        //     call, so the mechanism had nothing real to read.
+        let w = world("recorded");
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(1500.0)), ("source", json!("pay"))]));
+
+        let (calls, skipped) = w.store().enzyme_calls("home").expect("reads");
+        assert_eq!(skipped, 0);
+        let income = calls.iter().find(|c| c.operator == "budget.record_income").expect("logged");
+        assert_eq!(income.params.get("amount"), Some(&json!(1500.0)));
+        assert_eq!(income.params.get("source"), Some(&json!("pay")));
+    }
+
+    #[test]
+    fn genesis_is_not_a_call_and_is_not_offered_as_one() {
+        let w = world("genesis");
+        let (calls, skipped) = w.store().enzyme_calls("home").expect("reads");
+        assert!(calls.iter().all(|c| c.operator != "genesis"));
+        assert_eq!(skipped, 0, "and it is not counted as an unreadable one either");
+    }
+
+    #[test]
+    fn a_line_written_before_params_were_durable_is_skipped_and_counted() {
+        // ★★★ Never replayed with an empty map. An Enzyme called with nothing
+        //     is a DIFFERENT call, and reporting on it would be reporting
+        //     confidently on something that did not happen.
+        let w = world("legacy");
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(100.0)), ("source", json!("pay"))]));
+
+        // Write one line the old way — params absent, as every pre-slice line is.
+        let (_, next) = w.store().load_state("home").expect("state");
+        let mut legacy = crate::store::LoggedEvent::of(
+            next,
+            "budget.record_income",
+            &sustena_core::Execution {
+                result: sustena_core::OperatorResult::ok(Value::Null),
+                mutations: vec![],
+                events: vec![],
+                movements: vec![],
+                state: Value::Null,
+            },
+        );
+        legacy.params = None;
+        w.store().append("home", &legacy).expect("appended");
+
+        let (calls, skipped) = w.store().enzyme_calls("home").expect("reads");
+        assert_eq!(skipped, 1, "counted, not guessed at");
+        assert!(calls.iter().all(|c| !c.params.is_empty()), "and never handed on empty");
+    }
+
+    #[test]
+    fn the_recorded_calls_can_be_replayed_under_a_definition() {
+        // ★★★ The whole reason the params had to be durable: EDIT-11's
+        //     stranding check asks "would what already happened still have been
+        //     admissible?", and it cannot ask without the calls.
+        let w = world("replayable");
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(2000.0)), ("source", json!("pay"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(500.0))]));
+
+        let (calls, _) = w.store().enzyme_calls("home").expect("reads");
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|c| !c.params.is_empty()));
     }
 }

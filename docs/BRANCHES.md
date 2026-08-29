@@ -19,6 +19,49 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/durable-calls` — merged into `dev` 29 Aug — **SUS-6 + the wire "flake", fixed**
+
+**Off:** `dev` at `9ceb61c` · gate green (core 1,610 · host **237**, in 4.1 s).
+
+**`semantic::replay_under` had nothing real to read.** It re-runs the logged
+Enzyme **calls** under a chosen definition — that is what makes *would this
+still have been admissible under `D′`?* answerable, and what EDIT-11's stranding
+check stands on. It needs `(operator, params)`. The durable log recorded the
+operator and the resulting mutations, so **half the call was durable** and the
+mechanism could only be exercised from hand-built fixtures.
+
+`LoggedEvent.params` is additive and `Option`, with `#[serde(default)]`, so
+every line written before this deserialises byte-identically — the row's own
+"addable later without migration" turned out to be true.
+
+★★★ **`None` means *we do not know what it was called with*, which is genuinely
+different from *called with nothing*.** `enzyme_calls` returns `(calls,
+skipped)` and never hands on an empty map: an Enzyme called with nothing is a
+different call, and replaying it would be reporting confidently on something
+that did not happen. A caller can say *these are the ones we could check* rather
+than implying it checked everything.
+
+★★ Genesis and transfer legs carry `None` deliberately — neither is an ordinary
+Enzyme call, and filling them with an empty map would claim they were called
+with nothing.
+
+**The `wire` "flake" was a real bug, and it is fixed.** Two of its tests failed
+under a full parallel run, then four as the suite grew, and all eleven passed in
+isolation — taking **342 seconds**. The cause: each wire test unlocks **five**
+identities at PBKDF2's 600,000-iteration production cost, then talks over a
+socket with a **20-second IO timeout**. Under parallel load an unlock takes
+longer than the peer will wait, so the handshake times out mid-flight. It fails
+more as the suite grows, which is why it looked like a flake and was not one.
+
+★★★ Lowering the timeout was the wrong fix — 20 seconds is a real protection
+against a peer that stalls, and weakening production to make a test suite
+comfortable is backwards. The KDF cost is `cfg(test)`-lowered instead, with
+OWASP's floor kept as its **own constant and asserted** in `identity.rs`, so the
+number that ships is still guarded. The wire tests are about the wire.
+
+**The host suite went from 250+ seconds to 4.1.** It had been spending
+essentially all of its time deriving keys.
+
 ### `feat/domain-map` — merged into `dev` 29 Aug — **SUS-16**
 
 **Off:** `dev` at `4ea27d4` · gate green (core 1,600 · host builds clean).
@@ -897,11 +940,11 @@ before more is built on it. State at the halt:
 
 ## Known flake
 
-`wire::tests::a_sealed_frame_survives_the_round_trip_intact` failed once under a
-full parallel run on 26 Aug and passed alone, then twice more in full runs
-straight after. It does real crypto round trips and nothing in the inventory work
-touches `wire`. Recorded rather than ignored: a test that fails one run in four
-is worth knowing about before it fails on something that matters.
+**Diagnosed 29 Aug.** `wire::tests` fails intermittently under a full parallel
+run and passes in isolation — where the eleven tests take **342 seconds**. They
+are slow real-crypto round trips being starved alongside 230 other tests, not a
+correctness problem. The original note stands as the observation; this is the
+cause.
 
 ## Conventions
 
