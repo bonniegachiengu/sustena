@@ -973,6 +973,30 @@ impl Ingested {
         source_id: &str,
         reference: &str,
     ) -> StoreResult<Option<String>> {
+        self.same_fact_already_applied(sustain_id, source_id, reference, None)
+    }
+
+    /// The same question, with the AMOUNT as part of the key.
+    ///
+    /// ★★★ **Matching on a reference alone is not matching on a fact**, and
+    /// getting this wrong is worse than not having it. Reference codes are
+    /// allocated by different systems and can collide; when they do, a real
+    /// separate transaction is silently treated as already-applied and
+    /// **vanishes without trace** — nobody finds out, because the whole effect
+    /// of the join is that nothing is shown.
+    ///
+    /// ★★ So the amount has to agree too. Two payments of forty thousand on one
+    /// day are ordinary; a shared reference is ordinary; both together is a
+    /// coincidence worth acting on. This strictly *narrows* what gets joined,
+    /// which is the safe direction — a missed join shows a duplicate a person
+    /// can undo, a wrong join hides a transaction nobody knows to look for.
+    pub fn same_fact_already_applied(
+        &self,
+        sustain_id: &str,
+        source_id: &str,
+        reference: &str,
+        amount: Option<f64>,
+    ) -> StoreResult<Option<String>> {
         if reference.len() < MIN_REF_LEN {
             return Ok(None);
         }
@@ -981,7 +1005,16 @@ impl Ingested {
             .into_iter()
             .filter(|m| m.sustain_id == sustain_id && m.source_id != source_id)
             .filter(|m| m.applied)
-            .find(|m| m.reference() == Some(reference))
+            .filter(|m| m.reference() == Some(reference))
+            .find(|m| match (amount, message_amount(m)) {
+                // ★★ Both sides know the amount: they must agree.
+                (Some(want), Some(have)) => (want - have).abs() <= 0.005,
+                // ★★ One side does not: fall back to the reference alone rather
+                //    than refusing to join. That is the behaviour that shipped,
+                //    and narrowing it further would start missing real pairs
+                //    for messages whose rules extract no amount.
+                _ => true,
+            })
             .map(|m| m.id))
     }
 
@@ -1407,6 +1440,12 @@ impl Ingested {
     pub fn recall(&self, sustain_id: &str, description: &str) -> Option<(String, u32)> {
         self.history().ok()?.get(&history_key(sustain_id, description)).cloned()
     }
+}
+
+/// The amount a captured message reported, however its rule spelled it.
+fn message_amount(m: &IngestedMessage) -> Option<f64> {
+    let v = m.parsed_fields.get("amount")?;
+    v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
 }
 
 fn mark_key(sustain_id: &str, source_id: &str) -> String {
@@ -3671,5 +3710,90 @@ mod queue_tests {
                    New M-PESA balance is Ksh1.00";
         ing.capture("other", "mpesa", raw, &rules).expect("theirs");
         assert_eq!(ids(&ing.navigable("h", 5, 50).expect("q")), vec![mine]);
+    }
+}
+
+#[cfg(test)]
+mod fact_key_tests {
+    //! Ingest §IV — a reference is not a fact on its own.
+    use super::*;
+    use std::env;
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let dir = env::temp_dir().join(format!("sustena-fact-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        let ing = Ingested::at(dir).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    /// A real M-Pesa received text, so the amount is genuinely parsed.
+    fn received(reference: &str, amount: &str) -> String {
+        format!(
+            "{reference} Confirmed. You have received Ksh{amount} from MARY NGIGI 0726***961 \
+             on 2/8/26 at 9:14 AM New M-PESA balance is Ksh5,000.00"
+        )
+    }
+
+    fn capture(ing: &Ingested, rules: &[ParseRule], source: &str, raw: &str) -> IngestedMessage {
+        let Capture::Stored(m) = ing.capture("h", source, raw, rules).expect("capture") else {
+            panic!("stored")
+        };
+        *m
+    }
+
+    #[test]
+    fn one_transfer_from_two_senders_is_still_joined() {
+        // The behaviour that shipped, and it must keep working.
+        let (ing, rules) = store("joined");
+        let first = capture(&ing, &rules, "mpesa", &received("QGH7XJ4P2Q", "1,000.00"));
+        ing.record_outcome(&first.id, true, None).expect("applied");
+
+        let found = ing
+            .same_fact_already_applied("h", "kcb", "QGH7XJ4P2Q", Some(1000.0))
+            .expect("lookup");
+        assert_eq!(found.as_deref(), Some(first.id.as_str()));
+    }
+
+    #[test]
+    fn a_reference_collision_no_longer_swallows_a_real_transaction() {
+        // ★★★ The finding. Matching on a reference ALONE meant a collision
+        //     silently treated a separate transaction as already-applied, and
+        //     it vanished without trace — nobody finds out, because the whole
+        //     effect of the join is that nothing is shown.
+        let (ing, rules) = store("collision");
+        let first = capture(&ing, &rules, "mpesa", &received("QGH7XJ4P2Q", "1,000.00"));
+        ing.record_outcome(&first.id, true, None).expect("applied");
+
+        let joined = ing
+            .same_fact_already_applied("h", "kcb", "QGH7XJ4P2Q", Some(40_000.0))
+            .expect("lookup");
+        assert!(joined.is_none(), "a different amount is a different transaction");
+    }
+
+    #[test]
+    fn an_unknown_amount_falls_back_to_the_reference_rather_than_refusing() {
+        // ★★ Narrowing further would start missing real pairs for messages
+        //    whose rules extract no amount — and a missed join shows a
+        //    duplicate a person can undo, which is the safe failure.
+        let (ing, rules) = store("unknown-amount");
+        let first = capture(&ing, &rules, "mpesa", &received("QGH7XJ4P2Q", "1,000.00"));
+        ing.record_outcome(&first.id, true, None).expect("applied");
+
+        let found =
+            ing.same_fact_already_applied("h", "kcb", "QGH7XJ4P2Q", None).expect("lookup");
+        assert_eq!(found.as_deref(), Some(first.id.as_str()));
+    }
+
+    #[test]
+    fn the_old_entry_point_still_answers_the_old_question() {
+        let (ing, rules) = store("compat");
+        let first = capture(&ing, &rules, "mpesa", &received("QGH7XJ4P2Q", "1,000.00"));
+        ing.record_outcome(&first.id, true, None).expect("applied");
+        assert!(ing
+            .same_event_already_applied("h", "kcb", "QGH7XJ4P2Q")
+            .expect("lookup")
+            .is_some());
     }
 }

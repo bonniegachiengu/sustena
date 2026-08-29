@@ -894,9 +894,17 @@ impl World {
         //     queue with its own reason, because "already recorded from your
         //     other bank" is something worth being able to see.
         if let Some(reference) = m.reference() {
+            // ★★ With the amount, so a reference collision cannot silently
+            //    swallow a real separate transaction.
+            let amount = m
+                .parsed_fields
+                .get("amount")
+                .and_then(|v| v.as_f64().or_else(|| {
+                    v.as_str().and_then(|s| s.replace(',', "").parse().ok())
+                }));
             if let Some(first) = self
                 .ingest
-                .same_event_already_applied(sustain_id, source_id, reference)?
+                .same_fact_already_applied(sustain_id, source_id, reference, amount)?
             {
                 self.ingest.note_same_event(&m.id, &first)?;
                 let updated = self
