@@ -42,6 +42,51 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/attention-meter` — merged into `dev` 29 Aug — **OPV-8 + ADD-1**
+
+**Off:** `dev` / gate green (core 2,090 / host 256).
+
+**OPV-8: the system had the hold without the priced scan.** The knapsack that
+fits about four things into a person's working memory was built, and nothing
+priced the looking that fills it — the inverse of the usual gap. Normally a
+system measures eagerly and cannot decide what to show; here it decided well and
+never charged for the search.
+
+★★★ **Iso-cost is the property worth having.** Deep-and-narrow and
+broad-and-shallow are the same spend, because the product is what is bounded. So
+the budget constrains how much looking happens and says nothing about its shape,
+which is right: whether to look widely or closely is a judgement about the
+question rather than about the money.
+
+★★★ **Scan and hold are scarce in different things** — pawa over the composition
+tree versus a person's working memory. A design that priced only one would either
+search forever and show four things, or search cheaply and try to show forty.
+
+★★ `κ_a` is declared and uncalibrated and says so executably, the same honest
+position the meter's own coefficients hold. And a refusal names which of breadth,
+depth or resolution to give up, because being told only "no" leaves a caller
+guessing among three.
+
+**ADD-1: the shape, deliberately not the instrument.**
+
+★★★ **§6.7 is kept structurally.** `Peg::is_live()` is false with no field and
+no constructor that could make it true, because issuing a real, public,
+transferable token backed by real reserves is a human-authorized act with legal
+weight and not a boolean this codebase sets. Nothing here can pay anybody:
+`redemption_claim()` returns a claim.
+
+★★★ **The segregated floor is checked separately from the total, and that is
+the finding.** A reserve can be hugely over-collateralised on paper and unable to
+pay — which only shows on the day somebody redeems. A test builds exactly that
+state, ten times coverage with the floor empty, and it reports a breach rather
+than health. Collapsing the two numbers lets a reserve look fine while the part
+that must always be liquid has been lent out.
+
+★★ Coverage is a ratio rather than a boolean, because a boolean cannot show a
+peg thinning: 1.02 and 4.00 are both "covered" and are not the same situation.
+And the target is a value, so a digital shilling or a basket is a reviewed
+variant rather than a rewrite.
+
 ### `feat/metered-decisions` — merged into `dev` 29 Aug — **OP-11 + MON-12 + CTL-10 (+ CAP-16, PAWA-13)**
 
 **Off:** `dev` / gate green (core 2,071 / host 256).
