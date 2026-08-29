@@ -319,12 +319,26 @@ pub fn parse_message(raw_text: &str, source: Option<&str>, extra: &[ParseRule]) 
     }
 
     // ★★★ FIRST. Before any rule, before any caller may store anything.
-    if contains_sensitive_secret(text) {
-        return Transduction::Rejected {
-            reason: "Message contains an OTP/verification code or similar secret — refused, \
-                     never parsed or stored."
-                .to_string(),
-        };
+    // ★★★ TWO detectors, consulted with OR — see [`crate::secret_shape`]. The
+    //     vocabulary knows phrasings; the shape reads structure and no words at
+    //     all, so a bank inventing new wording defeats one and not the other.
+    //     Either refusing is a refusal, because a false positive costs one
+    //     capture somebody re-enters and a false negative stores a credential.
+    match crate::secret_shape::guard(text, contains_sensitive_secret(text)) {
+        crate::secret_shape::Caught::Nothing => {}
+        crate::secret_shape::Caught::ByShape { because } => {
+            return Transduction::Rejected {
+                reason: format!(
+                    "Message has the shape of a one-time code ({because}) — refused, never                      parsed or stored, even though its wording is unfamiliar."
+                ),
+            };
+        }
+        _ => {
+            return Transduction::Rejected {
+                reason: "Message contains an OTP/verification code or similar secret —                          refused, never parsed or stored."
+                    .to_string(),
+            };
+        }
     }
 
     let key = source.unwrap_or("").to_lowercase();
@@ -384,6 +398,22 @@ mod tests {
     }
 
     // ── the secret gate ─────────────────────────────────────────────────────
+
+    #[test]
+    fn a_credential_in_wording_the_vocabulary_has_never_seen_is_still_refused() {
+        // ★★★ IMM-11, end to end. The ten regexes have nothing to match in
+        //     Swahili; the shape is unchanged. Before the second detector this
+        //     message parsed as ordinary text and was stored.
+        let swahili = "Nambari yako ya siri ni 483920. Usimshirikishe mtu yeyote.";
+        assert!(!contains_sensitive_secret(swahili), "the vocabulary genuinely misses it");
+        match parse_message(swahili, None, &[]) {
+            Transduction::Rejected { reason } => {
+                assert!(reason.contains("shape of a one-time code"), "{reason}");
+                assert!(reason.contains("unfamiliar"), "say WHY it was caught: {reason}");
+            }
+            other => panic!("must be refused: {other:?}"),
+        }
+    }
 
     #[test]
     fn every_secret_shape_is_rejected_and_carries_nothing() {

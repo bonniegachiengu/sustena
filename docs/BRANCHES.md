@@ -19,6 +19,50 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/structural-secret-detector` — merged into `dev` 29 Aug — **IMM-11**
+
+**Off:** `dev` · gate green (core 1,721 · host 245).
+
+**Three layers checking the same ten regexes are one layer written three times.**
+The Android filter, the ingest engine and the transducer each refuse a message
+carrying a one-time secret, and that reads as defence in depth until you ask what
+happens when the vocabulary misses: all three miss together, for the same reason.
+Layering buys **independence of failure**, not a count.
+
+★★★ **So the second detector reads no words at all.** A bare 4–8 digit code —
+necessary and not sufficient, because a real paybill confirmation genuinely
+contains a bare eight-digit account number — plus three of four shape features:
+no transaction reference, brief, a shouted three-word run, no figure quoted in
+cents. Combined with the vocabulary by **OR**, because the costs are not
+symmetric: a false positive is one capture somebody re-enters, a false negative
+is a live credential in a database.
+
+★★★ **Independence proven rather than claimed, in both directions.** A credential
+message in Swahili passes the ten regexes completely untouched and is refused on
+shape; a wordy warning containing no code at all is invisible to shape and caught
+by vocabulary. Before this branch the Swahili message parsed as ordinary text and
+was stored.
+
+★★ **Calibrated against the real corpus, and it moved the design.** The obvious
+structural rule is "a credential message does not mention money" — and the real
+OTP sample names a USD transaction, so that rule would have missed the one
+message it was written for. It is caught on `no_cents` instead: money is quoted
+to two places and `113.8` is not. All eight real transaction shapes stay in the
+tests as a standing negative control, because a detector that refuses real
+payments is one somebody turns off, and then there is no second layer at all.
+
+★★ **A real bug the corpus found.** The first pass disqualified any token
+containing a full stop as an amount, which read the sentence-ending period in
+`000000.` as a decimal point and missed a real TAN code. Separators are only
+amount-markers **between** digits.
+
+⚠ **Disclosed, not done: the Android copy.** The device-side Java filter still
+has only the vocabulary. Writing a fourth hand-synced copy of a detector would
+re-create the exact coupling this row exists to break, and the right fix is for
+the phone to call one shared check — a larger change than this branch. **Until
+then this layer protects the store, not the wire**: a credential in unfamiliar
+wording still leaves the phone before anything refuses it.
+
 ### `feat/metrics-traces` — merged into `dev` 29 Aug — **MON-3**
 
 **Off:** `dev` · gate green (core 1,708 · host 245).

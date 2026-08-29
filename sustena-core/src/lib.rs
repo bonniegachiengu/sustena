@@ -171,6 +171,7 @@ pub mod router;
 pub mod rollup;
 pub mod royalty;
 pub mod schema;
+pub mod secret_shape;
 pub mod semantic;
 pub mod stranding;
 pub mod signal;
