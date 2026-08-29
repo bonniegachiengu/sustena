@@ -116,6 +116,21 @@ pub enum Disposition {
     AskAHuman { because: String, may_have_landed: bool },
 }
 
+/// **Every retry is a new decision, even the automatic ones.**
+///
+/// ★★★ [`crate::effect_journal`] holds the audit rule: a failed send is never
+/// re-sent without a new `Decided` event, so the journal shows two decisions
+/// rather than pretending one attempt happened twice. This module holds the
+/// *authority* rule — who may make that decision — and the two are separate
+/// questions that an earlier draft of the journal ran together.
+///
+/// A `Retry` disposition therefore obliges its caller to journal a fresh
+/// decision. The system is allowed to be the decider here **only** because the
+/// act declared how it is undone.
+pub fn retry_must_be_journalled(disposition: &Disposition) -> bool {
+    matches!(disposition, Disposition::Retry { .. })
+}
+
 /// The most times a reversible egress will retry itself.
 ///
 /// ★★ Bounded even where retrying is safe: undoable is not free, and an
@@ -340,6 +355,21 @@ mod tests {
             }
             other => panic!("expected escalation: {other:?}"),
         }
+    }
+
+    #[test]
+    fn an_automatic_retry_is_still_a_new_decision_in_the_journal() {
+        // ★★★ The audit rule and the authority rule are different questions.
+        //     The system may DECIDE to retry a declared-reversible act; it may
+        //     not do so invisibly. An earlier draft of `effect_journal` said a
+        //     retry always required a person, which would have interrupted
+        //     somebody over a cancellable draft.
+        let d = dispose(&undoable(), &unknown_outcome());
+        assert!(retry_must_be_journalled(&d));
+        assert!(!retry_must_be_journalled(&dispose(
+            &irreversible(),
+            &Delivery::Acknowledged { reference: "R".into() }
+        )));
     }
 
     #[test]

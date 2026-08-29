@@ -19,6 +19,37 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `fix/retry-is-a-decision` — merged into `dev` 29 Aug — **EVT-14 verified, and a contradiction found**
+
+**Off:** `dev` · gate green (core 1,780 · host 245).
+
+**EVT-14 was already built and the tracker said otherwise** — the same stale-row
+class as IMM-7. `effect_journal.rs` already had all four clauses: two events
+rather than one, `apply_can_send()` returning `false` as an *executable* claim
+rather than a comment, and no-re-fire structurally (a fold applies opaque
+mutations; there is no channel in that path to send anything down). Closing the
+row was a verification job, not a build.
+
+**And the verification found a real contradiction with `feat/egress-asymmetry`,
+which had landed an hour earlier.** `effect_journal` said a failed send is never
+automatically re-sent — a retry always requires a person. `egress` said a
+declared-reversible act may retry itself up to a bound. Two modules in one crate,
+disagreeing about the same act.
+
+★★★ **The resolution is that they were answering different questions.** The
+journal owns the **audit** rule: a retry is never invisible, it is a second
+`Decided` event, and the log shows two decisions rather than pretending one
+attempt happened twice. `egress` owns the **authority** rule: who may make that
+decision — a person for an irreversible act, and the system itself for one whose
+reversibility is declared with the compensating act named. The journal's wording
+ran the two together, and taken literally it would have made Sustena interrupt
+somebody over a cancellable draft. Interrupting people about things that do not
+need them is how a gate stops being read.
+
+★★ `egress::retry_must_be_journalled` now states the obligation in code rather
+than leaving it as agreement between two doc comments, and its test says why the
+earlier draft was wrong.
+
 ### `feat/council-independence` — merged into `dev` 29 Aug — **OPV-12 + OPV-26**
 
 **Off:** `dev` · gate green (core 1,779 · host 245).
