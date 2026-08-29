@@ -19,6 +19,42 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/sigma` — merged into `dev` 29 Aug — **SUS-1 + SUS-4 closed**
+
+**Off:** `dev` at `fb494a0` · gate green (core 1,670 · host 245).
+
+**Every component existed; the object did not.** `boundary.rs` is `B`,
+`schema.rs` is `S`, `region.rs` is `V`, `Definition` is `T`, `rollup.rs`
+composes — five real things, assembled by whichever caller needed them in
+whatever combination it wanted. A household was a `Definition` here, a `Region`
+there, and a list of children somewhere else, and **nothing anywhere held the
+claim that those are one thing.**
+
+★★★ ***Components of a Sustain are Sustains* only becomes true when one type
+says so.** Two types — one for "a Sustain", one for "a Sustain that has
+children" — would put a ceiling in the model that the world does not have. A
+village adopts into a county by exactly the call a habitat joins a household by.
+
+★★★ **No privileged top is structural, not a convention.** There is no `Root`
+type and no `is_root` flag: a root is one nobody has adopted yet, and a test
+asserts a household is the *same value* alone and adopted.
+
+★★ **A cycle is unrepresentable** — children are owned, so a Sustain cannot
+contain itself and the compiler refuses to build one. Every other holon walk in
+this codebase carries a visited-set; this one has nothing to guard against.
+
+★★ Type-checking recurses, and a finding is **named by the Sustain it came
+from**: a tree of thirty households reporting "invalid" is a report nobody can
+act on. It checks the holon path too, so a household whose total ranges over a
+dimension no habitat has is caught — that one reads as *a household with no
+money* rather than as a mistake.
+
+**SUS-4 closed by verification, not by flipping a row.** Its two open halves were
+*deterministic* (now `canonical.rs`, SUS-15) and *evolvable*, which pointed at
+M-EDIT — and M-EDIT is complete every row: the append-only definition DAG, `μ`
+with Expand–Migrate–Contract, and the stranding check. The pointer outlived the
+work it pointed at.
+
 ### `feat/outbox` — merged into `dev` 29 Aug — **ING-10**
 
 **Off:** `dev` at `a750e61` · gate green (core 1,659 · host 245).
