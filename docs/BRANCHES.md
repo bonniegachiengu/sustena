@@ -19,6 +19,46 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/strong-admit` — merged into `dev` 29 Aug — **CON-10 + CON-4 closed**
+
+**Off:** `dev` · gate green (core 1,679 · host 245).
+
+**`kernel.rs` existed and nothing ever admitted against it.** The viability
+kernel was computed, tested and unused — a fixed point nobody asked a question
+of. The row is one call, and the call is the whole point of having built it.
+
+**A monitor enforces exactly safety, never liveness** (Schneider, CON-4), and
+that is not a limitation to route around — it is what a monitor *is*. "Stays in
+`V`" is checkable one transition at a time; "a move always exists" is a claim
+about every future, and no single transition can witness it. So the weak gate
+admits states with no way out: every pocket funded, every rule satisfied, and no
+sequence of legal moves that keeps it there next month. Substituting the kernel
+moves the refusal to the last moment it can still help.
+
+**Findings — three, and each is a place a bool would have lied:**
+
+★★★ **A horizon kernel admits and says it is provisional.** `Viab^H` is a
+*superset* of the true kernel: surviving `H` steps is easier than surviving
+forever, so a state inside it may still be doomed at `H+1`. Returning
+`Survivable` on it would be the exact overstatement that makes a strong gate
+*worse* than a weak one — a confident yes into a corner. `ProvisionallySurvivable
+{ horizon }` is a third outcome and the honest one.
+
+★★★ **An empty kernel admits.** No state surviving says the model is wrong far
+more often than it says the household is doomed, and refusing every move on it
+would freeze somebody's money over an analysis nobody checked. `Unknown` admits
+for the same reason: the weak gate has already had its say, and this layer only
+ever *adds* a refusal it can justify.
+
+★★★ **What the row buys is countable, not assumed.** `doomed_but_viable()`
+returns the states the weak gate admits and this one would not. If it is empty on
+a household, the kernel is buying nothing there and the cost is not worth paying
+— which is a real answer, and better than inheriting the assumption that an
+expensive analysis earns its keep. The test fixture puts a `trap` state inside
+`V` with a positive balance and one legal move that leaves it, and asserts
+separately that the **weak gate really would have admitted it** — otherwise the
+whole layer would be proving nothing.
+
 ### `feat/sigma` — merged into `dev` 29 Aug — **SUS-1 + SUS-4 closed**
 
 **Off:** `dev` at `fb494a0` · gate green (core 1,670 · host 245).
@@ -1133,13 +1173,15 @@ before more is built on it. State at the halt:
 - Core suite clean; 202 host tests pass.
 - His phone is running the build installed 09:56 on 26 Aug.
 
-## Known flake
+## The "known flake" was a real defect — fixed 29 Aug
 
-**Diagnosed 29 Aug.** `wire::tests` fails intermittently under a full parallel
-run and passes in isolation — where the eleven tests take **342 seconds**. They
-are slow real-crypto round trips being starved alongside 230 other tests, not a
-correctness problem. The original note stands as the observation; this is the
-cause.
+`wire::tests` failed intermittently under a full parallel run and passed in
+isolation. Carried as a flake; it was not one. Each test did five PBKDF2 unlocks
+at the OWASP floor of 600,000 iterations against a 20-second socket timeout, and
+under parallel load they lost the race. Fixed by lowering the KDF cost under
+`cfg(test)` while asserting `PBKDF2_FLOOR` separately, so the production cost is
+still checked. **The host suite went from 250+ seconds to 4.1.** The lesson is
+the label: a test inherited as flaky stops being investigated.
 
 ## Conventions
 
