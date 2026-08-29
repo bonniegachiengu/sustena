@@ -19,6 +19,48 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/metrics-traces` — merged into `dev` 29 Aug — **MON-3**
+
+**Off:** `dev` · gate green (core 1,708 · host 245).
+
+**Three pillars, and two of them were already in the third.** §III asks for
+Metrics, Logs and Traces. Logs shipped long ago as the event log. Building the
+other two as separate stores is the conventional shape and it would have been the
+state-cache mistake a second time — a counter written *beside* the log by the same
+code can disagree with it, and nothing can say which is wrong.
+
+★★★ **Nothing here is stored.** A metric is a fold evaluated on read; a trace is
+the `causes` graph the log already is. They cannot drift because there is no
+second write path to be inconsistent with the first. The cost is named rather
+than hidden: every read is a scan. That is right at a household's volume and
+wrong at a million events a second, and when it stops being right the answer is a
+cache that is provably a fold — not a second writer.
+
+★★★ **A span has no duration.** OpenTelemetry's carries `start` and `end`; an
+event carries `t_event` and nothing about how long anything took. Deriving one —
+"it ended when the next event began" — would be a fabricated measurement, and a
+fabricated measurement is worse than an absent one because it looks like
+evidence. `elapsed_ms` is the reading that genuinely exists: how long the world
+took to finish reacting to a cause, which is explicitly not CPU time.
+
+★★★ **`TraceCollector` declined.** `causes` is written when the events are, so a
+collector would be a second recording of a fact the log already holds — the same
+objection as the metrics store, one layer up.
+
+★★ **Multiple causes are kept.** An event can have several, and picking the first
+to force a tree invents a causality nobody recorded. **An orphan is reported, not
+reparented**: a window boundary is not an origin, and making one a root turns "we
+did not fetch far enough back" into "this is where it started". Traversal is
+bounded by span count, so a malformed window terminates and reports instead of
+overflowing.
+
+★★ **`LabelOf` is an enum, and that is the cardinality defence.** The unbounded
+label values here would be payload text — a merchant name, a typed description.
+Naming the legal sources exhaustively means a free-text label cannot be declared
+by mistake. `cardinality()` is askable because a cardinality failure is never
+caught by a series being *wrong*; every one is individually correct, and there
+are fifty thousand of them.
+
 ### `feat/egress-asymmetry` — merged into `dev` 29 Aug — **ING-11**
 
 **Off:** `dev` · gate green (core 1,693 · host 245).
