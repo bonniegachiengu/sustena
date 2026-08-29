@@ -142,6 +142,7 @@ pub mod holarchy;
 pub mod holon;
 pub mod immune;
 pub mod independence;
+pub mod intake_key;
 pub mod inverse;
 pub mod issuance;
 pub mod juul;

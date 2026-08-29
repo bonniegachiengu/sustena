@@ -131,9 +131,15 @@ fn same_amount(a: i64, b: i64) -> bool {
 
 /// **Find messages from different senders that describe one movement.**
 ///
-/// ★★★ Never within one source. Two identical-reference messages from the same
-/// sender are the raw-text dedup's business, and it already handles them;
-/// reporting them here would be a second voice on a settled question.
+/// ★★★ Never within one source. Two same-reference messages from one sender are
+/// the intake key's business ([`crate::intake_key`]), and reporting them here
+/// would be a second voice on a settled question.
+///
+/// ★★ **This deferral used to rest on an assumption and now rests on a fact.**
+/// It originally said the raw-text dedup handled them — which was true only for
+/// byte-identical re-sends, so a carrier reformat slipped through both. The
+/// intrinsic key closes that, and the sentence above is now accurate rather
+/// than nearly so.
 ///
 /// ★★ `candidates` is expected in arrival order, so `first` is the one already
 /// in the books and `second` is the one that would double it.
