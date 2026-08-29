@@ -202,6 +202,7 @@ pub mod state;
 pub mod sync;
 pub mod trust;
 pub mod strategy;
+pub mod telemetry;
 pub mod tenet;
 pub mod transducer;
 pub mod transition;
