@@ -42,6 +42,41 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/llm-policy` — merged into `dev` 29 Aug — **OPV-24, CAP-8, IMM-13**
+
+**Off:** `dev` / gate green (core 2,059 / host 256).
+
+★★★ **A model is a last resort, not a default.** Both conjuncts of the guard are
+refusals: an Enzyme that covers the task means there is nothing to ask about, and
+an ordinary path already above the threshold means asking is spending money to be
+no better off. A system that reached for a model first would be one where the
+deterministic path quietly rotted.
+
+★★★ **A budget without a per-call cap is overshot by exactly one call.** The
+cost is only known once the call has happened, so `B` alone bounds nothing — and
+`maxtok` is required, with a cap of zero refused at construction. `budget_binds()`
+exists because "we have a budget" is not the same claim as "the budget binds": at
+ten per token, a two-thousand-token cap blows a ten-thousand budget in one call.
+
+★★★ **Deactivation is a policy, not a switch.** `Fallback` is required and has
+no `Nothing` variant, and every refusal carries one. A system whose only answer to
+"the model is unavailable" is to stop has made a model a dependency while calling
+it optional — so `allow: false` produces an answer, not an error.
+
+★★ The guard is one more predicate on the existing seam rather than a new
+mechanism, which is what makes it un-bypassable for the same reason everything
+else is. And `DeclineTheTask` is distinct from an outage precisely because
+somebody chose it: "this does not get done when the model is off" is a decision a
+person can disagree with.
+
+**Two rows closed alongside it by reading:**
+
+- **CAP-8** — duty 7 is this module; duty 8 was ARE-2, landed earlier today.
+- **IMM-13** — both halves were closed by other rows the same day: the
+  grant-must-be-a-transfer half by `abuse.rs`, and the unsigned-artefact half by
+  `publish.rs`, which keeps integrity, authenticity and quality as three separate
+  questions.
+
 ### `feat/market-design` — merged into `dev` 29 Aug — **ARE-8**
 
 **Off:** `dev` / gate green (core 2,048 / host 256).
