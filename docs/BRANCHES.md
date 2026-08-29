@@ -19,6 +19,42 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/positioning-reach` — merged into `dev` 29 Aug — **OPV-20**
+
+**Off:** `dev` · gate green (core 1,745 · host 245).
+
+**An act can be right on today's numbers and wrong on tomorrow's options.**
+Clearing a pocket to the shilling and clearing a loan can move a balance
+identically and leave completely different rooms to move in. Utility alone cannot
+see the difference; `ΔReach` is the term that can.
+
+★★★ **Counting reachable states is not measuring freedom.** A discretisation that
+splits one situation into ten near-identical states multiplies the count by ten
+and changes nothing about the household — and the number *looks* like a
+measurement while being an artefact of how somebody chose to enumerate. So `μ`
+carries declared weights, an undeclared state weighs **zero** (a measure whose
+value depends on what somebody forgot to list is not a measure), and raw counting
+exists only as `Measure::counting()`, spelled out so a reader can see it was
+chosen. A test shows the ten-way split scoring ten times higher under counting
+and identically under a declared μ.
+
+★★★ **The under-estimate rides on the answer.** `Reach_H ⊆ Reach_∞`, so a bounded
+`ΔReach` under-states positioning — worst for exactly the acts that pay off
+latest. That bias is systematic and one-directional, which makes it correctable
+by a reader who is told and invisible to one who is not, so `describe()` says *a
+floor and not a figure*. If either side is still growing the difference is
+truncated, so the caveat is not lost by one side happening to close.
+
+★★★ **Chaos and budget are different reasons to stop, and only one is a reason to
+buy compute.** `StoppedBy::Budget` says more compute would see further;
+`StoppedBy::Chaos` says it would see further into the arithmetic and no further
+into the world. An unknown horizon honours the budget and is **labelled**, never
+quietly treated as unbounded.
+
+★★ `Move::lands_on` was made public rather than re-implementing the transition in
+this module. Two definitions of "a legal move" would let the reach and the kernel
+disagree about what the system can do, and the disagreement would be silent.
+
 ### `feat/simulation-horizon` — merged into `dev` 29 Aug — **OPV-13**
 
 **Off:** `dev` · gate green (core 1,733 · host 245).
