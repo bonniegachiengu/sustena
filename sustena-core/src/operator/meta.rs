@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 
 use crate::operator::EmittedEvent;
-use crate::compose::EffectSummary;
+use crate::compose::{EffectSummary, Step};
 use crate::flow::Movement;
 use crate::state::State;
 
@@ -175,6 +175,32 @@ pub struct OperatorMeta {
     pub effect: Option<EffectSummary>,
     pub run: OperatorFn,
 }
+impl OperatorMeta {
+    /// **This operator, as composition needs to see it.**
+    ///
+    /// ★★★ The bridge that was missing. `compose.rs` has held Hoare sequencing
+    /// since it was written, and nothing ever handed it a real operator — so a
+    /// chain that could never run was only ever discovered by running it. Every
+    /// part is read off the declaration that already exists: the guard is the
+    /// operator's own constraints, the postcondition its own post-constraints,
+    /// the emissions its own declared side effects.
+    ///
+    /// ★★ Nothing is invented. An operator with no `EffectSummary` yields a
+    /// step with no effect, and composition then declines to pull a successor's
+    /// guard back through it rather than guessing what it did — the same
+    /// honesty `obligation` already applies to the same absence.
+    pub fn as_step(&self) -> Step {
+        Step {
+            name: self.name.to_string(),
+            guard: self.constraints.iter().map(|c| c.to_string()).collect(),
+            post: self.post_constraints.iter().map(|c| c.to_string()).collect(),
+            emits: self.side_effects.iter().map(|e| e.to_string()).collect(),
+            pawa_cost: self.pawa_cost,
+            effect: self.effect.clone(),
+        }
+    }
+}
+
 
 impl std::fmt::Debug for OperatorMeta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
