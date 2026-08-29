@@ -108,7 +108,32 @@ pub enum DefinitionVerdict {
 /// brand-new one, which is why creating is always safe and *editing* is where
 /// stranding can bite.
 pub fn check(authored: &AuthoredDefinition, instances: &[Instance]) -> DefinitionVerdict {
+    check_against(authored, instances, &[])
+}
+
+/// The same checks, plus the children this definition will aggregate over.
+///
+/// ★★★ **A parent and its children are one program** (GENOME §IX). An aggregate
+/// reading a dimension no child declares does not crash — it totals **zero
+/// contributions**, which reads exactly like a household that genuinely has no
+/// money, and nothing afterwards can tell the two apart. Checking the parent
+/// alone cannot see it, because the mistake is only visible from both sides.
+///
+/// ★★ Empty children is not a failure. A holon is declared before it is
+/// populated, and refusing here would make declaring one impossible until the
+/// first member joined.
+pub fn check_against(
+    authored: &AuthoredDefinition,
+    instances: &[Instance],
+    children: &[(&str, &sustena_core::Schema)],
+) -> DefinitionVerdict {
     let def = authored.to_definition();
+
+    if let Err(errors) = sustena_core::typecheck_holon(&def, children) {
+        return DefinitionVerdict::NotWellTyped {
+            errors: errors.into_iter().map(|e| format!("{}: {}", e.path, e.detail)).collect(),
+        };
+    }
 
     if let Err(errors) = typecheck(&def) {
         return DefinitionVerdict::NotWellTyped {

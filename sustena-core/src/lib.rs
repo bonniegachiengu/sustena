@@ -178,6 +178,7 @@ pub mod package;
 pub mod dag;
 pub mod operatives;
 pub mod parameter;
+pub mod holon_typing;
 pub mod overlay;
 pub mod tab;
 pub mod state;
@@ -313,6 +314,7 @@ pub use operatives::{attache, mentor};
 pub use ledger::{position, Holding, Position};
 pub use parameter::{DefParam, ParamError, Parameterised};
 pub use overlay::Overlay;
+pub use holon_typing::{joint_schema, typecheck_holon};
 pub use tab::{tab_sides, TabSides};
 pub use operator::{
     execute, execute_admitted, execute_afforded, execute_as, Authorization, Enforcement, Execution,

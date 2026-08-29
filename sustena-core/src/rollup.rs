@@ -105,6 +105,15 @@ impl AggregateDecl {
         &self.child_path
     }
 
+    /// The parsed path this aggregate reads from each child.
+    ///
+    /// ★★ Exposed so the holon type-check resolves it against a child's schema
+    /// with the same segments roll-up will read with — not a re-parse that
+    /// could disagree.
+    pub fn segments(&self) -> &[PathSegment] {
+        &self.segments
+    }
+
     pub fn op(&self) -> AggFunc {
         self.op
     }
