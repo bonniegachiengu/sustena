@@ -88,6 +88,7 @@ const TITLE: Record<string, string> = {
   classify_capture: "something needs classifying",
   household_summary: "the household",
   person_tab: "a running tab with someone",
+  net_worth: "what the household is worth",
   recent_spend: "money went out",
   recent_income: "money came in",
 };
@@ -1687,7 +1688,14 @@ function CardBody(props: { card: { id: string; render: string }; feed: FeedDto }
       fallback={
         <Show
           when={props.card.render === "person_tab"}
-          fallback={<PlainCard feed={props.feed} card={props.card} />}
+          fallback={
+            <Show
+              when={props.card.render === "net_worth"}
+              fallback={<PlainCard feed={props.feed} card={props.card} />}
+            >
+              <NetWorthCard feed={props.feed} />
+            </Show>
+          }
         >
           <PersonTabCard feed={props.feed} />
         </Show>
@@ -1775,6 +1783,45 @@ function PersonTabCard(props: { feed: FeedDto }) {
       <p class={O.caption}>
         tied to {str(props.feed, "tab_number")} · both directions land here
       </p>
+    </>
+  );
+}
+
+/**
+ * What the household is worth, not what is in the bank.
+ *
+ * ★★★ Four lines, never one number. Money out is not money gone — a week's
+ * shopping becomes food in the cupboard, a loan becomes a claim — and a single
+ * total hides exactly the distinction that makes it true. A household that
+ * shops well and one that loses money have the same bank balance and very
+ * different positions.
+ *
+ * ★★ Lines at zero are not drawn. A household with nothing lent out should not
+ * be shown a row of noughts to read past on the way to the number it wanted.
+ */
+function NetWorthCard(props: { feed: FeedDto }) {
+  const line = (label: string, key: string) => {
+    const v = num(props.feed, key);
+    return (
+      <Show when={Math.abs(v) > 0.005}>
+        <div class={O.row}>
+          <span class={O.caption}>{label}</span>
+          <span class={O.spacer} />
+          <span class={O.caption}>{fmt(v)}</span>
+        </div>
+      </Show>
+    );
+  };
+
+  return (
+    <>
+      <span class={O.figureLabel}>worth</span>
+      <span class={O.figure}>{fmt(num(props.feed, "worth"))}</span>
+      {line("in accounts", "worth_cash")}
+      {line("things you hold", "worth_things")}
+      {line("owed to you", "worth_owed_to_you")}
+      {line("you owe", "worth_owed_by_you")}
+      <p class={O.caption}>what you hold, not what you have left to spend</p>
     </>
   );
 }
