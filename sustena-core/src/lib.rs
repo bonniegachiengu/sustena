@@ -153,6 +153,7 @@ pub mod kernel;
 pub mod learned;
 pub mod learning;
 pub mod lens;
+pub mod llm_policy;
 pub mod market;
 pub mod market_design;
 pub mod meme;
