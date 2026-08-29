@@ -191,6 +191,7 @@ pub mod spec;
 pub mod admissibility;
 pub mod control_system;
 pub mod correlation;
+pub mod domain_engine;
 pub mod domain_map;
 pub mod effect_journal;
 pub mod event_time;
