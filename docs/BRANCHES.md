@@ -19,6 +19,34 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `fix/unsubstituted-owner-token` — merged into `dev` 29 Aug — **EDIT-16**
+
+**Off:** `dev` / frontend builds clean; core 1,920 / host 245 unchanged.
+
+**The row called it "a real bug sitting in the tree today", and it still was.**
+`definition?.access_policy?.owner_ids?.[0] || 'owner'` — when `owner_ids` holds
+the unsubstituted token `"{{owner_ids}}"`, `?.[0]` indexes the **string** and
+yields `"{"`, which is truthy, so the fallback never fires and `"{"` is posted as
+the `user_id` that provisions child sustains. A defect in a definition became
+wrong ownership on real children, with nothing refused and nothing logged.
+
+★★★ **The optional chain is a null check wearing a type check clothes.** It
+protects against *absent* and does nothing about *wrong-shaped*. And a fallback
+that cannot run is worse than no fallback at all, because it reads as handled —
+anybody reviewing that line saw a default and moved on.
+
+★★ **Both checks are needed.** `Array.isArray` alone misses the token arriving
+as a one-element array, `["{{owner_ids}}"]`, which a template with a placeholder
+inside the list produces.
+
+★★ **The old comment called a wrong id "low-risk" and that was optimistic**, so
+it was corrected rather than left: this project has already had a household owned
+by the literal string `"system"` and a stray sustain owned by a typo, and both
+took a migration to undo.
+
+The row observation stands — a typed overlay or a typed edit taxonomy would each
+have caught this before it shipped, which is exactly why the Rust side has both.
+
 ### `feat/spec-imports` — merged into `dev` 29 Aug — **DSL-12 complete**
 
 **Off:** `dev` / gate green (core 1,920 / host 245).
