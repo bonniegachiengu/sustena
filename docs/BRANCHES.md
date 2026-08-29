@@ -19,6 +19,38 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/outbox` — merged into `dev` 29 Aug — **ING-10**
+
+**Off:** `dev` at `a750e61` · gate green (core 1,659 · host 245).
+
+★★★ **`Unknown` is the whole reason this module exists.** A request that times
+out has told you nothing — the engine may have committed it and lost the reply,
+or never seen it. Treating that as failure drops real transactions; treating it
+as success loses them just as thoroughly and more quietly. Keeping it and
+sending again is safe **only** because capture is idempotent, and that is what
+idempotency was for.
+
+★★★ **An ack means durably committed, not received.** A server that
+acknowledges on receipt and then crashes has told a phone to forget something
+that exists nowhere — and the phone is the only other copy.
+
+★★★ **Jitter without randomness, and it is the better answer.** The core is
+deterministic and has no random source, so the wait is derived from the
+message's own id: two phones retrying the same failure do not thunder together —
+the usual point of jitter — *and* the schedule is reproducible, so a support
+question about why something retried at a particular moment has an answer. Full
+jitter (`[0, exponential]`), because two senders that back off to the same
+ceiling still collide if they both wait the ceiling.
+
+★★ **Queue depth is the leading metric** because it moves first: on the first
+failed send. Staleness cannot show until a whole expected interval has passed,
+and a missing transaction shows only when somebody goes looking. And "hardest to
+deliver" is by **attempts**, not age — age says how long ago it arrived, attempts
+say how hard it has been to deliver.
+
+★★ A capture keeps its id across every retry. A new id per attempt would turn
+at-least-once into as-many-times-as-it-failed.
+
 ### `feat/liveness` — merged into `dev` 29 Aug — **ING-8**
 
 **Off:** `dev` at `5ebfad8` · gate green (core 1,648 · host 245).
