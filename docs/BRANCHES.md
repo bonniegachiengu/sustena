@@ -19,6 +19,41 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/scenario-probe` — merged into `dev` 29 Aug — **OPV-15**
+
+**Off:** `dev` · gate green (core 1,768 · host 245).
+
+**The bridge out of the complicated domain.** Optimisation asks what is best
+*given the world works like this*. In a complex domain nobody knows that it does,
+and an answer that is best under one starting point and catastrophic under a
+neighbouring one is not an answer — it is a bet nobody was shown.
+
+★★★ **The disagreement is the finding, and it is never collapsed.** If one
+candidate wins on a good opening and another on a late salary, that *is* what the
+probe produced: the household is being told which decision depends on how the
+month opens. `contested_between()` names which start prefers which. A single
+ranked winner destroys that information and looks more confident for having
+destroyed it.
+
+★★★ **A canon translation, declared rather than done quietly.** §VIII says
+*sample* declared perturbations. This core has no random source by construction —
+the same constraint `outbox.rs` met by deriving jitter from the message id — so
+here the declared perturbations **are** the sample. That is not a weakening: an
+enumerated set is reproducible, so a probe run twice gives the same front and
+"why did it recommend that in March" has an answer. A random sample would give a
+different front from identical inputs, which is the worse property for something
+a person is asked to act on. Asserted as a test rather than claimed here.
+
+★★★ **The front carries its horizon.** A front without one is a recommendation
+with the "for how long" taken off.
+
+★★ **Dominated candidates are reported with who beat them.** "Dropped because
+`allocate` was at least as good everywhere and better when the salary is late" is
+a finding; an absence is not.
+
+★★ **A candidate not run under every starting point is neither dominant nor
+dominated** — it has not beaten anything there, and it has not lost either.
+
 ### `feat/candidate-score` — merged into `dev` 29 Aug — **OPV-18**
 
 **Off:** `dev` · gate green (core 1,758 · host 245). Only buildable once CON-10
