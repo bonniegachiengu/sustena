@@ -42,6 +42,54 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/reputation` — merged into `dev` 29 Aug — **ARE-4**
+
+**Off:** `dev` / gate green (core 1,950 / host 256).
+
+**The lemons market was live, not pending.** `trust_score` is written `0.0` at
+publish, updated by no code path, and every listing sorts by it — so `ORDER BY
+trust_score DESC` over an identically-zero column is an arbitrary order presented
+as a quality ranking. The unravelling needs only the ABSENCE of a quality signal,
+and a signal that is constant is absent.
+
+★★★ **A selection process with no criticism does not merely rank badly — it
+inverts.** The Deutsch distinction, which `meme.rs` already carries: a market with
+working evidence selects for what delivers value; one without it selects for
+whatever merely spreads. Trust is the error-correction that keeps selection
+rational, not marketplace decoration.
+
+★★★ **(a) Per version.** Keyed on `(name, version)`, with no method that reads a
+version standing from its neighbour. Trust earned on v1.0 must not transfer to
+v1.1 — the shape of essentially every real package-ecosystem compromise.
+
+★★★ **(d) The lower bound, and why it is not the point estimate.** A test
+asserts the LCB punishes thinness HARDER than the posterior mean does, and that
+gap is the whole reason to rank on it. Uncertainty becomes a cost the seller
+bears rather than a free option, so a new artefact must accumulate evidence.
+
+★★ **(b)** The score lies in `[0,1]` by construction, so the bound is
+structural rather than clamped — a bound enforced by arithmetic cannot be
+forgotten by a caller. Author history enters through the prior, **discounted**: at
+full weight a good author next artefact would launch as though already proven,
+which is the malicious-update vector wearing a different hat.
+
+★★ **(c)** Evidence ages **before** the new rating is added, per the article
+own pseudocode — ageing afterwards would discount the one piece of evidence
+nobody should be discounting. `effective_memory()` exists because a decay
+constant means nothing to a person while a window in observations does.
+
+★★ **(e)** Only purchasers may rate, which ties the cost of a fake rating to
+the cost of a fake purchase, and a rating is not revisable — replacement lets a
+rater test the market and settle on whichever score suits them. Stake weighting
+is offered with its limit named: transitive trust is vulnerable to collusive
+clusters, and the standard answer reintroduces an authority.
+
+★★ **An unrated artefact has no score**, and `ranked()` returns unrated
+versions apart rather than sorted in at zero: sorting them last says bad, first
+says good, and both are claims nobody made. The lower bound is a Wilson-style
+normal approximation and is **named as one** rather than presented as an exact
+interval.
+
 ### `feat/two-prices` — merged into `dev` 29 Aug — **ARE-3**
 
 **Off:** `dev` / gate green (core 1,936 / host 256).

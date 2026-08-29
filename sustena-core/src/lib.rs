@@ -179,6 +179,7 @@ pub mod proposal;
 pub mod provenance;
 pub mod reach;
 pub mod region;
+pub mod reputation;
 pub mod preattentive;
 pub mod principal;
 pub mod router;
