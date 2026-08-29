@@ -331,7 +331,7 @@ pub use surface::{parse_enzyme, render_enzyme, SurfaceError};
 pub use lift::{propose as propose_lifts, Lift};
 pub use canonical::{agrees_with, canonical, state_hash, Agreement as StateAgreement};
 pub use admissibility::{admissible_along, Authority, BindingRule, GlobalVerdict, Level};
-pub use control_system::{Control, ControlSystem, Move as ControlMove, Reading as ControlReading, Step as ControlStep};
+pub use control_system::{Control, ControlSystem, Move as ControlMove, Reading as ControlReading, Runway as ControlRunway, Step as ControlStep};
 pub use correlation::{fact_key, find_duplicates, FactKey, Suspected};
 pub use domain_map::{DomainMap, DomainRegion};
 pub use effect_journal::{EffectJournal, JournalEntry, Phase as EffectPhase};
