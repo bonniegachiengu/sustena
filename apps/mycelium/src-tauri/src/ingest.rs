@@ -134,6 +134,19 @@ pub struct IngestedMessage {
     /// message as the freshest word on an account balance.
     #[serde(default)]
     pub sent_at_ms: Option<i64>,
+    /// **`t_event`** — the moment the MESSAGE says it happened.
+    ///
+    /// ★★★ The second clock, and without it skew is not merely unknown but
+    /// unmeasurable. Every capture carried only the moment the phone read it,
+    /// so a backfill of two thousand texts stamped a month of spending with one
+    /// afternoon — and nothing in the system could tell, because there was no
+    /// second reading to disagree with the first.
+    ///
+    /// ★★ `None` when the message carried no readable time. Never the current
+    /// moment: that would make skew exactly zero, the one value that looks
+    /// healthy, for precisely the messages nobody could read a time from.
+    #[serde(default)]
+    pub event_at_ms: Option<i64>,
     /// A monotonic capture order — the host's, not a clock.
     pub seq: u64,
 }
@@ -653,6 +666,11 @@ impl Ingested {
             deferred_at: None,
             filed: Vec::new(),
             sent_at_ms,
+            // ★★ The offset is declared here, at the host, because it is a fact
+            //    about THIS node's senders rather than something the core
+            //    should assume on everyone's behalf.
+            event_at_ms: sustena_core::event_time(&t.parsed_fields())
+                .map(|at| at.to_epoch_ms(SENDER_UTC_OFFSET_MINUTES)),
             seq,
         };
         self.append_message(&message)?;
@@ -1447,6 +1465,14 @@ fn message_amount(m: &IngestedMessage) -> Option<f64> {
     let v = m.parsed_fields.get("amount")?;
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
 }
+
+/// The offset the senders this node reads are in.
+///
+/// ★★★ Declared, not detected. Safaricom and KCB both stamp East Africa Time,
+/// and a message that says half past four does not say half past four *where* —
+/// so somebody has to state it. Here rather than in the core, because it is a
+/// fact about this node's own senders.
+const SENDER_UTC_OFFSET_MINUTES: i64 = 180;
 
 fn mark_key(sustain_id: &str, source_id: &str) -> String {
     format!("{sustain_id}::{source_id}")
@@ -3054,6 +3080,7 @@ mod reference_tests {
             filed: Vec::new(),
             ignored: false,
             sent_at_ms: None,
+            event_at_ms: None,
             seq: 1,
         };
         m.parsed_fields.insert("ref".into(), serde_json::json!("AB12"));
@@ -3795,5 +3822,83 @@ mod fact_key_tests {
             .same_event_already_applied("h", "kcb", "QGH7XJ4P2Q")
             .expect("lookup")
             .is_some());
+    }
+}
+
+#[cfg(test)]
+mod event_time_tests {
+    //! Ingest §VIII — the message's own clock, at the door.
+    use super::*;
+    use std::env;
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let dir = env::temp_dir().join(format!("sustena-tevent-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        let ing = Ingested::at(dir).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    fn capture(ing: &Ingested, rules: &[ParseRule], raw: &str) -> IngestedMessage {
+        let Capture::Stored(m) = ing.capture("h", "mpesa", raw, rules).expect("capture") else {
+            panic!("stored")
+        };
+        *m
+    }
+
+    #[test]
+    fn a_captured_message_carries_the_moment_it_says_it_happened() {
+        // ★★★ The second clock. Without it every capture carried only the
+        //     moment the phone read it.
+        let (ing, rules) = store("carries");
+        let m = capture(
+            &ing,
+            &rules,
+            "QGH7XJ4P2Q Confirmed. Ksh90.00 paid to NAIVAS on 20/7/26 at 4:30 PM. \
+             New M-PESA balance is Ksh12,050.00",
+        );
+        let at = m.event_at_ms.expect("the message said when");
+        // 2026-07-20 16:30 EAT is 13:30 UTC.
+        let expect = sustena_core::LocalStamp {
+            year: 2026,
+            month: 7,
+            day: 20,
+            hour: 16,
+            minute: 30,
+        }
+        .to_epoch_ms(180);
+        assert_eq!(at, expect);
+    }
+
+    #[test]
+    fn a_backfill_read_in_one_afternoon_still_spans_the_month_it_covers() {
+        // ★★★ The failure this ends: a month of spending stamped with one
+        //     afternoon, every window closing on the wrong side, and nothing
+        //     able to tell because there was no second reading.
+        let (ing, rules) = store("spread");
+        let early = capture(
+            &ing,
+            &rules,
+            "QGH7XJ4P2Q Confirmed. Ksh10.00 paid to SHOPA on 3/7/26 at 9:00 AM. \
+             New M-PESA balance is Ksh1.00",
+        );
+        let late = capture(
+            &ing,
+            &rules,
+            "QGH7XJ4P2R Confirmed. Ksh10.00 paid to SHOPB on 3/8/26 at 9:00 AM. \
+             New M-PESA balance is Ksh1.00",
+        );
+        let gap = late.event_at_ms.unwrap() - early.event_at_ms.unwrap();
+        assert!(gap > 30 * 86_400_000, "a month apart, not one afternoon");
+    }
+
+    #[test]
+    fn a_message_with_no_readable_time_carries_none_rather_than_now() {
+        // ★★★ `now` would make skew exactly zero — the one value that looks
+        //     healthy — for precisely the messages nobody could read.
+        let (ing, rules) = store("unreadable");
+        let m = capture(&ing, &rules, "Dear customer, thank you for visiting our branch.");
+        assert!(m.event_at_ms.is_none());
     }
 }

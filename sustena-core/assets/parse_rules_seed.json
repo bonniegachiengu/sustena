@@ -249,6 +249,16 @@
           "type": "literal",
           "group": null,
           "value": "pochi"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "mapped",
@@ -309,6 +319,11 @@
           "type": "literal",
           "group": null,
           "value": "pochi"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
         }
       },
       "status": "mapped",
@@ -368,6 +383,11 @@
           "type": "literal",
           "group": null,
           "value": "mshwari"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
         }
       },
       "status": "mapped",
@@ -427,6 +447,11 @@
           "type": "literal",
           "group": null,
           "value": "mshwari"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
         }
       },
       "status": "mapped",
@@ -486,6 +511,16 @@
           "type": "literal",
           "group": null,
           "value": "sent"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "parsed_unmapped",
@@ -537,6 +572,16 @@
           "type": "literal",
           "group": null,
           "value": "sent"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "parsed_unmapped",
@@ -590,6 +635,16 @@
           "type": "amount",
           "group": "cost",
           "value": null
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "parsed_unmapped",
@@ -637,6 +692,16 @@
         "transaction_cost": {
           "type": "amount",
           "group": "cost",
+          "value": null
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
           "value": null
         }
       },
@@ -686,6 +751,16 @@
           "type": "literal",
           "group": null,
           "value": "sent"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "parsed_unmapped",
@@ -736,6 +811,16 @@
           "type": "literal",
           "group": null,
           "value": "received"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "mapped",
@@ -789,6 +874,16 @@
           "type": "literal",
           "group": null,
           "value": "sent"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "parsed_unmapped",
@@ -835,6 +930,16 @@
           "type": "literal",
           "group": null,
           "value": "sent"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "mapped",
@@ -887,6 +992,16 @@
           "type": "literal",
           "group": null,
           "value": "none"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "mapped",
@@ -1146,6 +1261,16 @@
           "type": "literal",
           "group": null,
           "value": "sent"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "parsed_unmapped",
@@ -1349,6 +1474,16 @@
           "type": "literal",
           "group": null,
           "value": "received"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "mapped",
@@ -1399,6 +1534,11 @@
           "type": "literal",
           "group": null,
           "value": "received"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
         }
       },
       "status": "mapped",
@@ -1498,6 +1638,16 @@
           "type": "literal",
           "group": null,
           "value": "sent"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "parsed_unmapped",
@@ -1543,6 +1693,11 @@
           "type": "literal",
           "group": null,
           "value": "sent"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
         }
       },
       "status": "parsed_unmapped",
@@ -1620,6 +1775,11 @@
           "type": "literal",
           "group": null,
           "value": "none"
+        },
+        "date": {
+          "type": "string",
+          "group": "date",
+          "value": null
         }
       },
       "status": "informational",
