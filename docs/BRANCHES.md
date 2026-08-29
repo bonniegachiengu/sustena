@@ -19,6 +19,36 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/dsl-typed-params` — merged into `dev` 29 Aug — **DSL-8**
+
+**Off:** `dev` at `5e2aaa7` · gate green (core 1,476 · host builds clean).
+
+**`Def(θ)`: a definition is a typed function into Sustains, checked once.**
+Definitions had no parameters at all, so there was nothing to check and
+substitution was textual — a token nobody supplied **survived as the literal
+string** and landed in real state. That is the `role_in_family` bug, and it is
+now caught at **author time**: the mistake was never in anybody's argument, it
+was a template referring to something it never declared. Textual substitution
+has no step at which to notice.
+
+The substitution lemma is asserted as a **property**, not claimed: one check,
+then many θ, each result conforming to the schema without being re-checked.
+
+Three judgments:
+
+- **A whole-value `"{{limit}}"` keeps the parameter's own type**; an embedded
+  `"pocket for {{name}}"` interpolates. A template that stringified the first
+  would fill a number dimension with a word and the schema would refuse the very
+  Sustain the template exists to build.
+- **"Checked once" has to cover the RESULT**, so the template's own shape is
+  checked against the schema using a canonical witness per declared type — not
+  the defaults, which a caller is free to replace.
+- **An argument nobody declared is named, not ignored.** Silently dropping it is
+  how a typo in a caller goes unnoticed for months.
+
+★★ `schema::conforms` was extracted rather than written fresh, so a parameter's
+argument is checked by exactly the rule a dimension's value is.
+
 ### `feat/dsl-type-judgment` — merged into `dev` 29 Aug — **WBD Phase 4 opened**
 
 **Off:** `dev` at `130176c`
