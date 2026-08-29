@@ -19,6 +19,33 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/dsl-spec-validator` — merged into `dev` 29 Aug — **DSL-12 (mostly)**
+
+**Off:** `dev` at `3862ddb` · gate green (core 1,509 · host 223).
+
+**One door, and everything a definition names goes through it.** `typecheck`
+checked the invariants — one of several things a definition *names*. It also
+names Enzymes it may run and aggregates it will total, and neither was bound to
+anything.
+
+**Same class of failure as DSL-5, in a different place.** A spec naming an Enzyme
+this engine does not provide loaded perfectly; the first person to try it was
+told the operator *is not available on this sustain* — which sounds like a
+permission, reads like a rule, and is a typo in a document.
+
+Judgments: **names first, then types** — reporting a mistyped rule while an
+unknown Enzyme is outstanding sends somebody to fix the wrong thing. **Every
+finding is collected**, because the second error is often what explains the
+first. **Duplicate ids are findings, not tie-breaks** — somebody meant two things
+and one is silently unreachable; picking a winner would be this module deciding
+which of their rules to discard. And an **aggregate id that shadows a real
+dimension** is refused: a parent rule reading that name would silently get the
+total instead.
+
+**Residual, declared rather than quietly dropped:** `imports` + enforced
+versioning, which has no mechanism anywhere yet, and widget-name binding, which
+`WidgetSet::load` already performs at its own door.
+
 ### `feat/dsl-holon-typing` — merged into `dev` 29 Aug — **DSL-10**
 
 **Off:** `dev` at `169ebb2` · gate green (core 1,500 · host 223).
