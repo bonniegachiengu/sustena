@@ -19,6 +19,38 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/domain-map` — merged into `dev` 29 Aug — **SUS-16**
+
+**Off:** `dev` at `4ea27d4` · gate green (core 1,600 · host builds clean).
+
+**`cynefin.rs` had the taxonomy and nothing that could produce a reading.** It
+could say what each domain presupposes and refuse a mismatched operative — and
+its own doc said plainly that inventing a classifier would be *a confident
+classification from nowhere*. The article says where the reading comes from: the
+household declares it, **per region of its own state space**.
+
+**A household is not in one domain.** Its rent is clear — there is a best
+practice and it works. A new side business is complex — you probe, you see what
+happens, you amplify what worked. Conant–Ashby's *a good regulator is a model of
+the system* is exactly the claim that a one-domain model of a many-domain
+household regulates it badly.
+
+★★★ **A state no declared region covers is DISORDER, never `clear`.** That is
+the dangerous default: *clear* licenses best practice, so an unrecognised
+situation would be met with the method that presupposes it is already
+understood. Disorder means *we do not know which rules apply*, and saying so is
+what lets somebody find out.
+
+★★★ **Two declarations that disagree are disorder too** — genuinely "we hold two
+incompatible models of this situation", which is the failure mode §X names.
+Picking the first by declaration order would hide a real contradiction behind a
+confident answer. Two that **agree** are not a conflict, so a household's regions
+need not be a perfect partition.
+
+★★ A region naming a dimension that does not exist is caught at load. Otherwise
+it silently never matches and the household sits in disorder for a reason nobody
+can see.
+
 ### `feat/cross-source-correlation` — merged into `dev` 29 Aug — **ING-12**
 
 **Off:** `dev` at `ec6057a` · gate green (core 1,591 · host 230).
