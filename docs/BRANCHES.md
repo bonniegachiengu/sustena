@@ -42,6 +42,43 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/publish-is-an-enzyme` — merged into `dev` 29 Aug — **ARE-2 + ARE-12**
+
+**Off:** `dev` / gate green (core 1,962 / host 256).
+
+**Publishing was a route, which is a second write path into `S_arena`** — the
+exact failure complete mediation forbids. A guard that some callers go through is
+not a guard; it is a suggestion with good adoption.
+
+★★★ **So `Published` has no public constructor.** The only way to hold one is
+`publish()`, which evaluates all five conjuncts. A host that wanted to skip the
+check has nothing to hand the catalogue — the same shape `package::Admitted`
+already uses for installs, applied to the other end of the market.
+
+★★★ **Immutability is the precondition for everything downstream.** Rebind
+`(name, version)` and per-version trust is not merely weakened, it is *undefined*:
+a content address stops being stable and a reputation attaches to a moving target.
+Everything yesterday's `reputation.rs` does rests on this one refusal, and the
+refusal text says so rather than reporting a bare conflict.
+
+★★★ **Type-checking is well-formedness, not merit**, and the vocabulary refuses
+to blur them: nothing in the module returns `Valid` or `Good`, and the refusal
+says the check *says nothing about whether the artefact is any good*. A green
+check on the first must not do duty for the second.
+
+★★ **Integrity, authenticity and quality are three questions**, and a perfectly
+signed, perfectly hashed artefact can be worthless or hostile — a test publishes
+one that passes both and is still refused, for a missing niche.
+
+★★ One variant per conjunct rather than a single `Rejected`, and every failure
+is collected: an author who fixes a signature and is then told about a niche has
+been made to resubmit twice. **A refused submission binds nothing**, or a failed
+publish would burn the version number it failed on.
+
+★★ `τ₀` is `reputation::Prior::from_author` — inherited, discounted, and never
+the author's own score, because entering at the author's score *is* the
+malicious-update vector. ARE-12's two concrete unbuilt points close with it.
+
 ### `feat/reputation` — merged into `dev` 29 Aug — **ARE-4**
 
 **Off:** `dev` / gate green (core 1,950 / host 256).

@@ -177,6 +177,7 @@ pub mod pricing;
 pub mod probe;
 pub mod proposal;
 pub mod provenance;
+pub mod publish;
 pub mod reach;
 pub mod region;
 pub mod reputation;
