@@ -19,6 +19,35 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/spec-imports` — merged into `dev` 29 Aug — **DSL-12 complete**
+
+**Off:** `dev` / gate green (core 1,920 / host 245).
+
+★★★ **An import at head is a rule you do not control.** Pull somebody else
+invariant unpinned and their next edit silently changes what your Sustain refuses
+— a household discovering on a Tuesday that a payment it could make last month is
+now blocked, with nothing in *its own* history to explain why. The refusal says
+that, rather than saying "unpinned".
+
+★★★ **There is no wildcard import, because the source can grow.** `bringing *`
+means a declaration added upstream next year appears in your spec without anybody
+asking, and the first you hear of it is a refusal you cannot account for. `brings`
+is an explicit list and there is no variant meaning everything.
+
+★★★ **A collision is refused and never shadowed.** Two imports bringing one name
+is not a precedence question: last-wins would mean the *order of the import lines*
+decides which rule governs somebody money, which is a rule nobody wrote. Both
+sources are named, because "there is a collision on X" leaves somebody grepping.
+
+★★ A cycle is reported as the loop itself — "A imports B imports A" is fixable,
+"there is a cycle" is a search. And `resolved()` is one hop only: a transitive
+import means a name arriving from a spec the author has never read, and "where did
+this rule come from" would have no short answer.
+
+**With this, the last core row on the Rust WBD that was genuinely open is closed.**
+What remains open is three legacy-Python defects (EDIT-14/15/16) and one
+deliberately host-side driver (CTL-9).
+
 ### `docs/declined-not-open` — merged into `dev` 29 Aug — **a marker for declined**
 
 **Docs only.** Three rows were carrying `⬜` for things nobody intends to build:
