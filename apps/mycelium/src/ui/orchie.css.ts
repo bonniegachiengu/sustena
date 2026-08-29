@@ -437,6 +437,25 @@ export const chipChosen = style([
   },
 ]);
 
+/**
+ * A pocket that is somebody.
+ *
+ * ★★★ Drawn differently because it BEHAVES differently: it runs both ways and
+ * can sit in his favour, which no envelope does. A person and a category that
+ * look identical in the picker teach that they are the same kind of thing, and
+ * the first time that matters is the moment he files a repayment as shopping.
+ *
+ * ★★ A teal rim rather than a second amber. Amber already means "chosen" three
+ * lines below, and two meanings on one colour is how a marker stops being read.
+ */
+export const chipPerson = style([
+  chip,
+  {
+    borderColor: vars.color.tealBorder,
+    color: vars.color.teal,
+  },
+]);
+
 /** The odd one out: creating a pocket is a different act from picking one. */
 export const chipNew = style([
   chip,

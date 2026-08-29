@@ -87,6 +87,7 @@ const TITLE: Record<string, string> = {
   pocket_strain: "a pocket is under strain",
   classify_capture: "something needs classifying",
   household_summary: "the household",
+  person_tab: "a running tab with someone",
   recent_spend: "money went out",
   recent_income: "money came in",
 };
@@ -1008,6 +1009,7 @@ function QueueCard(props: { feed: FeedDto; onChanged: () => void }) {
                 sustain={props.feed.sustainId}
                 messageId={c.id}
                 autoStart={c.status !== "processed"}
+                personPockets={props.feed.personPockets}
                 backfill
                 onDone={props.onChanged}
               />
@@ -1682,7 +1684,14 @@ function CardBody(props: { card: { id: string; render: string }; feed: FeedDto }
   return (
     <Show
       when={props.card.render === "pocket_strain"}
-      fallback={<PlainCard feed={props.feed} card={props.card} />}
+      fallback={
+        <Show
+          when={props.card.render === "person_tab"}
+          fallback={<PlainCard feed={props.feed} card={props.card} />}
+        >
+          <PersonTabCard feed={props.feed} />
+        </Show>
+      }
     >
       <span class={O.figureLabel}>{str(props.feed, "worst_pocket")}</span>
       <span class={O.figure}>{fmt(num(props.feed, "worst_spent"))}</span>
@@ -1698,6 +1707,75 @@ function CardBody(props: { card: { id: string; render: string }; feed: FeedDto }
       </div>
       <p class={O.caption}>the limit is the one you set for it</p>
     </Show>
+  );
+}
+
+/**
+ * A pocket that is a PERSON, drawn as a relationship.
+ *
+ * ★★★ The same numbers as any pocket would be a lie of omission. KES 1,000
+ * outstanding reads identically whether he sent 1,000 once or sent 40,000
+ * across a year and got 39,000 back, and those are not the same relationship.
+ * Both sides, always — the net alone is the thing that hides it.
+ *
+ * ★★★ It says WHO OWES WHOM in words, not as a signed number. A negative
+ * balance is a convention the ledger uses and a person has to decode; "you owe
+ * her" is the fact itself. Getting the sign backwards on a screen is how
+ * somebody pays a debt that was never theirs.
+ *
+ * ★★ The number is shown masked. He linked it as an identifier, and the pocket
+ * name already says which person this is — the digits are only there to tell
+ * two people apart if he ever names two pockets alike.
+ */
+function PersonTabCard(props: { feed: FeedDto }) {
+  const sent = () => num(props.feed, "tab_sent");
+  const received = () => num(props.feed, "tab_received");
+  const out = () => num(props.feed, "tab_out");
+  const allocated = () => num(props.feed, "tab_allocated");
+  // ★ Rounded, because a tab settled to the last shilling should read as
+  //   settled rather than as a rounding artefact of two large sides.
+  const settled = () => Math.abs(out()) < 0.5;
+
+  return (
+    <>
+      <span class={O.figureLabel}>{str(props.feed, "tab_person")} · person</span>
+      <span class={O.figure}>{fmt(Math.abs(out()))}</span>
+      <p class={O.caption}>
+        {settled()
+          ? "square — nothing outstanding either way"
+          : out() > 0
+            ? `${str(props.feed, "tab_person")} owes you`
+            : `you owe ${str(props.feed, "tab_person")}`}
+      </p>
+
+      {/* ★★★ The two sides, always both. This is the whole reason the card
+          exists rather than reusing the pocket one. */}
+      <div class={O.row}>
+        <span class={O.caption}>you sent {fmt(sent())}</span>
+        <span class={O.spacer} />
+        <span class={O.caption}>they sent {fmt(received())}</span>
+      </div>
+
+      <Show when={allocated() > 0}>
+        <div class={O.meter}>
+          <div
+            class={O.meterFill}
+            style={{
+              width: `${Math.min(100, Math.max(0, (out() / allocated()) * 100))}%`,
+              background: out() > allocated() ? "#e05050" : "#E8A020",
+            }}
+          />
+        </div>
+        <p class={O.caption}>
+          of {fmt(allocated())} set aside for them
+          {out() > allocated() ? " — you have gone past it" : ""}
+        </p>
+      </Show>
+
+      <p class={O.caption}>
+        tied to {str(props.feed, "tab_number")} · both directions land here
+      </p>
+    </>
   );
 }
 
@@ -1912,6 +1990,14 @@ function Classify(props: {
    * default; for a live one, funding the pocket and then spending is.
    */
   backfill?: boolean;
+  /**
+   * Which pockets are people rather than envelopes.
+   *
+   * ★★ Passed in rather than fetched: the feed already knows, and a second
+   * round trip per card to learn something the screen was handed would be work
+   * for nothing.
+   */
+  personPockets?: string[];
   onDone: () => void;
 }) {
   const [text, setText] = createSignal("");
@@ -2202,6 +2288,9 @@ function Classify(props: {
     void run(rest);
   };
 
+  /** Is this pocket somebody rather than something? */
+  const isPerson = (pocket: string) => (props.personPockets ?? []).includes(pocket);
+
   const remember = async (operator: string, params: JsonValue) => {
     if (!props.messageId) return;
     try {
@@ -2355,7 +2444,9 @@ function Classify(props: {
                                     small
                                       ? chosen
                                         ? O.chipChosen
-                                        : O.chip
+                                        : isPerson(o.value)
+                                          ? O.chipPerson
+                                          : O.chip
                                       : chosen
                                         ? O.optionChosen
                                         : O.option
@@ -2363,7 +2454,13 @@ function Classify(props: {
                                   disabled={busy()}
                                   onClick={() => answer(q().field, o.value)}
                                 >
+                                  {/* ★★ In the roomy layout the marker is a
+                                      word, because there is space for one and a
+                                      word cannot be mistaken for decoration. */}
                                   {o.label}
+                                  <Show when={!small && isPerson(o.value)}>
+                                    <span class={O.caption}> · a person, both ways</span>
+                                  </Show>
                                 </button>
                               );
                             }}
