@@ -19,6 +19,32 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/runway-bound` — merged into `dev` 29 Aug — **SUS-11 + IMM-2 closed**
+
+**Off:** `dev` at `2450dc2` · gate green (core 1,616 · host 237).
+
+**`⌈W/α⌉` — how many turns until this is over.** Lyapunov guarantees each step
+moves toward the region; it does **not** guarantee arrival. A loop that closes
+half the remaining gap every turn descends forever, arrives never, and passes
+the stability check at every single step. The bound is what turns *this is
+improving* into *this ends*.
+
+★★★ **`Unbounded` is named rather than reported as a very large number.**
+"Never, at this rate" is the actionable fact — it says *look for a bigger move*.
+A big number reads as patience being enough.
+
+★★ The projection is computed from the descent **actually achieved**, not from a
+rate somebody declared and nothing checks. And `Arrived` is distinct from
+`Steps(0)`: "nought turns away" and "already here" are the same number and
+different facts.
+
+**IMM-2 closed by CON-8's module rather than by a second one.** The row is the
+same claim from the Immune side, and the article is explicit that there is *no
+separate layering construct* — so building one would have been the deviation.
+Verified rather than flipped: `admissibility.rs` is monotone and
+order-independent by test, and person-first survives as refusal-only-on-a-newly-
+caused breach.
+
 ### `feat/durable-calls` — merged into `dev` 29 Aug — **SUS-6 + the wire "flake", fixed**
 
 **Off:** `dev` at `9ceb61c` · gate green (core 1,610 · host **237**, in 4.1 s).

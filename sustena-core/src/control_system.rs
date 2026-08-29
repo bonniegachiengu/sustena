@@ -123,6 +123,56 @@ impl Control {
     }
 }
 
+/// **How long until this is over?** — `descent ≥ α ⇒ ⌈W/α⌉ steps`
+/// (Sustain · §VII).
+///
+/// ★★★ **A descent that shrinks is not a descent.** Lyapunov guarantees each
+/// step moves toward the region; it does not guarantee arrival. A loop that
+/// closes half the remaining gap every time descends forever and never gets
+/// there, and every individual step passes the stability check. The bound is
+/// what turns *this is improving* into *this ends*, and it needs a floor on the
+/// rate rather than the rate of one step.
+///
+/// ★★ `None` when `α ≤ 0`. There is no number of steps that gets there, and
+/// returning a large one would be a promise with nothing behind it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Runway {
+    /// Already inside.
+    Arrived,
+    /// At the guaranteed rate, this many turns.
+    Steps(u64),
+    /// No guaranteed rate, so no honest answer.
+    ///
+    /// ★★★ Named rather than reported as a very large number. "Never, at this
+    /// rate" is a real and actionable fact — it says look for a bigger move —
+    /// and a big number would read as patience being enough.
+    Unbounded,
+}
+
+impl Runway {
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Arrived => "already inside the region".into(),
+            Self::Steps(1) => "one more turn at this rate".into(),
+            Self::Steps(n) => format!("{n} turns at this rate"),
+            Self::Unbounded => {
+                "nothing on offer closes the gap at a rate that ever arrives".into()
+            }
+        }
+    }
+}
+
+/// `⌈W/α⌉` — turns to re-enter, given a guaranteed per-step descent `α`.
+pub fn runway(error: f64, alpha: f64) -> Runway {
+    if error <= 0.0 {
+        return Runway::Arrived;
+    }
+    if alpha <= 0.0 {
+        return Runway::Unbounded;
+    }
+    Runway::Steps((error / alpha).ceil() as u64)
+}
+
 /// One turn of the loop, with every quantity it used.
 ///
 /// ★★ The reading is carried alongside the decision so a surface can show *what
@@ -132,6 +182,11 @@ impl Control {
 pub struct Step {
     pub reading: Reading,
     pub control: Control,
+    /// ★★ How many more turns like this one, if the loop keeps managing the
+    /// descent it just managed. A projection, not a promise — which is why it
+    /// is computed from the descent actually achieved rather than from a rate
+    /// somebody declared and nothing checks.
+    pub runway: Runway,
 }
 
 /// `C = ⟨Plant, Sensor, Governor, Actuator⟩`.
@@ -164,7 +219,7 @@ impl<'a> ControlSystem<'a> {
         let reading = self.sense(plant)?;
 
         if reading.settled() {
-            return Ok(Step { reading, control: Control::Settled });
+            return Ok(Step { reading, control: Control::Settled, runway: Runway::Arrived });
         }
 
         let mut best: Option<(Move, Stability, f64)> = None;
@@ -193,11 +248,20 @@ impl<'a> ControlSystem<'a> {
             }
         }
 
-        let control = match best {
-            None => Control::NoMoveHelps { error: reading.error, considered: moves.len() },
-            Some((chosen, stability, descent)) => Control::Act { chosen, stability, descent },
+        let (control, runway) = match best {
+            None => (
+                Control::NoMoveHelps { error: reading.error, considered: moves.len() },
+                // ★★★ Nothing helps, so no rate, so no arrival. Reporting a
+                //     number here would say "keep going" about a loop that is
+                //     not going anywhere.
+                Runway::Unbounded,
+            ),
+            Some((chosen, stability, descent)) => (
+                Control::Act { chosen, stability, descent },
+                runway(reading.error, descent),
+            ),
         };
-        Ok(Step { reading, control })
+        Ok(Step { reading, control, runway })
     }
 }
 
@@ -340,6 +404,64 @@ mod tests {
         let c = ControlSystem::new(&region);
         let reading = c.sense(&json!({"balance": -10.0, "other": 5.0})).expect("senses");
         assert!(!reading.exact, "a failing relation makes this a lower bound");
+    }
+
+    #[test]
+    fn the_step_says_how_many_more_turns_it_would_take() {
+        // ★★ A projection, not a promise — computed from the descent actually
+        //    achieved rather than from a rate somebody declared.
+        let r = region();
+        let c = ControlSystem::new(&r);
+        let step = c.step(&at(-100.0), &[Move::new("quarter", at(-75.0))]).expect("steps");
+        assert_eq!(step.runway, Runway::Steps(4));
+        assert!(step.runway.describe().contains("4 turns"));
+    }
+
+    #[test]
+    fn a_loop_that_halves_the_gap_forever_is_reported_as_arriving_not_as_stalling() {
+        // ★★ Each turn's projection is honest about THAT turn. The bound is
+        //    per-step by construction; a loop whose descent shrinks will keep
+        //    reporting a larger runway each turn, which is the visible symptom.
+        let r = region();
+        let c = ControlSystem::new(&r);
+        let first = c.step(&at(-100.0), &[Move::new("half", at(-50.0))]).expect("steps");
+        let second = c.step(&at(-50.0), &[Move::new("half", at(-25.0))]).expect("steps");
+        assert_eq!(first.runway, Runway::Steps(2));
+        assert_eq!(second.runway, Runway::Steps(2), "same shape, same projection");
+    }
+
+    #[test]
+    fn nothing_helping_has_no_runway_rather_than_a_large_one() {
+        // ★★★ A big number would read as patience being enough. "Never, at this
+        //     rate" is the actionable fact — it says look for a bigger move.
+        let r = region();
+        let c = ControlSystem::new(&r);
+        let step = c.step(&at(-100.0), &[]).expect("steps");
+        assert_eq!(step.runway, Runway::Unbounded);
+        assert!(step.runway.describe().contains("ever arrives"));
+    }
+
+    #[test]
+    fn inside_the_region_the_runway_is_arrival_not_zero_steps() {
+        // ★★ "Nought turns away" and "already here" are the same number and
+        //    different facts; only one of them is what a reader wants.
+        let r = region();
+        let c = ControlSystem::new(&r);
+        assert_eq!(c.step(&at(10.0), &[]).expect("steps").runway, Runway::Arrived);
+    }
+
+    #[test]
+    fn the_bound_rounds_up_because_a_partial_turn_is_a_turn() {
+        assert_eq!(runway(100.0, 30.0), Runway::Steps(4));
+        assert_eq!(runway(100.0, 100.0), Runway::Steps(1));
+    }
+
+    #[test]
+    fn a_descent_of_nothing_never_arrives() {
+        // ★★★ The whole content of the bound: Lyapunov guarantees each step
+        //     moves toward the region, never that it gets there.
+        assert_eq!(runway(100.0, 0.0), Runway::Unbounded);
+        assert_eq!(runway(100.0, -5.0), Runway::Unbounded);
     }
 
     #[test]
