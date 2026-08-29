@@ -182,7 +182,15 @@ pub fn opening_state(template: TemplateId) -> Value {
                 "accounts": {},
                 "income": {"monthly_total": 0.0, "sources": []}
             },
-            "inventory": {"assets": []}
+            "inventory": {"assets": []},
+            // ★★★ Present and empty, not absent. `vendors` was DECLARED and
+            //   never seeded, and organisational closure refuses an operator
+            //   that introduces a top-level dimension — correctly, since that
+            //   changes what the Sustain IS. So `vendor.remember` could not
+            //   commit on any real household, which is exactly why its memory
+            //   had stayed in a side file. An empty map is the honest opening
+            //   value: the household knows no vendors yet.
+            "vendors": {}
         }),
         TemplateId::Habitat => json!({
             "finances": {
@@ -191,7 +199,15 @@ pub fn opening_state(template: TemplateId) -> Value {
                 "accounts": {},
                 "income": {"monthly_total": 0.0, "sources": []}
             },
-            "inventory": {"assets": []}
+            "inventory": {"assets": []},
+            // ★★★ Present and empty, not absent. `vendors` was DECLARED and
+            //   never seeded, and organisational closure refuses an operator
+            //   that introduces a top-level dimension — correctly, since that
+            //   changes what the Sustain IS. So `vendor.remember` could not
+            //   commit on any real household, which is exactly why its memory
+            //   had stayed in a side file. An empty map is the honest opening
+            //   value: the household knows no vendors yet.
+            "vendors": {}
         }),
         // ★ Zero and zero, not absent. A device that has never reported has a
         //   real queue of nothing and a real last-contact of never, and both
