@@ -140,6 +140,7 @@ pub mod harmonics;
 pub mod horizon;
 pub mod holarchy;
 pub mod holon;
+pub mod immune;
 pub mod independence;
 pub mod inverse;
 pub mod issuance;

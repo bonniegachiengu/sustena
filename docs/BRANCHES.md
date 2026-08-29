@@ -19,6 +19,47 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/log-detection` — merged into `dev` 29 Aug — **IMM-12**
+
+**Off:** `dev` / gate green (core 1,851 / host 245).
+
+**Its own row said this was correctly last**, because a detector over an
+unmediated system reports a hole it cannot close. The system is mediated now —
+IMM-1, IMM-7, CON-10 — so this was the moment.
+
+★★★ **The base-rate limit is arithmetic, not caution.** A detector that is 99%
+accurate, over a household where one event in ten thousand is genuinely hostile,
+has a precision under one percent. Treating that as a denial means blocking a
+hundred legitimate acts to stop one attack, and the household turns the detector
+off by the end of the week.
+
+★★★ **So the return type is the argument.** There is no branch of `flag()` that
+can produce a `Deny`, however good the declared rates are, because confidence is
+not what is missing — the base rate is. `false_alarms_per_real()` exists to put
+the decisive number in front of whoever wants the detector to block things: "97%
+accurate" persuades, "you will investigate a hundred innocent transactions for
+every real one" decides.
+
+★★★ **A heartbeat may deny, and it is the only thing here that may.** A declared
+expectation checked deterministically has no false-positive rate to multiply by a
+base rate. "It promised to speak every day and has not spoken for three" is a fact
+about a promise, not a classification.
+
+★★★ **Negative selection carries its own known failure, disclosed.** An immune
+system that matures alongside a pathogen learns to tolerate it, and a detector
+that learns "normal" from a window containing an attack learns the attack as
+normal. `tolerated_during_training()` answers *was this learned, and from which
+window* — a detector that cannot distinguish that is one nobody can audit after
+an incident. A test learns an attacker as self from a compromised window, confirms
+it now reads as quiet, and confirms the window is still recoverable.
+
+★★ A `Shape` is coarse on purpose — including the amount would make every
+payment its own novelty, and a detector that flags everything has told you
+nothing. `coverage()` makes the self-set usefulness a number rather than a
+feeling, `grouped()` makes four hundred repeats one finding, and a detector that
+has never fired has **no** precision rather than a perfect one, because a metric
+that flatters silence is one people learn to game.
+
 ### `chore/verify-opv29` — merged into `dev` 29 Aug — **OPV-29 verified**
 
 **Docs only.** The row said *"route is OPV-28 and stays unbuilt"*. OPV-28 has since
