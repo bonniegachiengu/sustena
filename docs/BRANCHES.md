@@ -19,6 +19,31 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/event-payload` — merged into `dev` 29 Aug — **EVT-1 complete**
+
+**Off:** `dev` / gate green (core 1,897 / host 245).
+
+**Six of seven fields, and the seventh had a good reason for being missing.**
+`payload` lived on `EmittedEvent` at execution time and never reached the durable
+record, because nothing bridged the two. The row deliberately stayed open rather
+than gaining a field nobody populated — which would have closed it on paper.
+
+★★★ **What was actually missing was the bridge, and the split is the point.** The
+*values* are the host: an id, the two clocks, where it came from. The *bridge* is
+the core. So `Event::from_emitted()` is the one way across, and a host cannot
+assemble an `Event` by hand and drop the payload on the way.
+
+★★ **Additive exactly as `t_ingest` and `source` were** — `#[serde(default)]` on
+an `Option`, so a pre-slice wire record still deserialises and reads as *carried
+no payload* rather than as an empty one. `backfilled()` sets `None`, because *we
+never had one* and *the Enzyme emitted nothing* are different claims.
+
+★★ **The host durable format is untouched**, checked rather than assumed:
+`apps/mycelium` serialises its own `LoggedEvent`, so nothing on the device had to
+change. Eighteen call sites across core and the conformance tests needed the new
+field; the host needed none, which is itself the evidence that the boundary is
+where the ADR says it is.
+
 ### `feat/two-surfaces-one-truth` — merged into `dev` 29 Aug — **CAP-15, + CAP-11 and CAP-2**
 
 **Off:** `dev` / gate green (core 1,893 / host 245).

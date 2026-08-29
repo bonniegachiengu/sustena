@@ -71,6 +71,7 @@ fn ev(doc: &Value, spec: &Value) -> Event {
             old: json!(spec["old"].as_i64().unwrap()),
             new: json!(spec["new"].as_i64().unwrap()),
         }],
+        payload: None,
     }
 }
 

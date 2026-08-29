@@ -312,6 +312,7 @@ mod tests {
             stamp: stamp(),
             causes: vec![],
             mutations: vec![],
+            payload: None,
         }
     }
 
