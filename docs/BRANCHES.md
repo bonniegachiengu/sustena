@@ -19,6 +19,41 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/dsl-mdl-lift` — merged into `dev` 29 Aug — **DSL-15 · PHASE 4 COMPLETE**
+
+**Off:** `dev` at `b29907e` · gate green (core 1,548 · host 223).
+
+**Learning is compression, made arithmetic.** A household writes the same rule
+into six pockets — *never let this go below zero* — and six copies is six places
+to be wrong. The count IS the evidence: a shape written once is somebody's
+particular rule; a shape written six times is a concept they have and have not
+named.
+
+Judgments:
+
+- **`n` is the whole formula, not a rounding detail.** A pattern used twice
+  usually costs more than it saves, because the definition has a length of its
+  own. The formula says so instead of leaving it to taste, and the threshold
+  falls out of the numbers rather than being chosen. A test pins that two is not
+  yet a concept and six is.
+- **Length is counted over the typed AST, never the text.** Two rules differing
+  only in spacing are one rule; counting characters would make the formatter
+  part of the arithmetic.
+- **A call is charged two nodes, not zero.** Pretending a call is free is how
+  every abstraction looks worth it.
+- **A proposal is not an edit.** `ΔL > 0` says a lift would be shorter — not
+  that the household wants it, that the name is good, or that six pockets
+  rhyming this month is a concept rather than a coincidence. A person and the
+  migration predicate stand between, the same division `learned.rs` keeps.
+
+★★ The hole is the **open-map key** — a pocket's name is a value the household
+chose, the segments around it are structure. Holing every segment would make
+every rule identical; holing none would make a lift impossible.
+
+**★★★ This closes Phase 4.** Every DSL row landed on 29 Aug. The one declared
+residual is DSL-12's `imports` + enforced versioning, which has no mechanism
+anywhere yet.
+
 ### `feat/dsl-surface` — merged into `dev` 29 Aug — **DSL-14**
 
 **Off:** `dev` at `616a48f` · gate green (core 1,538 · host 223).
