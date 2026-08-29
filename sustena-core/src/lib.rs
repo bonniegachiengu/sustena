@@ -182,6 +182,7 @@ pub mod holon_typing;
 pub mod embroidery;
 pub mod spec;
 pub mod admissibility;
+pub mod control_system;
 pub mod canonical;
 pub mod lift;
 pub mod surface;
@@ -327,6 +328,7 @@ pub use surface::{parse_enzyme, render_enzyme, SurfaceError};
 pub use lift::{propose as propose_lifts, Lift};
 pub use canonical::{agrees_with, canonical, state_hash, Agreement as StateAgreement};
 pub use admissibility::{admissible_along, Authority, BindingRule, GlobalVerdict, Level};
+pub use control_system::{Control, ControlSystem, Move as ControlMove, Reading as ControlReading, Step as ControlStep};
 pub use tab::{tab_sides, TabSides};
 pub use operator::{
     execute, execute_admitted, execute_afforded, execute_as, Authorization, Enforcement, Execution,
