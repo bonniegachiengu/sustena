@@ -19,6 +19,37 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/default-council` — merged into `dev` 29 Aug — **OPV-2**
+
+**Off:** `dev` / gate green (core 1,887 / host 245).
+
+★★★ **Orchie has a seat.** The Note Correction stood as the diagnosis for weeks:
+the member that is structurally required — the only path to a person, and
+therefore the only path to an approval token — was the one nothing enumerated. A
+council you cannot enumerate is one you cannot check Corollary 1 against.
+
+★★★ **And its lack of a graph is declared rather than empty.** `Means::NotOverState`.
+Orchie duties are over the council, not over state; forcing it into a `Dag` would
+have made it look like a councillor that happens to call no operators, which is a
+worse lie than the absence was.
+
+★★★ **Corollary 1 is checked rather than reassuring.** No capability:
+`adds_capability_beyond()` is empty against the shipped registry, and every
+councillor graph **typechecks against the real `Registry::default()`** rather than
+a mock — a default council that does not typecheck is one that fails on the
+household first real message instead of in a test. No risk: a graph is data,
+nothing on `Member` executes, and no member reaches a `test.*` operator.
+
+**Finding — a seat with nothing to act through.** Navigator remit is *who is in
+this household*, and it has no operator behind it: `roster.admit` turns out to be
+a **test-only fixture** inside `#[cfg(test)]`, and membership lives in
+`principal.rs` as data rather than something an operative can move. The obvious
+move was to write a real `roster.admit` — which would be adding a capability to
+satisfy a list I had just written, backwards, and precisely what Corollary 1
+exists to make visible. Recorded as `Means::AwaitingAnOperator` with what it
+needs, and `seats_that_cannot_act()` reports it. **A council with a silent member
+has a coverage claim smaller than its roster, and nothing else would have said so.**
+
 ### `feat/provenance-thread` — merged into `dev` 29 Aug — **CAP-12, and three capstone seams closed with it**
 
 **Off:** `dev` / gate green (core 1,874 / host 245).
