@@ -19,6 +19,53 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/provenance-thread` — merged into `dev` 29 Aug — **CAP-12, and three capstone seams closed with it**
+
+**Off:** `dev` / gate green (core 1,874 / host 245).
+
+> *"Break the thread anywhere and the audit becomes a list of assertions."*
+
+**The three links existed separately and were never joined.** A device is
+registered, an event carries a source and a principal, an approval binds a
+principal to an act. Each is sound alone, and *"Bonnie approved this payment"* is
+still worthless if nobody can say which device reported the transaction he
+approved it against — because then the thing he approved is only an assertion
+that a transaction happened.
+
+★★★ **So a broken thread is a named outcome, never a slightly weaker one.**
+`Provenance::Broken` carries where it broke and `attributable_to()` returns
+`Option`, so a partial thread cannot be reported as somebody act by a caller that
+forgot to check. The row own sentence, made structural.
+
+★★★ **The break that matters most is the one that is not an absence.**
+`ApprovedBySomebodyElse`: a thread running end to end through two *different*
+people looks complete from either end — the device really did report it, and
+somebody really did approve it.
+
+★★ A source naming an unregistered device is a different finding from no source
+at all: one is a gap in the record, the other points at something that does not
+exist, and only the second means go and look. The **earliest** break is reported,
+because a later one is its symptom and fixing the symptom wastes the trip.
+
+★★ An ordinary read needs no approval and is still fully attributed — demanding
+one for every observation would make ordinary reads look unattributed, which
+trains people to ignore the report.
+
+**Three capstone seams closed alongside it, by reading rather than building:**
+
+- **CAP-10** — its last leg was *audit / immune-memory reads*. `telemetry.rs`
+  (this morning) is the audit read; `immune.rs` (this afternoon) is literally the
+  substrate on which *this has happened before* and *this has never happened
+  before* are both answerable.
+- **CAP-19** — SIMULATE, OPTIMISE and OBSERVE were the open legs of the thesis
+  loop, and `horizon`/`probe`, `score`/`reach`/`strong_admit`, and `telemetry`
+  respectively closed them today. Driving the loop on a clock stays host-side,
+  because the core has no clock.
+- **CAP-7** — **the fourth stale row of the day.** It said only duty 6, the
+  boundary firewall `F`, remained, blocked on the membership predicate. `F`
+  shipped on 17 Aug as `flow.rs`, and **IMM-1 own status has said so since** —
+  the two rows disagreed with each other for twelve days and neither noticed.
+
 ### `feat/intrinsic-intake-key` — merged into `dev` 29 Aug — **ING-5**
 
 **Off:** `dev` / gate green (core 1,863 / host 245).
