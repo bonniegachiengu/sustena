@@ -158,6 +158,29 @@ A spec vector may carry a `divergence` block naming a place where the two
 engines deliberately differ. The rule is that a divergence is **documented or
 it is a bug** — nothing silently differs.
 
+### Divergences that CLOSED
+
+★★★ A divergence closing is worth recording too. The log exists so nothing
+silently differs, and an entry that quietly disappears is the same failure as one
+that never got written — a later reader cannot tell whether it was fixed or
+forgotten.
+
+- **`edit.state_patch` `remove` — closed 29 Aug (EDIT-15).** The reference set the
+  path to `None` and reported success; Rust's typed state and organisational
+  closure refuse the shape change. The reference now **refuses too**, so the two
+  engines agree. The old comment — *"full delete not supported by
+  StateAccessor"* — was true and was never a reason to write a wrong value
+  instead: a missing capability should refuse, not improvise.
+
+- **`edit.operator_spec` price editing — closed 29 Aug (EDIT-14).** The reference
+  let `pawa_cost` and `license_tier` be set at runtime, free, with no authority
+  check — so changing an Enzyme's price cost less than using it, which is §VI
+  backwards. Both are out of the editable set. They were **removed rather than
+  gated**, because there is no authority model on that path to gate them with, and
+  a permission parameter nobody checks looks like a fence and is a comment.
+
+### Divergences that stand
+
 - **`transducer.json` — rust-ahead-of-python.** Nine instrument shapes —
   Fuliza borrow / interest / repayment, M-Shwari in and out, cash withdrawal at
   a till and at an agent, Pochi in and out — are **mapped** in Rust and

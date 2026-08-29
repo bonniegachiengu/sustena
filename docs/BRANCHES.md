@@ -19,6 +19,40 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `fix/the-edit-fence` — merged into `dev` 29 Aug — **EDIT-14 + EDIT-15**
+
+**Off:** `dev` / Python suite 2,320 pass; core 1,920 / host 245 unchanged.
+
+**Two holes in the same fence, both recorded as real defects and both still open.**
+
+★★★ **`remove` set the path to `None` and reported success.** Under a typed
+schema that is a type violation deposited into state for a later reader to trip
+over: a declared number now holds null, every reader of it is wrong, and nothing
+was refused at the moment the mistake was made. The old comment — *"full delete
+not supported by StateAccessor"* — was **true**, and was never a reason to write a
+wrong value instead. **A missing capability should refuse, not improvise.**
+
+★★★ **And deleting properly would not have been the fix.** A dimension is
+*declared*; removing it is a change to the definition, not to the state, and the
+Rust engine organisational closure refuses that shape change at the gate. The
+refusal is what agreeing with Rust looks like — recorded in
+`conformance/README.md` as a divergence that **closed**.
+
+★★★ **Changing an Enzyme price cost nothing while using it cost pawa.** §VI
+backwards, in the row own words. A fence that lets the price through is not
+fencing the thing worth fencing — `pawa_cost` and `license_tier` are economic
+terms the rest of the system meters against, not metadata like a description.
+
+★★ **Removed rather than gated behind an authority check**, deliberately: there
+is no authority model on that path to gate them with, and a permission parameter
+nobody checks looks like a fence and is a comment. When §VI authority reaches this
+operator they can come back through it.
+
+★★ **A new section in the conformance log: divergences that CLOSED.** The log
+exists so nothing silently differs, and an entry that quietly disappears is the
+same failure as one never written — a later reader cannot tell whether it was
+fixed or forgotten.
+
 ### `fix/unsubstituted-owner-token` — merged into `dev` 29 Aug — **EDIT-16**
 
 **Off:** `dev` / frontend builds clean; core 1,920 / host 245 unchanged.
