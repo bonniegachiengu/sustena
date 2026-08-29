@@ -19,6 +19,48 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/llm-as-proposal` — merged into `dev` 29 Aug — **OPV-23**
+
+**Off:** `dev` · gate green (core 1,826 · host 245).
+
+**Correctness does not depend on `g`. Only efficiency does.** The
+Metropolis—Hastings posture, and AlphaGo's: a bad proposal distribution wastes
+compute and cannot produce a wrong result, because nothing reaches state except
+through a verifier that never asked where the candidate came from.
+
+★★★ **Made into a test rather than asserted in prose.** A deliberately terrible
+generator and an ideal one are sifted by the same checker, and every admitted
+move from *both* is asserted valid. What differs between them is the waste, and
+only the waste.
+
+★★★ **The signature is the safety argument.** `verify(proposal, check)` takes the
+move's content and a checker, and there is no parameter through which a
+confidence, a generator name or a reputation could reach the decision — so *"the
+model was confident" is not an argument* is structural rather than a rule
+somebody keeps. The confidence is still carried on the `Proposal`, because it is
+real evidence **about the generator**; it is simply not reachable from the
+verdict. A test gives two identical wrong moves opposite confidences and asserts
+the verdicts are equal, and another checks the reverse — a diffident correct move
+is admitted, because a verifier that quietly favoured confidence would be
+penalising honesty.
+
+★★★ **Note Correction 4, answered by shape.** The row names the real failure: a
+`call_claude()` whose return value gets acted on is a method call, **not an
+element of `T`** — by the time it returns, the decision has been made somewhere
+the gate cannot see. A `Proposal` here is data naming a move and has no method
+that performs one.
+
+★★ **`acceptance_rate` reads the generator, and says so in its own doc.** A
+council that started treating a low rate as a safety problem would be one step
+from lowering the bar to raise the number. An empty run has *no* rate rather than
+a perfect one — a metric that flatters an idle generator is one people learn to
+game.
+
+★★ **Every proposal is checked**, with no early exit on the first acceptance:
+"the first one that passed" is a property of the order the generator happened to
+emit them in. And a rejection reason is about the **move** — "no such pocket" is
+fixable, "your model is unreliable" is not.
+
 ### `feat/vector-utility` — merged into `dev` 29 Aug — **OPV-25 + OPV-21**
 
 **Off:** `dev` · gate green (core 1,816 · host 245). OPV-21's own row predicted it

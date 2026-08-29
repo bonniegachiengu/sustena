@@ -168,6 +168,7 @@ pub mod population;
 pub mod predicate;
 pub mod presentation;
 pub mod probe;
+pub mod proposal;
 pub mod reach;
 pub mod region;
 pub mod preattentive;
