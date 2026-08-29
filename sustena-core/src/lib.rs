@@ -165,6 +165,7 @@ pub mod pincer;
 pub mod population;
 pub mod predicate;
 pub mod presentation;
+pub mod probe;
 pub mod reach;
 pub mod region;
 pub mod preattentive;
