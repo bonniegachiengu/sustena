@@ -42,6 +42,48 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/discovery-interface` — merged into `dev` 29 Aug — **ADD-3 + ADD-4**
+
+**Off:** `dev` / gate green (core 2,039 / host 256).
+
+**Two rows, one shape the articles both name: swap behind a stable interface.**
+Discovery is a registry with the overlay mocked behind it; settlement is local
+with the L2 and the finalizer mocked behind it. In both, the interface is the
+deliverable and the backend is an implementation detail — which is the only
+arrangement in which the real thing is genuinely a drop-in later.
+
+★★★ **A mock that is indistinguishable from the real thing is how a mock
+ships.** Every mocked answer is labelled on the answer itself, not in a config
+nobody reads at the call site. The failure mode is not the mock being wrong — it
+is somebody reading a green result and believing the DHT works.
+
+★★★ **A finality claim is the most dangerous thing to fake**, because acting on
+a false one means treating money as settled that is not. So finality follows from
+the rail and a caller has no parameter through which to talk a mock into claiming
+it, and `Rail::Ethereum` has no constructor that marks itself live — issuing a
+real, public, transferable token is a human-authorized act with legal weight, not
+a boolean this codebase sets. That is §6.7's line, kept structurally.
+
+★★★ **"Nobody holds it" and "nobody could be reached" are different answers**,
+and a resolution failure says whether the other backend was tried. A lookup that
+failed at the registry and never reached the overlay has not answered the
+question, and conflating the two turns a transient outage into a permanent "no
+such name".
+
+★★★ **The composition hierarchy IS the batching structure.** Nobody designed a
+rollup scheme, because a parent folding its children already is one. Only key
+transactions and roots go up — sending everything would pay L1 prices for a
+household's grocery shopping, and would also publish it.
+
+★★ The discovery threshold is a condition rather than a constant: the
+registry's O(n) state becoming the binding constraint. A decision made on the
+reason survives a change in hardware; one made on a number does not.
+
+★★ `Rail::Local` is *real and not network-final* — two true things at once,
+and a type that collapsed them would make one of them a lie. `compression()` says
+whether a rollup is doing anything: a batch where everything is a key transaction
+has not been rolled up, it has been renamed.
+
 ### `feat/abuse-economics` — merged into `dev` 29 Aug — **PAWA-10**
 
 **Off:** `dev` / gate green (core 2,019 / host 256).
