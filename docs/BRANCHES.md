@@ -42,6 +42,45 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/order-lifecycles` — merged into `dev` 29 Aug — **ARE-9**
+
+**Off:** `dev` / gate green (core 1,986 / host 256).
+
+**One order can carry two categorically different things**, and the schema always
+knew it: a plate of pilau is rival and delivered; an Enzyme is non-rival and
+germinated. Mycelium's law — value is conserved, information is not, so they route
+differently — appearing inside a single transaction.
+
+★★★ **There is no shared `Status` type.** The two sequences have different
+lengths, names and meanings, and one type able to hold either would let a package
+be marked `DELIVERED`, which is not a claim anybody could act on. Two status
+columns are not redundancy; collapsing them makes one lifecycle inexpressible.
+
+★★★ **Two totals, never summed.** One is money and one is metered work, so a
+single `total` column is that addition waiting to happen — and the sum would be a
+number in no unit at all. There is deliberately no `Order::total()`.
+
+**Finding — a conservation check that could not fail.** The first draft compared
+the order total to itself. That is precisely the defect §IX.3 names one paragraph
+later: a field carrying the NAME of a guarantee without the mechanism. It now
+compares what was charged against what was actually distributed, and two tests
+catch a lost unit and an invented one — over-distribution being a mint wearing a
+rounding error, and the more dangerous of the two.
+
+★★ Nothing settles partially, because a part-settled order is an unbalanced
+one. The two purses are checked separately: enough money and not enough pawa is a
+real state that a single balance check could not express.
+
+★★ `Sandboxed` is a real stop rather than a formality. Germination is ⊕, and
+the approval token belongs on the transition where something stops being
+contained and starts being part of the household.
+
+★★ `Receipt::admits_anything()` returns false **as a function rather than a
+comment**, so the claim is executable and a change that made a receipt admit
+something would have to delete it and its test. The point is not that receipts
+are worthless — they are the right object for an audit trail. Only that they must
+never be presented where a capability is implied.
+
 ### `feat/market-dynamics` — merged into `dev` 29 Aug — **ARE-5 + ARE-6 + ARE-7**
 
 **Off:** `dev` / gate green (core 1,973 / host 256).

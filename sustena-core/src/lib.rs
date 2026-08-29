@@ -209,6 +209,7 @@ pub mod effect_journal;
 pub mod event_time;
 pub mod liveness;
 pub mod egress;
+pub mod order;
 pub mod outbox;
 pub mod sigma;
 pub mod strong_admit;
