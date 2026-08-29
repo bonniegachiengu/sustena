@@ -5,6 +5,7 @@
 //! beyond the one that carries the answer to the webview. The app works with
 //! the machine offline because there is nothing to be offline *from*.
 
+pub mod driver;
 pub mod arena;
 #[cfg(test)]
 mod arena_test;
