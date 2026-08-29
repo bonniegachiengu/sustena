@@ -42,6 +42,47 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/market-dynamics` — merged into `dev` 29 Aug — **ARE-5 + ARE-6 + ARE-7**
+
+**Off:** `dev` / gate green (core 1,973 / host 256).
+
+★★★ **There is no global-ranking function in the module.** Not discouraged, not
+behind a warning — `rank_in` takes a niche, and a caller with no niche has
+nothing to call. The marginal over niches is the one aggregation No Free Lunch
+forbids, and the shipped `ORDER BY trust_score DESC` *is* that marginal. Making it
+inexpressible is the only version of this rule that survives a deadline.
+
+★★★ **"Nobody occupies the average" is a test.** Two niches with opposite
+winners: a single top-packages list is a claim about a household that does not
+exist. `how_wrong_a_global_list_would_be()` is offered as evidence *against* the
+global list rather than as a way to build one — and two niches that agree are one
+niche wearing two names, not proof that a global list is fine.
+
+★★ **NFL used correctly, with the misuse named.** It is not the claim that
+nothing is better than anything else: its premise is uniformity, which is not the
+world. *"Better" has no meaning without a specified problem distribution, and a
+library is worth exactly the non-uniformity of the one it is built for* — which
+is what makes a library valuable, not useless.
+
+★★★ **The selection test that matters is the one with no evidence.** A market
+with no fitness signal still selects; it selects on whatever proxy is lying
+around, which is adoption. Incumbency is preserved exactly and the
+popular-but-useless artefact keeps its share — the anti-rational failure mode
+made mechanical, and the reason `reputation.rs` is not decoration.
+
+★★★ **`delist()` takes no buyer list, no state and no reach.** The signature is
+the argument: it cannot revoke anything from anybody, and
+`still_works_for_existing_buyers` is always true with no field a caller could set
+to pretend otherwise. Stated as **correct rather than as a gap** — the end-to-end
+argument, and a market with recall powers is a market that can reach into your
+state. The market makes good artefacts findable; making bad ones harmless is the
+gate's job.
+
+★★ Sanctions are graduated and **each reversible, including the last**.
+Escalation is a walk, because reaching for the final instrument first is what
+makes a sanction system feel arbitrary — and an irreversible sanction is a
+judgment nobody can appeal.
+
 ### `fix/ratified-royalty-schedule` — merged into `dev` 29 Aug — **MYC-5**
 
 **Off:** `dev` / Python suite 2,324 pass; core 1,962 / host 256 unchanged.

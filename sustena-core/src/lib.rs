@@ -152,6 +152,7 @@ pub mod kernel;
 pub mod learned;
 pub mod learning;
 pub mod lens;
+pub mod market;
 pub mod meme;
 pub mod migrate;
 pub mod mixture;
