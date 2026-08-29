@@ -215,6 +215,7 @@ pub mod tenet;
 pub mod transducer;
 pub mod transition;
 pub mod treasury;
+pub mod utility;
 pub mod vclock;
 pub mod version;
 pub mod watermark;
