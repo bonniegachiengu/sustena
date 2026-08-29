@@ -122,6 +122,7 @@ pub mod damping;
 pub mod detect;
 pub mod device;
 pub mod dimension;
+pub mod duality;
 pub mod disaggregation;
 pub mod division;
 pub mod editing;

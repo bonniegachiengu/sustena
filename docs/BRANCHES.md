@@ -19,6 +19,51 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/duality-and-depth` — merged into `dev` 29 Aug — **OPV-9 + OPV-10**
+
+**Off:** `dev` / gate green (core 1,838 / host 245).
+
+**Two quantifiers, and the row is about how they interact.** (A) every agent holds
+both halves — it proposes and it judges. (B) the same duality recurs at all three
+scales. Reading (B) as licence to violate (A) rebuilds the half-mind council.
+
+★★★ **That failure is seductive because it sounds like architecture.** "The
+duality lives at the Orchie-Council scale, so a councillor need only propose" is a
+clean sentence, and what it builds is a room of suggesters with one judge at the
+top — a single mind with helpers, at which point every claim about independent
+judgment made anywhere else in this system quietly stops being true.
+`Violation::HalfMindExcusedByScale` exists so the excuse has a name.
+
+★★ **A half-mind nobody noticed and one that was argued for are different
+findings**, and the excuse is kept rather than discarded, because they get fixed
+differently: one is an oversight, the other is a belief somebody holds and will
+re-introduce.
+
+★★ **(B) is checked only over occupied scales.** Demanding a whole agent at a
+scale nobody has built yet would report a hole in a system that never claimed to
+have one.
+
+★★★ **OPV-10: there is deliberately no `SubOperative` type.** `compose()` takes
+and returns `Sigma`. Having one would be the claim that depth is a different kind
+of thing, and the composition law says it is not.
+
+★★★ **Corollary 2 is checked rather than asserted.** `depth_never_adds_power()`
+runs the same action against the full path and against every prefix. If a deeper
+path ever admitted what a shallower one refused, the composition would not be a
+conjunction — and the conjunction is the only thing holding the whole holon
+argument up.
+
+★★★ **Sub-region containment is enumerated, not symbolic**, for the same reason
+`kernel.rs` enumerates: containment of two interval-plus-relation regions is not
+decidable in general, and a symbolic answer that was sometimes wrong would be
+worse than an honest sample.
+
+**Finding — a test that passed for the wrong reason.** The first draft of the
+depth fixture set `before == after`. `admissible_along` refuses only a *newly
+caused* breach, so that fixture could never be refused at all, and the test
+asserting "a deeper level refusing is ordinary" was asserting nothing. Fixed by
+supplying both readings, with a comment on the fixture saying why.
+
 ### `feat/llm-as-proposal` — merged into `dev` 29 Aug — **OPV-23**
 
 **Off:** `dev` · gate green (core 1,826 · host 245).
