@@ -19,6 +19,54 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/parser-signs` — merged into `dev` 29 Aug — **money model §8 COMPLETE**
+
+**Off:** `dev` at `80f5709`
+**State:** merged, gate green (core 1,445 · host 223).
+
+**§6's settled signs, implemented.** Nine instrument shapes that all asked a
+person now route themselves: Fuliza borrow / interest / repayment, M-Shwari in
+and out, cash withdrawal at a till and at an agent, Pochi in and out.
+
+**The finding underneath it: an overdraft was inexpressible.** No operator
+anywhere wrote `finances.liabilities.*`, so borrowed money could only be filed
+as income — which overstates the household by the whole of what it owes.
+`budget.borrow`, `budget.charge_debt` and `budget.repay_debt` are the first
+operators that write it. A borrow is one transaction with **two positive
+postings** (§3): the money arrives and the obligation appears, and a test pins
+that borrowing leaves the household's position exactly where it was, because
+borrowed money is not wealth. The charge for borrowing gathers in a pocket of
+its own (§6.2) so the running cost of an overdraft is visible over time.
+
+**A money-safety test had to be restated, and that deserved care.** The old rule
+was *"the only auto-applied operator is income"* — true, and the right rule,
+while income was the one unambiguous shape. The rule it was standing in for is
+**nothing files money into a CATEGORY without being asked**, and that has not
+moved: `budget.spend` and `budget.allocate` remain un-auto-appliable by any
+rule, and a payment to somebody outside the household still always asks. What
+the settled shapes have in common is that no category is involved — an overdraft
+names its lender, a transfer has the household at both ends, a withdrawal moves
+money to your own pocket. Asking which pocket a cash withdrawal belongs to is a
+question with no true answer. The rule is now asserted directly instead of
+through a proxy that had stopped holding.
+
+**A second finding, from the same failure:** the transducer's `Real` operator
+universe — the thing `typecheck_rule` was checked against — was a **stub that
+knew one operator**. Every rule naming an operator that does not exist, or
+handing it a parameter it does not declare, would have passed. It is the real
+registry now.
+
+**Divergence recorded, not papered over.** These nine are mapped in Rust and
+`parsed_unmapped` in the Python reference, which cannot express an overdraft at
+all. `conformance/vectors/transducer.json` carries a `divergence` block, the
+replay skips those cases **by name**, and a test fails if the block disappears.
+`conformance/README.md` §Recorded divergences has the entry.
+
+**§8 is now complete** — 1 double entry, 2 parser signs, 3 person accounts,
+4 realignment, 5 operative DAGs, 6 net worth. The one piece left open is
+graduation to a real child Sustain, which needs `holon.create_child` and is
+noted under `feat/operative-dag`.
+
 ### `feat/net-worth` — merged into `dev` 29 Aug
 
 **Off:** `dev` at `ca90fb7`
