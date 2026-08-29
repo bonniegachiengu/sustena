@@ -19,6 +19,42 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/host-loop-driver` — merged into `dev` 29 Aug — **CTL-9, the last open row**
+
+**Off:** `dev` / gate green (core 1,920 / host 256).
+
+**`ooda.rs` was already the assembled loop; what was missing was the somebody who
+steps it.** The core deliberately has no clock and no scheduler, so the driver
+belongs in the host — ADR-0001 line, and the reason the decision logic is
+testable and replayable at all.
+
+★★★ **The clock is a parameter, not a call.** `tick(now_ms)` lets a test ask
+*what happens after three days* without waiting three days, and two replays of one
+log reach the same state. A driver that read the clock itself would be untestable
+in exactly the cases that matter.
+
+★★★ **No hidden backlog**, which is the row own condition. Everything parked at
+DECIDE goes into a public `awaiting()`, oldest first, because the oldest is the
+one most likely to have been decided by neglect. And **a decision that has waited
+past the declared bound has effectively been decided against** — `describe()` says
+so, because a list that reads the same on day one and day nine is how a system
+decides by neglect while still looking like it is waiting.
+
+★★★ **The driver structurally cannot authorize.** `tick` has no parameter
+through which an approval token could arrive: the loop can observe, orient, decide
+and act on something already approved, and it can never approve its own surfaced
+decision. That is the one property here that would be worth nothing as a
+convention.
+
+★★ A sustain already parked is not re-driven, or the queue becomes a count of
+ticks rather than of things needing attention. `resolve()` reports whether
+anything was actually there, or a surface reports *handled* for something nobody
+handled. And a failed pass keeps its reason, because a silently skipped sustain
+looks identical to a quiet one, and the difference is the whole of whether the
+system is working.
+
+**With this the WBD reads 227 done, 0 open, 3 declined, 38 parked.**
+
 ### `fix/the-edit-fence` — merged into `dev` 29 Aug — **EDIT-14 + EDIT-15**
 
 **Off:** `dev` / Python suite 2,320 pass; core 1,920 / host 245 unchanged.
