@@ -42,6 +42,40 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/market-design` — merged into `dev` 29 Aug — **ARE-8**
+
+**Off:** `dev` / gate green (core 2,048 / host 256).
+
+★★★ **Matching theory does not apply here, and the refusal is named rather than
+passed over.** Gale-Shapley and its descendants are about rival goods under
+capacity constraints, where the binding concept is stability against blocking
+pairs. An artefact is non-rival and replicable, so there is no capacity
+constraint, no rationing and no blocking pair. Borrowing "stable matching" here
+would import a vocabulary whose central object does not exist — and the borrowing
+would not fail loudly. It would quietly mean nothing.
+
+★★★ **Only safety is achieved structurally, and that is the row.** In most
+markets safety comes from rules — disclosure, escrow, enforcement. Here nothing
+bought can act except as an admitted transition inside the buyer's own viable
+region, and a gate that cannot be bypassed is not enforced by anybody.
+
+★★★ **The consequence is the part worth having.** Where safety comes from
+rules, trying something unproven risks whatever the rules failed to cover; where
+it comes from the gate, the worst case is a refusal. So a buyer here can afford a
+low-evidence artefact that a buyer in a conventional software market cannot, and
+that changes the exploration/exploitation trade-off in the Arena's favour. It is
+a test, not a claim.
+
+★★ The four biological-market conditions are checked, so "this is a market" is
+a finding rather than a figure of speech — not analogy and referent, but two
+instances of one model, and the model is the one that has the theorems. Three out
+of four is an exchange, and the missing condition is named because "not a market"
+is unactionable.
+
+★★ Thickness is why the free tier exists, which makes it a market-design
+instrument rather than generosity: a catalogue with nothing in it has no
+selection to run.
+
 ### `feat/discovery-interface` — merged into `dev` 29 Aug — **ADD-3 + ADD-4**
 
 **Off:** `dev` / gate green (core 2,039 / host 256).
