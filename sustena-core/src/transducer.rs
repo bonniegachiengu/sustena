@@ -365,13 +365,21 @@ mod tests {
     use super::*;
     use crate::parse_rule::{typecheck_rule, OperatorUniverse};
 
+    /// ★★★ The REAL registry, not a stand-in for it.
+    ///
+    /// This was a stub that knew one operator, which was true enough while one
+    /// operator was all any rule mapped to — and it meant `typecheck_rule` was
+    /// being checked against a fiction. A rule naming an operator that does not
+    /// exist, or handing it a parameter it does not declare, would have passed.
     struct Real;
     impl OperatorUniverse for Real {
         fn has(&self, operator: &str) -> bool {
-            operator == "budget.record_income"
+            crate::operator::Registry::default().get(operator).is_some()
         }
-        fn params_of(&self, _operator: &str) -> Option<Vec<String>> {
-            Some(vec!["amount".into(), "source".into(), "frequency".into()])
+        fn params_of(&self, operator: &str) -> Option<Vec<String>> {
+            crate::operator::Registry::default()
+                .get(operator)
+                .map(|m| m.params.iter().map(|p| p.name.to_string()).collect())
         }
     }
 
@@ -541,28 +549,46 @@ mod tests {
 
     // ── money-safety asymmetry ──────────────────────────────────────────────
 
+    /// The operators that decide what money was FOR.
+    ///
+    /// ★★★ This is the real line, and it is not the same line as "inbound or
+    /// outbound". Filing money into a category is a human judgment — only a
+    /// person knows whether a payment was food or a favour — and nothing may
+    /// make that judgment automatically. Everything else about a message can
+    /// be read off it: a lender is named in the text, a transfer has the
+    /// household at both ends, income is income.
+    const CATEGORISING: &[&str] = &["budget.spend", "budget.allocate"];
+
     #[test]
-    fn the_only_auto_applied_operator_is_income() {
-        // ★★★ Every shipped mapped rule routes to income. A spend that
-        //   auto-applied would be inventing which pocket a person meant.
-        let mapped: Vec<_> = all_seed_rules()
-            .into_iter()
-            .filter(|r| r.operator.is_some())
-            .collect();
+    fn nothing_files_money_into_a_category_without_being_asked() {
+        // ★★★ The money-safety rule. It used to be stated as "the only
+        //     auto-applied operator is income", which was the same rule while
+        //     income was the only unambiguous shape. §6 settled four more —
+        //     an overdraft, a savings transfer, a cash withdrawal, a Pochi —
+        //     and none of them involve choosing a pocket. The rule that
+        //     actually protects him is this one, so it is written directly
+        //     rather than approximated by a proxy that has stopped holding.
+        let mapped: Vec<_> =
+            all_seed_rules().into_iter().filter(|r| r.operator.is_some()).collect();
         assert!(!mapped.is_empty(), "some rules must map, or the tier is theatre");
         for r in &mapped {
-            assert_eq!(
-                r.operator.as_deref(),
-                Some("budget.record_income"),
-                "{} auto-applies {:?} — outbound money must ask a person",
+            let op = r.operator.as_deref().unwrap_or_default();
+            assert!(
+                !CATEGORISING.contains(&op),
+                "{} auto-applies {op} — only a person decides what money was for",
                 r.id,
-                r.operator
             );
         }
     }
 
     #[test]
-    fn every_outbound_shape_asks_a_person() {
+    fn a_payment_to_somebody_outside_the_household_always_asks() {
+        // ★★★ The half of the old outbound rule that still stands, and the
+        //     one that matters: money leaving toward a shop or a person is
+        //     exactly the case where the pocket is a judgment. A transfer
+        //     between the household's own places is not — the money has not
+        //     gone anywhere, and both ends are already known.
+        let internal: &[&str] = &["budget.transfer", "budget.repay_debt", "budget.charge_debt"];
         for rule in all_seed_rules() {
             let outbound = rule
                 .extract
@@ -570,13 +596,34 @@ mod tests {
                 .and_then(|s| s.value.as_ref())
                 .and_then(|v| v.as_str())
                 == Some("sent");
-            if outbound {
-                assert!(
-                    rule.operator.is_none(),
-                    "{} routes an outbound shape automatically",
-                    rule.id
-                );
+            if !outbound {
+                continue;
             }
+            match rule.operator.as_deref() {
+                None => {}
+                Some(op) => assert!(
+                    internal.contains(&op),
+                    "{} routes outbound money to {op} without asking",
+                    rule.id,
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn every_settled_instrument_shape_names_a_real_operator() {
+        // ★★ The other side of the same coin: the shapes §6 settled must
+        //    actually route somewhere, or settling them was paperwork.
+        let reg = crate::operator::Registry::default();
+        for id in [
+            "mpesa_fuliza_borrow", "mpesa_fuliza_interest", "mpesa_fuliza_repay",
+            "mpesa_mshwari_deposit", "mpesa_mshwari_withdraw",
+            "mpesa_withdraw", "mpesa_agent_withdraw",
+            "mpesa_pochi_received", "mpesa_pochi_withdraw",
+        ] {
+            let rule = all_seed_rules().into_iter().find(|r| r.id == id).expect(id);
+            let op = rule.operator.as_deref().unwrap_or_else(|| panic!("{id} maps to nothing"));
+            assert!(reg.get(op).is_some(), "{id} names {op}, which does not exist");
         }
     }
 
