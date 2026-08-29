@@ -19,6 +19,32 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/dsl-holon-typing` — merged into `dev` 29 Aug — **DSL-10**
+
+**Off:** `dev` at `169ebb2` · gate green (core 1,500 · host 223).
+
+**A parent and its children are one program.** A parent declares *sum every
+child's `finances.liquid.balance`* and writes rules about the total. Three things
+must agree: the child must HAVE that dimension, it must be a kind you can SUM,
+and the parent's rule must treat the result as what it is. Check the parent alone
+and all three can be wrong at once with nothing to report it.
+
+**Both failures are silent, which is what makes author-time work worth it.** An
+aggregate over a dimension no child declares does not crash — it totals **zero
+contributions**. Summing a string does not crash — it skips every child as
+unreadable and reports the same zero. Both read exactly like a household that
+genuinely has nothing, and there is no later moment at which anyone can tell.
+
+Judgments: **every child is checked, not a sample** — a holon of habitats and a
+shop is ordinary, and checking one is how a roll-up silently drops the members
+that differ. **`COUNT` is exempt on purpose** — how many children have a label is
+a real question; what their labels sum to is not. **An empty holon is not an
+error** — a holon is declared before it is populated.
+
+★★ `AggregateDecl::segments()` was exposed so the check resolves against a
+child's schema with the same segments roll-up will read with, rather than a
+re-parse free to disagree.
+
 ### `feat/dsl-typed-overlay` — merged into `dev` 29 Aug — **DSL-9**
 
 **Off:** `dev` at `6f8bc11` · gate green (core 1,491 · host 223).
