@@ -369,6 +369,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: link_number,
     });
 
@@ -388,6 +389,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 0,
         effect: None,
+        authored: None,
         run: identify,
     });
 
@@ -408,6 +410,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 0,
         effect: None,
+        authored: None,
         run: suggest,
     });
 
@@ -426,6 +429,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: remember,
     });
 }

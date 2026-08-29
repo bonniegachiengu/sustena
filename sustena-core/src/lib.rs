@@ -179,6 +179,7 @@ pub mod dag;
 pub mod operatives;
 pub mod parameter;
 pub mod holon_typing;
+pub mod embroidery;
 pub mod spec;
 pub mod overlay;
 pub mod tab;
@@ -317,6 +318,7 @@ pub use parameter::{DefParam, ParamError, Parameterised};
 pub use overlay::Overlay;
 pub use holon_typing::{joint_schema, typecheck_holon};
 pub use spec::{validate_spec, SpecContext};
+pub use embroidery::{Action, AuthoredEnzyme, Expr, MovementDecl};
 pub use tab::{tab_sides, TabSides};
 pub use operator::{
     execute, execute_admitted, execute_afforded, execute_as, Authorization, Enforcement, Execution,

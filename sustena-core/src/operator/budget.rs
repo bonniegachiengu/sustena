@@ -1210,6 +1210,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: record_income,
     });
 
@@ -1230,6 +1231,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: allocate,
     });
 
@@ -1247,6 +1249,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: add_pocket,
     });
 
@@ -1266,6 +1269,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: spend,
     });
 
@@ -1285,6 +1289,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: unspend,
     });
 
@@ -1302,6 +1307,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: unallocate,
     });
 
@@ -1316,6 +1322,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: open_account,
     });
 
@@ -1334,6 +1341,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: transfer,
     });
 
@@ -1354,6 +1362,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: borrow,
     });
 
@@ -1372,6 +1381,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: charge_debt,
     });
 
@@ -1390,6 +1400,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: repay_debt,
     });
 
@@ -1404,6 +1415,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: place_unaccounted,
     });
 
@@ -1418,6 +1430,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: unrecord_income,
     });
 
@@ -1437,6 +1450,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: reclassify,
     });
 
@@ -1455,6 +1469,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 0,
         effect: None,
+        authored: None,
         run: |state, _params, events, _movements| {
             let _ = state.set(
                 "finances.pockets.food",

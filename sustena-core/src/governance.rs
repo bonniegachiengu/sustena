@@ -269,6 +269,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 0,
         effect: None,
+        authored: None,
         run: set_parameter,
     });
 }

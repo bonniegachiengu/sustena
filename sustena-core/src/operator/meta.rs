@@ -173,6 +173,14 @@ pub struct OperatorMeta {
     /// row — so an operator without one yields `Unavailable` rather than a
     /// guess. See [`crate::obligation`].
     pub effect: Option<EffectSummary>,
+    /// ★★★ **The body, when it was written in Embroidery rather than in Rust.**
+    ///
+    /// `None` for every Enzyme this crate ships. When it is `Some`, the
+    /// interpreter runs it and `run` is never called — but `run` still holds a
+    /// real function that REFUSES, so if the dispatch is ever got wrong the
+    /// result is an honest error rather than a native body running with an
+    /// authored Enzyme's parameters.
+    pub authored: Option<std::sync::Arc<crate::embroidery::AuthoredEnzyme>>,
     pub run: OperatorFn,
 }
 impl OperatorMeta {

@@ -19,6 +19,40 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/dsl-authored-enzymes` — merged into `dev` 29 Aug — **DSL-13 (the large one)**
+
+**Off:** `dev` at `2e75491` · gate green (core 1,525 · host 223).
+
+**A definition named Enzymes; it never said what they DO.** `⟦operator⟧` was a
+name lookup, so the only people who could add a capability to a Sustain were the
+people who could compile one — and the language a household is supposedly
+written in could not express its own rules.
+
+`⟨g, e, ε, μ⟩` is now data: guards in the same language invariants use, actions
+over declared paths, declared emissions, declared movements.
+
+**It runs INSIDE the gate**, through one dispatch at the single existing call
+site — same admission, same invariants, same double-entry reconciliation. Four
+tests pin that: an authored Enzyme commits and folds; its guard refuses and
+leaves no trace; the household's own invariants still refuse it (authoring an
+Enzyme does not author a way around the law); and one that lowers a cash account
+without declaring what it moved is refused as a single-sided entry.
+
+★★★ **Its effect summary is DERIVED from the actions, so it cannot lie.**
+`obligation` is explicit that a native summary is a *claim about a body* which
+may be wrong. An authored Enzyme has no separate body to disagree with, so
+composition reasons about what will actually happen.
+
+Two deliberate absences: **no arithmetic in expressions** — it lives in the
+actions, which is exactly how `StateAccessor` already works, so this is the
+engine's own shape rather than a second one; and **no control flow** — sequencing
+belongs to `dag.rs`, where it is checked, and an effect that could branch would
+put an unchecked second sequencer inside the one place that must stay total.
+
+★★ `run` still holds a real function for an authored Enzyme, and it refuses. If
+the dispatch is ever got wrong the result is an honest error rather than a native
+body running with an authored Enzyme's parameters. A test calls it directly.
+
 ### `feat/dsl-spec-validator` — merged into `dev` 29 Aug — **DSL-12 (mostly)**
 
 **Off:** `dev` at `3862ddb` · gate green (core 1,509 · host 223).
