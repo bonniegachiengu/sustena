@@ -173,6 +173,7 @@ pub mod pincer;
 pub mod population;
 pub mod predicate;
 pub mod presentation;
+pub mod pricing;
 pub mod probe;
 pub mod proposal;
 pub mod provenance;

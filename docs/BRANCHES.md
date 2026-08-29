@@ -42,6 +42,38 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/two-prices` — merged into `dev` 29 Aug — **ARE-3**
+
+**Off:** `dev` / gate green (core 1,936 / host 256).
+
+**One column was doing two jobs.** The shipped `pawa_cost` is read as *"pawa to
+install"* by the surfaces and charged as a *per-call royalty* by the ledger. Those
+are not two readings of one number — they are two economics sharing a field, and
+whichever one is right the other is silently wrong.
+
+★★★ **They behave differently, which is why they cannot share a field.** An
+access price is a one-time signal and a one-time transfer; a usage price is a
+metered stream, and it is the one that makes cost proportional to the value
+actually delivered over time. A test shows the shape a single column structurally
+cannot hold: *expensive to acquire, free to run* — an ordinary, sensible artefact.
+
+★★★ **The occasion chooses the schedule, so a caller cannot mismatch them.**
+`charge_for` returns the amount **and** the `RevenueType` together: acquiring
+settles on Access, running on Usage. With one price those could only ever be
+matched by convention — and that correspondence is the whole reason MYC-5
+schedule is revenue-typed in the first place.
+
+★★★ **Unpriced is not free.** `None` means nobody has priced this; `Some(0)`
+means somebody decided. Collapsing them makes an unpriced artefact silently free,
+a decision taken by omission — in the one place where "free" ought to be a choice
+somebody made and can be asked about.
+
+★★ `crossover()` answers the comparison a buyer needs and a single column
+cannot make: 500 outright against 10 a run overtakes at 51. It returns `None` when
+two prices never cross, because a number there would be read as a threshold that
+does not exist — and `lifetime_cost` refuses to total a price nobody set, since a
+guess wearing a total is worse than no total.
+
 ### `feat/pawa-fitness-term` — merged into `dev` 29 Aug — **PAWA-4 + TEN-11, the economy layer opens**
 
 **Off:** `dev` / gate green (core 1,926 / host 256).
