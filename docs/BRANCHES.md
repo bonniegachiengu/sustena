@@ -19,6 +19,38 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/cross-source-correlation` — merged into `dev` 29 Aug — **ING-12**
+
+**Off:** `dev` at `ec6057a` · gate green (core 1,591 · host 230).
+
+**One transfer, two senders, one fact.** The raw-text dedup cannot see this by
+construction — it keys on the text, and the two texts are genuinely different.
+Both get captured, correctly, and applying both puts forty thousand shillings
+into the books twice.
+
+**The finding, and it is the serious one: the host was already joining these —
+on the REFERENCE ALONE.** A reference is not a fact. Codes are allocated by
+different systems and collide, and when they did, a real separate transaction
+was silently treated as already-applied and **vanished without trace**. Nobody
+finds out, because the whole effect of the join is that nothing is shown. The
+key is reference **and** amount now.
+
+An unknown amount falls back to the reference rather than refusing to join —
+narrowing further would miss real pairs for messages whose rules extract no
+amount, and the failure directions are not symmetric: a **missed** join shows a
+duplicate a person can undo; a **wrong** join hides a transaction nobody knows
+to look for.
+
+★★★ The core module **surfaces rather than suppresses**, naming both messages.
+A false positive that asks costs one tap; a false positive that hides costs a
+transaction and the trust in every other number.
+
+Two judgments: **no text-hash fallback across sources** — two descriptions of
+one event have different text by definition, so a text key would be exactly
+backwards here; and **opposite directions are evidence FOR**, because one side
+sent and the other received is what a single transfer looks like from two
+vantage points.
+
 ### `feat/control-system` — merged into `dev` 29 Aug — **CTL-1 · M-CTL COMPLETE**
 
 **Off:** `dev` at `b3f448d` · gate green (core 1,580 · host builds clean).
