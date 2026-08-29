@@ -19,6 +19,20 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `docs/declined-not-open` — merged into `dev` 29 Aug — **a marker for declined**
+
+**Docs only.** Three rows were carrying `⬜` for things nobody intends to build:
+MON-2 (the Kalman filter, a declined import with three concrete sites recorded),
+OPV-14 tail shape (declined for a structural reason), and CTL-6 (relocated out of
+core by ADR-0001). They now carry `🚫`.
+
+**Why it matters more than a glyph.** Six stale rows were found today, all in the
+same direction: the tracker was **pessimistic**, and work was at risk of being
+rebuilt. `⬜` on a declined row is the same failure pointed the other way — it
+reads as *open*, and the natural response to an open row is to close it. A
+position that has been argued for deserves a marker that says so, or somebody
+eventually builds the thing the argument was against.
+
 ### `feat/meme-kinds` — merged into `dev` 29 Aug — **OPV-5, the last unstarted core row**
 
 **Off:** `dev` / gate green (core 1,909 / host 245).
