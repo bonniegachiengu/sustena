@@ -19,6 +19,40 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/dsl-type-judgment` — merged into `dev` 29 Aug — **WBD Phase 4 opened**
+
+**Off:** `dev` at `130176c`
+**State:** merged, gate green (core 1,463 · host 223).
+
+**DSL-5 + DSL-1's type-check half** (GENOME §V), taken together because they are
+one tree-walk: the judgment, and the door it guards.
+
+**The gate has three outcomes — refuse, clamp, defer — and no fourth for "this
+rule is broken".** So an untyped mistake arrived dressed as a refusal: a rule
+comparing a pocket's NAME to a number reported that the household had broken a
+law, and somebody would go looking for money that never moved. `editing::typecheck`
+**bound names without typing anything**, so `label >= 5` loaded cleanly.
+
+Three judgments the article settles and one it does not:
+
+- **Ordering needs the same type; equality is total.** `a == b` across two types
+  is honestly `false` — they are different values. `a > b` has no answer at all.
+  Refusing both would outlaw a perfectly good "is this empty" test. My first
+  pass applied the type rule to both and a test caught it.
+- **`Any` and an undeclared param are compatible with everything.** `Any` exists
+  so a schema can be adopted one dimension at a time; a checker that complained
+  about silence would make adopting it cost a full re-declaration first.
+  Unstated is not the same as wrong.
+- **An undeclared path makes no type complaint.** `bind` already reports it, and
+  a person who reads two complaints for one mistake learns to read neither.
+- **Not settled, so not invented:** whether `notes == 5` deserves an
+  always-false lint. That is a lint, not a type error, and the article does not
+  ask for it.
+
+★★ `type_at` reuses `Schema::resolve` rather than growing a second path-walker.
+The first draft had its own, which would have been a second answer to a question
+the binder and the evaluator already agree on, free to drift from both.
+
 ### `feat/parser-signs` — merged into `dev` 29 Aug — **money model §8 COMPLETE**
 
 **Off:** `dev` at `80f5709`
