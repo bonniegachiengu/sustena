@@ -42,6 +42,38 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/android-shape-filter` — merged into `dev` 29 Aug — **IMM-11's Android half**
+
+**Off:** `dev` / APK v1.14.0 (versionCode 24) builds, verifies (v2) and aligns.
+
+**The disclosed gap from this morning, closed.** The structural detector landed
+server-side and the phone still had only the vocabulary — so a credential in
+unfamiliar wording still left the device before anything refused it. That layer
+protected the store, not the wire.
+
+★★★ **`SmsShapeFilter` reads no words at all**, and is wired into BOTH the
+real-time `SmsReceiver` and the backfill `SmsCapturePlugin.readInbox()`. A
+backfill applying a weaker check than the live path would be a second door with a
+lower lock.
+
+★★★ **Deliberately not a fourth copy of the vocabulary.** IMM-11's whole
+complaint is that the phone, the engine and the transducer share one keyword
+list; a fourth copy of that list would have deepened the coupling the row exists
+to break. This is a different algorithm, so a change to one does not silently
+need a change to the other.
+
+★★ **OR, not AND**, same as the server: either detector refusing is a refusal,
+because a false positive costs one capture re-entered by hand and a false
+negative puts a live credential on the wire. An AND would let each layer veto the
+other's catch.
+
+**Residual, stated rather than left implied.** The shape rules are now
+hand-mirrored in two runtimes — this class and `secret_shape.rs`. That is a
+smaller instance of the same problem: smaller because it is five stable
+structural features rather than a vocabulary that grows every time a bank writes
+a new sentence, but not zero. The real fix remains one shared check the phone can
+call, which needs a shared runtime the Capacitor app does not have.
+
 ### `feat/network-membership` — merged into `dev` 29 Aug — **MYC-1 + MYC-3**
 
 **Off:** `dev` / gate green (core 1,998 / host 256).

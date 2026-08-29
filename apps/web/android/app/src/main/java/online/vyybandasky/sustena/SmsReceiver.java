@@ -77,8 +77,14 @@ public class SmsReceiver extends BroadcastReceiver {
         }
 
         String bodyText = body.toString();
-        if (SmsSecretFilter.containsSensitiveSecret(bodyText)) {
-            return; // OTP/verification code -- discarded here, NEVER queued, regardless of sender
+        // TWO detectors, consulted with OR (SmsShapeFilter). The vocabulary
+        // knows phrasings; the shape reads structure and no words at all, so a
+        // bank inventing new wording -- or writing in Swahili -- defeats one and
+        // not the other. Either refusing is a refusal, because a false positive
+        // costs one capture re-entered by hand and a false negative puts a live
+        // credential on the wire.
+        if (SmsShapeFilter.mustNotLeaveTheDevice(bodyText)) {
+            return; // credential -- discarded here, NEVER queued, regardless of sender
         }
 
         long timestampMs = System.currentTimeMillis();
