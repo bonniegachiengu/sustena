@@ -202,6 +202,7 @@ pub mod parameter;
 pub mod holon_typing;
 pub mod embroidery;
 pub mod spec;
+pub mod abuse;
 pub mod admissibility;
 pub mod control_system;
 pub mod correlation;

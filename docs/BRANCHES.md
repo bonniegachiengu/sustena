@@ -42,6 +42,37 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/abuse-economics` — merged into `dev` 29 Aug — **PAWA-10**
+
+**Off:** `dev` / gate green (core 2,019 / host 256).
+
+**Nothing in this module is a new defence**, and that is the row. Each of the
+three is the meter doing a second job: the balance check that stops an
+unaffordable run is the same check that stops a runaway one, and the term that
+rewards an elegant plan is the same term that reduces load.
+
+★★★ **The honest cost, with a number attached.** Pricing via processing prices
+the attacker and the household *identically* — a defence that could tell them
+apart would not need a price. A test asserts an ordinary household month and an
+attacker burst cost exactly the same, and `raising_the_price_changes_the_ratio()`
+returns false: raising the coefficient buys a shorter flood for a fixed attacker
+budget, not a better ratio, and the household's bill moves by the same factor.
+So the right question is never "does this stop an attacker" but "what does it
+cost the person it was not aimed at".
+
+★★★ **Where the Sybil arithmetic actually turns.** A grant that MINTS is
+profitable and unbounded whatever identity costs, because the return per identity
+is fixed and the supply of identities is not. A test walks four identity prices
+and shows none of them rescues it — "make identity expensive" is the obvious move
+and the wrong one. The fix is: do not mint per identity.
+
+★★ **A transferred grant that pays is bad and finite**, and the verdict says
+so separately. Conflating bad with unbounded would make every profitable grant
+look like an emergency, and the purse genuinely does bound the damage.
+
+★★ A free operation has no bound at all, and `calls_affordable` returns `None`
+rather than a large number — worth knowing before declaring a bound.
+
 ### `feat/commons-and-symbionts` — merged into `dev` 29 Aug — **MYC-7 + MYC-9**
 
 **Off:** `dev` / gate green (core 2,008 / host 256).
