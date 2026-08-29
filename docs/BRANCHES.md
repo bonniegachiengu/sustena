@@ -42,6 +42,45 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/network-membership` — merged into `dev` 29 Aug — **MYC-1 + MYC-3**
+
+**Off:** `dev` / gate green (core 1,998 / host 256).
+
+★★★ **There is deliberately no `Network` type.** The network is a `Sigma` whose
+members are Sustains, and the same composition folds a homestead into it that
+folds a habitat into a homestead. A distinct type would be the claim that the
+largest scale is special, and the whole article is that it is not.
+
+★★★ **Membership is a gated transition, not a fact of deployment** — a machine
+that is running is not thereby a member, and "the network" without a boundary is a
+mood.
+
+**Failure is indistinguishable from slowness, and the types say so.**
+
+★★★ **There is no `Dead` variant to reach.** A crash and a slow link look the
+same from outside, so a variant asserting death would be a claim no asynchronous
+system can make. `Suspect` carries how many witnesses were asked and that it is
+refutable, and `refute()` exists — a detector whose output could not be argued
+with would not have a false-positive *rate*, it would have victims.
+
+★★★ **One silent probe is not evidence.** A single timeout says as much about
+the prober's own network as about the target, so suspecting on it would make a
+congested minute look like a departure. `k` witnesses first, and the count is
+declared, because a knob nobody chose is a false-positive rate nobody chose.
+
+★★ **Only a stated departure is a fact.** And leaving destroys the edge and
+nothing else: this module has no method that touches a member's state at all,
+which is the holon invariant applied to the network — the whole is real, and it
+never erases the parts inside it.
+
+★★ **Nothing reads a clock and no function takes a global view** — two of the
+three things federation forbids. `probe` is handed the acks rather than waiting
+for them, so this module decides what a silence *means* while finding out stays
+the host's job, and a member never met is an ordinary state rather than an error.
+
+★★ No network power reaches past a member's gate: observe, aggregate, price,
+refuse service, and nothing else — asserted as a function rather than a comment.
+
 ### `feat/order-lifecycles` — merged into `dev` 29 Aug — **ARE-9**
 
 **Off:** `dev` / gate green (core 1,986 / host 256).
