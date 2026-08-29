@@ -210,6 +210,7 @@ pub mod unscored;
 pub mod canonical;
 pub mod lift;
 pub mod surface;
+pub mod surfaces;
 pub mod overlay;
 pub mod tab;
 pub mod state;
