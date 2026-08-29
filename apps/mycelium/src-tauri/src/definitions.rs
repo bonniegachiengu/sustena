@@ -129,6 +129,20 @@ pub fn check_against(
 ) -> DefinitionVerdict {
     let def = authored.to_definition();
 
+    // ★★★ **Everything the definition NAMES, before anything it asserts.**
+    //     A spec naming an Enzyme this engine does not provide loads perfectly
+    //     today; the first person to try it is told the operator "is not
+    //     available on this sustain", which sounds like a permission and is a
+    //     typo. Names first, then types — reporting a mistyped rule while an
+    //     unknown Enzyme is outstanding sends somebody to fix the wrong thing.
+    let ctx = sustena_core::SpecContext { children: children.to_vec() };
+    if let Err(errors) = sustena_core::validate_spec(&def, &sustena_core::Registry::default(), &ctx)
+    {
+        return DefinitionVerdict::NotWellTyped {
+            errors: errors.into_iter().map(|e| format!("{}: {}", e.path, e.detail)).collect(),
+        };
+    }
+
     if let Err(errors) = sustena_core::typecheck_holon(&def, children) {
         return DefinitionVerdict::NotWellTyped {
             errors: errors.into_iter().map(|e| format!("{}: {}", e.path, e.detail)).collect(),
