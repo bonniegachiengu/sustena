@@ -175,6 +175,7 @@ pub mod semantic;
 pub mod stranding;
 pub mod signal;
 pub mod package;
+pub mod tab;
 pub mod state;
 pub mod sync;
 pub mod trust;
@@ -303,6 +304,7 @@ pub use operative::{
     Ranking, Sense, Shared, StatePoint, Utility,
 };
 pub use operator::vendor::{is_person_pocket, person_key, pocket_for_number};
+pub use tab::{tab_sides, TabSides};
 pub use operator::{
     execute, execute_admitted, execute_afforded, execute_as, Authorization, Enforcement, Execution,
     OperatorMeta,
