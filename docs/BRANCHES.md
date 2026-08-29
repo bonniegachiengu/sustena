@@ -42,6 +42,46 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/commons-and-symbionts` — merged into `dev` 29 Aug — **MYC-7 + MYC-9**
+
+**Off:** `dev` / gate green (core 2,008 / host 256).
+
+**A subsidy funded from a common purse is a free-rider magnet by construction.**
+The treasury is subtractable and hard to exclude members from — which is what
+membership means — so it is exactly the configuration Hardin predicted would be
+destroyed. Ostrom is the empirical reply, and mapping the eight principles is the
+specification of what the network must implement to survive its own generosity.
+
+★★★ **Each principle names the mechanism that discharges it.** "We follow
+Ostrom" is a claim; "principle 5 is the sanction ladder" is a thing somebody can
+go and read.
+
+★★★ **Principle 8 is marked as falling out of the primitive**, not adopted as
+policy. A commons that has to *remember* to be nested can stop being nested; one
+that is nested because its primitive is recursive cannot.
+
+★★★ **There is no `Unbounded` grant.** A grant bounded by nothing is a mint
+with extra steps, and the type has nowhere to express one.
+
+★★★ **A free identity is refused loudly, because principle 1 fails silently.**
+That is the whole problem: the commons looks healthy right up until it is
+drained, because every fake member is indistinguishable from a real one at the
+moment it takes its grant. `identity_is_costly` is a required argument, so
+somebody has to think about it rather than inherit an assumption.
+
+★★ Both defences tested as a pair — a costly identity with an unbounded grant
+drains the purse slowly; a bounded grant with free identity drains it quickly.
+And a grant the purse can cover to a real newcomer is admitted: a defence that
+refused everything would be a purse nobody could draw on, which is the same
+failure as one that drains.
+
+★★★ **MYC-9: the Symbiont's authority is zero as a property of the type.** No
+`privileged` field, no exception, and the two refusals are functions rather than
+comments so a change granting an exception would have to delete them and their
+test. That is the row's own point — promises are unenforceable, and a
+privileged-Symbiont exception is not a feature with a risk, it is the deletion of
+the property that makes the rest of the argument true.
+
 ### `feat/android-shape-filter` — merged into `dev` 29 Aug — **IMM-11's Android half**
 
 **Off:** `dev` / APK v1.14.0 (versionCode 24) builds, verifies (v2) and aligns.

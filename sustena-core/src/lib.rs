@@ -110,6 +110,7 @@ pub mod belief;
 pub mod boundary;
 pub mod checkpoint;
 pub mod clocks;
+pub mod commons;
 pub mod compose;
 pub mod consensus;
 pub mod crdt;
