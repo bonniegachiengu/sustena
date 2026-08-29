@@ -19,6 +19,38 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/control-system` — merged into `dev` 29 Aug — **CTL-1 · M-CTL COMPLETE**
+
+**Off:** `dev` at `b3f448d` · gate green (core 1,580 · host builds clean).
+
+**Every piece of the loop existed; the loop did not.** `region.rs` gave `e`,
+`controller.rs` gave Lyapunov and the Sheridan dispatch, `ooda.rs` gave the
+phases — and each caller assembled them in whatever order it chose. Four callers
+is four loops, and the day two of them disagree about whether to measure before
+or after the candidate, nobody can say which one is the Controller.
+
+★★★ **The Actuator is deliberately not here.** §I closes the loop through a
+*human*, and ADR-0001 keeps I/O out of the core. `step()` computes what the loop
+would do and returns it; acting is the host's and authorising is the person's. A
+step that could act would close the loop through itself, which is the one shape
+supervisory control is defined in opposition to. A test asserts the plant comes
+back untouched.
+
+Three judgments: **a move that increases `W` is not a candidate at all** —
+Lyapunov is the definition of a good decision, not a ranking, and offering a
+worsening move would be offering to make things worse and calling it an option.
+**Inside the region it proposes nothing**, because a controller that acts when
+nothing is wrong is the over-corrector damping exists to catch. **A tie goes to
+declared preference**, never to whichever candidate the vector happened to hold
+first.
+
+★★ *Nothing helps* is an answer, not an error. Reporting it as a failure would
+push a caller toward acting anyway; saying so plainly is what lets a person go
+and find something that does.
+
+**This closes M-CTL.** The module header still read *NOT STARTED* while most of
+its rows were ✅ — corrected, with the original note kept for the record.
+
 ### `feat/canonical-hash` — merged into `dev` 29 Aug — **SUS-15 + CON-8**
 
 **Off:** `dev` at `6a728b2` · gate green (core 1,571 · host 223).
