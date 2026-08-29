@@ -298,6 +298,7 @@ mod tests {
             protocol: Protocol::Rpc,
             min_privilege: 0,
             effect,
+            authored: None,
             run: |_s, _p, _e, _m| OperatorResult::ok(json!({})),
         }
     }

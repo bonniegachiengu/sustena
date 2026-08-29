@@ -78,6 +78,7 @@ fn op(name: &'static str, reads: &[&str], writes: Option<&[&str]>) -> OperatorMe
         min_privilege: 0,
         effect: writes
             .map(|ws| ws.iter().fold(EffectSummary::new(), |e, p| e.with(p, Change::Opaque))),
+        authored: None,
         run: noop,
     }
 }

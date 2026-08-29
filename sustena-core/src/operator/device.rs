@@ -94,6 +94,7 @@ pub fn register(registry: &mut Registry) {
         protocol: Protocol::Rpc,
         min_privilege: 1,
         effect: None,
+        authored: None,
         run: heartbeat,
     });
 }

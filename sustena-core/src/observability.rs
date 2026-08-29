@@ -391,6 +391,7 @@ mod tests {
             effect: writes.map(|ws| {
                 ws.iter().fold(EffectSummary::new(), |e, (p, c)| e.with(p, c.clone()))
             }),
+            authored: None,
             run: noop,
         }
     }

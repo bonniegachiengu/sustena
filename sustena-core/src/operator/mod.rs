@@ -450,7 +450,16 @@ pub fn execute_afforded(
     let mut events: Vec<EmittedEvent> = Vec::new();
     // Constraint §II: `candidate, flows = o.effect(copy(s), params, ctx)`.
     let mut movements: Vec<Movement> = Vec::new();
-    let result = (meta.run)(&mut working, params, &mut events, &mut movements);
+    // ★★★ **One execution path, whichever language the Enzyme was written in.**
+    //
+    //     An authored Enzyme is interpreted here — inside the gate, above the
+    //     same admission check, the same invariants, the same double-entry
+    //     reconciliation. Running it anywhere else would be a second door into
+    //     state, and a second door is the thing the gate exists to not have.
+    let result = match &meta.authored {
+        Some(enzyme) => enzyme.run(&mut working, params, &mut events, &mut movements),
+        None => (meta.run)(&mut working, params, &mut events, &mut movements),
+    };
 
     if !result.is_ok() {
         // The operator refused on its own terms. Discard everything it touched:
@@ -804,6 +813,7 @@ mod tests {
             protocol: crate::operator::meta::Protocol::Rpc,
             min_privilege: 1,
             effect: None,
+            authored: None,
             run: admit_member,
         });
         r
@@ -1015,6 +1025,7 @@ mod tests {
                 "finances.pockets.food.allocated",
                 crate::compose::Change::SetTo(json!(-999.0)),
             )),
+            authored: None,
             run: |state, _p, _e, _m| {
                 let _ = state.set("finances.pockets.food.allocated", json!(-999.0));
                 OperatorResult::ok(json!({}))
@@ -1364,6 +1375,7 @@ mod tests {
             protocol: Protocol::Rpc,
             min_privilege: 0,
             effect: None,
+            authored: None,
             run: |state, _p, events, _movements| {
                 // Replace the whole finances record with one missing `liquid`.
                 let _ = state.set("finances", json!({"pockets": {}, "income": {}}));
@@ -1594,6 +1606,7 @@ mod tests {
             protocol: Protocol::Rpc,
             min_privilege: 0,
             effect: None,
+            authored: None,
             run: |state, _p, events, _movements| {
                 let _ = state.set("finances.pockets.food.allocated", json!(25000));
                 events.push(EmittedEvent { name: "event.test.minted".into(), payload: json!({}) });
