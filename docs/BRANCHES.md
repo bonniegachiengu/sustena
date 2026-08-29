@@ -19,6 +19,40 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/liveness` — merged into `dev` 29 Aug — **ING-8**
+
+**Off:** `dev` at `5ebfad8` · gate green (core 1,648 · host 245).
+
+**A capture path that dies is silent, and silence is also what a quiet Tuesday
+looks like.** A revoked SMS permission, a rule that stopped matching, a bank that
+changed its sender id — every one presents as *no new messages*. Nothing else in
+the system can notice, because the failure is an absence.
+
+★★★ **"Never guess a cadence" is the row's own constraint, and it is structural
+here.** `learned_theta` returns `None` below five gaps: three observations are
+three numbers, not a distribution, and a threshold from them is an alarm about
+last week wearing a threshold's clothes. So a source nobody has watched long
+enough is **unknown** — a third answer. Healthy would hide a dead capture path;
+stale would cry wolf about a source that is simply new.
+
+★★★ **A heartbeat converts a statistical detector into a deterministic one.**
+`gap > h + δ` is a fact, not an inference — no percentile, no history, no
+warm-up, watchable from the first message. Where both exist the promise wins.
+
+★★ **Nearest-rank, not interpolation**, so the threshold shown is a gap this
+source really had rather than an average of two it never did. And the grace `δ`
+is required rather than defaulted — a declared cadence is a promise about intent,
+not about the network, and where "late" begins belongs to whoever declared it.
+
+★★ *Seen when it speaks, not when it parses* was **already right** in the host —
+verified rather than assumed, and now asserted by a test. A message nobody could
+read still proves the phone is on; counting only successful parses would send
+somebody to check the phone when the answer is *the format changed*.
+
+★★ A negative gap is discarded rather than recorded: a clock that moved backwards
+is not a cadence, and it would poison the percentile with a number no source ever
+kept.
+
 ### `feat/event-time` — merged into `dev` 29 Aug — **ING-13**
 
 **Off:** `dev` at `55bfc8e` · gate green (core 1,637 · host 240).
