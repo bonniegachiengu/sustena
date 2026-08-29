@@ -157,6 +157,7 @@ pub mod llm_policy;
 pub mod market;
 pub mod market_design;
 pub mod meme;
+pub mod metered;
 pub mod migrate;
 pub mod mixture;
 pub mod models;

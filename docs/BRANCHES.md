@@ -42,6 +42,44 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/metered-decisions` — merged into `dev` 29 Aug — **OP-11 + MON-12 + CTL-10 (+ CAP-16, PAWA-13)**
+
+**Off:** `dev` / gate green (core 2,071 / host 256).
+
+**Three rows, one idea: everything that spends, spends the same meter.** Once
+computation has a price, the price is available everywhere a decision is made —
+so watching, surfacing and intervening all become economic questions rather than
+only statistical ones.
+
+★★★ **Declared and metered stay two numbers.** A declared cost is a promise made
+before the run; a metered one is a measurement taken after it. Collapsing them
+loses the ability to notice that an operator consistently costs more than it says
+— the signal worth having, and one a single number cannot produce because there
+is nothing to compare against.
+
+★★★ **A refused call costs zero, as a function rather than a comment.** Charging
+for refusals would make the gate a revenue source, which is the worst possible
+incentive to attach to a thing whose job is to say no.
+
+★★★ **A CUSUM crossing is necessary and not sufficient.** The crossing is a
+statistical fact; surfacing is an economic decision. A detector tuned purely on
+statistics will spend a person's attention on a signal that was not worth the
+interruption — and attention is the scarcer of the two currencies, since a person
+has about four working-memory slots and rather more than four pawa.
+
+★★ **The price of a slot is required rather than defaulted**, and the reason is
+uncomfortable: putting a number on attention is a judgement about how much
+somebody's focus is worth, and a default would be this module making it for them.
+
+★★★ **Two interventions that close the same distance to V are not equally good**
+if one costs four times as much, and before the meter there was no way to say so.
+It is gain *net of* cost rather than cost alone, so an intervention that closes
+four times the distance is allowed to cost more.
+
+**Two rows closed alongside:** CAP-16 with ADD-4's settlement module, and PAWA-13
+structurally — `Rail::Ethereum` has no constructor that marks itself live, so the
+honest line is not a boolean this codebase can set.
+
 ### `feat/llm-policy` — merged into `dev` 29 Aug — **OPV-24, CAP-8, IMM-13**
 
 **Off:** `dev` / gate green (core 2,059 / host 256).
