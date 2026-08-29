@@ -19,6 +19,45 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/canonical-hash` — merged into `dev` 29 Aug — **SUS-15 + CON-8**
+
+**Off:** `dev` at `6a728b2` · gate green (core 1,571 · host 223).
+
+Two rows, landed together because the second was found while wiring the first.
+
+**SUS-15 — `H(s) = hash(canonical(s))`.** `fold(log) == cache` is the law the
+whole engine rests on, and checking it meant comparing two whole state trees.
+Across a peer link that is not a question anyone can ask: you cannot send a
+household's entire finances to find out whether two nodes agree, and a node that
+answers *mostly* has answered nothing. Sixty-four characters either match or they
+do not.
+
+★★★ Sorting object keys is not tidiness — this crate builds its `Map` with
+`preserve_order`, so hashing insertion order would report a household as diverged
+**from itself**. Numbers go through the engine's own `num` rule for the same
+reason. Array order is preserved, because in a list order IS the value.
+
+★★ `sha2` is the first hashing dependency, named rather than slipped in: `H(s)`
+is compared across peers that need not trust each other, and a hash somebody can
+collide on purpose verifies nothing.
+
+**CON-8 — `⋀_{H∈path} admit_H`, the full path.** Only the immediate parent was
+ever asked, so a village-level rule two edges up did not apply — silently, with
+nothing saying a level had been skipped. A holon three deep is not exotic; it is
+the shape the model is named after.
+
+Judgments kept: **refusal only on a newly-caused breach** (a household already
+over its limit freezing every member would punish exactly the household that
+most needs its members able to act); **advisory by default**; **every level
+reported**, not just the first to refuse.
+
+★★★ **The finding:** an unreadable rule evaluates false both before and after,
+so it looked exactly like a pre-existing breach and was waved through as *not
+newly caused* — a gate failing open at the worst possible moment, right after
+somebody mistyped a law. The reading is three-valued now: held / failed /
+**unreadable**. DSL-5's *a broken document is not a violated law* turns out to
+apply here too, and a test caught the conflation rather than a reading of it.
+
 ### `feat/dsl-mdl-lift` — merged into `dev` 29 Aug — **DSL-15 · PHASE 4 COMPLETE**
 
 **Off:** `dev` at `b29907e` · gate green (core 1,548 · host 223).

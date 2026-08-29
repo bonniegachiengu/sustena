@@ -181,6 +181,8 @@ pub mod parameter;
 pub mod holon_typing;
 pub mod embroidery;
 pub mod spec;
+pub mod admissibility;
+pub mod canonical;
 pub mod lift;
 pub mod surface;
 pub mod overlay;
@@ -323,6 +325,8 @@ pub use spec::{validate_spec, SpecContext};
 pub use embroidery::{Action, AuthoredEnzyme, Expr, MovementDecl};
 pub use surface::{parse_enzyme, render_enzyme, SurfaceError};
 pub use lift::{propose as propose_lifts, Lift};
+pub use canonical::{agrees_with, canonical, state_hash, Agreement as StateAgreement};
+pub use admissibility::{admissible_along, Authority, BindingRule, GlobalVerdict, Level};
 pub use tab::{tab_sides, TabSides};
 pub use operator::{
     execute, execute_admitted, execute_afforded, execute_as, Authorization, Enforcement, Execution,
