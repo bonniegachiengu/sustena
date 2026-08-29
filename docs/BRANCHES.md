@@ -19,6 +19,45 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/two-surfaces-one-truth` — merged into `dev` 29 Aug — **CAP-15, + CAP-11 and CAP-2**
+
+**Off:** `dev` / gate green (core 1,893 / host 245).
+
+**"Two surfaces, one truth" was a claim nothing checked.** Mycelium and Orchie are
+supposed to be projections of the same object differing only in budget, and until
+now that was a sentence in a document.
+
+★★★ **It is checkable, and now checked: the views must nest.** Whatever the phone
+shows, the laptop shows too. If the small view ever holds something the large one
+does not, they are not two views of one truth — they are two answers, and a person
+moving between them is reading two systems that happen to share a login.
+
+★★★ **The failure would be invisible from either surface alone.** Each looks
+internally consistent. Only composing at two budgets and comparing can catch it,
+which is exactly why this had to be a check rather than a comment.
+
+★★ **Nesting is one-directional** — the laptop showing more is what a larger
+budget *is*. `only_on_the_larger()` names what the phone is not showing, because
+*"three other things stayed quiet"* is only true if somebody can say which three,
+and `extra_budget_bought_something()` answers whether the bigger surface is a
+larger view of the truth or the same view with more room.
+
+★★ **Checked at every budget between the two**, not only at the ends: an
+unstable ordering could hold at K=4 and K=64 and break at K=5, and an end-to-end
+check would have missed it. The divergence case is constructed too — a check
+that has never been seen to fail is one nobody knows the shape of.
+
+**Two more capstone rows closed by reading:**
+
+- **CAP-11** — **the fifth stale row today.** Its open leg was *the authoring
+  language*, closed by M-DSL Phase 4 earlier in this same run: `surface.rs`
+  (many surfaces, one AST), `embroidery.rs` (Enzymes authored as data rather than
+  compiled Rust), `lift.rs` (when a definition earns its keep).
+- **CAP-2** — complete as far as it is code. `sigma.rs` is the one recursive type,
+  and Corollary 2 is now *checked* rather than argued (`duality.rs`). The theorem
+  is the design justification, not a function — the fixpoint is what the type
+  system already refuses to let you break.
+
 ### `feat/default-council` — merged into `dev` 29 Aug — **OPV-2**
 
 **Off:** `dev` / gate green (core 1,887 / host 245).
