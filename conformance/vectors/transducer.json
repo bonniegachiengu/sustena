@@ -943,5 +943,24 @@
         "parser_name": ""
       }
     }
-  ]
+  ],
+  "divergence": {
+    "kind": "rust-ahead-of-python",
+    "recorded": "2026-08-29",
+    "statement": "The nine instrument shapes below are MAPPED in Rust and parsed_unmapped in the reference engine. This is not a port gap: it is the money model (Orchie_Money_Model.md §6, settled 26 Aug) being implemented. The reference engine sends every one of them to a person to classify, which is the honest default while an engine cannot tell an overdraft from a payment — and the wrong answer once it can, because asking someone which pocket their own cash withdrawal belongs to is asking a question with no true answer.",
+    "python_behaviour_today": "apps/api leaves all nine at parsed_unmapped with no operator. It has no operator that could take them: nothing in the reference writes finances.liabilities.*, so an overdraft cannot be expressed there at all — it can only be filed as income, which overstates the household by the whole of what it owes.",
+    "the_rule_that_did_not_change": "Nothing files money into a CATEGORY without being asked. budget.spend and budget.allocate remain un-auto-appliable by any rule, and a payment to somebody outside the household still always asks. What changed is that four shapes were shown not to involve a category at all: an overdraft names its lender, a transfer has the household at both ends, a cash withdrawal moves money to your own pocket. The old test asserted the proxy (\"the only auto-applied operator is income\"), which held only while income was the one unambiguous shape. The rule is now asserted directly.",
+    "cases_affected": [
+      "mpesa_fuliza_borrow",
+      "mpesa_fuliza_interest",
+      "mpesa_fuliza_repay",
+      "mpesa_mshwari_deposit",
+      "mpesa_mshwari_withdraw",
+      "mpesa_withdraw",
+      "mpesa_agent_withdraw",
+      "mpesa_pochi_received",
+      "mpesa_pochi_withdraw"
+    ],
+    "closes_if": "The reference engine gains budget.borrow / charge_debt / repay_debt and adopts §6. These become parity vectors unchanged; nothing in them is Rust-specific."
+  }
 }

@@ -158,6 +158,23 @@ A spec vector may carry a `divergence` block naming a place where the two
 engines deliberately differ. The rule is that a divergence is **documented or
 it is a bug** — nothing silently differs.
 
+- **`transducer.json` — rust-ahead-of-python.** Nine instrument shapes —
+  Fuliza borrow / interest / repayment, M-Shwari in and out, cash withdrawal at
+  a till and at an agent, Pochi in and out — are **mapped** in Rust and
+  `parsed_unmapped` in the reference. This is the money model
+  (`Orchie_Money_Model.md` §6, settled 26 Aug) being implemented, not a port
+  gap. The reference *cannot* express an overdraft: nothing in `apps/api` writes
+  `finances.liabilities.*`, so borrowed money can only be filed as income, which
+  overstates the household by the whole of what it owes.
+  The block records the rule that did **not** change — nothing files money into
+  a *category* without being asked, and a payment to somebody outside the
+  household still always asks. What the four settled shapes have in common is
+  that no category is involved: an overdraft names its lender, a transfer has
+  the household at both ends, a withdrawal moves money to your own pocket.
+  Asking which pocket your own cash withdrawal belongs to is a question with no
+  true answer. `tests/conformance_transducer.rs` skips those nine **by name**
+  and asserts the block still exists, so the divergence cannot become silent.
+
 - **`approval.json` — rust-ahead-of-python.** The reference engine has no
   approval token at all (`approval_token`, `valid_token` and `effect_class` are
   grep-0 in `apps/api/sustena/`). In Python "the human decides" holds by

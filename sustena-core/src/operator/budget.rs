@@ -975,6 +975,222 @@ fn reclassify(
 
 // ── registration ─────────────────────────────────────────────────────────────
 
+
+// ── budget.borrow / charge_debt / repay_debt ────────────────────────────────
+//
+// ★★★ **Money model §3: a borrow is ONE transaction with TWO postings, both
+// positive** — cash arrives AND an obligation appears. Nothing in this engine
+// could express that: no operator wrote `finances.liabilities.*` at all, so an
+// overdraft looked exactly like income and the household's position overstated
+// itself by the whole of what it owed.
+//
+// ★★★ The lender sits OUTSIDE the household, which is why both movements are
+// `from` it. Writing the obligation as money flowing out of the liability would
+// net the two sides to zero and describe a transaction where nothing happened.
+// The canon is explicit that both sides rise, and the ledger check is
+// observed-against-declared rather than sum-to-zero, so this states what it did.
+
+/// The pocket a lender's charges are gathered into.
+///
+/// ★★ Money model §6.2: the running cost of an overdraft belongs in a pocket of
+/// its own, so it is visible OVER TIME rather than dissolved into whatever it
+/// happened to be spent alongside. Named after the lender so two lenders never
+/// share a total.
+fn fees_pocket(params: &Map<String, Value>, lender: &str) -> String {
+    let declared = text(params, "fees_pocket");
+    if declared.is_empty() {
+        normalize_pocket_name(&format!("{lender} fees"))
+    } else {
+        normalize_pocket_name(&declared)
+    }
+}
+
+/// Charge a fee to a pocket that exists to hold exactly these.
+///
+/// ★★ It is allowed to go past its allocation, and deliberately. The charge
+/// happened whether or not it was budgeted for; refusing would record a
+/// household that was never charged, and the overrun is worth SEEING.
+fn charge_to_fees(state: &mut State, pocket: &str, amount: f64) {
+    let path = format!("finances.pockets.{pocket}");
+    if !state.exists(&format!("{path}.allocated")) {
+        let _ = state.set(&path, json!({"allocated": 0.0, "spent": 0.0, "limit": 0.0}));
+    }
+    let _ = state.increment(&format!("{path}.spent"), &json!(amount));
+}
+
+fn lender_of(params: &Map<String, Value>) -> String {
+    let l = text(params, "lender");
+    if l.is_empty() { "debt".to_string() } else { normalize_pocket_name(&l) }
+}
+
+fn owed(state: &State, lender: &str) -> f64 {
+    state
+        .get(&format!("finances.liabilities.{lender}.balance"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0)
+}
+
+fn move_debt(state: &mut State, lender: &str, delta: f64) {
+    let path = format!("finances.liabilities.{lender}");
+    if !state.exists(&format!("{path}.balance")) {
+        let _ = state.set(&path, json!({"label": lender, "balance": 0.0}));
+    }
+    let _ = state.increment(&format!("{path}.balance"), &json!(delta));
+}
+
+fn borrow(
+    state: &mut State,
+    params: &Map<String, Value>,
+    events: &mut Vec<EmittedEvent>,
+    movements: &mut Vec<Movement>,
+) -> OperatorResult {
+    let lender = lender_of(params);
+    let amount = num(params, "amount");
+    let fee = num(params, "fee");
+    if amount <= 0.0 && fee <= 0.0 {
+        return OperatorResult::fail("A borrow has to be of something.", "borrow_positive");
+    }
+
+    // ★★ The fee is owed too. It is charged for the privilege, and the lender
+    //    adds it to the balance — so what is owed is the principal PLUS it,
+    //    while only the principal ever arrives as spendable money.
+    let obligation = amount + fee;
+    move_debt(state, &lender, obligation);
+
+    if amount > 0.0 {
+        let _ = state.increment("finances.liquid.balance", &json!(amount));
+        if let Some(a) = account_of(params) {
+            move_account(state, &a, amount);
+        }
+    }
+    let pocket = fees_pocket(params, &lender);
+    if fee > 0.0 {
+        charge_to_fees(state, &pocket, fee);
+    }
+
+    let source = format!("lender:{lender}");
+    if amount > 0.0 {
+        let landed = match account_of(params) {
+            Some(a) => format!("finances.accounts.{a}"),
+            None => "finances.liquid".to_string(),
+        };
+        movements.push(Movement::new("money", amount, &source, &landed));
+    }
+    movements.push(Movement::new(
+        "money",
+        obligation,
+        &source,
+        &format!("finances.liabilities.{lender}"),
+    ));
+
+    events.push(EmittedEvent {
+        name: "event.finances.borrowed".into(),
+        payload: json!({"lender": lender, "amount": money(amount), "fee": money(fee),
+                        "owed": money(owed(state, &lender))}),
+    });
+
+    OperatorResult::ok(json!({
+        "lender": lender, "amount": money(amount), "fee": money(fee),
+        "fees_pocket": pocket, "owed": money(owed(state, &lender)),
+    }))
+}
+
+/// Interest or a charge added to a debt that already exists.
+///
+/// ★★★ Separate from `borrow` because nothing arrives. Folding it in would
+/// have meant borrowing zero shillings to be charged for it, which is a sentence
+/// nobody should have to read to understand their own overdraft.
+fn charge_debt(
+    state: &mut State,
+    params: &Map<String, Value>,
+    events: &mut Vec<EmittedEvent>,
+    movements: &mut Vec<Movement>,
+) -> OperatorResult {
+    let lender = lender_of(params);
+    let amount = num(params, "amount");
+    if amount <= 0.0 {
+        return OperatorResult::fail("A charge has to be of something.", "charge_positive");
+    }
+
+    move_debt(state, &lender, amount);
+    let pocket = fees_pocket(params, &lender);
+    charge_to_fees(state, &pocket, amount);
+
+    movements.push(Movement::new(
+        "money",
+        amount,
+        &format!("lender:{lender}"),
+        &format!("finances.liabilities.{lender}"),
+    ));
+
+    events.push(EmittedEvent {
+        name: "event.finances.debt_charged".into(),
+        payload: json!({"lender": lender, "amount": money(amount),
+                        "owed": money(owed(state, &lender))}),
+    });
+
+    OperatorResult::ok(json!({
+        "lender": lender, "amount": money(amount), "fees_pocket": pocket,
+        "owed": money(owed(state, &lender)),
+    }))
+}
+
+fn repay_debt(
+    state: &mut State,
+    params: &Map<String, Value>,
+    events: &mut Vec<EmittedEvent>,
+    movements: &mut Vec<Movement>,
+) -> OperatorResult {
+    let lender = lender_of(params);
+    let amount = num(params, "amount");
+    if amount <= 0.0 {
+        return OperatorResult::fail("A repayment has to be of something.", "repay_positive");
+    }
+    let outstanding = owed(state, &lender);
+    // ★★★ Repaying more than is owed would leave a NEGATIVE debt, which reads
+    //     as the lender owing the household — a claim it does not have. The
+    //     refusal names both figures so the real amount is one tap away.
+    if amount > outstanding + 0.005 {
+        let mut r = OperatorResult::fail(
+            format!(
+                "Repaying KES {amount:.0} is more than the KES {outstanding:.0} owed to '{lender}'."
+            ),
+            "repay_within_debt",
+        );
+        r.data = json!({"lender": lender, "owed": money(outstanding), "requested": money(amount)});
+        return r;
+    }
+
+    move_debt(state, &lender, -amount);
+    let _ = state.decrement("finances.liquid.balance", &json!(amount), true);
+    if let Some(a) = account_of(params) {
+        move_account(state, &a, -amount);
+    }
+
+    let sink = format!("lender:{lender}");
+    let left = match account_of(params) {
+        Some(a) => format!("finances.accounts.{a}"),
+        None => "finances.liquid".to_string(),
+    };
+    movements.push(Movement::new("money", amount, &left, &sink));
+    movements.push(Movement::new(
+        "money",
+        amount,
+        &format!("finances.liabilities.{lender}"),
+        &sink,
+    ));
+
+    events.push(EmittedEvent {
+        name: "event.finances.debt_repaid".into(),
+        payload: json!({"lender": lender, "amount": money(amount),
+                        "owed": money(owed(state, &lender))}),
+    });
+
+    OperatorResult::ok(json!({
+        "lender": lender, "amount": money(amount), "owed": money(owed(state, &lender)),
+    }))
+}
+
 pub fn register(registry: &mut Registry) {
     registry.register(OperatorMeta {
         name: "budget.record_income",
@@ -1119,6 +1335,62 @@ pub fn register(registry: &mut Registry) {
         min_privilege: 1,
         effect: None,
         run: transfer,
+    });
+
+    registry.register(OperatorMeta {
+        name: "budget.borrow",
+        description: "Money borrowed: it arrives, and it is owed. Both sides recorded.",
+        params: vec![
+            ParamDecl::text("lender"),
+            ParamDecl::number("amount"),
+            ParamDecl::number("fee").optional(),
+            ParamDecl::text("account").optional(),
+            ParamDecl::text("fees_pocket").optional(),
+        ],
+        constraints: vec![],
+        post_constraints: vec![],
+        side_effects: vec!["event.finances.borrowed"],
+        pawa_cost: 0,
+        protocol: Protocol::Rpc,
+        min_privilege: 1,
+        effect: None,
+        run: borrow,
+    });
+
+    registry.register(OperatorMeta {
+        name: "budget.charge_debt",
+        description: "Interest or a fee added to a debt that already exists.",
+        params: vec![
+            ParamDecl::text("lender"),
+            ParamDecl::number("amount"),
+            ParamDecl::text("fees_pocket").optional(),
+        ],
+        constraints: vec![],
+        post_constraints: vec![],
+        side_effects: vec!["event.finances.debt_charged"],
+        pawa_cost: 0,
+        protocol: Protocol::Rpc,
+        min_privilege: 1,
+        effect: None,
+        run: charge_debt,
+    });
+
+    registry.register(OperatorMeta {
+        name: "budget.repay_debt",
+        description: "Pay down what is owed. Refuses to pay more than exists.",
+        params: vec![
+            ParamDecl::text("lender"),
+            ParamDecl::number("amount"),
+            ParamDecl::text("account").optional(),
+        ],
+        constraints: vec![],
+        post_constraints: vec![],
+        side_effects: vec!["event.finances.debt_repaid"],
+        pawa_cost: 0,
+        protocol: Protocol::Rpc,
+        min_privilege: 1,
+        effect: None,
+        run: repay_debt,
     });
 
     registry.register(OperatorMeta {
@@ -1294,5 +1566,179 @@ mod person_tab_tests {
                      &[("pocket_name", json!("Aida")), ("amount", json!(1000.0))]);
         assert!(ex.committed());
         assert!(!ex.movements.is_empty(), "it declared what it moved");
+    }
+}
+
+#[cfg(test)]
+mod debt_tests {
+    //! Money model §3 and §6: an overdraft is one transaction with two
+    //! positive postings, and its running cost is visible over time.
+    use super::*;
+    use crate::operator::{execute, Enforcement, Execution, Registry as Reg};
+
+    fn household() -> Value {
+        json!({"finances": {
+            "liquid": {"balance": 1000.0},
+            "pockets": {"food": {"allocated": 500.0, "spent": 0.0, "limit": 0.0}},
+            "accounts": {"mpesa": {"label": "mpesa", "balance": 1000.0}},
+            "income": {"monthly_total": 0.0, "sources": []}},
+            "vendors": {}})
+    }
+
+    fn run(state: &Value, op: &str, ps: &[(&str, Value)]) -> Execution {
+        let reg = Reg::default();
+        let params: Map<String, Value> =
+            ps.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect();
+        execute(&reg, &reg.names(), &Enforcement::default(), state, op, &params)
+    }
+
+    fn owed_in(state: &Value, lender: &str) -> f64 {
+        state
+            .pointer(&format!("/finances/liabilities/{lender}/balance"))
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+    }
+
+    #[test]
+    fn borrowing_records_the_money_and_the_obligation_together() {
+        // ★★★ The canon's own shape: cash + AND liability +. Before this, an
+        //     overdraft looked exactly like income and the position overstated
+        //     itself by the whole of what was owed.
+        let ex = run(&household(), "budget.borrow",
+                     &[("lender", json!("Fuliza")), ("amount", json!(500.0)),
+                       ("account", json!("mpesa"))]);
+        assert!(ex.committed(), "{:?}", ex.result.reason);
+        assert_eq!(
+            ex.state.pointer("/finances/accounts/mpesa/balance").and_then(Value::as_f64),
+            Some(1500.0),
+        );
+        assert_eq!(owed_in(&ex.state, "Fuliza"), 500.0);
+    }
+
+    #[test]
+    fn borrowing_leaves_the_position_exactly_where_it_was() {
+        // ★★★ The property that makes the two postings worth having. Borrowed
+        //     money is not wealth; it is somebody else's, held for a while.
+        let before = crate::ledger::position(&household()).net();
+        let ex = run(&household(), "budget.borrow",
+                     &[("lender", json!("Fuliza")), ("amount", json!(500.0)),
+                       ("account", json!("mpesa"))]);
+        assert_eq!(crate::ledger::position(&ex.state).net(), before);
+    }
+
+    #[test]
+    fn the_charge_for_borrowing_gathers_in_a_pocket_of_its_own() {
+        // ★★ §6.2: the running cost of an overdraft has to be visible OVER
+        //    TIME, not dissolved into whatever it was spent alongside.
+        let ex = run(&household(), "budget.borrow",
+                     &[("lender", json!("Fuliza")), ("amount", json!(500.0)),
+                       ("fee", json!(25.0)), ("account", json!("mpesa"))]);
+        assert!(ex.committed(), "{:?}", ex.result.reason);
+        assert_eq!(
+            ex.state.pointer("/finances/pockets/Fuliza_fees/spent").and_then(Value::as_f64),
+            Some(25.0),
+        );
+        // Only the principal arrives; the fee is owed as well as charged.
+        assert_eq!(
+            ex.state.pointer("/finances/accounts/mpesa/balance").and_then(Value::as_f64),
+            Some(1500.0),
+        );
+        assert_eq!(owed_in(&ex.state, "Fuliza"), 525.0);
+    }
+
+    #[test]
+    fn a_second_borrow_adds_to_the_same_debt_rather_than_replacing_it() {
+        let one = run(&household(), "budget.borrow",
+                      &[("lender", json!("Fuliza")), ("amount", json!(300.0))]);
+        let two = run(&one.state, "budget.borrow",
+                      &[("lender", json!("Fuliza")), ("amount", json!(200.0))]);
+        assert_eq!(owed_in(&two.state, "Fuliza"), 500.0);
+    }
+
+    #[test]
+    fn interest_on_an_existing_debt_brings_no_money_in() {
+        // ★★★ Nothing arrives, so nothing is credited. Folding this into
+        //     `borrow` would have meant borrowing zero to be charged for it.
+        let borrowed = run(&household(), "budget.borrow",
+                           &[("lender", json!("Fuliza")), ("amount", json!(500.0)),
+                             ("account", json!("mpesa"))]);
+        let cash_before = borrowed
+            .state.pointer("/finances/accounts/mpesa/balance").and_then(Value::as_f64);
+
+        let ex = run(&borrowed.state, "budget.charge_debt",
+                     &[("lender", json!("Fuliza")), ("amount", json!(30.0))]);
+        assert!(ex.committed(), "{:?}", ex.result.reason);
+        assert_eq!(owed_in(&ex.state, "Fuliza"), 530.0);
+        assert_eq!(
+            ex.state.pointer("/finances/accounts/mpesa/balance").and_then(Value::as_f64),
+            cash_before,
+            "a charge is not a payment",
+        );
+        assert_eq!(
+            ex.state.pointer("/finances/pockets/Fuliza_fees/spent").and_then(Value::as_f64),
+            Some(30.0),
+        );
+    }
+
+    #[test]
+    fn repaying_takes_the_money_and_the_obligation_away_together() {
+        let borrowed = run(&household(), "budget.borrow",
+                           &[("lender", json!("Fuliza")), ("amount", json!(500.0)),
+                             ("account", json!("mpesa"))]);
+        let ex = run(&borrowed.state, "budget.repay_debt",
+                     &[("lender", json!("Fuliza")), ("amount", json!(200.0)),
+                       ("account", json!("mpesa"))]);
+        assert!(ex.committed(), "{:?}", ex.result.reason);
+        assert_eq!(owed_in(&ex.state, "Fuliza"), 300.0);
+        assert_eq!(
+            ex.state.pointer("/finances/accounts/mpesa/balance").and_then(Value::as_f64),
+            Some(1300.0),
+        );
+    }
+
+    #[test]
+    fn repaying_more_than_is_owed_is_refused_with_both_figures() {
+        // ★★★ A negative debt reads as the lender owing the household — a
+        //     claim it does not have, and one the position would count.
+        let borrowed = run(&household(), "budget.borrow",
+                           &[("lender", json!("Fuliza")), ("amount", json!(100.0))]);
+        let ex = run(&borrowed.state, "budget.repay_debt",
+                     &[("lender", json!("Fuliza")), ("amount", json!(500.0))]);
+        assert!(!ex.committed());
+        assert_eq!(ex.result.constraint_violated.as_deref(), Some("repay_within_debt"));
+        assert_eq!(ex.result.data["owed"], json!(100.0));
+        assert_eq!(ex.result.data["requested"], json!(500.0));
+    }
+
+    #[test]
+    fn a_debt_lowers_what_the_household_is_worth() {
+        // ★★ The other half of "borrowing changes nothing": once the money is
+        //    spent, only the obligation is left, and the position says so.
+        let borrowed = run(&household(), "budget.borrow",
+                           &[("lender", json!("Fuliza")), ("amount", json!(500.0)),
+                             ("account", json!("mpesa"))]);
+        let before = crate::ledger::position(&borrowed.state).net();
+        let spent = run(&borrowed.state, "budget.allocate",
+                        &[("pocket_name", json!("food")), ("amount", json!(500.0))]);
+        let gone = run(&spent.state, "budget.spend",
+                       &[("pocket_name", json!("food")), ("amount", json!(500.0)),
+                         ("account", json!("mpesa"))]);
+        assert!(gone.committed(), "{:?}", gone.result.reason);
+        assert_eq!(crate::ledger::position(&gone.state).net(), before - 500.0);
+    }
+
+    #[test]
+    fn every_debt_move_declares_both_sides_to_the_ledger() {
+        // ★★★ The gate refuses a single-sided entry, so this passing at all is
+        //     the double-entry check agreeing with what the operator did.
+        for (op, ps) in [
+            ("budget.borrow", vec![("lender", json!("Fuliza")), ("amount", json!(500.0)),
+                                   ("fee", json!(25.0)), ("account", json!("mpesa"))]),
+            ("budget.charge_debt", vec![("lender", json!("Fuliza")), ("amount", json!(10.0))]),
+        ] {
+            let ex = run(&household(), op, &ps);
+            assert!(ex.committed(), "{op}: {:?}", ex.result.reason);
+            assert!(crate::ledger::reconcile(&ex.mutations, &ex.movements).is_empty());
+        }
     }
 }

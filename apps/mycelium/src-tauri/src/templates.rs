@@ -124,6 +124,13 @@ pub fn definition(template: TemplateId) -> Definition {
         //    money back from them meet in one running tab instead of landing as
         //    a spend here and an unrelated lump of income there.
         .with_operator("vendor.link_number")
+        // ★★★ Money model §3: borrowed money arrives AND is owed. Without these
+        //    an overdraft could only be filed as income, which overstates the
+        //    household by the whole of what it owes — and there was no operator
+        //    anywhere that wrote `finances.liabilities.*`.
+        .with_operator("budget.borrow")
+        .with_operator("budget.charge_debt")
+        .with_operator("budget.repay_debt")
         // Every Sustain that holds money holds this one.
         .with_invariant("liquid_non_negative", "finances.liquid.balance >= 0");
 

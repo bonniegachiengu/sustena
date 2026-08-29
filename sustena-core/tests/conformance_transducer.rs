@@ -87,6 +87,16 @@ fn every_recorded_case_matches_the_reference() {
         let source = case["source"].as_str();
         let want = &case["expect"];
 
+        // ★★★ The recorded divergence, honoured BY NAME. These nine shapes are
+        //     mapped here and unmapped in the reference because the money model
+        //     settled what they mean; the vector's own `divergence` block says
+        //     so, and the test below fails if that block ever disappears.
+        //     Skipping by name rather than by "any mismatch" is the difference
+        //     between a documented divergence and a hole.
+        if diverged(&doc, name) {
+            continue;
+        }
+
         let t = parse_message(text, source, &[]);
 
         assert_eq!(
@@ -216,4 +226,37 @@ fn the_mapped_income_cases_extract_the_real_amounts() {
         assert!(same(&amount, want), "{name}: amount {amount} != reference {want}");
         assert!(amount.as_f64().unwrap_or(0.0) > 0.0, "{name}: a real figure");
     }
+}
+
+/// Is this case one the recorded divergence names?
+///
+/// ★★ Matched on the rule id the case name starts with, because a vector case
+/// is `<rule_id>#<n>` and the divergence is a property of the RULE.
+fn diverged(doc: &Value, case: &str) -> bool {
+    doc["divergence"]["cases_affected"]
+        .as_array()
+        .map(|ids| {
+            ids.iter()
+                .filter_map(Value::as_str)
+                .any(|id| case == id || case.starts_with(&format!("{id}#")))
+        })
+        .unwrap_or(false)
+}
+
+#[test]
+fn the_divergence_stays_recorded() {
+    // ★★★ A divergence that stops being documented is a divergence that became
+    //     silent, and a silent one is indistinguishable from a bug.
+    let doc = load();
+    assert_eq!(doc["divergence"]["kind"], "rust-ahead-of-python");
+    assert!(
+        doc["divergence"]["cases_affected"].as_array().is_some_and(|a| a.len() == 9),
+        "the nine settled instrument shapes must stay named",
+    );
+    assert!(
+        doc["divergence"]["the_rule_that_did_not_change"]
+            .as_str()
+            .is_some_and(|s| s.contains("budget.spend")),
+        "the money-safety rule this did NOT relax must stay written down",
+    );
 }
