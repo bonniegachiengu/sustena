@@ -190,6 +190,7 @@ pub mod event_time;
 pub mod liveness;
 pub mod outbox;
 pub mod sigma;
+pub mod strong_admit;
 pub mod unscored;
 pub mod canonical;
 pub mod lift;
@@ -345,6 +346,7 @@ pub use event_time::{event_time, skew_ms, Local as LocalStamp};
 pub use liveness::{learned_theta, liveness as source_liveness, Heartbeat, Liveness};
 pub use outbox::{apply as apply_ack, delay_ms, queue_depth, Ack, Backoff, Disposition, Pending};
 pub use sigma::Sigma;
+pub use strong_admit::{admit_strong, doomed_but_viable, StrongVerdict};
 pub use tab::{tab_sides, TabSides};
 pub use operator::{
     execute, execute_admitted, execute_afforded, execute_as, Authorization, Enforcement, Execution,
