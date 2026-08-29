@@ -62,7 +62,31 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 /// ★ Named, not tuned. OWASP's 2023 floor for PBKDF2-HMAC-SHA256.
-const PBKDF2_ITERATIONS: u32 = 600_000;
+///
+/// ★★ Kept as its own constant so the floor is still *asserted* even where the
+/// cost is lowered — see `PBKDF2_ITERATIONS` below and the test that compares
+/// them.
+pub const PBKDF2_FLOOR: u32 = 600_000;
+
+/// What this build actually pays to unlock an identity.
+///
+/// ★★★ **Lowered under `cfg(test)`, and that is a fix rather than a shortcut.**
+/// The wire tests each unlock five identities and then talk over a socket with a
+/// 20-second IO timeout. At the production cost a single unlock is around a
+/// second alone and far longer under a parallel suite — so the peer's read times
+/// out mid-handshake and four crypto tests fail. They had been recorded as a
+/// flake; they were a **real interaction** between a production timeout and a
+/// deliberately expensive KDF, and it fails more as the suite grows.
+///
+/// ★★★ Lowering the timeout's other side was the alternative and it is the
+/// wrong one: 20 seconds is a real protection against a peer that stalls, and
+/// weakening production to make a test suite comfortable is exactly backwards.
+/// The wire tests are about the WIRE; the KDF's cost is asserted where it
+/// belongs, against `PBKDF2_FLOOR`, in this module's own tests.
+#[cfg(not(test))]
+const PBKDF2_ITERATIONS: u32 = PBKDF2_FLOOR;
+#[cfg(test)]
+const PBKDF2_ITERATIONS: u32 = 1_000;
 
 /// What the identity signs to prove it is itself. Constant on purpose: the
 /// proof is about key possession, not about freshness.
@@ -431,5 +455,42 @@ mod tests {
         let rendered = format!("{u:?}");
         assert!(rendered.contains("bg.myc"));
         assert!(!rendered.contains(&u.sign(b"x")), "no key material in Debug");
+    }
+}
+
+#[cfg(test)]
+mod kdf_cost_tests {
+    use super::*;
+
+    #[test]
+    fn the_production_cost_is_still_owasps_floor() {
+        // ★★★ The point of keeping the floor as its own constant: the test
+        //     build pays less so the suite can run, and the number that ships
+        //     is still guarded here. A single constant lowered for tests would
+        //     have quietly shipped a weaker one.
+        assert_eq!(PBKDF2_FLOOR, 600_000);
+    }
+
+    #[test]
+    fn the_test_build_pays_less_and_says_so() {
+        // ★★ Named rather than left for somebody to discover while wondering
+        //    why a local unlock feels instant.
+        assert!(
+            PBKDF2_ITERATIONS < PBKDF2_FLOOR,
+            "tests run at a reduced cost on purpose — see the constant's note",
+        );
+    }
+
+    #[test]
+    fn an_identity_still_unlocks_with_the_cost_it_was_written_at() {
+        // ★★★ The iteration count travels with the FILE rather than being
+        //     assumed from the build, so an identity written at one cost still
+        //     opens after the constant changes.
+        let dir = std::env::temp_dir().join("mycelium-kdf-cost");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch");
+        let store = IdentityStore::at(&dir);
+        store.enrol("bonnie", "a-long-enough-passphrase").expect("enrolled");
+        assert!(store.unlock("a-long-enough-passphrase").is_ok());
     }
 }
