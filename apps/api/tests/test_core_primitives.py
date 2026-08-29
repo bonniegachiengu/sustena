@@ -394,21 +394,81 @@ class TestPawaLedger:
         assert await ledger.get_balance("bob") == 0
 
     @pytest.mark.asyncio
-    async def test_charge_royalty_split(self):
+    async def test_usage_charge_uses_the_ratified_schedule(self):
+        """A pawa charge splits 70 / 15 / 5 / 5 / 5."""
         from sustena.core.pawa import NETWORK_TREASURY_ID
         ledger = PawaLedger()
         await ledger.credit("caller", None, 100, "test")
-        ok = await ledger.charge("caller", None, 100, "contributor-1")
+        ok = await ledger.charge("caller", None, 100, "contributor-1", revenue="usage")
         assert ok is True
         assert await ledger.get_balance("caller") == 0
-        assert await ledger.get_balance("contributor-1") == 70   # 70%
-        # Treasury gets 20% + 5% referrer (no referrer) + 5% validator = 30%
+        assert await ledger.get_balance("contributor-1") == 70
+        # No validator, proposer or referrer named, so their shares fold into
+        # the treasury: 15 + 5 + 5 + 5 = 30. Never dropped.
         assert await ledger.get_balance(NETWORK_TREASURY_ID) == 30
+
+    @pytest.mark.asyncio
+    async def test_a_licence_sale_settles_on_a_different_schedule(self):
+        """Paying to HAVE something is not paying to RUN it.
+
+        The earlier four-way split could not tell them apart; this is the
+        distinction that made the schedule revenue-typed.
+        """
+        from sustena.core.pawa import NETWORK_TREASURY_ID
+        ledger = PawaLedger()
+        await ledger.credit("buyer", None, 100, "test")
+        ok = await ledger.charge("buyer", None, 100, "contributor-1", revenue="access")
+        assert ok is True
+        assert await ledger.get_balance("contributor-1") == 80
+        assert await ledger.get_balance(NETWORK_TREASURY_ID) == 20
+
+    @pytest.mark.asyncio
+    async def test_the_split_conserves_exactly_at_every_amount(self):
+        """A rounding leak is a conservation violation, not a cosmetic bug.
+
+        Integer-floor arithmetic with the remainder assigned to the validator
+        share is what makes this a theorem rather than a hope.
+        """
+        from sustena.core.pawa import NETWORK_TREASURY_ID
+        for amount in (1, 2, 3, 7, 13, 99, 100, 101, 9_999):
+            for revenue in ("usage", "access"):
+                ledger = PawaLedger()
+                await ledger.credit("caller", None, amount, "test")
+                assert await ledger.charge(
+                    "caller", None, amount, "c",
+                    revenue=revenue, referrer_id="r",
+                    proposer_id="p", validator_id="v",
+                ) is True
+                out = 0
+                for who in ("c", "r", "p", "v", NETWORK_TREASURY_ID):
+                    out += await ledger.get_balance(who)
+                assert out == amount, f"{amount} {revenue}: {out} came out"
+                assert await ledger.get_balance("caller") == 0
+
+    @pytest.mark.asyncio
+    async def test_an_absent_role_folds_into_the_treasury_and_is_never_dropped(self):
+        from sustena.core.pawa import NETWORK_TREASURY_ID
+        ledger = PawaLedger()
+        await ledger.credit("caller", None, 1000, "test")
+        await ledger.charge("caller", None, 1000, "c", revenue="usage", referrer_id="r")
+        # contributor 700, referrer 50; treasury takes 150 + 50 + 50 = 250.
+        assert await ledger.get_balance("c") == 700
+        assert await ledger.get_balance("r") == 50
+        assert await ledger.get_balance(NETWORK_TREASURY_ID) == 250
+
+    @pytest.mark.asyncio
+    async def test_revenue_type_is_required_rather_than_defaulted(self):
+        """A caller that has not decided which of the two happened has not
+        decided what it is settling."""
+        ledger = PawaLedger()
+        await ledger.credit("caller", None, 100, "test")
+        with pytest.raises(ValueError, match="paying to run"):
+            await ledger.charge("caller", None, 100, "c", revenue="whatever")
 
     @pytest.mark.asyncio
     async def test_charge_insufficient_blocked(self):
         ledger = PawaLedger()
         await ledger.credit("caller", None, 5, "test")
-        ok = await ledger.charge("caller", None, 100, "contributor-1")
+        ok = await ledger.charge("caller", None, 100, "contributor-1", revenue="usage")
         assert ok is False
         assert await ledger.get_balance("caller") == 5  # Unchanged

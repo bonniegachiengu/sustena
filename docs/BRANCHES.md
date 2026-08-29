@@ -42,6 +42,34 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `fix/ratified-royalty-schedule` — merged into `dev` 29 Aug — **MYC-5**
+
+**Off:** `dev` / Python suite 2,324 pass; core 1,962 / host 256 unchanged.
+
+**Rust already ran the ratified schedule; the reference engine did not.**
+`PawaLedger.charge` still ran the superseded four-way 70/20/5/5.
+
+★★★ **And the finding is sharper than wrong numbers: the signature could not
+hold the right ones.** There was no `proposer` parameter, so the ratified split
+was not expressible there at all — anyone wiring it up would have inherited a
+schedule that silently dropped a role. Adding the parameter is the substance of
+the fix; the percentages are the easy half.
+
+★★★ **`revenue` is required, not defaulted.** Paying to RUN something is not
+paying to HAVE it, and one schedule could not tell them apart — which is why the
+ratified one is revenue-typed. A caller that has not decided which of the two
+happened has not decided what it is settling, so it is asked.
+
+★★ **Conservation is asserted at nine amounts across both schedules**, not at
+one convenient round number. Integer-floor with the remainder to the validator
+share is what makes it a theorem rather than a hope, and it mirrors
+`royalty::split` line for line so the two engines cannot drift on the one
+property neither may break. An absent role folds into the treasury and is never
+dropped, for the same reason.
+
+★★ **It still has zero callers**, and that is exactly why it was worth fixing:
+a wrong schedule sitting in the tree is the kind of dead code that gets believed.
+
 ### `feat/publish-is-an-enzyme` — merged into `dev` 29 Aug — **ARE-2 + ARE-12**
 
 **Off:** `dev` / gate green (core 1,962 / host 256).
