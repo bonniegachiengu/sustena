@@ -19,6 +19,45 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/intrinsic-intake-key` — merged into `dev` 29 Aug — **ING-5**
+
+**Off:** `dev` / gate green (core 1,863 / host 245).
+
+**`at-least-once` composed with `idempotent` is exactly-once only if the key is a
+property of the FACT.** Two wrong keys were available and both are named:
+
+★★★ **A generated id partitions by arrival.** Mint a UUID per captured message
+and the same transaction arriving twice gets two ids and applies twice — the
+retry the outbox exists to make safe becomes the thing that doubles somebody
+rent. The refusal is structural: `key_for()` takes a sustain, a source, the parsed
+fields and the raw text, and there is nowhere for a minted id to arrive.
+
+★★★ **A text hash partitions by wording**, which is the gap that was actually
+open. One sender re-sending a transaction with a reformatted date and a changed
+footer produces a different digest and applies it a second time. A test asserts
+the two real-shaped texts genuinely hash differently, so the row is proven to be
+buying something rather than assumed to be.
+
+★★★ **It closes an assumption `correlation.rs` was resting on.** Its
+`find_duplicates` deliberately never looks within one source, on the grounds that
+*"two identical-reference messages from the same sender are the raw-text dedup
+business, and it already handles them"*. That was true only for byte-identical
+re-sends — a carrier reformat slipped past both. The comment is corrected in this
+branch, and the deferral now rests on a fact rather than nearly-a-fact.
+
+★★★ **Cross-source still surfaces rather than suppresses**, unchanged and
+deliberate. `correlation.rs` argues that case at length: silently dropping the
+second message means a genuinely separate transaction that happened to share a
+reference vanishes without trace. So the KCB-and-M-Pesa pair is still two captures
+and still a question for a person. What changed is only the case within one
+sender, where a repeat really is a repeat.
+
+★★ The key includes the **amount**, reusing `correlation.rs` own earlier
+finding rather than re-deriving it — a reference collision that swallowed a real
+transaction is what put the amount in that key. And the reference floor is
+delegated to `reference_of`, so intake and correlation cannot disagree about what
+counts as a code.
+
 ### `feat/log-detection` — merged into `dev` 29 Aug — **IMM-12**
 
 **Off:** `dev` / gate green (core 1,851 / host 245).
