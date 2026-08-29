@@ -19,6 +19,39 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/unscored-dimensions` — merged into `dev` 29 Aug — **SUS-17**
+
+**Off:** `dev` at `b57b151` · gate green (core 1,626 · host 237).
+
+**Goodhart's law is not about the measured dimension going wrong — it is about
+the unmeasured ones.** Optimise the pockets and the inventory quietly empties;
+optimise the total and one member's tab quietly runs. The dimension nobody
+scored is the one that moves, precisely because nothing is looking.
+
+★★★ **`goodhart.rs` deliberately did not build the auto-emit half, and its
+reason was right:** emitting a *bound* needs to know what bound, and a
+fabricated threshold over a dimension nobody watches is a confident number from
+nowhere. That reasoning stands and is honoured here.
+
+★★★ **But there is a bound that is not invented: the household's own declared
+type.** `Number { lo: 0 }` is the definition saying this does not go below zero.
+Emitting an invariant from it is *using their number*, not choosing one — and it
+converts a bound the schema **describes** into a bound the gate **holds**.
+
+**Everything else is named, not bounded.** Unscored *and* unbounded dimensions
+are listed rather than guessed at: filling them with a floor would replace a
+visible gap with an invisible wrong answer.
+
+Two judgments: **a label gets no bound** — it cannot drift, and a rule that can
+never fire makes the list of guards look longer than the protection is. And **an
+open map is left to a quantifier rather than enumerated** — a pocket is named by
+a person, so rules over today's keys would silently fail to cover tomorrow's,
+which is the worst kind of gap because the list looks complete.
+
+★★ The emitted invariants are parsed and *evaluated* in tests, not just
+generated — a guard the evaluator cannot read is a guard that silently never
+holds.
+
 ### `feat/runway-bound` — merged into `dev` 29 Aug — **SUS-11 + IMM-2 closed**
 
 **Off:** `dev` at `2450dc2` · gate green (core 1,616 · host 237).
