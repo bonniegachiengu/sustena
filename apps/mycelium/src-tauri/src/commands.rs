@@ -1849,6 +1849,18 @@ pub fn link_number(
     Ok(GateResult::of("vendor.link_number", &x))
 }
 
+/// **`H(s)` for one Sustain** — its state as one short string.
+///
+/// ★★★ The point of a hash here is that it is ASKABLE. Two nodes comparing
+/// whole households is not a conversation that fits over a phone link, and a
+/// node that answers "mostly the same" has answered nothing. Sixty-four
+/// characters either match or they do not.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn sustain_hash(world: State<'_, World>, sustain_id: String) -> Result<String, String> {
+    world.store().state_hash(&sustain_id).map_err(|e| e.to_string())
+}
+
 /// **Put this off until he remembers what it was.**
 ///
 /// ★★★ An honest defer, and a different act from setting something aside as

@@ -559,6 +559,18 @@ impl Store {
     ///
     /// The state is not stored anywhere. This is the only way to obtain it, so
     /// the property cannot quietly stop being true.
+    /// **`H(s)`** — this Sustain's state, as one short string.
+    ///
+    /// ★★★ `fold(log) == cache` is the law the whole engine rests on, and
+    /// checking it used to mean comparing two whole state trees. Across a peer
+    /// link that is not a question anyone can ask: you cannot send a
+    /// household's entire finances to find out whether two nodes agree. This is
+    /// the same question in sixty-four characters.
+    pub fn state_hash(&self, sustain_id: &str) -> StoreResult<String> {
+        let (state, _) = self.load_state(sustain_id)?;
+        Ok(sustena_core::state_hash(&state))
+    }
+
     pub fn load_state(&self, sustain_id: &str) -> StoreResult<(Value, u64)> {
         let log = self.read_log(sustain_id)?;
         let next_seq = log.last().map(|e| e.seq + 1).unwrap_or(0);

@@ -3034,3 +3034,69 @@ mod operative_layer_tests {
         assert!(a.result_of("remember").is_some(), "attaché learned the counterparty");
     }
 }
+
+#[cfg(test)]
+mod state_hash_tests {
+    //! CELL §IX, at the door it is actually asked through.
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-hash-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    fn call(w: &World, op: &str, ps: Vec<(&str, Value)>) -> bool {
+        let params: Map<String, Value> = ps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        matches!(w.call("home", op, &params), Ok(Some((x, _))) if x.committed())
+    }
+
+    #[test]
+    fn the_hash_is_of_the_folded_log_not_of_a_cache_beside_it() {
+        // ★★★ `state = fold(events)` — the store has no cache to hash, so this
+        //     cannot drift from the log by construction.
+        let w = world("folded");
+        let before = w.store().state_hash("home").expect("hashes");
+        assert_eq!(before.len(), 64);
+
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(1000.0)), ("source", json!("pay"))]));
+        let after = w.store().state_hash("home").expect("hashes");
+        assert_ne!(before, after, "real money moved, so the state is a different state");
+    }
+
+    #[test]
+    fn asking_twice_with_nothing_in_between_gives_one_answer() {
+        // ★★ A hash that wandered would raise an alarm on every read.
+        let w = world("stable");
+        assert_eq!(w.store().state_hash("home").unwrap(), w.store().state_hash("home").unwrap());
+    }
+
+    #[test]
+    fn two_households_that_did_the_same_things_agree() {
+        // ★★★ The row's actual purpose: verification as a comparison of two
+        //     short strings rather than of two whole households.
+        let a = world("twin-a");
+        let b = world("twin-b");
+        for w in [&a, &b] {
+            assert!(call(w, "budget.record_income",
+                         vec![("amount", json!(2500.0)), ("source", json!("pay"))]));
+            assert!(call(w, "budget.allocate",
+                         vec![("pocket_name", json!("food")), ("amount", json!(500.0))]));
+        }
+        let (ha, hb) = (a.store().state_hash("home").unwrap(), b.store().state_hash("home").unwrap());
+        assert_eq!(ha, hb, "same history, same state, same hash");
+
+        // And one more move on one side is a divergence either can name.
+        assert!(call(&b, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(1.0))]));
+        assert_ne!(ha, b.store().state_hash("home").unwrap());
+    }
+}

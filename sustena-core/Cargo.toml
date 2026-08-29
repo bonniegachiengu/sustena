@@ -19,6 +19,10 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
 regex = "1"
+# ★★ The first hashing dependency, and the reason is peers: `H(s)` is compared
+#    across nodes that need not trust each other, and a hash somebody can
+#    collide on purpose verifies nothing. The host already links it.
+sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
