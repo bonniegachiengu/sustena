@@ -19,6 +19,46 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/candidate-score` — merged into `dev` 29 Aug — **OPV-18**
+
+**Off:** `dev` · gate green (core 1,758 · host 245). Only buildable once CON-10
+gave it `Viab` and OPV-20 gave it `ΔReach`.
+
+`score = Δu + β·1[∀k viable] + γ·ΔReach_H`. Three terms, and the content is in
+what each refuses to be.
+
+★★★ **Viability is a property of the trajectory.** `viability_of` takes the whole
+path and there is deliberately no overload taking an endpoint. A plan that empties
+the rent pocket in week two and refills it in week four *ends* exactly where a
+plan that never touched it ends — and one of them has a fortnight in it where the
+household cannot pay rent. Scoring the endpoint rates them identically, which is
+not a rounding error.
+
+★★★ **An indicator, not a graded penalty.** Tested rather than asserted: ten
+times the utility still does not buy the trip through ruin, and the term costs
+the same however shallow the dip was. A depth-proportional penalty would be
+smoother and would let a large enough `Δu` purchase exactly the trade this term
+exists to forbid.
+
+★★★ **`γ = 0` refuses every beaver dam, and it is a policy with a name.** A dam
+has no immediate utility; its whole value is the room it leaves. At zero it loses
+to a trinket, and `refuses_positioning()` exists so that reads as a decision
+rather than an absent parameter.
+
+★★★ **A horizon-kernel state does not earn the bonus.** `Viab^H` is a superset of
+the true kernel, so the state may still be doomed — paying the guarantee bonus on
+it is paying for the optimism.
+
+★★ **A limitation left visible rather than patched.** One β and an indicator
+means *we could not tell* lands exactly where *we watched it fail* does. Adding a
+second weight would be adding a parameter the canon does not declare, so the
+distinction is carried in `is_known_failure()`, where a caller with a tie can
+break it on evidence without anybody's score moving. The test asserts the numbers
+genuinely cannot tell them apart, so the gap is recorded rather than assumed away.
+
+★★ The terms survive the sum. A ranked list of bare numbers cannot answer *why is
+this one above that one*, which is the question a person asks of a recommendation.
+
 ### `feat/positioning-reach` — merged into `dev` 29 Aug — **OPV-20**
 
 **Off:** `dev` · gate green (core 1,745 · host 245).
