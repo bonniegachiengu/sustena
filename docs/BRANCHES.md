@@ -19,6 +19,40 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/simulation-horizon` — merged into `dev` 29 Aug — **OPV-13**
+
+**Off:** `dev` · gate green (core 1,733 · host 245).
+
+**`H* ≈ (1/λ)·ln(ε/|δ₀|)`.** Past `H*` a simulator is spending compute on noise
+and reporting it as a result. Two households differing by one shilling diverge
+exponentially under a chaotic transition model, and after enough steps the
+trajectory says nothing about *this* household — only about the arithmetic. A
+number returned without its horizon is false by omission.
+
+★★★ **So the horizon is part of the answer.** `Bounded<T>::read()` returns
+`Option`: a reading past its own horizon has no value to take. A flag beside a
+number is one a caller can forget to check; this one cannot be.
+
+★★★ **λ is measured or it is `Unknown`.** An assumed exponent produces a horizon
+that looks like a measurement, and one wrong in the generous direction licenses
+exactly the compute it should refuse — so `Unknown` covers *nothing*, not
+everything. Below five usable separations there is no estimate, and a pair too
+close to resolve is skipped rather than clamped to the floor, which would invent
+a growth rate out of the floor's own value.
+
+★★★ **`Unbounded` is not called `Infinite`.** λ ≤ 0 says chaos does not bound
+this. An unmodelled event, a changed rule or somebody deciding differently all
+still end a forecast, and a name promising forever would be silent about them.
+
+★★ **The logarithm, made askable.** `steps_bought_by(factor, λ) = ln(factor)/λ`,
+and it does not depend on where you started. The instinct on being told a
+forecast is short is to measure more carefully; against a chaotic system ten
+times the precision buys three steps, and now that is a number somebody can look
+at before funding it.
+
+★★ **`ε ≤ δ₀` reports zero, not a negative.** "You cannot simulate this usefully
+at all" is a real answer a caller can act on.
+
 ### `feat/structural-secret-detector` — merged into `dev` 29 Aug — **IMM-11**
 
 **Off:** `dev` · gate green (core 1,721 · host 245).
