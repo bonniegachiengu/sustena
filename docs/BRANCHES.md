@@ -19,6 +19,45 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/egress-asymmetry` — merged into `dev` 29 Aug — **ING-11**
+
+**Off:** `dev` · gate green (core 1,693 · host 245).
+
+**Egress is not ingest run backwards.** `outbox.rs` retries on `Unknown` and is
+right to — the destination is this engine, capture is keyed by fact, a duplicate
+is swallowed. Egress cannot borrow that: **we cannot make someone else's receiver
+idempotent.** There is no key to send, nobody to ask to honour it, and a second
+send of the same payment is a second payment.
+
+★★★ **The same `Unknown` produces opposite correct answers on the two sides**,
+and the test asserts both in one place rather than describing the difference in a
+comment. It is the whole row: identical input, opposite disposition, and the only
+thing that changed is who owns the receiver.
+
+★★★ **`Reversibility::Unknown` is treated as irreversible.** The two mistakes are
+not symmetric — calling a reversible act irreversible costs one interruption;
+calling an irreversible act reversible costs somebody's money. So an egress
+nobody has classified gets the cautious answer rather than the convenient one,
+and `EgressEffect::new` takes reversibility as a required argument so it cannot
+be shipped by not thinking about it.
+
+★★ **`Reversible` carries the compensating act.** "Undoable" with no undo named
+is precisely the claim an auto-retry would be relying on. And even a safe retry
+is bounded: undoable is not free, and an unbounded loop against a receiver that
+is down is a different kind of harm.
+
+★★ **A reversible live egress needs no approval token, on purpose.** The human
+gate exists because an act cannot be taken back; asking for approval on one that
+can would train people to approve without reading, which is how a gate stops
+being a gate. A token that is offered and *wrong* is still wrong either way.
+
+**Finding — the refusal that could not exist.** The obvious shape was an enum
+with two arms, "you did not approve it" and "your approval is wrong". The first
+is unconstructible: `EffectClass` has no *live and unapproved* variant, so no
+caller can reach the gate in that state. Writing the arm anyway would have put a
+refusal in the vocabulary that no input can produce — a check that reads as
+performed while nothing is checked. Removed; `admit_egress` returns `TokenError`.
+
 ### `feat/strong-admit` — merged into `dev` 29 Aug — **CON-10 + CON-4 closed**
 
 **Off:** `dev` · gate green (core 1,679 · host 245).
