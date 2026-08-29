@@ -19,6 +19,38 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/device-as-sustain` — merged into `dev` 29 Aug — **ING-9**
+
+**Off:** `dev` · gate green (core 1,793 · host 245). Desktop installers rebuilt
+green from this tree (v0.3.2 MSI + NSIS).
+
+**A device is a Sustain, not a table with a `last_seen` column.** It has state, it
+has a region it is meant to stay inside, and it leaves that region in ways that
+matter — so the machinery that already watches a household watches the phone, and
+staleness is an ordinary invariant rather than alarm code somebody wrote by hand
+next to the ingest path. `queue_depth ≤ max` is a bound like any other.
+
+★★★ **A dead device cannot report that it is dead**, and the type says so.
+`Reading::FromTheDevice` has no liveness field to read, and `is_stale()` returns
+`Option` so the device's own reading answers `None`. Every other dimension here
+is self-reported, and self-reporting is exactly what stops when the thing fails —
+so `t_last_ack` is written by the **receiver** from its own clock, from the one
+seat that can see an absence.
+
+★★★ **A test found a real design error in the first draft.** It claimed a missing
+dimension "simply is not bounded"; `Region` correctly refuses to measure a
+distance it has no number for. The fix is a third reading, not a swallowed error:
+a device that stopped reporting its battery is `Health::Unmeasurable` — neither
+fine nor drifting. Calling it healthy is precisely how a silent failure reads as a
+quiet week. And only a *missing reading* becomes `Unmeasurable`; a malformed
+region stays an error, or a declaration bug would hide behind a phone.
+
+★★ **Never having spoken is not the same as having stopped.** Only one is a
+fault, and a newly registered device should not raise one.
+
+★★ **Battery is bounded below only.** There is no such thing as too much charge,
+and a two-sided interval would report a fully charged phone as drifting.
+
 ### `fix/retry-is-a-decision` — merged into `dev` 29 Aug — **EVT-14 verified, and a contradiction found**
 
 **Off:** `dev` · gate green (core 1,780 · host 245).

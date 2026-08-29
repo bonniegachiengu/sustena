@@ -120,6 +120,7 @@ pub mod cynefin;
 pub mod curated;
 pub mod damping;
 pub mod detect;
+pub mod device;
 pub mod dimension;
 pub mod disaggregation;
 pub mod division;
