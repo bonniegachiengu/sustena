@@ -71,6 +71,7 @@ fn ev(id: &str, causes: &[String]) -> Event {
         },
         causes: causes.to_vec(),
         mutations: vec![],
+        payload: None,
     }
 }
 

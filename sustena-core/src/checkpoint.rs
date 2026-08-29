@@ -285,6 +285,7 @@ mod tests {
                 old: json!(old),
                 new: json!(new),
             }],
+            payload: None,
         }
     }
 

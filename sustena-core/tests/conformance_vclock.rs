@@ -70,6 +70,7 @@ fn events_of(doc: &Value, fixture: &str) -> Vec<Event> {
                 .map(|c| c.as_str().unwrap().to_string())
                 .collect(),
             mutations: vec![],
+            payload: None,
         })
         .collect()
 }
@@ -244,6 +245,7 @@ fn assign_clocks_refuses_a_cycle_but_not_a_partial_log() {
             stamp: CausalStamp { counter: 1, node: "n".into() },
             causes: vec!["q".into()],
             mutations: vec![],
+            payload: None,
         },
         Event {
             id: "q".into(),
@@ -255,6 +257,7 @@ fn assign_clocks_refuses_a_cycle_but_not_a_partial_log() {
             stamp: CausalStamp { counter: 2, node: "n".into() },
             causes: vec!["p".into()],
             mutations: vec![],
+            payload: None,
         },
     ];
     assert!(matches!(assign_clocks(&cyclic), Err(ClockError::CausalCycle(_))), "{}", c["name"]);
@@ -270,6 +273,7 @@ fn assign_clocks_refuses_a_cycle_but_not_a_partial_log() {
         stamp: CausalStamp { counter: 5, node: "n".into() },
         causes: vec!["something-older".into()],
         mutations: vec![],
+        payload: None,
     }];
     let clocks = assign_clocks(&partial).expect("★ partial replay must be possible");
     assert_eq!(clocks["only"].get("n"), c["expect"]["clock_for_only"].as_u64().unwrap());

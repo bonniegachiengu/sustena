@@ -746,6 +746,7 @@ mod tests {
                     stamp: CausalStamp::new("n"),
                     causes: vec![],
                     mutations: vec![],
+                    payload: None,
                 };
                 let hits = periods.iter().filter(|q| q.window.contains(&at)).count();
                 // The final end is outside the covered span, which is correct

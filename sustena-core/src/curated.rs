@@ -941,6 +941,7 @@ mod tests {
             stamp: CausalStamp::new("test"),
             causes: vec![],
             mutations: vec![],
+            payload: None,
         }
     }
 
