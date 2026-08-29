@@ -115,6 +115,7 @@ pub mod consensus;
 pub mod crdt;
 pub mod controller;
 pub mod council;
+pub mod council_default;
 pub mod criticality;
 pub mod cynefin;
 pub mod curated;
