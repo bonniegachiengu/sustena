@@ -1074,9 +1074,30 @@ pub fn get_feed(
     let extra: Vec<sustena_core::widget::WidgetDecl> =
         installed.iter().map(|w| w.to_decl()).collect();
 
-    let (reading, view) =
-        crate::orchie::feed(&world.operators, &state, queued.len(), &recent, query.as_deref(), extra)
-            .map_err(|errors| errors.join("; "))?;
+    let tab = leading_tab(&world, &sustain_id, &state);
+    // ★ Every linked pocket, so any list of pockets can say which are people —
+    //   not just the one tab the attention budget had room to show.
+    let person_pockets: Vec<String> = state
+        .pointer("/finances/links")
+        .and_then(Value::as_object)
+        .map(|m| {
+            let mut names: Vec<String> =
+                m.values().filter_map(Value::as_str).map(str::to_string).collect();
+            names.sort();
+            names.dedup();
+            names
+        })
+        .unwrap_or_default();
+    let (reading, view) = crate::orchie::feed(
+        &world.operators,
+        &state,
+        queued.len(),
+        &recent,
+        query.as_deref(),
+        extra,
+        tab.as_ref(),
+    )
+    .map_err(|errors| errors.join("; "))?;
 
     let emits_of = |id: &str| -> Vec<String> {
         crate::orchie::widget_declarations()
@@ -1233,6 +1254,7 @@ pub fn get_feed(
             .unwrap_or_default()),
         device: device_of(&world, &sustain_id),
         inventory: inventory_of(&state),
+        person_pockets,
         filed: world
             .ingest()
             .filed_spends(&sustain_id, RECENT_FILED)
@@ -1641,6 +1663,73 @@ pub fn reclassify_spend(
         let _ = world.ingest().record_reclassification(&message_id, &to_pocket, amount);
     }
     Ok(result)
+}
+
+/// Show a number without giving it away.
+///
+/// ★★★ He linked it as an identifier, not as something to put on a screen. The
+/// card has to be able to say WHICH person this tab is, and the pocket name
+/// already does that — the number is only there so he can tell two people apart
+/// if he ever names two pockets alike. Six hidden digits in the middle is
+/// enough to recognise and not enough to dial.
+fn masked_number(full: &str) -> String {
+    let d: Vec<char> = full.chars().filter(char::is_ascii_digit).collect();
+    if d.len() < 6 {
+        return "·".repeat(d.len());
+    }
+    let head: String = d[..3].iter().collect();
+    let tail: String = d[d.len() - 3..].iter().collect();
+    format!("{head}···{tail}")
+}
+
+/// The person tab most worth showing, if the household has any.
+///
+/// ★★★ ONE, not all of them. Orchie's whole premise is an attention budget, and
+/// a list of every person he has ever paid is the flood the budget exists to
+/// prevent. The one shown is the relationship with the most money in play,
+/// either direction — that is the one a person would actually want on the
+/// screen, and it is measured rather than guessed.
+///
+/// ★★ The two sides come from the LOG, not from a running total kept beside the
+/// state. The pocket's own `spent` is the net; the log is where "how it got
+/// there" still exists. It also means a pocket linked today shows its whole
+/// history, rather than a tab that appears to begin the day it was noticed.
+fn leading_tab(
+    world: &World,
+    sustain_id: &str,
+    state: &Value,
+) -> Option<crate::orchie::TabReading> {
+    let links = state.pointer("/finances/links")?.as_object()?.clone();
+    if links.is_empty() {
+        return None;
+    }
+    // One read of the log for every tab, rather than one per pocket.
+    let log = world.store().read_log(sustain_id).unwrap_or_default();
+    let mutations: Vec<sustena_core::Mutation> =
+        log.into_iter().flat_map(|e| e.mutations).collect();
+
+    let mut best: Option<crate::orchie::TabReading> = None;
+    for (number, pocket) in links {
+        let Some(pocket) = pocket.as_str() else { continue };
+        let allocated = state
+            .pointer(&format!("/finances/pockets/{pocket}/allocated"))
+            .and_then(Value::as_f64);
+        // ★ A link pointing at a pocket that is gone describes nothing.
+        let Some(allocated) = allocated else { continue };
+
+        let sides = sustena_core::tab_sides(pocket, &mutations);
+        let reading = crate::orchie::TabReading {
+            pocket: pocket.to_string(),
+            masked: masked_number(&number),
+            sent: sides.sent,
+            received: sides.received,
+            allocated,
+        };
+        if best.as_ref().is_none_or(|b| reading.outstanding().abs() > b.outstanding().abs()) {
+            best = Some(reading);
+        }
+    }
+    best
 }
 
 /// What a message says about whose tab it might be.

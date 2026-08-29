@@ -19,6 +19,44 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/person-tab-display` — merged into `dev` 29 Aug
+
+**Off:** `dev` at `3f5b78c`
+**State:** merged, gate green (core 1,411 · host 220), installed and verified on device.
+
+**A person pocket was drawn exactly like `food`.** It nets correctly and always
+did, but a screen that draws a relationship identically to a category is telling
+him they are the same kind of thing — and the first time that matters is the
+moment he files a repayment as shopping.
+
+**The two sides are DERIVED, never stored.** A pocket keeps one number, `spent`,
+which already says where the tab stands. What it cannot say is how it got there:
+KES 1,000 outstanding reads identically whether he sent 1,000 once or sent
+40,000 across a year and got 39,000 back. `sustena-core/src/tab.rs` reads both
+sides back off the log, because `state = fold(events)` means the history the
+state was folded from is still there. Running totals kept beside `spent` would
+be a second source that could disagree with the first, with no way to say which
+was right — and a tab that appeared to begin the day it was linked.
+
+Two judgments worth disagreeing with:
+
+- **The tab is bounded on ONE side only.** Sending somebody more than the
+  household set aside for them is a real departure, measured against their own
+  allocation. Their owing HIM money is not — it is the tab doing what a tab
+  does. A two-sided interval would have made every repayment read as a fault.
+
+- **One tab on screen, not all of them.** Orchie's premise is an attention
+  budget; a list of everyone he has ever paid is the flood it exists to prevent.
+  The one shown is the relationship with the most money in play, either
+  direction — measured, not guessed. Every linked pocket is still marked in the
+  picker, so nothing is hidden, only unranked.
+
+The card says **who owes whom in words**. A negative balance is a convention the
+ledger uses and a person has to decode; getting the sign backwards on a screen
+is how somebody pays a debt that was never theirs. The number appears masked
+(`072···961`) — he linked it as an identifier, and the pocket name already says
+which person it is.
+
 ### `feat/person-pockets` — merged into `dev` 26 Aug at `111435b`
 
 **Off:** `dev` at `66af726`

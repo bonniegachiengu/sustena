@@ -1213,6 +1213,16 @@ inventory: InventoryGroupDto[];
  */
 filed: FiledSpendDto[]; 
 /**
+ * ★★★ Which pockets are PEOPLE rather than envelopes.
+ * 
+ * A pocket tied to somebody's number behaves differently — it runs both
+ * ways and can sit in his favour — and a screen that draws it identically
+ * to `food` is telling him it is the same kind of thing. Sent as names
+ * rather than as a flag per pocket so any surface that lists pockets can
+ * mark them without a second call.
+ */
+personPockets: string[]; 
+/**
  * ★★★ Money the household holds that no account claims.
  * 
  * Zero once every shilling has a place. Non-zero means the pooled balance

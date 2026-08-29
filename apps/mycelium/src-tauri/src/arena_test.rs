@@ -301,7 +301,7 @@ fn an_installed_widget_appears_in_the_real_feed() {
 
     let state = world.with(|i| i.get("home").map(|s| s.state.clone())).expect("state");
     let extra = installed.iter().map(|w| w.to_decl()).collect();
-    let (_, view) = crate::orchie::feed(&world.operators, &state, 0, &[], None, extra)
+    let (_, view) = crate::orchie::feed(&world.operators, &state, 0, &[], None, extra, None)
         .expect("the feed loads the installed card alongside the built-ins");
     assert!(
         view.selected.iter().chain(view.excluded.iter()).any(|c| c.id == "beds_card"),
