@@ -42,6 +42,36 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/pawa-fitness-term` — merged into `dev` 29 Aug — **PAWA-4 + TEN-11, the economy layer opens**
+
+**Off:** `dev` / gate green (core 1,926 / host 256).
+
+**The first economy row, and it lands on this morning work.** `score.rs` shipped
+today with three terms; Pawa §3 asks for a fourth, `− λ·Pawa(π, s)`, and the
+per-branch pawa the simulator accumulates had nowhere to be spent.
+
+★★★ **The article own sentence is the test**: *"among strategies that achieve
+the same outcome, the one with lower pawa wins."* Identical utility, viability and
+positioning, one branch burning four times the compute — the lean one wins.
+
+★★★ **The anti-scalar-collapse guard the article names is honoured.** It asks
+explicitly to *"keep the pawa term visible in the vector, don't let a
+cheap-but-harmful plan hide inside an aggregate"* — so `pawa` sits beside the
+total, and a free-and-ruinous plan still loses the whole of β with its zero cost
+still readable. That is asserted, not assumed.
+
+★★★ **`λ = 0` makes efficiency invisible, and `ignores_efficiency()` says so.**
+The same shape as `γ = 0` refusing the beaver dam: two plans reaching the same
+place for wildly different amounts of the network compute ranking identically is a
+policy somebody chose, not a parameter somebody forgot.
+
+★★ **Efficiency is a weight, not a veto** — a far better outcome still beats a
+cheaper worse one. Elegance is rewarded, not mandated. And a branch that was
+measured and not charged reads differently from one nobody measured.
+
+TEN-11 closes with it: it was the only open row in M-TEN and was parked on the
+economy rather than on Tenet. **M-TEN is complete.**
+
 ### `feat/host-loop-driver` — merged into `dev` 29 Aug — **CTL-9, the last open row**
 
 **Off:** `dev` / gate green (core 1,920 / host 256).

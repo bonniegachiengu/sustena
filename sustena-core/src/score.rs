@@ -1,10 +1,24 @@
 //! **The score** (Operative · §X).
 //!
 //! ```text
-//!   score_i = Δu_i + β·1[∀k: s̃_k ∈ Viab_T(V)] + γ·ΔReach_H
+//!   score_i = Δu_i + β·1[∀k: s̃_k ∈ Viab_T(V)] + γ·ΔReach_H − λ·Pawa(π, s)
 //! ```
 //!
-//! Three terms, and the interesting content is in what each one refuses to be.
+//! Four terms, and the interesting content is in what each one refuses to be.
+//!
+//! ## The efficiency term, and why it stays visible
+//!
+//! ★★★ **"Among strategies that achieve the same outcome, the one with lower
+//! pawa wins"** (Pawa §3). Efficiency stops being a vibe and becomes a number
+//! the simulator returns *before* anything real happens — and because a leaner
+//! strategy consumes less of the network real compute and storage, the same
+//! number that rewards elegance also spares the network.
+//!
+//! ★★★ **The pawa term is kept in the vector, never collapsed into the total
+//! alone** — the article names this explicitly: *"keep the pawa term visible in
+//! the vector, don't let a cheap-but-harmful plan hide inside an aggregate."* A
+//! plan that is cheap and ruinous still loses the whole of `β`, and a reader can
+//! see which term carried it.
 //!
 //! ## Viability is a property of the TRAJECTORY, not of the endpoint
 //!
@@ -55,11 +69,23 @@ pub struct Weights {
     pub beta: f64,
     /// What room to move in is worth.
     pub gamma: f64,
+    /// `λ` — what a unit of pawa costs the ranking.
+    ///
+    /// ★★ Declared like the others. At zero, two plans reaching the same place
+    /// for wildly different amounts of the network compute rank identically,
+    /// which is a policy and not an absent parameter.
+    pub lambda: f64,
 }
 
 impl Weights {
     pub fn new(beta: f64, gamma: f64) -> Self {
-        Self { beta, gamma }
+        Self { beta, gamma, lambda: 0.0 }
+    }
+
+    /// Declare what a unit of pawa costs the ranking.
+    pub fn charging(mut self, lambda: f64) -> Self {
+        self.lambda = lambda;
+        self
     }
 
     /// ★★★ Does this weighting make positioning invisible?
@@ -73,6 +99,16 @@ impl Weights {
     /// Does this weighting make trajectory viability worth nothing?
     pub fn ignores_viability(&self) -> bool {
         self.beta == 0.0
+    }
+
+    /// ★★★ Does this weighting make efficiency invisible?
+    ///
+    /// Named for the same reason `refuses_positioning` is: at `λ = 0` a plan
+    /// that burns ten times the compute to reach the same place ranks
+    /// identically, and that is a decision somebody should be able to see they
+    /// made.
+    pub fn ignores_efficiency(&self) -> bool {
+        self.lambda == 0.0
     }
 }
 
@@ -175,6 +211,13 @@ pub struct Score {
     pub utility: f64,
     pub viability: ViabilityTerm,
     pub positioning: Option<Positioning>,
+    /// `Pawa(π, s)` — what the whole branch cost, accumulated in the sandbox.
+    ///
+    /// ★★★ Kept beside the total rather than folded away, because the article
+    /// asks for exactly that: a cheap-but-harmful plan must not be able to hide
+    /// inside an aggregate. A reader can see what the efficiency term
+    /// contributed and what it did not rescue.
+    pub pawa: f64,
     pub weights: Weights,
     /// ★★ True when a bounded reach means the total is a lower bound.
     pub is_floor: bool,
@@ -191,6 +234,13 @@ impl Score {
             (Some(p), false) => parts.push(p.describe()),
             (None, false) => parts.push("room to move was not measured".into()),
         }
+        if self.weights.ignores_efficiency() {
+            if self.pawa > 0.0 {
+                parts.push(format!("cost {:.1} pawa, which is not being counted (λ=0)", self.pawa));
+            }
+        } else {
+            parts.push(format!("cost {:.1} pawa", self.pawa));
+        }
         if self.is_floor {
             parts.push("the total is a floor".into());
         }
@@ -205,15 +255,31 @@ pub fn score(
     positioning: Option<Positioning>,
     weights: Weights,
 ) -> Score {
+    scored_at(delta_u, path, positioning, 0.0, weights)
+}
+
+/// **`score = Δu + β·1[∀k viable] + γ·ΔReach_H − λ·Pawa(π, s)`**
+///
+/// ★★★ `pawa` is the branch total, **accumulated in the sandbox with live state
+/// untouched** — the whole point of ranking efficiency is that it happens before
+/// anything real has been spent.
+pub fn scored_at(
+    delta_u: f64,
+    path: &[StrongVerdict],
+    positioning: Option<Positioning>,
+    pawa: f64,
+    weights: Weights,
+) -> Score {
     let viability = viability_of(path);
     let reach_term = positioning.as_ref().map(|p| p.delta).unwrap_or(0.0);
-    let total = delta_u + weights.beta * viability.indicator() + weights.gamma * reach_term;
+    let total = delta_u + weights.beta * viability.indicator() + weights.gamma * reach_term
+        - weights.lambda * pawa;
     // The floor only matters if the positioning term is actually being counted.
     let is_floor = !weights.refuses_positioning()
         && positioning
             .as_ref()
             .is_some_and(|p| p.bias == Bias::UnderStatesPositioning);
-    Score { total, utility: delta_u, viability, positioning, weights, is_floor }
+    Score { total, utility: delta_u, viability, positioning, pawa, weights, is_floor }
 }
 
 /// Rank candidates, best first, with ties broken by name so the order is stable.
@@ -406,6 +472,77 @@ mod tests {
         assert_eq!(s.total, 2.0 + 10.0 + 4.0);
         assert_eq!(s.positioning.as_ref().unwrap().delta, 4.0);
         assert!(s.describe().contains("from the change itself"));
+    }
+
+    // ── the efficiency term (PAWA-4 · TEN-11 · Pawa §3) ────────────────────
+
+    fn efficient() -> Weights {
+        Weights::new(10.0, 1.0).charging(0.5)
+    }
+
+    #[test]
+    fn among_strategies_that_reach_the_same_place_the_cheaper_one_wins() {
+        // ★★★ The article's own sentence, made into a test. Identical utility,
+        //     identical viability, identical positioning — and one of them
+        //     burns four times the compute to get there.
+        let lean = scored_at(5.0, &ok_path(3), None, 2.0, efficient());
+        let wasteful = scored_at(5.0, &ok_path(3), None, 8.0, efficient());
+        assert!(lean.total > wasteful.total);
+        assert!(lean.describe().contains("cost 2.0 pawa"));
+    }
+
+    #[test]
+    fn a_cheap_and_ruinous_plan_cannot_hide_inside_the_aggregate() {
+        // ★★★ The anti-scalar-collapse guard the article names explicitly. A
+        //     plan that costs nothing and passes through ruin still loses the
+        //     whole of β, and the terms are all still there to read.
+        let free_and_ruinous = scored_at(5.0, &dips_at(1, 3), None, 0.0, efficient());
+        let costly_and_sound = scored_at(5.0, &ok_path(3), None, 6.0, efficient());
+        assert!(costly_and_sound.total > free_and_ruinous.total);
+        assert!(free_and_ruinous.viability.is_known_failure());
+        assert_eq!(free_and_ruinous.pawa, 0.0, "and the cost is still readable");
+    }
+
+    #[test]
+    fn lambda_zero_makes_efficiency_invisible_and_says_so() {
+        // ★★ Same shape as γ=0 refusing the beaver dam: a policy, not an absent
+        //    parameter. Two plans reaching the same place for wildly different
+        //    amounts of the network's compute rank identically.
+        let free = Weights::new(10.0, 1.0);
+        assert!(free.ignores_efficiency());
+        let cheap = scored_at(5.0, &ok_path(2), None, 1.0, free);
+        let dear = scored_at(5.0, &ok_path(2), None, 900.0, free);
+        assert_eq!(cheap.total, dear.total);
+        assert!(dear.describe().contains("not being counted (λ=0)"));
+    }
+
+    #[test]
+    fn the_cost_survives_the_sum_even_when_nobody_is_charging_for_it() {
+        // ★★ A branch that was measured and not charged is different from one
+        //    nobody measured, and the reader can tell.
+        let s = scored_at(1.0, &ok_path(2), None, 7.0, Weights::new(1.0, 0.0));
+        assert_eq!(s.pawa, 7.0);
+        assert_eq!(s.total, 2.0, "λ=0, so the cost changed nothing");
+    }
+
+    #[test]
+    fn efficiency_can_be_outweighed_but_never_ignored() {
+        // ★★ A far better outcome should still win against a cheaper worse one
+        //    — the term is a weight, not a veto. Elegance is rewarded, not
+        //    mandated.
+        let great_and_dear = scored_at(20.0, &ok_path(2), None, 10.0, efficient());
+        let poor_and_cheap = scored_at(1.0, &ok_path(2), None, 0.0, efficient());
+        assert!(great_and_dear.total > poor_and_cheap.total);
+    }
+
+    #[test]
+    fn the_plain_score_helper_charges_nothing_and_is_honest_about_it() {
+        // ★★ `score()` is `scored_at(..., 0.0, ...)`: a caller that has not
+        //    measured a branch reports zero cost, which is true of what it
+        //    knows, and `λ` then multiplies nothing.
+        let s = score(3.0, &ok_path(2), None, efficient());
+        assert_eq!(s.pawa, 0.0);
+        assert_eq!(s.total, 13.0);
     }
 
     #[test]
