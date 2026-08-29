@@ -174,6 +174,11 @@ it is a bug** — nothing silently differs.
   Asking which pocket your own cash withdrawal belongs to is a question with no
   true answer. `tests/conformance_transducer.rs` skips those nine **by name**
   and asserts the block still exists, so the divergence cannot become silent.
+  **Extended 29 Aug:** the block also names two `additional_fields` — `date` and
+  `time` — which Rust extracts and the reference does not (ING-13, the message's
+  own clock). The replay allows extra fields **only where the block names them**:
+  a field nobody declared appearing in a parse result would be a change nobody
+  reviewed, and noticing that is what a vector is for.
 
 - **`approval.json` — rust-ahead-of-python.** The reference engine has no
   approval token at all (`approval_token`, `valid_token` and `effect_class` are

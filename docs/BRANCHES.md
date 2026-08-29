@@ -19,6 +19,40 @@ branch nobody can describe is a branch nobody can safely merge.
 
 ## Merged
 
+### `feat/event-time` — merged into `dev` 29 Aug — **ING-13**
+
+**Off:** `dev` at `55bfc8e` · gate green (core 1,637 · host 240).
+
+**The patterns had been capturing `date` and `time` all along and throwing them
+away.** 32 fields across 20 rules are kept now; nothing about what any rule
+*matches* changed.
+
+**Without `t_event`, skew was not merely unknown but unmeasurable.** Every
+capture carried only the moment the phone read it — so a backfill of two thousand
+texts stamped a month of spending with one afternoon, every window closed on the
+wrong side, and nothing in the system could tell, because there was no second
+reading to disagree with the first.
+
+Three ways to be wrong by a lot, each pinned by a test:
+
+- **`12 AM` is midnight and `12 PM` is noon**, and the obvious arithmetic gets
+  both backwards. A twelve-hour error puts an evening payment on the wrong day.
+- **`20/7/26` is day-first**, settled by real samples where 20 cannot be a month.
+  The other reading moves an event by up to eleven months — and only on the
+  ambiguous days, so it fails invisibly for two thirds of every month.
+- **An unreadable date yields `None`, never *now*.** *Now* makes skew exactly
+  zero — the one value that looks healthy — for precisely the messages nobody
+  could read a time from.
+
+★★ The UTC offset is the **host's** declaration about its own senders. A message
+says half past four; it does not say half past four *where*, and the core carries
+no locale data to guess with.
+
+★★★ The conformance vector's divergence block now names the two extra fields,
+and the replay allows extras **only where the block names them** — a field nobody
+declared appearing in a parse result would be a change nobody reviewed, and
+noticing that is what a vector is for.
+
 ### `feat/unscored-dimensions` — merged into `dev` 29 Aug — **SUS-17**
 
 **Off:** `dev` at `b57b151` · gate green (core 1,626 · host 237).

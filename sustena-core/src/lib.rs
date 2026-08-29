@@ -186,6 +186,7 @@ pub mod control_system;
 pub mod correlation;
 pub mod domain_map;
 pub mod effect_journal;
+pub mod event_time;
 pub mod unscored;
 pub mod canonical;
 pub mod lift;
@@ -337,6 +338,7 @@ pub use correlation::{fact_key, find_duplicates, FactKey, Suspected};
 pub use domain_map::{DomainMap, DomainRegion};
 pub use effect_journal::{EffectJournal, JournalEntry, Phase as EffectPhase};
 pub use unscored::{unscored, Unscored, Unwatched};
+pub use event_time::{event_time, skew_ms, Local as LocalStamp};
 pub use tab::{tab_sides, TabSides};
 pub use operator::{
     execute, execute_admitted, execute_afforded, execute_as, Authorization, Enforcement, Execution,

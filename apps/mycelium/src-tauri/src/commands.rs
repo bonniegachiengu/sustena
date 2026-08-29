@@ -2907,6 +2907,7 @@ mod feed_surface_tests {
             deferred_at: None,
             filed: Vec::new(),
             sent_at_ms: None,
+            event_at_ms: None,
             seq,
         }
     }
