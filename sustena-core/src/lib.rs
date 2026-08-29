@@ -135,6 +135,7 @@ pub mod fold;
 pub mod goodhart;
 pub mod governance;
 pub mod harmonics;
+pub mod horizon;
 pub mod holarchy;
 pub mod holon;
 pub mod inverse;
