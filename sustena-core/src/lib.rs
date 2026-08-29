@@ -154,6 +154,7 @@ pub mod learned;
 pub mod learning;
 pub mod lens;
 pub mod market;
+pub mod market_design;
 pub mod meme;
 pub mod migrate;
 pub mod mixture;
