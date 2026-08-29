@@ -42,6 +42,38 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `docs/close-the-economy-layer` — merged into `dev` 29 Aug — **MYC-5 · MYC-6 · PAWA-12 · UI-12**
+
+The last four rows, and three of them closed by **reading** rather than
+building — which is the finding worth keeping.
+
+★★★ **A row does not update itself when its dependency lands.** MYC-6 was
+declared in Rust on 18 Aug and its argument was settled by PAWA-10 hours before
+this branch opened; PAWA-12's four claims were each built weeks apart by
+different slices, and nobody went back to tick the row that asserted them
+together. Both read as *open work* and were neither. That is the same structural
+failure as the six stale rows found earlier — a tracker records what a slice
+*set out to do*, and closing it is a separate act somebody has to remember.
+
+★★★ **UI-12 gets the `🚫` marker, not `⬜`.** *The LLM proposes, the schema
+disposes* needs an LLM to propose, and this core has no model and no I/O by
+ADR-0001. The half that can live here is built — `proposal.rs` is
+schema-disposes in its general form, and `llm_policy.rs` decides when a model may
+be asked at all. Leaving it `⬜` costs somebody a re-read to reach the same
+conclusion; a stub for the generation half would be worse, a call site with
+nothing behind it.
+
+★★ **MYC-5 was the one that was genuinely wrong**, and the defect was sharper
+than bad numbers: `PawaLedger.charge`'s **signature could not express the
+ratified schedule** — no `proposer` parameter existed. It has zero callers, which
+is exactly why it mattered: a wrong schedule sitting in the tree is the kind of
+dead code that gets believed. `revenue` is now required rather than defaulted,
+and conservation is asserted at nine amounts across both schedules so the two
+engines cannot drift on the one property neither may break.
+
+**The WBD is closed: 264 done · 0 open · 0 parked · 4 declined.** `main` is
+untouched and stays frozen — promotion and release are Bonnie's call.
+
 ### `feat/attention-meter` — merged into `dev` 29 Aug — **OPV-8 + ADD-1**
 
 **Off:** `dev` / gate green (core 2,090 / host 256).

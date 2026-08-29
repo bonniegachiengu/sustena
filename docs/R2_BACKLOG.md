@@ -2,14 +2,25 @@
 
 *The source of truth for Phase R2: implementing what the articles specify but the code does not yet do.*
 
-**Status: R1 (parity) complete. R2 complete. The WBD reads 227 done · 0 open · 3 declined · 38 parked (29 Aug 2026).**
+**Status: R1 (parity) complete. R2 complete. **The WBD is closed** — 264 done · **0 open** · **0 parked** · 4 declined (29 Aug 2026).**
 
-> The 38 parked rows are the **economy layer** (M-PAWA, MYC, ARE, ADD), parked by
-> standing decision. Everything else in `docs/SUSTENA_UPGRADE_SPEC.md` is closed.
-> Three rows are **declined rather than open** — MON-2 (the Kalman filter), OPV-14's
-> tail shape, and CTL-6 (relocated out of core by ADR-0001) — each a position that
-> was argued for, now carrying a marker that says so instead of one that reads as
-> *unfinished*.
+> The **economy layer** (M-PAWA, MYC, ARE, ADD) was the last thing parked, and
+> it was greenlit and built on 29 Aug — the meter and its coefficients, the
+> ratified five-way royalty schedule on both engines, pricing and reputation and
+> publishing, the per-niche market and its graduated sanctions, orders and
+> conservation, membership and the commons, name resolution and the settlement
+> rails, and the peg's shape. **Nothing in `docs/SUSTENA_UPGRADE_SPEC.md` is open
+> or parked.**
+>
+> Four rows are **declined rather than open** — MON-2 (the Kalman filter),
+> OPV-14's tail shape, CTL-6 (relocated out of core by ADR-0001), and UI-12
+> (bounded generation needs a model, and this core has none). Each is a position
+> that was argued for, now carrying a marker that says so instead of one that
+> reads as *unfinished*. A `⬜` on a declined row is the inverse of a stale
+> `✅`, and it costs somebody a re-read to discover the same conclusion twice.
+>
+> ★★★ **`main` stays frozen.** Everything above is on `dev`. Promoting it and
+> cutting a release is Bonnie's call, not the build's.
 
 > **Read this before opening an R2 slice.** Every item traces to an article. The
 > articles are the spec; the code catches up to them, never the reverse. Where
@@ -25,7 +36,7 @@
 | Reference engine (Python) | live, in daily use, **2,320 tests** |
 | Portable core (Rust, `sustena-core`) | **R1 parity complete** — all 5 slices; **R2 in progress** |
 | Conformance vectors | R1 parity + R2 spec, incl. **22 approval**, **26 editing**, **29 constraint**, **31 compose**, **16 version**, **15 migrate**, **20 region**, **17 detect**, **20 controller**, **18 kernel**, **16 tenet**, **18 ensemble**, **17 signal**, **16 pincer**, **17 ooda**, **17 monitor**, **15 holarchy**, **14 population**, **17 consensus**, **13 router**, **16 vclock**, **16 disaggregation**, **21 division**, **20 crdt**, **17 operative**, **16 goodhart+presentation**, **14 mixture**, **16 criticality**, **15 cynefin**, **15 boundary**, **14 flow**, **8 obligation**, **18 clocks**, **17 watermark**, **20 period**, **16 checkpoint**, **19 dimension**, **14 belief**, **16 harmonics**, **13 windowing**, **14 observability**, **14 damping**, **11 semantic**, **14 capability**, **11 stranding**, **14 learned**, **13 lens**, **15 preattentive**, **14 widget**, **45 curated**, **14 strategy**, **15 attention**, **20 rollup (parity)**, **11 holon (parity)**, **9 authorization (spec)**, **60 transducer (parity)** cases (divergences recorded) |
-| Rust tests | **1,920 unit** (core) · **256** (host) — all green. Phase 4 (DSL) opened and completed 2026-08-29; the WBD closed the same day. |
+| Rust tests | **2,090 unit** (core; 3,049 including the conformance and integration binaries) · **256** (host) — all green. Phase 4 (DSL) and the economy layer both opened and completed 2026-08-29; the WBD closed the same day. |
 
 **R1 slices at parity:** state · event fold · rules · operators + gate · council.
 
