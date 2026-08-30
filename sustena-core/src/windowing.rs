@@ -399,6 +399,7 @@ mod tests {
             stamp: CausalStamp::new("phone"),
             causes: vec![],
             mutations: vec![],
+            payload: None,
         }
     }
 

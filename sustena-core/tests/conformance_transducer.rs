@@ -67,8 +67,18 @@ fn compare_map(
     //   say nothing about behaviour. Membership and values are asserted
     //   exactly, which is the part that could be wrong.
     let got_keys: BTreeSet<&String> = got.keys().collect();
+    // ★★★ Extra fields are allowed only where the divergence block NAMES them.
+    //     Rust extracts `date` and `time` the reference does not — real
+    //     ahead-ness, recorded — but a field nobody declared appearing here
+    //     would be a change nobody reviewed, and the whole point of a vector is
+    //     that it notices.
     let want_keys: BTreeSet<&String> = want.keys().collect();
-    assert_eq!(got_keys, want_keys, "{name}: {what} — different field set");
+    let extra: BTreeSet<String> = allowed_extra(&load());
+    let unexpected: Vec<&&String> =
+        got_keys.difference(&want_keys).filter(|k| !extra.contains(**k)).collect();
+    assert!(unexpected.is_empty(), "{name}: {what} — undeclared extra fields {unexpected:?}");
+    let missing: Vec<&&String> = want_keys.difference(&got_keys).collect();
+    assert!(missing.is_empty(), "{name}: {what} — fields the reference produced are gone {missing:?}");
     for (k, w) in &want {
         let g = got.get(k).unwrap_or(&Value::Null);
         assert!(same(g, w), "{name}: {what}.{k} — {g} != reference {w}");
@@ -86,6 +96,16 @@ fn every_recorded_case_matches_the_reference() {
         let text = case["text"].as_str().unwrap();
         let source = case["source"].as_str();
         let want = &case["expect"];
+
+        // ★★★ The recorded divergence, honoured BY NAME. These nine shapes are
+        //     mapped here and unmapped in the reference because the money model
+        //     settled what they mean; the vector's own `divergence` block says
+        //     so, and the test below fails if that block ever disappears.
+        //     Skipping by name rather than by "any mismatch" is the difference
+        //     between a documented divergence and a hole.
+        if diverged(&doc, name) {
+            continue;
+        }
 
         let t = parse_message(text, source, &[]);
 
@@ -216,4 +236,45 @@ fn the_mapped_income_cases_extract_the_real_amounts() {
         assert!(same(&amount, want), "{name}: amount {amount} != reference {want}");
         assert!(amount.as_f64().unwrap_or(0.0) > 0.0, "{name}: a real figure");
     }
+}
+
+/// Is this case one the recorded divergence names?
+///
+/// ★★ Matched on the rule id the case name starts with, because a vector case
+/// is `<rule_id>#<n>` and the divergence is a property of the RULE.
+fn diverged(doc: &Value, case: &str) -> bool {
+    doc["divergence"]["cases_affected"]
+        .as_array()
+        .map(|ids| {
+            ids.iter()
+                .filter_map(Value::as_str)
+                .any(|id| case == id || case.starts_with(&format!("{id}#")))
+        })
+        .unwrap_or(false)
+}
+
+#[test]
+fn the_divergence_stays_recorded() {
+    // ★★★ A divergence that stops being documented is a divergence that became
+    //     silent, and a silent one is indistinguishable from a bug.
+    let doc = load();
+    assert_eq!(doc["divergence"]["kind"], "rust-ahead-of-python");
+    assert!(
+        doc["divergence"]["cases_affected"].as_array().is_some_and(|a| a.len() == 9),
+        "the nine settled instrument shapes must stay named",
+    );
+    assert!(
+        doc["divergence"]["the_rule_that_did_not_change"]
+            .as_str()
+            .is_some_and(|s| s.contains("budget.spend")),
+        "the money-safety rule this did NOT relax must stay written down",
+    );
+}
+
+/// The extra fields the recorded divergence permits, and only those.
+fn allowed_extra(doc: &Value) -> std::collections::BTreeSet<String> {
+    doc["divergence"]["additional_fields"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default()
 }

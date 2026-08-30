@@ -198,6 +198,7 @@ fn a_boundary_instant_belongs_to_exactly_one_month() {
         stamp: CausalStamp::new("n"),
         causes: vec![],
         mutations: vec![],
+        payload: None,
     };
 
     for q in &p {

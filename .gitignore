@@ -186,3 +186,6 @@ updater.key*
 # Transient output of scripts/release.ps1
 release-run.log
 crates/tauri-plugin-sms-capture/Cargo.lock
+
+# Installable builds, collected for pinning. Artifacts, not source.
+/builds/

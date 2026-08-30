@@ -66,6 +66,7 @@ fn ev(id: &str, t: i64) -> Event {
         stamp: CausalStamp::new("phone"),
         causes: vec![],
         mutations: vec![],
+        payload: None,
     }
 }
 

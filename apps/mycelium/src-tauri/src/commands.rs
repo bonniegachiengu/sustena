@@ -11,10 +11,12 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::dto::{
-    AccessDto, Branch, BranchStep, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
+    AccessDto, AccountDto, AssetDto, Branch, BranchStep, DeviceDto, InventoryGroupDto,
+    FiledSpendDto, OwnIdentifiersDto, SkipLearnedDto,
+    TransferDto, TrendDto, Committed, ConstraintReading, CouncilOutcomeDto, EconomyDto,
     GateResult, Holarchy, LedgerEntryDto, LogEntryDto, MeasuredPawa, OperatorAccessDto,
     OperatorDto, ParamDto, ParameterDto, Refused, RolledUp, RollupDto, SustainDto, SustainSummary,
-    AttentionDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
+    AttentionDto, CaptureContextDto, NettingDto, CaptureResult, CardDto, ChoiceDto, FeedDto, IdentityDto,
     InferenceDto, IngestDto, MessageDto, QuietDto, RuleDto, SourceDto,
     BodyDto, CoOwnerDto, InstallDto, LibraryDto, NetworkDto, OfferDto, PackageDto,
     OrderDto, PeerDto, PeerShelfDto,
@@ -966,7 +968,64 @@ pub fn learn_rule(
 // ── Orchie ──────────────────────────────────────────────────
 
 /// **The curated feed** — `compose(r)` over one household.
-#[tauri::command]
+/// Which capture the classify card should offer next.
+///
+/// ★★ Oldest first, so the same message is offered until it is dealt with
+/// rather than a different one on every refresh. One id, never a list: the
+/// card works the queue one message at a time, which is the disclosure machine
+/// of Curated UI VII and the reason the screen cannot grow with the queue.
+/// How many answered messages the back arrow can reach.
+///
+/// ★★ A short tail. Changing your mind about this morning is a real need;
+/// walking back through a year is a different screen and nobody asked for it.
+const REACHABLE_DONE: usize = 15;
+/// How far forward the queue runs in one sitting.
+const QUEUE_AHEAD: usize = 60;
+
+/// One message, as the card needs to show it.
+fn context_of(m: &crate::ingest::IngestedMessage) -> CaptureContextDto {
+    let f = |k: &str| m.parsed_fields.get(k);
+    // Where it currently sits, read off what it recorded it DID.
+    let filed = m.filed.iter().rev().find(|x| x.operator == "budget.spend");
+    CaptureContextDto {
+        id: m.id.clone(),
+        raw: m.raw_payload.clone(),
+        source: m.source_id.clone(),
+        amount: f("amount")
+            .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))),
+        counterparty: f("counterparty").and_then(|v| v.as_str()).map(str::to_string),
+        direction: f("direction").and_then(|v| v.as_str()).map(str::to_string),
+        reason: m.reason.clone(),
+        status: if m.resolved {
+            "processed"
+        } else if m.deferred_at.is_some() {
+            "deferred"
+        } else {
+            "pending"
+        }
+        .to_string(),
+        filed_pocket: filed
+            .and_then(|x| x.params.get("pocket_name"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        filed_amount: filed.and_then(|x| x.params.get("amount")).and_then(|v| v.as_f64()),
+    }
+}
+
+fn oldest_waiting(queued: &[crate::ingest::IngestedMessage]) -> Option<CaptureContextDto> {
+    // ★ One builder for one shape. Two hand-written copies of the same DTO is
+    //   how one of them quietly stops carrying a field the other has.
+    queued.iter().min_by_key(|m| m.seq).map(context_of)
+}
+
+/// ★★★ `(async)`, because this reads the whole ingest log.
+///
+/// A sync command runs inline on the IPC thread, which on a phone is the thread
+/// that draws. `get_feed` parses every stored message to find the ones still
+/// waiting, and on an inbox that had been read that was thousands of them. The
+/// screen froze for about a minute after unlocking, with no reading happening
+/// at all: this is what it was doing.
+#[tauri::command(async)]
 #[specta::specta]
 pub fn get_feed(
     world: State<'_, World>,
@@ -1015,9 +1074,30 @@ pub fn get_feed(
     let extra: Vec<sustena_core::widget::WidgetDecl> =
         installed.iter().map(|w| w.to_decl()).collect();
 
-    let (reading, view) =
-        crate::orchie::feed(&world.operators, &state, queued.len(), &recent, query.as_deref(), extra)
-            .map_err(|errors| errors.join("; "))?;
+    let tab = leading_tab(&world, &sustain_id, &state);
+    // ★ Every linked pocket, so any list of pockets can say which are people —
+    //   not just the one tab the attention budget had room to show.
+    let person_pockets: Vec<String> = state
+        .pointer("/finances/links")
+        .and_then(Value::as_object)
+        .map(|m| {
+            let mut names: Vec<String> =
+                m.values().filter_map(Value::as_str).map(str::to_string).collect();
+            names.sort();
+            names.dedup();
+            names
+        })
+        .unwrap_or_default();
+    let (reading, view) = crate::orchie::feed(
+        &world.operators,
+        &state,
+        queued.len(),
+        &recent,
+        query.as_deref(),
+        extra,
+        tab.as_ref(),
+    )
+    .map_err(|errors| errors.join("; "))?;
 
     let emits_of = |id: &str| -> Vec<String> {
         crate::orchie::widget_declarations()
@@ -1081,25 +1161,87 @@ pub fn get_feed(
             });
         }
     }
-    for m in &queued {
-        attention.push(AttentionDto {
-            kind: "capture".into(),
-            what: m
-                .parsed_fields
-                .get("counterparty")
-                .and_then(|v| v.as_str())
-                .unwrap_or("a captured message")
-                .to_string(),
-            why: m.reason.clone(),
-            severity: "warn".into(),
-            message_id: Some(m.id.clone()),
-        });
+    // ★★★ **No capture rows here, and that is the point.**
+    //
+    // Classifying already IS a widget: `classify_capture`, declared in
+    // `orchie.rs`, Unit-bound, reading the `unclassified` dimension and
+    // emitting the budget Enzymes. `compose(r)` scores it against everything
+    // else and the knapsack decides whether it fits.
+    //
+    // This function used to push a row per queued message ALONGSIDE that, a
+    // second surface the budget never saw. Reading a real inbox made it
+    // thousands of rows and the screen tried to work every one at once. A view
+    // is the knapsack's pick (Curated UI III to VI); a list that grows with the
+    // number of events is what the budget exists to forbid.
+    //
+    // So the card is the only capture surface, and all it needs from here is
+    // which message to offer next.
+    // The oldest still needing a person. ONE id, never a list: the card works
+    // them one at a time, which is the disclosure machine of Curated UI VII.
+    let queue_head = oldest_waiting(&queued);
+
+    // The walkable queue: what he has just done, then what is waiting.
+    let walk = world
+        .ingest()
+        .navigable(&sustain_id, REACHABLE_DONE, QUEUE_AHEAD)
+        .unwrap_or_default();
+    let queue_start = walk.iter().position(|m| !m.resolved).unwrap_or(walk.len()) as u32;
+    let queue: Vec<CaptureContextDto> = walk.iter().map(context_of).collect();
+
+    // ★★ Folded in AFTER the view is composed, so one render is one reading.
+    //    Observing inside the compose path would count a re-render as new
+    //    evidence and let the series drift on nothing happening at all.
+    let observed = world.observe(&sustain_id, &reading);
+    let trend = observed.as_ref().map(|i| TrendDto {
+        now: i.reading.w,
+        smoothed: i.reading.smoothed,
+        drifting: i.reading.alert.is_some(),
+        escalates: i.reading.escalates(),
+        // ★★★ Monitor §VII: hue is processed before attention engages, in
+        //     roughly 150 to 200ms, across the whole field at once. The
+        //     ranking was being computed correctly and then drawn flat, so it
+        //     existed in the data and never reached the eye. `encode_field`
+        //     has been in the core since it shipped, with nothing calling it.
+        //
+        //     One attribute, and deliberately only one. Hue has a settled
+        //     three-way meaning already in the palette; brightness and motion
+        //     are real and come later, and motion should stay rare because a
+        //     card that pulses without cause is the flicker §V warns about.
+        health: health_hue(i),
+    });
+    if trend.as_ref().is_some_and(|t| t.drifting) {
+        // ★★★ Worded as a direction rather than a breach, because that is what
+        //     CUSUM detects. "You are over budget" and "you have been drifting
+        //     over for a while now" are different facts and only one of them
+        //     is this one.
+        attention.insert(
+            0,
+            AttentionDto {
+                kind: "drift".into(),
+                // ★★ Worded for what the detector actually saw. It watches
+                //    the smoothed level, so this fires both for a small gap
+                //    that keeps repeating and in the wake of one big one —
+                //    and "still well outside" is true of both, where "this has
+                //    been building" would only be true of the first.
+                what: "still outside where you want to be".into(),
+                why: "Not just today — the gap has stayed open across recent changes."
+                    .into(),
+                // ★ Warning rather than danger. A drift is not yet a breach,
+                //   and calling it one would spend the loudest word on the
+                //   quieter fact.
+                severity: "warn".into(),
+                message_id: None,
+            },
+        );
     }
 
     Ok(FeedDto {
         sustain_id: sustain_id.clone(),
         label,
         cards,
+        queue_head,
+        queue,
+        queue_start,
         quiet,
         budget: view.budget as u32,
         spent: view.spent as u32,
@@ -1108,7 +1250,188 @@ pub fn get_feed(
         attention,
         rollup: world.rollup(&sustain_id),
         liquid: state.pointer("/finances/liquid/balance").and_then(Value::as_f64),
+        accounts: accounts_of(&state, &world.ingest().reported_balances(&sustain_id)
+            .unwrap_or_default()),
+        device: device_of(&world, &sustain_id),
+        inventory: inventory_of(&state),
+        person_pockets,
+        filed: world
+            .ingest()
+            .filed_spends(&sustain_id, RECENT_FILED)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| FiledSpendDto {
+                message_id: f.message_id,
+                pocket: f.pocket,
+                amount: f.amount,
+                counterparty: f.counterparty,
+            })
+            .collect(),
+        trend,
+        unaccounted: unaccounted_in(&state),
     })
+}
+
+/// The constraint-health hue for one reading, as §VII's encoder assigns it.
+///
+/// ★★ Read off `encode_field` rather than re-derived here. A second opinion
+/// about what counts as amber would drift from the core's, and then the colour
+/// on screen would stop meaning what the engine meant by it.
+fn health_hue(reading: &sustena_core::monitor::Ingested) -> String {
+    use sustena_core::preattentive::{encode_field, Hue, VisualAttribute};
+    let specs = encode_field(&[reading]);
+    let hue = specs.first().and_then(|s| {
+        s.attributes().iter().find_map(|a| match a {
+            VisualAttribute::Hue { value, .. } => Some(*value),
+            _ => None,
+        })
+    });
+    match hue {
+        Some(Hue::Green) => "green",
+        Some(Hue::Amber) => "amber",
+        Some(Hue::Red) => "red",
+        None => "green",
+    }
+    .to_string()
+}
+
+/// How many recent filings to offer for correction.
+///
+/// ★★ A short list on purpose. Correcting last week's shopping is a real need;
+/// scrolling a year of it is a different screen, and one nobody has asked for.
+const RECENT_FILED: usize = 12;
+
+/// What the household holds, grouped by the pocket that bought it.
+fn inventory_of(state: &Value) -> Vec<InventoryGroupDto> {
+    let assets = state
+        .pointer("/inventory/assets")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut by_pocket: std::collections::BTreeMap<String, Vec<AssetDto>> = Default::default();
+    for a in assets {
+        let dto = AssetDto {
+            id: a.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
+            item: a.get("item").and_then(Value::as_str).unwrap_or("").to_string(),
+            value: a.get("value").and_then(Value::as_f64).unwrap_or(0.0),
+            source_tx: a.get("source_tx").and_then(Value::as_str).unwrap_or("").to_string(),
+            pocket: a.get("pocket").and_then(Value::as_str).unwrap_or("").to_string(),
+            subpocket: a.get("subpocket").and_then(Value::as_str).map(str::to_string),
+        };
+        // ★★ Used-up things stay on the record — the purchase they came from
+        //    is still a real fact — but they are not part of what is HELD, so
+        //    they do not swell the total or the list.
+        if dto.value > 0.0 {
+            by_pocket.entry(dto.pocket.clone()).or_default().push(dto);
+        }
+    }
+
+    by_pocket
+        .into_iter()
+        .map(|(pocket, assets)| InventoryGroupDto {
+            total: ((assets.iter().map(|a| a.value).sum::<f64>()) * 100.0).round() / 100.0,
+            pocket,
+            assets,
+        })
+        .collect()
+}
+
+/// How long a device may be quiet before the watcher calls it late.
+///
+/// ★★ A decision, not an estimate, and Ingest §VIII is why: percentile
+/// staleness declares a false-alarm rate rather than discovering one, and on a
+/// bursty signal a confident alarm is necessarily a late one. A heartbeat every
+/// sweep removes the statistics — the phone reports whenever it reads, so
+/// silence past this is silence, not a quiet spell.
+const QUIET_BEFORE_LATE_MINUTES: u32 = 60 * 24;
+
+/// The device child's own reading, judged by the household that watches it.
+fn device_of(world: &World, household: &str) -> Option<DeviceDto> {
+    let id = World::device_id(household);
+    let state = world.with(|i| i.get(&id).map(|s| s.state.clone()))?;
+    let depth = state.pointer("/device/queue_depth").and_then(Value::as_f64).unwrap_or(0.0);
+    let last = state.pointer("/device/last_ack_ms").and_then(Value::as_f64).unwrap_or(0.0);
+
+    // ★★★ Never reported is NOT "quiet for zero minutes". A device that has
+    //     said nothing since it was created has no last-contact to measure
+    //     from, and reporting one would read as freshly heard from.
+    let quiet = if last <= 0.0 {
+        None
+    } else {
+        Some((((now_ms() as f64 - last).max(0.0)) / 60_000.0).round() as u32)
+    };
+    Some(DeviceDto {
+        sustain_id: id,
+        queue_depth: depth.max(0.0) as u32,
+        quiet_for_minutes: quiet,
+        stale: quiet.is_none_or(|m| m > QUIET_BEFORE_LATE_MINUTES),
+        app_version: state
+            .pointer("/device/app_version")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    })
+}
+
+/// Every account the household holds, in a stable order, each against what
+/// the bank itself last reported for it.
+///
+/// ★★ Drift is reported, never corrected. A difference between our arithmetic
+/// and the bank's own word is a real thing to look into -- a missed text, a
+/// charge nobody classified, a fee -- and silently moving our figure to match
+/// would erase the evidence of whatever caused it.
+fn accounts_of(
+    state: &Value,
+    reported: &std::collections::BTreeMap<String, crate::ingest::Reported>,
+) -> Vec<AccountDto> {
+    state
+        .pointer("/finances/accounts")
+        .and_then(Value::as_object)
+        .map(|m| {
+            m.iter()
+                .map(|(id, a)| {
+                    let balance = a.get("balance").and_then(Value::as_f64).unwrap_or(0.0);
+                    let said = reported.get(id).map(|r| r.balance);
+                    AccountDto {
+                        id: id.clone(),
+                        label: a.get("label").and_then(Value::as_str).unwrap_or(id).to_string(),
+                        balance,
+                        reported: said,
+                        drift: said.map(|r| ((r - balance) * 100.0).round() / 100.0),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Money the household holds that no account claims.
+///
+/// ★★ The same two sums the core's conservation law compares, read here so a
+/// surface can show the gap rather than a total that hides it. Rounded to the
+/// shilling, because a float difference of 1e-13 is not a thing to report.
+fn unaccounted_in(state: &Value) -> f64 {
+    let liquid = state.pointer("/finances/liquid/balance").and_then(Value::as_f64).unwrap_or(0.0);
+    let earmarked: f64 = state
+        .pointer("/finances/pockets")
+        .and_then(Value::as_object)
+        .map(|m| {
+            m.values()
+                .map(|p| {
+                    let a = p.get("allocated").and_then(Value::as_f64).unwrap_or(0.0);
+                    let sp = p.get("spent").and_then(Value::as_f64).unwrap_or(0.0);
+                    a - sp
+                })
+                .sum()
+        })
+        .unwrap_or(0.0);
+    let in_accounts: f64 = state
+        .pointer("/finances/accounts")
+        .and_then(Value::as_object)
+        .map(|m| m.values().filter_map(|a| a.get("balance")?.as_f64()).sum())
+        .unwrap_or(0.0);
+    (((liquid + earmarked) - in_accounts) * 100.0).round() / 100.0
 }
 
 fn pockets_of(state: &Value) -> Vec<String> {
@@ -1116,6 +1439,475 @@ fn pockets_of(state: &Value) -> Vec<String> {
         .pointer("/finances/pockets")
         .and_then(|p| p.as_object().map(|o| o.keys().cloned().collect()))
         .unwrap_or_default()
+}
+
+/// Cancel refunds against their charges, where both are still unclassified.
+///
+/// ★★★ Case 1 of the netting design. A charge and its refund net to zero, so
+/// if neither has been filed the honest outcome is that both leave the queue
+/// and nothing is recorded: no money moved on balance, and no event should
+/// claim it did. Nothing is deleted; each keeps its text and gains the id of
+/// the other.
+///
+/// ★★ Where more than one charge could be the match, it nets NOTHING. Getting
+/// the pair wrong would make two real transactions disappear.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn net_reversals(world: State<'_, World>, sustain_id: String) -> Result<NettingDto, String> {
+    let r = world.ingest().net_reversals(&sustain_id).map_err(|e| e.to_string())?;
+
+    // ★★★ Case 2 is the only part of netting that moves money, and it moves it
+    //     through `World::call` -- the same door the Console and the classify
+    //     card use. There is no store-level write path to the ledger, and this
+    //     does not become the first one.
+    let mut given_back = 0u32;
+    let mut refused = 0u32;
+    for c in &r.compensations {
+        let mut all_committed = true;
+        for call in &c.calls {
+            let params: Map<String, Value> = call.params.clone().into_iter().collect();
+            match world.call(&sustain_id, &call.operator, &params) {
+                Ok(Some((x, _))) if x.committed() => {}
+                // ★★ A refusal stops this pair here. The earlier calls of a
+                //    pair are themselves real, committed moves and are left
+                //    standing rather than force-reversed -- a second undo of a
+                //    refusal is how a mistake gets doubled. The pair stays
+                //    unmarked, so it comes back next pass.
+                _ => {
+                    all_committed = false;
+                    break;
+                }
+            }
+        }
+        if all_committed {
+            world
+                .ingest()
+                .mark_compensated(&c.reversal, &c.original)
+                .map_err(|e| e.to_string())?;
+            given_back += 1;
+        } else {
+            refused += 1;
+        }
+    }
+
+    if !r.netted.is_empty() || given_back > 0 {
+        trace!("netted {} pair(s), gave back {given_back}", r.netted.len());
+    }
+    Ok(NettingDto {
+        netted: r.netted.len() as u32,
+        given_back,
+        refused,
+        uncompensable: r.uncompensable,
+        unmatched: r.unmatched,
+        ambiguous: r.ambiguous,
+    })
+}
+
+/// The numbers this household calls its own.
+///
+/// ★★ Read and written on the device only. They exist so a move between his
+/// own accounts can be told apart from a payment to someone else, which is not
+/// a distinction any wording makes.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn get_own_identifiers(world: State<'_, World>) -> Result<OwnIdentifiersDto, String> {
+    let own = world.ingest().own_identifiers().map_err(|e| e.to_string())?;
+    Ok(OwnIdentifiersDto { mpesa: own.mpesa, kcb: own.kcb })
+}
+
+#[tauri::command(async)]
+#[specta::specta]
+pub fn set_own_identifiers(
+    world: State<'_, World>,
+    own: OwnIdentifiersDto,
+) -> Result<OwnIdentifiersDto, String> {
+    let store = crate::ingest::OwnIdentifiers { mpesa: own.mpesa, kcb: own.kcb };
+    world.ingest().set_own_identifiers(&store).map_err(|e| e.to_string())?;
+    get_own_identifiers(world)
+}
+
+/// Turn each pair of texts that is really one move into one move.
+///
+/// ★★★ Net zero by construction: `budget.transfer` takes money out of one
+/// account and puts the same amount into another, touches no pocket and adds
+/// nothing to income. Booking the two texts separately would record an expense
+/// and an income that never happened, and his income would grow every time he
+/// moved his own money.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn apply_transfers(
+    world: State<'_, World>,
+    sustain_id: String,
+) -> Result<TransferDto, String> {
+    let found = world.ingest().find_transfers(&sustain_id).map_err(|e| e.to_string())?;
+    let mut out = TransferDto {
+        reclaimed: found.reclaimed,
+        unpaired: found.unpaired,
+        ambiguous: found.ambiguous,
+        blocked: found.blocked_by_applied_income,
+        ..Default::default()
+    };
+
+    // ── one text that names both ends ────────────────────────────────────────
+    //
+    // ★★★ The order matters and is not interchangeable. If the far side already
+    //     filed itself as income, that income must come off the books BEFORE
+    //     the transfer credits the same account, or the money is counted twice
+    //     -- once as earnings that never happened and once as the move it
+    //     really was. And if the undo is refused, the transfer must not run at
+    //     all: half of this is worse than none of it.
+    for mv in &found.self_moves {
+        if let Some(income_id) = &mv.undo_income {
+            let mut undo = Map::new();
+            undo.insert("entry_id".into(), Value::String(income_id.clone()));
+            undo.insert("account".into(), Value::String(mv.to_account.clone()));
+            match world.call(&sustain_id, "budget.unrecord_income", &undo) {
+                Ok(Some((x, _))) if x.committed() => {}
+                _ => {
+                    out.refused += 1;
+                    continue;
+                }
+            }
+        }
+
+        let mut params = Map::new();
+        params.insert("from_account".into(), Value::String(mv.from_account.clone()));
+        params.insert("to_account".into(), Value::String(mv.to_account.clone()));
+        params.insert("amount".into(), serde_json::json!(mv.amount));
+        match world.call(&sustain_id, "budget.transfer", &params) {
+            Ok(Some((x, _))) if x.committed() => {
+                world.ingest().mark_self_moved(&mv.message).map_err(|e| e.to_string())?;
+                // The income it replaced is settled too, so it stops asking.
+                if let Some(income_id) = &mv.undo_income {
+                    let _ = world.ingest().mark_self_moved(income_id);
+                }
+                out.moved += 1;
+            }
+            _ => out.refused += 1,
+        }
+    }
+
+    for t in &found.matched {
+        let mut params = Map::new();
+        params.insert("from_account".into(), Value::String(t.from_account.clone()));
+        params.insert("to_account".into(), Value::String(t.to_account.clone()));
+        params.insert("amount".into(), serde_json::json!(t.amount));
+        // The same door every other write uses.
+        match world.call(&sustain_id, "budget.transfer", &params) {
+            Ok(Some((x, _))) if x.committed() => {
+                world
+                    .ingest()
+                    .mark_transferred(&t.out_leg, &t.in_leg)
+                    .map_err(|e| e.to_string())?;
+                out.moved += 1;
+            }
+            _ => out.refused += 1,
+        }
+    }
+    if out.moved > 0 {
+        trace!("recorded {} transfer(s) between his own accounts", out.moved);
+    }
+    Ok(out)
+}
+
+/// **Never ask me about these again** — learn a skip from one message.
+///
+/// ★★ Retroactive by design. He answers this in the middle of a backlog full
+/// of the same shape, so a rule that only covered future messages would leave
+/// the pile it was meant to clear exactly as it was.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn learn_skip(
+    world: State<'_, World>,
+    sustain_id: String,
+    message_id: String,
+) -> Result<SkipLearnedDto, String> {
+    let out = world.ingest().learn_skip(&sustain_id, &message_id).map_err(|e| e.to_string())?;
+    if out.cleared > 0 {
+        trace!("learned a skip, cleared {} waiting", out.cleared);
+    }
+    Ok(SkipLearnedDto { cleared: out.cleared, unlearnable: out.unlearnable })
+}
+
+/// **Move a spend filed to the wrong pocket.**
+///
+/// ★★★ A correction, appended. The original filing is not rewritten: the
+/// operator moves what is counted, and the message records the move after the
+/// filing it corrects, so the log keeps both.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn reclassify_spend(
+    world: State<'_, World>,
+    sustain_id: String,
+    message_id: String,
+    from_pocket: String,
+    to_pocket: String,
+    amount: f64,
+) -> Result<GateResult, String> {
+    let mut params = Map::new();
+    params.insert("from_pocket".into(), Value::String(from_pocket));
+    params.insert("to_pocket".into(), Value::String(to_pocket.clone()));
+    params.insert("amount".into(), serde_json::json!(amount));
+    params.insert("source_tx".into(), Value::String(message_id.clone()));
+
+    let Some((x, _)) = world
+        .call(&sustain_id, "budget.reclassify", &params)
+        .map_err(|e| e.to_string())?
+    else {
+        return Err(format!("no Sustain called '{sustain_id}'"));
+    };
+    let result = GateResult::of("budget.reclassify", &x);
+    if x.committed() {
+        // ★ Only after the gate committed. Noting a correction that was
+        //   refused would show the list a move that never happened.
+        let _ = world.ingest().record_reclassification(&message_id, &to_pocket, amount);
+    }
+    Ok(result)
+}
+
+/// **What the household remembers about this counterparty.**
+///
+/// ★★★ Answered by running the head of Mentor's own graph —
+/// `vendor.identify → vendor.suggest` — rather than by a lookup written here.
+/// That is the realignment: the deciding step IS the operative's first two
+/// nodes, executing through the real registry, so the answer a screen shows and
+/// the answer an operative acts on cannot drift apart. They are the same call.
+///
+/// ★★★ **One source of truth.** The memory lives in the `vendors` dimension of
+/// state, written by `vendor.remember` through the gate, replayed by the fold.
+/// It used to live ALSO in a `history.json` beside the log, and two places that
+/// say what a vendor is for is one place too many — the day they disagreed
+/// there would be no way to say which was right.
+///
+/// ★★ The old file is still READ, and never written again. It drains itself:
+/// anything only it knows is offered once, and the next confirmation writes
+/// that answer into state where it belongs. Deleting it outright would have
+/// thrown away real classifications he had already made.
+fn vendor_memory(
+    world: &World,
+    sustain_id: &str,
+    state: &Value,
+    description: &str,
+) -> Option<(String, u32)> {
+    let head = sustena_core::mentor();
+    let input: Map<String, Value> =
+        [("counterparty".to_string(), Value::String(description.to_string()))]
+            .into_iter()
+            .collect();
+    // ★ The sustain's own allow-list, so a read-only head is held to exactly
+    //   the operators that sustain declares — same list `World::call` uses.
+    let allowed: Vec<String> =
+        world.with(|i| i.get(sustain_id).map(|s| s.definition.operators.clone()))?;
+    let run = sustena_core::dag::run(
+        &head,
+        &world.operators,
+        &allowed,
+        &sustena_core::Enforcement::default(),
+        state,
+        &input,
+    )
+    .ok()?;
+
+    let suggested = run.result_of("suggest").and_then(|r| {
+        let pocket = r.data.get("pocket")?.as_str()?.to_string();
+        let times = r.data.get("times").and_then(Value::as_u64).unwrap_or(1) as u32;
+        Some((pocket, times))
+    });
+    // ★ The legacy file only when state has nothing to say.
+    suggested.or_else(|| world.ingest().recall(sustain_id, description))
+}
+
+/// Show a number without giving it away.
+///
+/// ★★★ He linked it as an identifier, not as something to put on a screen. The
+/// card has to be able to say WHICH person this tab is, and the pocket name
+/// already does that — the number is only there so he can tell two people apart
+/// if he ever names two pockets alike. Six hidden digits in the middle is
+/// enough to recognise and not enough to dial.
+fn masked_number(full: &str) -> String {
+    let d: Vec<char> = full.chars().filter(char::is_ascii_digit).collect();
+    if d.len() < 6 {
+        return "·".repeat(d.len());
+    }
+    let head: String = d[..3].iter().collect();
+    let tail: String = d[d.len() - 3..].iter().collect();
+    format!("{head}···{tail}")
+}
+
+/// The person tab most worth showing, if the household has any.
+///
+/// ★★★ ONE, not all of them. Orchie's whole premise is an attention budget, and
+/// a list of every person he has ever paid is the flood the budget exists to
+/// prevent. The one shown is the relationship with the most money in play,
+/// either direction — that is the one a person would actually want on the
+/// screen, and it is measured rather than guessed.
+///
+/// ★★ The two sides come from the LOG, not from a running total kept beside the
+/// state. The pocket's own `spent` is the net; the log is where "how it got
+/// there" still exists. It also means a pocket linked today shows its whole
+/// history, rather than a tab that appears to begin the day it was noticed.
+fn leading_tab(
+    world: &World,
+    sustain_id: &str,
+    state: &Value,
+) -> Option<crate::orchie::TabReading> {
+    let links = state.pointer("/finances/links")?.as_object()?.clone();
+    if links.is_empty() {
+        return None;
+    }
+    // One read of the log for every tab, rather than one per pocket.
+    let log = world.store().read_log(sustain_id).unwrap_or_default();
+    let mutations: Vec<sustena_core::Mutation> =
+        log.into_iter().flat_map(|e| e.mutations).collect();
+
+    let mut best: Option<crate::orchie::TabReading> = None;
+    for (number, pocket) in links {
+        let Some(pocket) = pocket.as_str() else { continue };
+        let allocated = state
+            .pointer(&format!("/finances/pockets/{pocket}/allocated"))
+            .and_then(Value::as_f64);
+        // ★ A link pointing at a pocket that is gone describes nothing.
+        let Some(allocated) = allocated else { continue };
+
+        let sides = sustena_core::tab_sides(pocket, &mutations);
+        let reading = crate::orchie::TabReading {
+            pocket: pocket.to_string(),
+            masked: masked_number(&number),
+            sent: sides.sent,
+            received: sides.received,
+            allocated,
+        };
+        if best.as_ref().is_none_or(|b| reading.outstanding().abs() > b.outstanding().abs()) {
+            best = Some(reading);
+        }
+    }
+    best
+}
+
+/// What a message says about whose tab it might be.
+///
+/// ★★ Asked by the card rather than carried on every capture, because it is
+/// only ever needed at the moment somebody is looking at one message.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct PersonHint {
+    /// The number as the message printed it — usually masked.
+    pub printed: Option<String>,
+    /// The pocket it is already tied to, if it is tied to one.
+    pub pocket: Option<String>,
+}
+
+/// Does this message carry a number, and is that number already somebody's tab?
+#[tauri::command(async)]
+#[specta::specta]
+pub fn person_hint(
+    world: State<'_, World>,
+    sustain_id: String,
+    message_id: String,
+) -> Result<PersonHint, String> {
+    let Some(state) = world.with(|i| i.get(&sustain_id).map(|s| s.state.clone())) else {
+        return Err(format!("no Sustain called '{sustain_id}'"));
+    };
+    let printed = world
+        .ingest()
+        .current()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|m| m.id == message_id)
+        .and_then(|m| printed_number(&m.parsed_fields));
+    let pocket = printed
+        .as_deref()
+        .and_then(|n| sustena_core::pocket_for_number(&sustena_core::State::new(state), n));
+    Ok(PersonHint { printed, pocket })
+}
+
+/// **Tie a phone number to a pocket, so money both ways lands in that tab.**
+///
+/// ★★★ Through the gate like everything else. The link changes what future
+/// money does, which makes it a decision the household records, not a setting
+/// tucked into a preferences file where the fold could never see it.
+///
+/// ★★ The number is typed in full on purpose. Messages print it masked, and a
+/// mask is missing its middle — linking one would claim an identity nobody
+/// actually gave, and every later match would inherit the guess.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn link_number(
+    world: State<'_, World>,
+    sustain_id: String,
+    pocket_name: String,
+    number: String,
+) -> Result<GateResult, String> {
+    let mut params = Map::new();
+    params.insert("pocket_name".into(), Value::String(pocket_name));
+    params.insert("number".into(), Value::String(number));
+
+    let Some((x, _)) =
+        world.call(&sustain_id, "vendor.link_number", &params).map_err(|e| e.to_string())?
+    else {
+        return Err(format!("no Sustain called '{sustain_id}'"));
+    };
+    Ok(GateResult::of("vendor.link_number", &x))
+}
+
+/// **`H(s)` for one Sustain** — its state as one short string.
+///
+/// ★★★ The point of a hash here is that it is ASKABLE. Two nodes comparing
+/// whole households is not a conversation that fits over a phone link, and a
+/// node that answers "mostly the same" has answered nothing. Sixty-four
+/// characters either match or they do not.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn sustain_hash(world: State<'_, World>, sustain_id: String) -> Result<String, String> {
+    world.store().state_hash(&sustain_id).map_err(|e| e.to_string())
+}
+
+/// **Put this off until he remembers what it was.**
+///
+/// ★★★ An honest defer, and a different act from setting something aside as
+/// not a transaction. That one says there is nothing here; this says there is
+/// something here and he cannot answer it yet. It stays in the queue and comes
+/// back at the TOP next time he opens the app, because burying it under new
+/// arrivals would make deferring indistinguishable from discarding.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn defer_message(
+    world: State<'_, World>,
+    sustain_id: String,
+    message_id: String,
+) -> Result<bool, String> {
+    // The capture seq is the household's own monotonic tick, so "deferred
+    // longest ago" is answerable without a clock.
+    let at = world.with(|i| i.get(&sustain_id).map(|s| s.next_seq)).unwrap_or(0);
+    world.ingest().defer(&message_id, at).map_err(|e| e.to_string())
+}
+
+/// Set a captured message aside as not a transaction.
+///
+/// ★★ A real state on the message, never a delete. A reversal, a promo or a
+/// notice has nothing to file, and saying so should not mean losing the record
+/// that it arrived.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn ignore_message(world: State<'_, World>, message_id: String) -> Result<bool, String> {
+    world.ingest().ignore(&message_id).map_err(|e| e.to_string())
+}
+
+/// The counterparty number a message printed, however it printed it.
+///
+/// ★★ `phone` when the rule captured one; otherwise the number a bank tucked
+/// into the name field, which several real shapes do. A mask counts — matching
+/// one against a linked number is exactly what `pocket_for_number` is for.
+pub(crate) fn printed_number(parsed: &BTreeMap<String, Value>) -> Option<String> {
+    if let Some(p) = parsed.get("phone").and_then(Value::as_str) {
+        if p.chars().any(|c| c.is_ascii_digit()) {
+            return Some(p.to_string());
+        }
+    }
+    let who = parsed.get("counterparty").and_then(Value::as_str)?;
+    let token = who
+        .split_whitespace()
+        .find(|w| w.chars().filter(char::is_ascii_digit).count() >= 4)?;
+    Some(token.to_string())
 }
 
 /// **`ε → (o, θ)`** — one inference pass over a narrated effect or a captured
@@ -1166,8 +1958,17 @@ pub fn orchie_infer(
     let history = if ignore_history {
         None
     } else {
-        description.as_ref().and_then(|d| world.ingest().recall(&sustain_id, d))
+        description.as_ref().and_then(|d| vendor_memory(&world, &sustain_id, &state, d))
     };
+
+    // ★★★ Whose tab this is, if it is anyone's.
+    //
+    // Read from the number the message itself printed, against the links he
+    // set up. A name is a description; a number is an identity, so this is
+    // checked before any history keyed on how a bank spelled somebody.
+    let person_pocket = printed_number(&parsed).and_then(|n| {
+        sustena_core::pocket_for_number(&sustena_core::State::new(state.clone()), &n)
+    });
 
     let capture = sustena_core::Capture {
         candidates: &candidates,
@@ -1177,7 +1978,31 @@ pub fn orchie_infer(
         known: known_map,
         history,
         raw_text: raw.as_deref(),
+        person_pocket,
     };
+
+    // ★★★ Rank the pockets he is offered by what he has actually done.
+    //
+    // The engine hands back every pocket in whatever order the state holds
+    // them, which is arbitrary. The classification history knows how many
+    // times each pocket has been chosen, so the ones he uses lead and the
+    // long tail follows. Real counts, not a guess at relevance.
+    // ★★ Ordered by what he has actually done. State first — the one source
+    //    of truth — with the legacy file filling in anything only it still
+    //    knows, so the ordering does not lurch the day the last entry drains.
+    let mut by_use = world.ingest().pocket_use_counts(&sustain_id).unwrap_or_default();
+    if let Some(vendors) = state.pointer("/vendors").and_then(Value::as_object) {
+        for record in vendors.values() {
+            let (Some(p), times) = (
+                record.get("pocket").and_then(Value::as_str),
+                record.get("times").and_then(Value::as_u64).unwrap_or(1) as u32,
+            ) else {
+                continue;
+            };
+            let entry = by_use.entry(p.to_string()).or_insert(0);
+            *entry = (*entry).max(times);
+        }
+    }
 
     Ok(match sustena_core::infer(&world.operators, &capture) {
         sustena_core::Inference::Ready {
@@ -1196,6 +2021,18 @@ pub fn orchie_infer(
             history_use_count,
         },
         sustena_core::Inference::NeedsDisambiguation { field, question, options, why } => {
+            let options = options.map(|mut opts| {
+                if field == "pocket_name" {
+                    // Most-used first, then alphabetical so the tail is
+                    // predictable rather than arbitrary.
+                    opts.sort_by(|a, b| {
+                        let ua = by_use.get(&a.value).copied().unwrap_or(0);
+                        let ub = by_use.get(&b.value).copied().unwrap_or(0);
+                        ub.cmp(&ua).then_with(|| a.label.cmp(&b.label))
+                    });
+                }
+                opts
+            });
             InferenceDto::NeedsDisambiguation {
                 field,
                 question,
@@ -1227,11 +2064,30 @@ pub fn orchie_confirm(
     params: Value,
     message_id: Option<String>,
     description: Option<String>,
+    resolves: Option<bool>,
 ) -> Result<GateResult, String> {
-    let params_map: Map<String, Value> = match params {
+    let mut params_map: Map<String, Value> = match params {
         Value::Object(o) => o,
         _ => Map::new(),
     };
+
+    // ★★★ Attribution costs nothing. A captured message already knows whether
+    //     it came from M-Pesa or KCB, so the account the money moved in is
+    //     read off the message rather than asked for. Only when the operator
+    //     actually takes an account, and only when nobody has already said.
+    if !params_map.contains_key("account") {
+        if let Some(id) = &message_id {
+            let takes_account = world
+                .operators
+                .get(&operator)
+                .is_some_and(|m| m.params.iter().any(|p| p.name == "account"));
+            if takes_account {
+                if let Some(src) = world.ingest().source_of_message(id) {
+                    params_map.insert("account".into(), Value::String(src));
+                }
+            }
+        }
+    }
     trace!("orchie_confirm  {sustain_id}  {operator}");
 
     let Some((x, seq)) = world
@@ -1252,18 +2108,41 @@ pub fn orchie_confirm(
         }
         // ★ Remember the classification only on a real success, and only when
         //   there is a pocket to remember — income has none.
+        //
+        // ★★★ Through the OPERATOR, so the memory is state: written by the
+        //     gate, replayed by the fold, readable by anything that can read a
+        //     dimension. It used to be a side file as well, and two places
+        //     saying what a vendor is for is one place too many.
+        //
+        // ★★ Best-effort on purpose. The money has already moved and been
+        //     recorded; failing to note who it was paid to is worth a lost
+        //     suggestion, never a lost transaction.
         if let (Some(d), Some(pocket)) = (
             description.as_deref(),
             params_map.get("pocket_name").and_then(|v| v.as_str()),
         ) {
-            let _ = world.ingest().remember(&sustain_id, d, pocket);
+            let mut remember = Map::new();
+            remember.insert("counterparty".into(), Value::String(d.to_string()));
+            remember.insert("pocket_name".into(), Value::String(pocket.to_string()));
+            let _ = world.call(&sustain_id, "vendor.remember", &remember);
         }
         if let Some(id) = &message_id {
-            let _ = world.ingest().record_outcome(id, true, None);
+            // ★★★ What was done, before whether it is finished. Filing a past
+            //     charge is an allocation and then a spend, and undoing it
+            //     later needs both -- so each leg records itself as it lands,
+            //     and only the last one resolves the message.
+            let params_sorted: std::collections::BTreeMap<String, Value> =
+                params_map.clone().into_iter().collect();
+            let _ = world.ingest().record_filing(id, &operator, &params_sorted);
+            if resolves.unwrap_or(true) {
+                let _ = world.ingest().record_outcome(id, true, None);
+            }
         }
     } else {
         let _ = Refused::of(&sustain_id, &operator, &result).emit(&app);
         if let Some(id) = &message_id {
+            // ★ A refusal changed nothing, so there is no filing to record --
+            //   only the reason, and the message stays in the queue.
             let _ = world.ingest().record_outcome(id, false, result.reason.clone());
         }
     }
@@ -1798,7 +2677,21 @@ pub struct SmsSweep {
     /// A text the engine refused outright, with the first reason.
     pub failed: u32,
     pub first_failure: Option<String>,
+    /// Another page or batch is waiting.
+    pub has_more: bool,
+    /// Where the next page starts. Reading only.
+    pub next_offset: u32,
+    /// Still queued after this batch. Draining only.
+    pub remaining: u32,
+    /// Charge/refund pairs cancelled once the read finished. Each took TWO out
+    /// of the queue and recorded nothing, because together they are zero.
+    pub netted_pairs: u32,
 }
+
+/// The inbox is read as one stream rather than per sender, so the mark is kept
+/// under one key. ★ The store keys marks per source anyway, so splitting the
+/// read later needs no migration.
+const ANY_SOURCE: &str = "inbox";
 
 /// M-Pesa or KCB, decided by WHO SENT IT. Never by the wording: several real
 /// KCB messages say M-PESA in their own text and are still KCB.
@@ -1814,10 +2707,25 @@ fn source_of(sender: &str) -> Option<&'static str> {
     }
 }
 
+/// The host's clock, in epoch milliseconds.
+///
+/// ★ Time belongs to the host. The core takes it as a parameter so the same
+/// inputs always produce the same state, which is what lets a conformance
+/// vector pin an operator at all.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
     let mut out = SmsSweep {
         skipped_other_senders: batch.filtered_out,
         skipped_secrets: batch.secrets_refused,
+        has_more: batch.has_more,
+        next_offset: batch.next_offset,
+        remaining: batch.remaining,
         ..Default::default()
     };
     for m in batch.messages {
@@ -1826,7 +2734,7 @@ fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
             continue;
         };
         out.read += 1;
-        match world.capture(sustain_id, source, &m.body) {
+        match world.capture_at(sustain_id, source, &m.body, Some(m.timestamp_ms)) {
             Ok(Capture::Rejected { .. }) => out.refused += 1,
             Ok(Capture::Duplicate(_)) => out.duplicates += 1,
             Ok(Capture::Stored(stored)) => match stored.status.as_str() {
@@ -1846,7 +2754,7 @@ fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
 }
 
 /// Has the phone been given permission to read texts yet?
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sms_permission_state(app: tauri::AppHandle) -> Result<String, String> {
     use tauri_plugin_sms_capture::SmsCaptureExt;
@@ -1857,7 +2765,7 @@ pub fn sms_permission_state(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 /// Ask for it. The reason is shown in the app first, before this is called.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sms_request_permission(app: tauri::AppHandle) -> Result<String, String> {
     use tauri_plugin_sms_capture::SmsCaptureExt;
@@ -1867,41 +2775,165 @@ pub fn sms_request_permission(app: tauri::AppHandle) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-/// The backfill. Reads texts already on the phone, so a person never pastes a
-/// thousand messages by hand. `since_days` of 0 means all of them.
-#[tauri::command]
+/// ★★★ **`(async)` on a sync body, and it is the whole freeze fix.**
+///
+/// Tauri's macro defaults a plain `fn` command to `ExecutionContext::Blocking`,
+/// which the generated handler runs INLINE on the IPC thread. On a phone that
+/// is the UI thread, so a command that takes a while takes the interface with
+/// it. Marking it `async` on a synchronous body selects the `sync_threadpool`
+/// path instead: the same code, run off the thread that draws.
+///
+/// Found the hard way. 6,078 texts on the reporting device, 2,779 of them
+/// matching, every one captured before the one call returned. The button sat
+/// reading "read my texts" the entire time, and unlocking did the same thing
+/// because the queue drains there.
+///
+/// ONE PAGE of the backfill. The caller loops, and shows progress between
+/// pages. `since_days` of 0 means the whole inbox.
+#[tauri::command(async)]
 #[specta::specta]
-pub fn sms_import_inbox(
+pub fn sms_import_page(
     world: State<'_, World>,
     app: tauri::AppHandle,
     sustain_id: String,
     since_days: i32,
+    offset: u32,
+    limit: u32,
 ) -> Result<SmsSweep, String> {
     use tauri_plugin_sms_capture::{ReadInboxArgs, SmsCaptureExt};
+
+    // ★★★ Only what arrived since the last read.
+    //
+    // A repeat read used to walk the whole inbox and offer every message again.
+    // Nothing was double-counted, because the dedup index caught them, but two
+    // thousand messages were re-read to learn that two thousand times. The mark
+    // is the newest message a completed read saw; a repeat starts there.
+    let since_ms = world.ingest().read_mark(&sustain_id, ANY_SOURCE).unwrap_or(0);
+
     let batch = app
         .sms_capture()
-        .read_inbox(ReadInboxArgs { since_days })
+        .read_inbox(ReadInboxArgs { since_days, offset, limit, since_ms })
         .map_err(|e| e.to_string())?;
-    trace!("sms import: {} message(s) offered", batch.messages.len());
-    Ok(sweep(&world, &sustain_id, batch))
+    trace!("sms page @{offset} since {since_ms}: {} offered", batch.messages.len());
+
+    // The newest this page saw, so the mark can move once the read finishes.
+    // ★ Kept in Rust only: the mark is the store's business and a timestamp
+    //   cannot cross into TypeScript anyway (specta forbids i64).
+    let newest = batch.messages.iter().map(|m| m.timestamp_ms).max();
+    let mut out = sweep(&world, &sustain_id, batch);
+
+    // ★★ The mark moves only when the LAST page lands. A read abandoned halfway
+    //    must not make the next one skip what it never looked at.
+    if !out.has_more {
+        // ★★★ And once the whole inbox is in, cancel the refunds against their
+        //     charges. It runs here rather than per page because a refund and
+        //     its charge can land in different pages, and a pass over a partial
+        //     queue would call a pair unmatched that simply had not arrived.
+        if let Ok(net) = world.ingest().net_reversals(&sustain_id) {
+            out.netted_pairs = net.netted.len() as u32;
+        }
+        if let Some(ms) = newest.or(Some(since_ms)) {
+            let _ = world.ingest().set_read_mark(&sustain_id, ANY_SOURCE, ms);
+        }
+        // ★★ The phone says how it is doing, on the same pass that proves it
+        //    is working. `remaining` is the leading indicator §IX names: a
+        //    device that cannot deliver keeps accepting, so the queue rises
+        //    before anything else visibly breaks.
+        let _ = world.heartbeat(&sustain_id, out.remaining, now_ms());
+    }
+    Ok(out)
 }
 
-/// Whatever arrived while the app was closed. Draining clears the queue, so a
-/// text is offered once; the engine's own dedup covers the rest.
-#[tauri::command]
+/// ONE BATCH of whatever arrived while the app was closed. Taking clears what
+/// was taken, so a text is offered once; the engine's own dedup covers the
+/// rest. The caller loops while `has_more`.
+///
+/// Bounded and off the UI thread for the same reason as the page above: this
+/// runs on unlock, and a queue that had built up froze the unlock itself.
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sms_drain_queue(
     world: State<'_, World>,
     app: tauri::AppHandle,
     sustain_id: String,
+    limit: u32,
 ) -> Result<SmsSweep, String> {
-    use tauri_plugin_sms_capture::SmsCaptureExt;
+    use tauri_plugin_sms_capture::{DrainArgs, SmsCaptureExt};
     let batch = app
         .sms_capture()
-        .drain_queue()
+        .drain_queue(DrainArgs { limit })
         .map_err(|e| e.to_string())?;
     if !batch.messages.is_empty() {
-        trace!("sms drain: {} message(s) waiting", batch.messages.len());
+        trace!("sms drain: {} taken, {} left", batch.messages.len(), batch.remaining);
     }
     Ok(sweep(&world, &sustain_id, batch))
+}
+
+/// How many texts are waiting, without taking any. Cheap enough to ask before
+/// deciding whether to show progress at all.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn sms_queue_depth(app: tauri::AppHandle) -> Result<u32, String> {
+    use tauri_plugin_sms_capture::SmsCaptureExt;
+    app.sms_capture().queue_depth().map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod feed_surface_tests {
+    use super::*;
+    use crate::ingest::IngestedMessage;
+
+    fn msg(seq: u64) -> IngestedMessage {
+        IngestedMessage {
+            id: format!("m{seq}"),
+            sustain_id: "h".into(),
+            source_id: "mpesa".into(),
+            raw_payload: "Ksh100 paid to SOMEONE".into(),
+            dedup_key: format!("k{seq}"),
+            status: "parsed_unmapped".into(),
+            parser_name: "mpesa_buygoods".into(),
+            reason: "which pocket is yours to decide".into(),
+            parsed_fields: Default::default(),
+            external_ref: None,
+            operator: None,
+            params: Default::default(),
+            applied: false,
+            gate_reason: None,
+            resolved: false,
+            ignored: false,
+            netted_with: None,
+            same_event_as: None,
+            reclaimed: false,
+            deferred_at: None,
+            filed: Vec::new(),
+            sent_at_ms: None,
+            event_at_ms: None,
+            seq,
+        }
+    }
+
+    /// ★★★ The property the freeze was a violation of.
+    ///
+    /// Two thousand waiting captures reach the screen as ONE id, exactly as two
+    /// do. What the person sees is `compose(r)`'s pick under the budget, and
+    /// nothing here grows with the queue.
+    #[test]
+    fn a_large_queue_reaches_the_screen_as_one_id() {
+        let many: Vec<_> = (0..2_000).map(msg).collect();
+        let head = oldest_waiting(&many);
+        assert_eq!(head.map(|c| c.id).as_deref(), Some("m0"));
+    }
+
+    /// Oldest first, whatever order they arrive in.
+    #[test]
+    fn the_oldest_is_offered_first() {
+        let some = vec![msg(9), msg(3), msg(7)];
+        assert_eq!(oldest_waiting(&some).map(|c| c.id).as_deref(), Some("m3"));
+    }
+
+    /// An empty queue offers nothing rather than a fabricated id.
+    #[test]
+    fn nothing_waiting_offers_nothing() {
+        assert!(oldest_waiting(&[]).is_none());
+    }
 }

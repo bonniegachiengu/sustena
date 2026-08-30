@@ -108,7 +108,46 @@ pub enum DefinitionVerdict {
 /// brand-new one, which is why creating is always safe and *editing* is where
 /// stranding can bite.
 pub fn check(authored: &AuthoredDefinition, instances: &[Instance]) -> DefinitionVerdict {
+    check_against(authored, instances, &[])
+}
+
+/// The same checks, plus the children this definition will aggregate over.
+///
+/// ★★★ **A parent and its children are one program** (GENOME §IX). An aggregate
+/// reading a dimension no child declares does not crash — it totals **zero
+/// contributions**, which reads exactly like a household that genuinely has no
+/// money, and nothing afterwards can tell the two apart. Checking the parent
+/// alone cannot see it, because the mistake is only visible from both sides.
+///
+/// ★★ Empty children is not a failure. A holon is declared before it is
+/// populated, and refusing here would make declaring one impossible until the
+/// first member joined.
+pub fn check_against(
+    authored: &AuthoredDefinition,
+    instances: &[Instance],
+    children: &[(&str, &sustena_core::Schema)],
+) -> DefinitionVerdict {
     let def = authored.to_definition();
+
+    // ★★★ **Everything the definition NAMES, before anything it asserts.**
+    //     A spec naming an Enzyme this engine does not provide loads perfectly
+    //     today; the first person to try it is told the operator "is not
+    //     available on this sustain", which sounds like a permission and is a
+    //     typo. Names first, then types — reporting a mistyped rule while an
+    //     unknown Enzyme is outstanding sends somebody to fix the wrong thing.
+    let ctx = sustena_core::SpecContext { children: children.to_vec() };
+    if let Err(errors) = sustena_core::validate_spec(&def, &sustena_core::Registry::default(), &ctx)
+    {
+        return DefinitionVerdict::NotWellTyped {
+            errors: errors.into_iter().map(|e| format!("{}: {}", e.path, e.detail)).collect(),
+        };
+    }
+
+    if let Err(errors) = sustena_core::typecheck_holon(&def, children) {
+        return DefinitionVerdict::NotWellTyped {
+            errors: errors.into_iter().map(|e| format!("{}: {}", e.path, e.detail)).collect(),
+        };
+    }
 
     if let Err(errors) = typecheck(&def) {
         return DefinitionVerdict::NotWellTyped {

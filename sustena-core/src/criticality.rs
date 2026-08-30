@@ -556,6 +556,7 @@ mod tests {
             },
             causes: causes.iter().map(|c| (*c).to_string()).collect(),
             mutations: vec![],
+            payload: None,
         }
     }
 

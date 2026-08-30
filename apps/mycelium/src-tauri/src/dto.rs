@@ -103,11 +103,18 @@ pub struct GateResult {
     pub events: Vec<EventDto>,
     /// The resulting state, or the **untouched original** if refused.
     pub state: serde_json::Value,
+    /// ★★★ What the operator returned alongside its verdict.
+    ///
+    /// A refusal from `budget.spend` carries `remaining`, `requested` and
+    /// `shortfall`, put there so a caller can build an allocate-then-retry
+    /// without reading an English sentence. It was being dropped here, which
+    /// left the surface with a dead end and a paragraph.
+    pub data: serde_json::Value,
 }
 
 impl GateResult {
     pub fn of(operator: &str, x: &Execution) -> Self {
-        let OperatorResult { status, reason, constraint_violated, .. } = &x.result;
+        let OperatorResult { status, reason, constraint_violated, data, .. } = &x.result;
         GateResult {
             verdict: Verdict::from(*status),
             operator: operator.to_string(),
@@ -116,6 +123,7 @@ impl GateResult {
             mutations: x.mutations.len() as u32,
             events: x.events.iter().map(EventDto::from).collect(),
             state: x.state.clone(),
+            data: data.clone(),
         }
     }
 }
@@ -975,6 +983,21 @@ pub struct FeedDto {
     pub sustain_id: String,
     pub label: String,
     pub cards: Vec<CardDto>,
+    /// ★★★ The queue he can walk, in the order he should meet it.
+    ///
+    /// Recently answered first — so the back arrow reaches them — then what is
+    /// waiting, with anything he deferred at the head of that. ONE card renders
+    /// at a time; this is the list it steps through, not a list to display.
+    pub queue: Vec<CaptureContextDto>,
+    /// Where in `queue` the first unanswered message sits, so the card opens
+    /// on work rather than on history.
+    pub queue_start: u32,
+    /// The oldest capture still needing a person, if there is one.
+    ///
+    /// ★★ ONE message rather than a list. The classify card works the queue one
+    /// at a time; a list here would be the unbounded second surface the
+    /// attention budget exists to prevent.
+    pub queue_head: Option<CaptureContextDto>,
     /// ★ What stayed quiet — withdrawn and excluded alike, each saying which.
     pub quiet: Vec<QuietDto>,
     pub budget: u32,
@@ -987,6 +1010,244 @@ pub struct FeedDto {
     /// The calm read: the household's own roll-up ρ, when it declares one.
     pub rollup: Option<RollupDto>,
     pub liquid: Option<f64>,
+    /// Where the money is, as against what it is for.
+    pub accounts: Vec<AccountDto>,
+    /// The phone, as a Sustain the household watches. `None` before it has
+    /// ever reported.
+    pub device: Option<DeviceDto>,
+    /// Where the household is heading, not just where it is. `None` until the
+    /// series has a reading in it.
+    pub trend: Option<TrendDto>,
+    /// What the household holds, grouped by the pocket that bought it.
+    pub inventory: Vec<InventoryGroupDto>,
+    /// Recent spends, so one filed to the wrong pocket can be reached at all.
+    pub filed: Vec<FiledSpendDto>,
+    /// ★★★ Which pockets are PEOPLE rather than envelopes.
+    ///
+    /// A pocket tied to somebody's number behaves differently — it runs both
+    /// ways and can sit in his favour — and a screen that draws it identically
+    /// to `food` is telling him it is the same kind of thing. Sent as names
+    /// rather than as a flag per pocket so any surface that lists pockets can
+    /// mark them without a second call.
+    pub person_pockets: Vec<String>,
+    /// ★★★ Money the household holds that no account claims.
+    ///
+    /// Zero once every shilling has a place. Non-zero means the pooled balance
+    /// has not been migrated yet, and it is shown rather than quietly folded
+    /// into a total, because "how much is in M-Pesa" cannot be answered
+    /// honestly while some of it is nowhere.
+    pub unaccounted: f64,
+}
+
+/// The numbers a household calls its own, on the wire.
+///
+/// ★★★ These cross between this process and its own webview and nowhere else.
+/// A phone number and a bank account are the address of a person; there is no
+/// code path that sends them off the device, and there should not be one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnIdentifiersDto {
+    pub mpesa: Vec<String>,
+    pub kcb: Vec<String>,
+}
+
+/// What a transfer pass did.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferDto {
+    /// Pairs recognised as one move and recorded as one.
+    pub moved: u32,
+    /// The gate refused it. The pair stays in the queue rather than being
+    /// marked done on a move that never landed.
+    pub refused: u32,
+    /// A leg to one of his own numbers whose other half is not here.
+    pub unpaired: u32,
+    /// ★★ Messages he had set aside that a shared reference brought back.
+    /// Counted so a queue that GREW can say why, the same way one that shrank
+    /// does.
+    pub reclaimed: u32,
+    /// A partner leg that had already been filed as income and could not be
+    /// taken back. Reported rather than left as a silent zero.
+    pub blocked: u32,
+    pub ambiguous: u32,
+}
+
+/// The household's own distance from where it wants to be, over time.
+///
+/// ★★★ One reading is a number; a series is a story. Monitor §V smooths it so
+/// a figure that jitters between reads does not train the eye to ignore it,
+/// and §VI watches for the case a threshold cannot see — a household spending
+/// slightly over every day for two weeks reads, on any single day, exactly
+/// like one that had a bad afternoon and recovered.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TrendDto {
+    /// `W` — the raw distance to the viable region on this reading.
+    pub now: f64,
+    /// The smoothed level, which is what salience is read off.
+    pub smoothed: f64,
+    /// ★★ True when the drift has accumulated past what a single bad day
+    /// explains. Not the same as being far away today.
+    pub drifting: bool,
+    /// Whether that crossing is severe enough to hand to the Controller.
+    pub escalates: bool,
+    /// ★★★ Constraint health as a colour: `green`, `amber` or `red`.
+    ///
+    /// Monitor §VII rests on Treisman: some visual attributes are processed in
+    /// parallel across the whole field before attention engages, in roughly
+    /// 150 to 200ms. Hue is one, and it is the one with a settled three-way
+    /// meaning already in the palette. Assigned by the core's own encoder, so
+    /// the colour on screen means what the engine meant by it.
+    pub health: String,
+}
+
+/// How the capture device is doing, as its WATCHER sees it.
+///
+/// ★★★ Judged here rather than on the device, and that is Ingest §IX rather
+/// than a convenience. A phone that has stopped cannot report that it has
+/// stopped, so a liveness clause evaluated by the phone is worthless exactly
+/// when it matters. The device records two plain readings; whether they add up
+/// to "fine" is the watcher's call.
+///
+/// ★★ Not a declared invariant either, and this is a real limit rather than a
+/// choice: the predicate DSL has no arithmetic and no notion of now, so
+/// `now − t_last_ack <= theta` cannot be written as a rule. It is computed
+/// here, against the same two dimensions a declared rule would have read.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceDto {
+    pub sustain_id: String,
+    /// Texts caught but not yet handed over. §IX's leading indicator: it rises
+    /// before anything else visibly breaks, because a device that cannot
+    /// deliver keeps accepting.
+    pub queue_depth: u32,
+    /// Minutes since it last said anything. `None` means it never has.
+    pub quiet_for_minutes: Option<u32>,
+    /// Whether the watcher considers it late.
+    pub stale: bool,
+    pub app_version: String,
+}
+
+/// What "skip all like this" did.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SkipLearnedDto {
+    /// How many already-waiting messages the new rule cleared.
+    pub cleared: u32,
+    /// ★★ True when nothing could be learned: no rule recognised this message,
+    /// so the only shape it could describe is "everything I cannot read" — and
+    /// that pile is exactly the one that needs a person's eyes.
+    pub unlearnable: bool,
+}
+
+/// One thing the household holds, bought with a spend.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetDto {
+    pub id: String,
+    pub item: String,
+    pub value: f64,
+    /// The purchase it came out of, so a pocket can show what its spending
+    /// actually bought.
+    pub source_tx: String,
+    pub pocket: String,
+    pub subpocket: Option<String>,
+}
+
+/// What the household holds, and what it is grouped under.
+///
+/// ★★ Grouped by pocket rather than listed flat, because the question people
+/// actually ask is "what did the food money buy", not "what do I own".
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct InventoryGroupDto {
+    pub pocket: String,
+    pub total: f64,
+    pub assets: Vec<AssetDto>,
+}
+
+/// A spend that landed, and where it currently sits.
+///
+/// ★★ Read off what the message recorded it DID, so the list is the log's own
+/// account of the filing rather than a guess reconstructed from a balance.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FiledSpendDto {
+    pub message_id: String,
+    pub pocket: String,
+    pub amount: f64,
+    pub counterparty: String,
+}
+
+/// One account, on the wire.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDto {
+    pub id: String,
+    pub label: String,
+    pub balance: f64,
+    /// ★★★ What the bank itself last said was in there.
+    ///
+    /// The only figure in the whole system that is not our own arithmetic,
+    /// which is exactly what makes it able to check it. `None` where no
+    /// captured message for this account carried a running balance.
+    pub reported: Option<f64>,
+    /// Reported minus ours. Positive means the bank says there is more there
+    /// than we have accounted for.
+    pub drift: Option<f64>,
+}
+
+/// What the classify card needs in order to show a person WHAT they are filing.
+///
+/// ★★★ The card used to ask "which pocket does this belong to?" without showing
+/// the message. A person was being asked to file something they could not see.
+/// Everything here was already on the ingested message; none of it was reaching
+/// the screen.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureContextDto {
+    pub id: String,
+    /// The text exactly as it arrived.
+    pub raw: String,
+    /// Which sender it came from: "mpesa" or "kcb".
+    pub source: String,
+    /// What the transducer made of it, when it could.
+    pub amount: Option<f64>,
+    pub counterparty: Option<String>,
+    pub direction: Option<String>,
+    /// The transducer's own words about why this is waiting.
+    pub reason: String,
+    /// `pending`, `deferred`, or `processed`.
+    ///
+    /// ★★ A processed message stays in the list on purpose: the back arrow
+    /// has to reach a filing he wants to change, and a correction path with
+    /// nothing to correct from is not a path.
+    pub status: String,
+    /// Where a processed one currently sits, so the card can say so.
+    pub filed_pocket: Option<String>,
+    pub filed_amount: Option<f64>,
+}
+
+/// What a netting pass did.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NettingDto {
+    /// Charge/refund pairs cancelled. Each removes TWO from the queue.
+    pub netted: u32,
+    /// Refunds of charges already filed, where the money really went back
+    /// through the gate.
+    pub given_back: u32,
+    /// Compensating calls the gate refused. The pair stays unsettled and comes
+    /// back next pass, rather than being marked done on a move that never
+    /// landed.
+    pub refused: u32,
+    /// Matched a filed charge, but nothing recorded HOW it was filed, so there
+    /// is no honest way to undo it.
+    pub uncompensable: u32,
+    /// Refunds with no charge to cancel, left for a person.
+    pub unmatched: u32,
+    /// Refunds with more than one candidate. Deliberately untouched.
+    pub ambiguous: u32,
 }
 
 /// One inference pass, on the wire.

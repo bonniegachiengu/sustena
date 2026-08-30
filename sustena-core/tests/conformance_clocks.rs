@@ -97,6 +97,7 @@ fn events(doc: &Value) -> Vec<Event> {
             stamp: CausalStamp::new("phone"),
             causes: vec![],
             mutations: vec![],
+            payload: None,
         })
         .collect()
 }
@@ -417,6 +418,7 @@ fn the_new_fields_do_not_change_order_dedupe_or_the_fold() {
             old: serde_json::json!(500),
             new: serde_json::json!(700),
         }],
+        payload: None,
     };
 
     let a = merge(vec![old.clone(), other.clone(), old.clone()]);

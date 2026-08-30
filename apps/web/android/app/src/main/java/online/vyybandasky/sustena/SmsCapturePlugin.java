@@ -86,8 +86,11 @@ public class SmsCapturePlugin extends Plugin {
                         continue; // not M-Pesa or KCB -- never returned to JS
                     }
                     String messageBody = cursor.getString(bodyIdx);
-                    if (SmsSecretFilter.containsSensitiveSecret(messageBody)) {
-                        continue; // OTP/verification code -- NEVER returned to JS, regardless of sender
+                    // Both detectors, same as the real-time path -- a backfill
+                    // that applied a weaker check than the live path would be a
+                    // second door with a lower lock.
+                    if (SmsShapeFilter.mustNotLeaveTheDevice(messageBody)) {
+                        continue; // credential -- NEVER returned to JS, regardless of sender
                     }
                     JSObject item = new JSObject();
                     item.put("sender", sender);

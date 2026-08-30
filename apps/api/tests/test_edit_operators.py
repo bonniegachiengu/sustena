@@ -52,14 +52,22 @@ class TestEditStatePatch:
         assert ctx.state.get("config.language") == "sw"
 
     @pytest.mark.asyncio
-    async def test_remove_sets_to_none(self):
+    async def test_remove_is_refused_rather_than_depositing_a_null(self):
+        """A declared dimension cannot be made absent by a state patch.
+
+        This used to set the path to None and report success, which under a
+        typed schema is a type violation deposited into state for a later
+        reader to trip over. A missing capability should refuse, not improvise.
+        """
         ctx = _make_ctx({"settings": {"debug": True}})
         result = await OPERATOR_REGISTRY["edit.state_patch"].fn(
             ctx,
             patch=[{"op": "remove", "path": "settings.debug"}],
         )
-        assert result.succeeded
-        assert ctx.state.get("settings.debug") is None
+        assert not result.succeeded
+        assert "type violation" in (result.reason or "")
+        # And the value it refused to remove is untouched.
+        assert ctx.state.get("settings.debug") is True
 
     @pytest.mark.asyncio
     async def test_multiple_operations(self):
@@ -126,20 +134,37 @@ class TestEditOperatorSpec:
             OPERATOR_REGISTRY["budget.summary"].description = original
 
     @pytest.mark.asyncio
-    async def test_update_pawa_cost(self):
+    async def test_price_is_not_editable_at_runtime(self):
+        """Changing an Enzyme's price used to cost nothing while using it cost pawa.
+
+        A fence that lets the price through is not fencing the thing worth
+        fencing. `pawa_cost` and `license_tier` are economic terms the rest of
+        the system meters against, not metadata.
+        """
         ctx = _make_ctx()
         original = OPERATOR_REGISTRY["budget.summary"].pawa_cost
-        try:
-            result = await OPERATOR_REGISTRY["edit.operator_spec"].fn(
-                ctx,
-                operator_name="budget.summary",
-                field="pawa_cost",
-                value=5,
-            )
-            assert result.succeeded
-            assert OPERATOR_REGISTRY["budget.summary"].pawa_cost == 5
-        finally:
-            OPERATOR_REGISTRY["budget.summary"].pawa_cost = original
+        result = await OPERATOR_REGISTRY["edit.operator_spec"].fn(
+            ctx,
+            operator_name="budget.summary",
+            field="pawa_cost",
+            value=5,
+        )
+        assert not result.succeeded
+        assert result.constraint_violated == "field_editable"
+        assert "economic term" in (result.reason or "")
+        assert OPERATOR_REGISTRY["budget.summary"].pawa_cost == original
+
+    @pytest.mark.asyncio
+    async def test_licence_tier_is_not_editable_either(self):
+        ctx = _make_ctx()
+        result = await OPERATOR_REGISTRY["edit.operator_spec"].fn(
+            ctx,
+            operator_name="budget.summary",
+            field="license_tier",
+            value="premium",
+        )
+        assert not result.succeeded
+        assert "economic term" in (result.reason or "")
 
     @pytest.mark.asyncio
     async def test_unknown_operator_returns_fail(self):

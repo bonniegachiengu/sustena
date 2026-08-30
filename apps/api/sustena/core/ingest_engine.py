@@ -254,25 +254,73 @@ class IngestEngine:
     # ── Dedup ──────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _dedup_key(sustain_id: str, source_id: str, raw_payload: str) -> str:
-        """
-        Stable fingerprint for the inbox dedup boundary: the same source
-        reporting the exact same raw text INTO THE SAME SUSTAIN is the same
-        captured message, full stop — including messages that fail to parse
-        at all, so a garbled message doesn't pile up duplicate needs_attention
-        rows every time a flaky capture client retries the POST.
+    def _amount_minor(parsed_fields: dict | None) -> int | None:
+        """The parsed amount in minor units, or None when there isn't one.
 
-        sustain_id is part of the key, not just source_id+payload: a capture
-        client identifies its source (e.g. a device id) but sustain_id is
-        supplied per-call, so nothing stops the same source_id from feeding
-        two different sustains (a shared/relabelled device, a copy-paste
-        mistake). Without sustain_id in the key, the second sustain's capture
-        of identical text would be silently treated as a duplicate of the
-        first and its event would never apply — the exact kind of cross-tenant
-        dedup collision "no silent failure" exists to prevent.
+        Integer minor units, not a float: 0.1 + 0.2 is not 0.3, and a key that
+        disagrees with itself by a rounding error is worse than no key.
         """
-        digest = hashlib.sha256(f"{sustain_id}\x00{source_id}\x00{raw_payload}".encode("utf-8")).hexdigest()
-        return digest
+        if not parsed_fields:
+            return None
+        amount = parsed_fields.get("amount")
+        if amount is None:
+            return None
+        try:
+            return int(round(float(amount) * 100))
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _intake_key(
+        cls,
+        sustain_id: str,
+        source_id: str,
+        raw_payload: str,
+        external_ref: str | None = None,
+        parsed_fields: dict | None = None,
+    ) -> str:
+        """
+        What makes two captures the same INTAKE (ING-5; core/intake_key.rs).
+
+        Intrinsic first, text second, and there is no third option. A generated
+        id is not offered even as a parameter, because a generated id
+        partitions by ARRIVAL: the same transaction arriving twice gets two
+        ids and applies twice, which turns the retry the outbox exists to make
+        safe into the thing that doubles somebody's rent.
+
+            i:<sustain>:<source>:<REF>:<amount_minor>   the message carried a code
+            t:<sustain>:<source>:<sha256(raw)>          it did not
+
+        The intrinsic form keys on the FACT, so a re-send in different words --
+        a reformatted date, an extra space, a changed footer, all of which
+        carriers do -- is still one intake. The text form is honest about what
+        it can and cannot see: it catches a byte-identical repeat and nothing
+        subtler.
+
+        Scoped by sustain AND source, both deliberately:
+
+          - sustain, because a capture client identifies its source (a device
+            id) while sustain_id is supplied per call, so nothing stops one
+            source_id feeding two sustains -- a shared or relabelled device, a
+            copy-paste mistake. Without it, the second sustain's capture of
+            identical text is silently treated as a duplicate of the first and
+            its event never applies.
+
+          - source, because suppressing ACROSS sources would be the more
+            dangerous bug: a genuinely separate transaction that happened to
+            share a reference would vanish without trace. The same fact seen
+            through two senders still produces two captures and is SURFACED
+            for a person by _find_prior_fact below, exactly as before.
+
+        The amount is in the key, and this is where this method and
+        _fact_key() deliberately disagree -- see that method's note.
+        """
+        ref = (external_ref or "").strip().upper()
+        amount_minor = cls._amount_minor(parsed_fields)
+        if ref and amount_minor is not None:
+            return f"i:{sustain_id}:{source_id}:{ref}:{amount_minor}"
+        digest = hashlib.sha256(raw_payload.encode("utf-8")).hexdigest()
+        return f"t:{sustain_id}:{source_id}:{digest}"
 
     @staticmethod
     def _fact_key(sustain_id: str, external_ref: str | None) -> str | None:
@@ -303,6 +351,18 @@ class IngestEngine:
         Failing to match is the dangerous direction here; matching too eagerly
         is not, because two genuinely distinct transactions never share an
         M-PESA code.
+
+        _intake_key() DOES include the amount, and the two are not in
+        conflict -- each is right in its own scope. This key runs ACROSS
+        sources, where the two parsers read differently-formatted text
+        ("Ksh 40000.00" vs "Ksh40,000.00") and an amount mismatch would let
+        the double-count back in. The intake key runs WITHIN one source, where
+        the same parser produced both readings, so the formatting argument
+        does not apply -- and there the amount is doing real work: a reference
+        collision within one sender (a truncated code, a reversal pair reusing
+        a reference) would otherwise suppress a genuinely separate
+        transaction, which is the failure that put the amount in the key
+        upstream.
 
         Returns None when no reference was parsed, in which case correlation is
         simply not attempted — an honest "cannot tell" rather than a guess from
@@ -361,6 +421,93 @@ class IngestEngine:
             ),
         )
         self._db.commit()
+
+    # -- Migration ------------------------------------------------------------
+
+    def migrate_intake_keys(self, dry_run: bool = True) -> dict:
+        """
+        Re-key every already-saved capture onto the ING-5 intake key.
+
+        NOTHING IS DELETED AND NOTHING IS MERGED. Every row keeps its id, its
+        raw text and its status; only the dedup_key column is rewritten. A row
+        that cannot be keyed intrinsically -- no parsed reference, or no parsed
+        amount -- takes the text form, which is unique by construction because
+        it is built from exactly the inputs the old key was built from. So a
+        reformat can never lose a capture, and the count before must equal the
+        count after.
+
+        HISTORY IS NOT REWRITTEN. If two saved rows would land on the same
+        intrinsic key, they are a repeat the old text key let through -- but
+        both already exist, and one of them may already have moved money. The
+        migration does NOT retro-suppress the later one: it leaves both on
+        their (unique) text keys and REPORTS the pair, so a person decides.
+        Silently collapsing two rows would be the migration deciding something
+        about somebody's money that it is not entitled to decide.
+
+        dry_run=True by default. A migration that touches real saved data
+        should have to be asked for twice.
+        """
+        rows = self._db.execute(
+            "SELECT id, sustain_id, source_id, raw_payload, dedup_key, external_ref, "
+            "parsed_fields_json FROM ingest_messages ORDER BY received_at ASC"
+        ).fetchall()
+
+        proposed: dict[str, list[str]] = {}
+        for r in rows:
+            try:
+                parsed = json.loads(r["parsed_fields_json"] or "{}")
+            except (ValueError, TypeError):
+                parsed = {}
+            key = self._intake_key(
+                r["sustain_id"], r["source_id"], r["raw_payload"],
+                external_ref=r["external_ref"], parsed_fields=parsed,
+            )
+            proposed.setdefault(key, []).append(r["id"])
+
+        collisions = {k: ids for k, ids in proposed.items() if len(ids) > 1}
+        held_back = {mid for ids in collisions.values() for mid in ids}
+
+        plan = []
+        for r in rows:
+            if r["id"] in held_back:
+                key = self._intake_key(r["sustain_id"], r["source_id"], r["raw_payload"])
+            else:
+                key = next(k for k, ids in proposed.items() if r["id"] in ids)
+            if key != r["dedup_key"]:
+                plan.append((r["id"], key))
+
+        report = {
+            "rows_before": len(rows),
+            "to_rewrite": len(plan),
+            "intrinsic": sum(1 for _, k in plan if k.startswith("i:")),
+            "text": sum(1 for _, k in plan if k.startswith("t:")),
+            "collisions": [
+                {"key": k, "message_ids": ids} for k, ids in collisions.items()
+            ],
+            "held_back_on_text_key": len(held_back),
+            "dry_run": dry_run,
+        }
+
+        if dry_run:
+            report["rows_after"] = len(rows)
+            report["applied"] = False
+            return report
+
+        for message_id, key in plan:
+            self._db.execute(
+                "UPDATE ingest_messages SET dedup_key = ? WHERE id = ?", (key, message_id)
+            )
+        self._db.commit()
+
+        after = self._db.execute(
+            "SELECT COUNT(*) c, COUNT(DISTINCT dedup_key) d FROM ingest_messages"
+        ).fetchone()
+        report["rows_after"] = after["c"]
+        report["distinct_keys_after"] = after["d"]
+        report["applied"] = True
+        report["intact"] = after["c"] == len(rows) and after["d"] == after["c"]
+        logger.info("[ingest] intake-key migration: %s", report)
+        return report
 
     # ── Sources / staleness ─────────────────────────────────────────────────────
 
@@ -492,7 +639,23 @@ class IngestEngine:
                 "reason": "Message contains an OTP/verification code or similar secret — refused, never stored.",
             }
 
-        dedup_key = self._dedup_key(sustain_id, source_id, raw_payload)
+        # Parse BEFORE keying, because the key is a property of the FACT and
+        # the fact is not known until the message has been read. The order is
+        # not an optimisation to revisit: keying first would mean keying on
+        # the only thing available before a parse -- the wording -- which is
+        # exactly the partition ING-5 exists to stop using.
+        #
+        # parse_message is pure and stateless (transducer.py holds no DB
+        # handle); declared_rules is the one real call site threading engine
+        # state into it, and reading it here rather than in _process changes
+        # nothing about what it returns.
+        declared_rules = self._sustain_engine.get_effective_parse_rules(source_id.lower())
+        result = parse_message(raw_payload, source_id=source_id, declared_rules=declared_rules)
+
+        dedup_key = self._intake_key(
+            sustain_id, source_id, raw_payload,
+            external_ref=result.external_ref, parsed_fields=result.parsed_fields,
+        )
 
         # A source is "seen" the moment it communicates, regardless of what
         # happens to this particular message.
@@ -515,21 +678,17 @@ class IngestEngine:
             logger.info("[ingest] duplicate capture ignored: source=%s dedup_key=%s", source_id, dedup_key[:12])
             return self._to_response(existing, is_duplicate=True)
 
-        return await self._process(message_id)
+        return await self._process(message_id, result)
 
-    async def _process(self, message_id: str) -> dict:
+    async def _process(self, message_id: str, result) -> dict:
+        """Everything that happens to a capture after it has been taken in.
+
+        Takes the parse result rather than re-deriving it: capture() has to
+        parse before it can key the row (the key is a property of the fact),
+        and parsing twice would risk the row being keyed on one reading and
+        acted on by another.
+        """
         row = self._db.execute("SELECT * FROM ingest_messages WHERE id = ?", (message_id,)).fetchone()
-        # source_id (whatever the capture client tagged this with, decided
-        # strictly by SMS sender -- see transducer.py's own _PARSERS_BY_SOURCE
-        # comment) is passed through so parsing stays scoped to that source's
-        # own parser set -- body content can never override it.
-        #
-        # declared_rules (Phase 3C, 2 Aug 2026): the real, engine-aware
-        # effective rule set (seed + any active user corrections) --
-        # transducer.py itself stays pure/stateless (no DB access), so this
-        # is the one real call site threading engine state into it.
-        declared_rules = self._sustain_engine.get_effective_parse_rules((row["source_id"] or "").lower())
-        result = parse_message(row["raw_payload"], source_id=row["source_id"], declared_rules=declared_rules)
 
         status = STATUS_NEEDS_ATTENTION
         operator_name: str | None = None

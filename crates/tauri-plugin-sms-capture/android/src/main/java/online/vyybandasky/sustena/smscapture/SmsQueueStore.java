@@ -38,11 +38,47 @@ final class SmsQueueStore {
         prefs.edit().putString(KEY, arr.toString()).apply();
     }
 
-    static synchronized JSONArray drain(Context ctx) {
+    /**
+     * Takes at most {@code limit} items and leaves the rest.
+     *
+     * Bounded on purpose. Draining everything in one call is what froze the
+     * app on unlock when a large batch had built up: the caller then had to
+     * process the whole lot before it could return. The caller loops instead,
+     * and the app stays responsive between batches.
+     *
+     * A limit of 0 or less means take everything, which is what the tests use.
+     */
+    static synchronized DrainResult drain(Context ctx, int limit) {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        JSONArray arr = readArray(prefs);
-        prefs.edit().remove(KEY).apply();
-        return arr;
+        JSONArray all = readArray(prefs);
+        if (limit <= 0 || all.length() <= limit) {
+            prefs.edit().remove(KEY).apply();
+            return new DrainResult(all, 0);
+        }
+        JSONArray taken = new JSONArray();
+        JSONArray left = new JSONArray();
+        for (int i = 0; i < all.length(); i++) {
+            Object item = all.opt(i);
+            if (item == null) continue;
+            if (i < limit) taken.put(item); else left.put(item);
+        }
+        prefs.edit().putString(KEY, left.toString()).apply();
+        return new DrainResult(taken, left.length());
+    }
+
+    /** What was taken, and how much is still waiting. */
+    static final class DrainResult {
+        final JSONArray taken;
+        final int remaining;
+        DrainResult(JSONArray taken, int remaining) {
+            this.taken = taken;
+            this.remaining = remaining;
+        }
+    }
+
+    /** How many are waiting, without taking any. The queue-depth reading. */
+    static synchronized int depth(Context ctx) {
+        return readArray(ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)).length();
     }
 
     private static JSONArray readArray(SharedPreferences prefs) {

@@ -71,7 +71,44 @@ const VERBS: &[(&str, &str)] = &[
     ("deposited", "record_income"),
     ("got paid", "record_income"),
     ("income", "record_income"),
+    // A refund is money in, but it is not income: it gives back what was
+    // spent rather than adding to what was earned.
+    ("refund", "unspend"),
+    ("refunded", "unspend"),
+    ("reversed", "unspend"),
+    ("came back", "unspend"),
 ];
+
+/// The fields this pass can put a question about.
+///
+/// ★★ Anything else missing is a genuine dead end for that candidate, because
+/// there is no question here that would fill it in.
+const ASKABLE_FIELDS: &[&str] = &["pocket_name", "amount"];
+
+/// Phrases that mean the money came IN, read off the raw text.
+///
+/// ★★★ A last line of defence, and it exists because the first one failed in a
+/// way that could have cost real money. A plainly-received KES 1,000 whose
+/// shape no rule matched arrived with no `direction` at all, and the classify
+/// card then offered "spend it" as the first answer to "which pocket does this
+/// belong to?" — one tap from recording −1,000 for money that had come in.
+///
+/// ★★★ Wording is weaker evidence than a parsed field, so this may only ever
+/// REMOVE spending from the options, never add anything. Being wrong here
+/// costs a question; the alternative cost the sign of a transaction.
+const RECEIVED_PHRASES: &[&str] = &[
+    "you have received",
+    "has been received",
+    "money received",
+    "credited to",
+    "received from",
+];
+
+/// Does the message itself say money came in?
+pub fn reads_as_money_in(raw: &str) -> bool {
+    let t = raw.to_lowercase();
+    RECEIVED_PHRASES.iter().any(|p| t.contains(p))
+}
 
 /// Humanised labels, for the one question that asks *which action*.
 fn label_for(operator: &str) -> &str {
@@ -79,6 +116,8 @@ fn label_for(operator: &str) -> &str {
         "budget.spend" => "spend it",
         "budget.allocate" => "set it aside",
         "budget.record_income" => "money received",
+        "budget.unspend" => "money came back",
+        "budget.unallocate" => "take it back out of a pocket",
         other => other,
     }
 }
@@ -302,6 +341,13 @@ pub struct Capture<'a> {
     pub history: Option<(String, u32)>,
     /// The full raw message body, for the last-resort amount recovery.
     pub raw_text: Option<&'a str>,
+    /// The pocket this counterparty's NUMBER is tied to, if it is tied to one.
+    ///
+    /// ★★★ Resolved by the caller against live state, not looked up here, so
+    /// this pass stays a pure function of what it was handed. What it means is
+    /// settled: money to that number leaves that tab and money from it returns
+    /// to that tab, so there is nothing left to ask.
+    pub person_pocket: Option<String>,
 }
 
 /// **`ε → (o, θ)`.** One deterministic pass — see the module docs for the
@@ -356,16 +402,36 @@ pub fn infer<P: OperatorParams>(universe: &P, c: &Capture) -> Inference {
         let mut hinted = narrow_by_verb(c.effect_text.unwrap_or(""), &ops);
         if hinted.is_empty() {
             // A real ingest signal, not a guess: the money already left.
-            let direction = c.parsed_fields.get("direction").and_then(|v| v.as_str());
-            let suffix = match direction {
-                Some("sent") => Some("spend"),
-                Some("received") => Some("record_income"),
-                _ => None,
+            //
+            // ★★★ Money coming IN has two honest destinations, and calling
+            // either one the other is a real misstatement. Income adds to what
+            // was earned; a refund gives back what was spent and adds to no
+            // total at all. Narrowing to both leaves the choice with the
+            // person, which is the only one who can tell them apart.
+            // ★★★ The parsed direction first, and the message's own words as a
+            //     fallback when nothing parsed it. An unrecognised shape is
+            //     exactly when this matters: there is no field to trust, and
+            //     the text is still saying plainly that money arrived.
+            let spoken = c
+                .raw_text
+                .filter(|r| reads_as_money_in(r))
+                .map(|_| "received");
+            let direction = c
+                .parsed_fields
+                .get("direction")
+                .and_then(|v| v.as_str())
+                .or(spoken);
+            let suffixes: &[&str] = match direction {
+                Some("sent") => &["spend"],
+                Some("received") => &["record_income", "unspend"],
+                _ => &[],
             };
-            if let Some(suffix) = suffix {
+            if !suffixes.is_empty() {
                 hinted = ops
                     .iter()
-                    .filter(|op| op.rsplit('.').next() == Some(suffix))
+                    .filter(|op| {
+                        op.rsplit('.').next().is_some_and(|tail| suffixes.contains(&tail))
+                    })
                     .cloned()
                     .collect();
             }
@@ -376,10 +442,46 @@ pub fn infer<P: OperatorParams>(universe: &P, c: &Capture) -> Inference {
         }
     }
 
+    // 3b · a linked number answers the operator AND the pocket at once
+    //
+    // ★★★ This is what a person pocket buys. Money in from a known number is
+    // otherwise ambiguous between income and a refund — two honest readings
+    // this module refuses to guess between — but a number tied to somebody's
+    // tab settles it: it is that tab being paid back, not new money earned.
+    // Money out is the mirror. Neither is a guess, because he said whose
+    // number it was.
+    //
+    // ★★ It never overrides a person. A pocket already answered stands, and the
+    // narrowing is skipped entirely when the operator was chosen by hand above.
+    if let Some(pocket) = c.person_pocket.clone().filter(|p| c.pockets.contains(p)) {
+        let received = c
+            .parsed_fields
+            .get("direction")
+            .and_then(|v| v.as_str())
+            .map_or_else(|| c.raw_text.is_some_and(reads_as_money_in), |d| d == "received");
+        let want = if received { "unspend" } else { "spend" };
+        let narrowed: Vec<String> = ops
+            .iter()
+            .filter(|op| op.rsplit('.').next() == Some(want))
+            .cloned()
+            .collect();
+        // ★ Only when that operator is actually on offer. A widget that cannot
+        //   emit it is not made to.
+        if !narrowed.is_empty() {
+            ops = narrowed;
+            facts.entry("pocket_name".into()).or_insert(serde_json::json!(pocket));
+        }
+    }
+
     // 4 · pocket — only when a pocket is relevant to what remains
-    let pocket_relevant = ops
-        .iter()
-        .any(|op| universe.params(op).iter().any(|(n, _)| n == "pocket_name"));
+    //
+    // ★★★ EVERY remaining candidate, not merely one of them. Where the set is
+    // mixed -- money in could be income, which has no pocket, or a refund,
+    // which has one -- asking for a pocket first is the irrelevant question
+    // this module's own note forbids. The operator question comes first, and
+    // answering it makes the pocket question either necessary or moot.
+    let pocket_relevant = !ops.is_empty()
+        && ops.iter().all(|op| universe.params(op).iter().any(|(n, _)| n == "pocket_name"));
 
     if pocket_relevant && !facts.contains_key("pocket_name") {
         let mut search = String::new();
@@ -449,11 +551,35 @@ pub fn infer<P: OperatorParams>(universe: &P, c: &Capture) -> Inference {
         };
     }
 
+    // ★★★ MONEY IN IS NEVER A SPEND.
+    //
+    // Belt and braces over the narrowing above, and deliberately not folded
+    // into it. The narrowing is a preference — it gives way when a hint would
+    // eliminate every candidate. This does not give way. A message that says
+    // money arrived may not be offered spending, even if that leaves nothing
+    // to offer, because "I cannot tell you what to do with this" is a fine
+    // answer and "you spent it" is a false one.
+    if c.raw_text.is_some_and(reads_as_money_in)
+        && !c.known.contains_key("operator")
+    {
+        ops.retain(|op| op.rsplit('.').next() != Some("spend"));
+    }
+
     // 6 · which action, if more than one still fits
     if ops.len() > 1 {
+        // ★★★ A candidate is only out of the running if what it lacks can
+        // never be asked for. Dropping one merely because a question has not
+        // been PUT yet is how a refund became income: `record_income` needs
+        // only an amount, `budget.unspend` also needs a pocket, and with the
+        // pocket question still ahead of it the refund quietly lost. Missing an
+        // askable field means "ask", never "eliminate".
         let satisfiable: Vec<String> = ops
             .iter()
-            .filter(|op| required_params_satisfiable(universe, op, &facts))
+            .filter(|op| {
+                missing_required(universe, op, &facts)
+                    .iter()
+                    .all(|f| ASKABLE_FIELDS.contains(&f.as_str()))
+            })
             .cloned()
             .collect();
         if satisfiable.len() == 1 {
@@ -541,6 +667,14 @@ mod tests {
         m.insert(
             "budget.allocate".to_string(),
             vec![("pocket_name".to_string(), true), ("amount".to_string(), true)],
+        );
+        m.insert(
+            "budget.unspend".to_string(),
+            vec![
+                ("pocket_name".to_string(), true),
+                ("amount".to_string(), true),
+                ("payer".to_string(), false),
+            ],
         );
         m.insert(
             "budget.record_income".to_string(),
@@ -722,6 +856,155 @@ mod tests {
             infer(&u, &c),
             Inference::NeedsDisambiguation { ref field, .. } if field == "amount"
         ));
+    }
+
+    /// The classify card's real emits once a refund could be answered at all.
+    fn candidates_with_refund() -> Vec<String> {
+        ["budget.spend", "budget.allocate", "budget.unspend"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    /// The three operators the classify card actually offers.
+    fn card_offers() -> Vec<String> {
+        ["budget.spend", "budget.allocate", "budget.unspend"]
+            .iter().map(|s| s.to_string()).collect()
+    }
+
+    const HIS_RECEIVED: &str = "UHIE73CBRB Confirmed. You have received Ksh1,000.00 \
+                                from mary ngigi on 26/8/26 at 9:15 AM. \
+                                New M-PESA balance is Ksh5,000.00";
+
+
+    #[test]
+    fn money_that_came_in_is_never_offered_as_a_spend() {
+        // ★★★ The money-safety rule, and the reason it is separate from the
+        //     ordinary narrowing: the narrowing gives way when a hint would
+        //     eliminate every candidate, and this must not. A message saying
+        //     money arrived may not be offered spending even if that leaves
+        //     nothing to offer — "I cannot tell you what to do with this" is a
+        //     fine answer and "you spent it" is a false one.
+        let (u, ops, p) = (universe(), card_offers(), pockets());
+        let mut c = Capture { candidates: &ops, pockets: &p, ..Default::default() };
+        c.raw_text = Some(HIS_RECEIVED);
+        c.known.insert("pocket_name".into(), json!("food"));
+
+        match infer(&u, &c) {
+            Inference::Ready { operator, .. } => {
+                assert_ne!(operator, "budget.spend", "money in recorded as money out");
+                assert_eq!(operator, "budget.unspend", "it credits the pocket instead");
+            }
+            Inference::NeedsDisambiguation { options, .. } => {
+                let offered = options.expect("tap options");
+                let vs: Vec<&str> = offered.iter().map(|o| o.value.as_str()).collect();
+                assert!(!vs.contains(&"budget.spend"), "spending was still on offer: {vs:?}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_message_s_own_words_are_read_when_nothing_parsed_a_direction() {
+        // ★★ An unrecognised shape is exactly when this matters: there is no
+        //    field to trust, and the text still says plainly that money came in.
+        assert!(reads_as_money_in(HIS_RECEIVED));
+        assert!(reads_as_money_in("Ksh500 has been received on your account"));
+        assert!(!reads_as_money_in("Ksh450.00 paid to NAIVAS SUPERMARKET"));
+        assert!(!reads_as_money_in("Ksh2,000 sent to MARY WANJIRU"));
+    }
+
+    #[test]
+    fn wording_may_only_ever_remove_spending_never_add_anything() {
+        // ★★★ Wording is weaker evidence than a parsed field, so it is allowed
+        //     to take an option away and never to put one there. Being wrong
+        //     costs a question; the alternative cost the sign of a transaction.
+        let u = universe();
+        let only_spend: Vec<String> = vec!["budget.spend".to_string()];
+        let p = pockets();
+        let mut c = Capture { candidates: &only_spend, pockets: &p, ..Default::default() };
+        c.raw_text = Some(HIS_RECEIVED);
+        c.known.insert("pocket_name".into(), json!("food"));
+        c.known.insert("amount".into(), json!(1000.0));
+
+        // Nothing is invented to fill the gap: it refuses rather than spending.
+        match infer(&u, &c) {
+            Inference::Ready { operator, .. } => {
+                panic!("it found something to do anyway: {operator}")
+            }
+            Inference::CannotInfer { .. } | Inference::NeedsDisambiguation { .. } => {}
+        }
+    }
+
+    #[test]
+    fn an_explicit_answer_still_wins_over_the_wording() {
+        // ★★ If he has said outright what this should do, that is a person
+        //    overriding a guess about their own money, and it stands.
+        let (u, ops, p) = (universe(), card_offers(), pockets());
+        let mut c = Capture { candidates: &ops, pockets: &p, ..Default::default() };
+        c.raw_text = Some(HIS_RECEIVED);
+        c.known.insert("pocket_name".into(), json!("food"));
+        c.known.insert("amount".into(), json!(1000.0));
+        c.known.insert("operator".into(), json!("budget.spend"));
+
+        match infer(&u, &c) {
+            Inference::Ready { operator, .. } => assert_eq!(operator, "budget.spend"),
+            other => panic!("a person's own answer was overruled: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_refund_is_never_narrowed_to_a_spend() {
+        // ★★★ The bug this closes. A reversal arrives in the same queue as a
+        //     purchase, and with only spend and allocate to choose from the
+        //     only available answer counted the original charge twice.
+        let (u, ops, p) = (universe(), candidates_with_refund(), pockets());
+        let mut c = Capture { candidates: &ops, pockets: &p, ..Default::default() };
+        c.parsed_fields.insert("amount".into(), json!(500.0));
+        c.parsed_fields.insert("direction".into(), json!("received"));
+        c.known.insert("pocket_name".into(), json!("food"));
+        match infer(&u, &c) {
+            Inference::Ready { operator, .. } => assert_eq!(operator, "budget.unspend"),
+            other => panic!("expected ready, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn money_in_asks_which_kind_when_both_are_possible() {
+        // ★★ Income and a refund are both money in and mean different things:
+        //    one adds to what was earned, the other gives back what was spent.
+        //    Where both are on offer the person is asked rather than guessed at.
+        let u = universe();
+        let ops: Vec<String> = ["budget.spend", "budget.record_income", "budget.unspend"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let p = pockets();
+        let mut c = Capture { candidates: &ops, pockets: &p, ..Default::default() };
+        c.parsed_fields.insert("amount".into(), json!(500.0));
+        c.parsed_fields.insert("direction".into(), json!("received"));
+        match infer(&u, &c) {
+            Inference::NeedsDisambiguation { field, options, .. } => {
+                assert_eq!(field, "operator");
+                let options = options.expect("a choice between operators is a tap, not an input");
+                let vs: Vec<&str> = options.iter().map(|o| o.value.as_str()).collect();
+                assert!(vs.contains(&"budget.record_income"));
+                assert!(vs.contains(&"budget.unspend"));
+                assert!(!vs.contains(&"budget.spend"), "money in is never a spend");
+            }
+            other => panic!("expected a question, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_word_refund_alone_is_enough_to_mean_money_came_back() {
+        let (u, ops, p) = (universe(), candidates_with_refund(), pockets());
+        let mut c = capture("refund of 500 into food", &ops, &p);
+        c.known.insert("pocket_name".into(), json!("food"));
+        match infer(&u, &c) {
+            Inference::Ready { operator, .. } => assert_eq!(operator, "budget.unspend"),
+            other => panic!("expected ready, got {other:?}"),
+        }
     }
 
     #[test]

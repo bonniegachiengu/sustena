@@ -375,6 +375,7 @@ mod tests {
                 stamp: CausalStamp::new("n"),
                 causes: vec![],
                 mutations: vec![],
+                payload: None,
             })
             .collect();
         // `replay` takes only events and a checkpoint — there is no parameter

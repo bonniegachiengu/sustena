@@ -158,6 +158,62 @@ A spec vector may carry a `divergence` block naming a place where the two
 engines deliberately differ. The rule is that a divergence is **documented or
 it is a bug** — nothing silently differs.
 
+### Divergences that CLOSED
+
+**Intake keying (ING-5)** — closed 30 Aug 2026. The core keyed a capture
+on the transaction it describes; the host still keyed on a hash of the wording,
+so the two engines disagreed about what "the same intake" means — the sharpest
+class of divergence, because it is a disagreement about identity rather than
+about a value. The host now runs the same rule, and 127 already-saved captures
+were re-keyed onto it (none lost, none merged). Two host findings came back the
+other way and are now recorded in the core's row: the order is forced (parse,
+then key), and the amount belongs in a within-source key while it must stay out
+of a cross-source one.
+
+
+★★★ A divergence closing is worth recording too. The log exists so nothing
+silently differs, and an entry that quietly disappears is the same failure as one
+that never got written — a later reader cannot tell whether it was fixed or
+forgotten.
+
+- **`edit.state_patch` `remove` — closed 29 Aug (EDIT-15).** The reference set the
+  path to `None` and reported success; Rust's typed state and organisational
+  closure refuse the shape change. The reference now **refuses too**, so the two
+  engines agree. The old comment — *"full delete not supported by
+  StateAccessor"* — was true and was never a reason to write a wrong value
+  instead: a missing capability should refuse, not improvise.
+
+- **`edit.operator_spec` price editing — closed 29 Aug (EDIT-14).** The reference
+  let `pawa_cost` and `license_tier` be set at runtime, free, with no authority
+  check — so changing an Enzyme's price cost less than using it, which is §VI
+  backwards. Both are out of the editable set. They were **removed rather than
+  gated**, because there is no authority model on that path to gate them with, and
+  a permission parameter nobody checks looks like a fence and is a comment.
+
+### Divergences that stand
+
+- **`transducer.json` — rust-ahead-of-python.** Nine instrument shapes —
+  Fuliza borrow / interest / repayment, M-Shwari in and out, cash withdrawal at
+  a till and at an agent, Pochi in and out — are **mapped** in Rust and
+  `parsed_unmapped` in the reference. This is the money model
+  (`Orchie_Money_Model.md` §6, settled 26 Aug) being implemented, not a port
+  gap. The reference *cannot* express an overdraft: nothing in `apps/api` writes
+  `finances.liabilities.*`, so borrowed money can only be filed as income, which
+  overstates the household by the whole of what it owes.
+  The block records the rule that did **not** change — nothing files money into
+  a *category* without being asked, and a payment to somebody outside the
+  household still always asks. What the four settled shapes have in common is
+  that no category is involved: an overdraft names its lender, a transfer has
+  the household at both ends, a withdrawal moves money to your own pocket.
+  Asking which pocket your own cash withdrawal belongs to is a question with no
+  true answer. `tests/conformance_transducer.rs` skips those nine **by name**
+  and asserts the block still exists, so the divergence cannot become silent.
+  **Extended 29 Aug:** the block also names two `additional_fields` — `date` and
+  `time` — which Rust extracts and the reference does not (ING-13, the message's
+  own clock). The replay allows extra fields **only where the block names them**:
+  a field nobody declared appearing in a parse result would be a change nobody
+  reviewed, and noticing that is what a vector is for.
+
 - **`approval.json` — rust-ahead-of-python.** The reference engine has no
   approval token at all (`approval_token`, `valid_token` and `effect_class` are
   grep-0 in `apps/api/sustena/`). In Python "the human decides" holds by

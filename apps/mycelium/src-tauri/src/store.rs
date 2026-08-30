@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sustena_core::event::CausalStamp;
 use sustena_core::sync::{reconcile, LogEntry, Reconciliation, Replayable, Replica};
 use sustena_core::VectorClock;
@@ -64,6 +64,23 @@ pub struct LoggedEvent {
     pub events: Vec<EventDto>,
     #[serde(default)]
     pub mutations: Vec<Mutation>,
+    /// ★★★ **What the Enzyme was CALLED with**, without which semantic replay
+    /// cannot run at all.
+    ///
+    /// `semantic::replay_under` re-runs the logged *calls* through the gate
+    /// under a chosen definition — that is what makes "would this still have
+    /// been admissible under `D′`?" answerable, and what EDIT-11's stranding
+    /// check stands on. It needs `(operator, params)`. The log recorded the
+    /// operator and the resulting mutations, so half the call was durable and
+    /// the mechanism had nothing real to read.
+    ///
+    /// ★★ `Option`, not an empty map, and `#[serde(default)]` so every line
+    /// written before this still deserialises byte-identically. `None` means
+    /// **we do not know what it was called with** — genuinely different from
+    /// *called with nothing*, and replaying the second when the first is true
+    /// would re-run a different call and report confidently on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<Map<String, Value>>,
     /// ★★★ **The node that wrote this line.** `seq` alone stopped being an
     /// identity the moment a second node existed: two nodes both write
     /// `seq: 5`, and a merge keyed on the bare sequence silently drops one.
@@ -118,6 +135,8 @@ impl LoggedEvent {
             operator: "genesis".into(),
             events: Vec::new(),
             mutations: vec![Mutation::ReplaceRoot { value: state.clone() }],
+            // ★ Genesis is not an Enzyme call, so there are no params to have.
+            params: None,
             origin: None,
             lamport: None,
             clock: None,
@@ -125,11 +144,22 @@ impl LoggedEvent {
     }
 
     pub fn of(seq: u64, operator: &str, x: &Execution) -> Self {
+        Self::called(seq, operator, x, Map::new())
+    }
+
+    /// The same line, with the call that produced it.
+    pub fn called(
+        seq: u64,
+        operator: &str,
+        x: &Execution,
+        params: Map<String, Value>,
+    ) -> Self {
         LoggedEvent {
             seq,
             operator: operator.to_string(),
             events: x.events.iter().map(EventDto::from).collect(),
             mutations: x.mutations.clone(),
+            params: Some(params),
             origin: None,
             lamport: None,
             clock: None,
@@ -559,6 +589,51 @@ impl Store {
     ///
     /// The state is not stored anywhere. This is the only way to obtain it, so
     /// the property cannot quietly stop being true.
+    /// **`H(s)`** — this Sustain's state, as one short string.
+    ///
+    /// ★★★ `fold(log) == cache` is the law the whole engine rests on, and
+    /// checking it used to mean comparing two whole state trees. Across a peer
+    /// link that is not a question anyone can ask: you cannot send a
+    /// household's entire finances to find out whether two nodes agree. This is
+    /// the same question in sixty-four characters.
+    pub fn state_hash(&self, sustain_id: &str) -> StoreResult<String> {
+        let (state, _) = self.load_state(sustain_id)?;
+        Ok(sustena_core::state_hash(&state))
+    }
+
+    /// **The Enzyme calls this Sustain's history is made of.**
+    ///
+    /// ★★★ Only the lines that actually recorded their parameters. A line
+    /// written before params were durable is **skipped and counted**, never
+    /// replayed with an empty map — an Enzyme called with nothing is a
+    /// different call, and reporting on it would be reporting confidently on
+    /// something that did not happen.
+    ///
+    /// Returns `(calls, skipped)`, so a caller can say *these are the ones we
+    /// could check* rather than implying it checked everything.
+    pub fn enzyme_calls(
+        &self,
+        sustain_id: &str,
+    ) -> StoreResult<(Vec<sustena_core::EnzymeCall>, usize)> {
+        let mut calls = Vec::new();
+        let mut skipped = 0;
+        for line in self.read_log(sustain_id)? {
+            if line.operator == "genesis" {
+                continue;
+            }
+            match line.params {
+                None => skipped += 1,
+                Some(params) => {
+                    let mut call =
+                        sustena_core::EnzymeCall::new(&line.seq.to_string(), &line.operator);
+                    call.params = params;
+                    calls.push(call);
+                }
+            }
+        }
+        Ok((calls, skipped))
+    }
+
     pub fn load_state(&self, sustain_id: &str) -> StoreResult<(Value, u64)> {
         let log = self.read_log(sustain_id)?;
         let next_seq = log.last().map(|e| e.seq + 1).unwrap_or(0);

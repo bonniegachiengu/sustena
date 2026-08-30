@@ -79,6 +79,7 @@ fn event(name: &str) -> Event {
         stamp: CausalStamp::new("test"),
         causes: vec![],
         mutations: vec![],
+        payload: None,
     }
 }
 

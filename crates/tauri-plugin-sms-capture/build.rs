@@ -2,7 +2,7 @@
 // is what makes the Tauri CLI add it to the generated Android project and merge
 // its manifest, which is why the receiver and the SMS permissions live here and
 // not in gen/android -- that directory is regenerated and gitignored.
-const COMMANDS: &[&str] = &["permission_state", "request_permission", "read_inbox", "drain_queue"];
+const COMMANDS: &[&str] = &["permission_state", "request_permission", "read_inbox", "drain_queue", "queue_depth"];
 
 fn main() {
     tauri_plugin::Builder::new(COMMANDS)

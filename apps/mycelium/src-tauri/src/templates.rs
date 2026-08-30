@@ -31,6 +31,13 @@ pub enum TemplateId {
     Homestead,
     /// A person — the smallest Sustain that still holds its own money.
     Habitat,
+    /// ★★★ A capture device — the phone itself, as a Sustain.
+    ///
+    /// Ingest §IX: a sensor IS a Sustain, so noticing it has gone quiet needs
+    /// no alerting subsystem of its own. Staleness becomes an ordinary reading
+    /// of an ordinary child, and the connection panel is a view over its state
+    /// rather than a separate thing to build.
+    Device,
 }
 
 impl TemplateId {
@@ -38,24 +45,98 @@ impl TemplateId {
         match self {
             TemplateId::Homestead => "homestead",
             TemplateId::Habitat => "habitat",
+            TemplateId::Device => "device",
         }
     }
 
     pub fn all() -> Vec<TemplateId> {
-        vec![TemplateId::Homestead, TemplateId::Habitat]
+        vec![TemplateId::Homestead, TemplateId::Habitat, TemplateId::Device]
     }
+}
+
+/// `Σ` for a device: what it knows about itself, and nothing else.
+///
+/// ★★ No money dimensions, and no `liquid_non_negative`. A phone holds no
+/// money, and giving it the household's shape so the code could be shared
+/// would put a balance on a thing that has none.
+///
+/// ★★★ **No liveness invariant here, deliberately.** §IX's `now − t_last_ack
+/// <= theta` cannot be a rule the device carries: a phone that has stopped
+/// cannot evaluate anything, least of all whether it has stopped. It is
+/// evaluated by whoever is watching, over this child's own dimensions — which
+/// is why `queue_depth` and `last_ack_ms` are recorded here and judged nowhere
+/// near here.
+fn device_definition() -> Definition {
+    Definition::new(Schema::new().declare("device", DimType::Any))
+        .with_operator("device.heartbeat")
 }
 
 /// `Σ` for a template.
 pub fn definition(template: TemplateId) -> Definition {
-    let base = Definition::new(Schema::new().declare("finances", DimType::Any))
+    let base = Definition::new(
+        Schema::new()
+            .declare("finances", DimType::Any)
+            // ★★ What the household HOLDS, as against what it has spent. A
+            //    spend records money leaving; without this, nothing records
+            //    that beans arrived, and a household that shops well looks
+            //    identical to one that loses money.
+            .declare("inventory", DimType::Any)
+            // ★★ Who you paid, and what you usually call it. State rather
+            //    than a side file, so a rebuild reproduces it and anything
+            //    composing over the household can read it.
+            .declare("vendors", DimType::Any),
+    )
         .with_operator("budget.record_income")
         .with_operator("budget.add_pocket")
         .with_operator("budget.allocate")
         .with_operator("budget.spend")
+        // ★★ The declared inverses of the two moves above. A Sustain that can
+        //    spend must be able to record a refund of that spend, or a real
+        //    reversal has nowhere to go but a wrong number.
+        .with_operator("budget.unspend")
+        .with_operator("budget.unallocate")
+        // ★★ Where the money is, as opposed to what it is for. A household
+        //    holding money in two places cannot answer "how much do I have in
+        //    M-Pesa" from a single pooled figure.
+        .with_operator("budget.open_account")
+        .with_operator("budget.transfer")
+        // ★★ The inverse of income. Money arriving from his own other account
+        //    reads exactly like earnings, so it is filed as income before
+        //    anything can tell; when the other half says otherwise it has to
+        //    come back off, or his earnings grow every time he moves his money.
+        .with_operator("budget.unrecord_income")
+        // Supplies bought with a spend, recorded as things now held.
+        .with_operator("inventory.itemize")
+        // ★★★ The real expense. Buying rice left the household no poorer;
+        //    eating it is what does. Without this the ledger calls the
+        //    purchase the expense, which is off by however long the thing
+        //    lasts — a month's shopping looks like a terrible week, and the
+        //    week it is eaten looks free.
+        .with_operator("inventory.consume")
+        // ★★★ Read-only nodes, so a finance operative can be a DAG whose
+        //    steps are operator calls rather than a function wired to a
+        //    screen. A capability that cannot appear in a graph cannot be
+        //    part of an operative.
+        .with_operator("vendor.identify")
+        .with_operator("vendor.suggest")
+        .with_operator("vendor.remember")
+        // ★★★ A pocket tied to a real person's number, so money out to them and
+        //    money back from them meet in one running tab instead of landing as
+        //    a spend here and an unrelated lump of income there.
+        .with_operator("vendor.link_number")
+        // ★★★ Money model §3: borrowed money arrives AND is owed. Without these
+        //    an overdraft could only be filed as income, which overstates the
+        //    household by the whole of what it owes — and there was no operator
+        //    anywhere that wrote `finances.liabilities.*`.
+        .with_operator("budget.borrow")
+        .with_operator("budget.charge_debt")
+        .with_operator("budget.repay_debt")
         // Every Sustain that holds money holds this one.
         .with_invariant("liquid_non_negative", "finances.liquid.balance >= 0");
 
+    if let TemplateId::Device = template {
+        return device_definition();
+    }
     match template {
         // ★ The household carries a shared pocket and the rule that guards it,
         //   and it is the one that declares what gets TOTALLED across the
@@ -91,6 +172,7 @@ pub fn definition(template: TemplateId) -> Definition {
         //   refuses *everything* on. Declaring rules for dimensions that do not
         //   exist yet is how a Sustain bricks itself.
         TemplateId::Habitat => base,
+        TemplateId::Device => unreachable!("device returns before this match"),
     }
 }
 
@@ -101,15 +183,44 @@ pub fn opening_state(template: TemplateId) -> Value {
             "finances": {
                 "liquid": {"balance": 0.0},
                 "pockets": {"food": {"allocated": 0.0, "spent": 0.0, "limit": 0.0}},
+                // ★ Empty rather than pre-named. Which accounts someone holds
+                //   is theirs to say, and the first text that arrives opens the
+                //   one it came from anyway.
+                "accounts": {},
                 "income": {"monthly_total": 0.0, "sources": []}
-            }
+            },
+            "inventory": {"assets": []},
+            // ★★★ Present and empty, not absent. `vendors` was DECLARED and
+            //   never seeded, and organisational closure refuses an operator
+            //   that introduces a top-level dimension — correctly, since that
+            //   changes what the Sustain IS. So `vendor.remember` could not
+            //   commit on any real household, which is exactly why its memory
+            //   had stayed in a side file. An empty map is the honest opening
+            //   value: the household knows no vendors yet.
+            "vendors": {}
         }),
         TemplateId::Habitat => json!({
             "finances": {
                 "liquid": {"balance": 0.0},
                 "pockets": {},
+                "accounts": {},
                 "income": {"monthly_total": 0.0, "sources": []}
-            }
+            },
+            "inventory": {"assets": []},
+            // ★★★ Present and empty, not absent. `vendors` was DECLARED and
+            //   never seeded, and organisational closure refuses an operator
+            //   that introduces a top-level dimension — correctly, since that
+            //   changes what the Sustain IS. So `vendor.remember` could not
+            //   commit on any real household, which is exactly why its memory
+            //   had stayed in a side file. An empty map is the honest opening
+            //   value: the household knows no vendors yet.
+            "vendors": {}
+        }),
+        // ★ Zero and zero, not absent. A device that has never reported has a
+        //   real queue of nothing and a real last-contact of never, and both
+        //   are readings a watcher can act on.
+        TemplateId::Device => json!({
+            "device": {"queue_depth": 0.0, "last_ack_ms": 0.0, "app_version": ""}
         }),
     }
 }

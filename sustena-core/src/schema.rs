@@ -245,6 +245,17 @@ pub fn validate(state: &Value, schema: &Schema) -> Vec<TypeError> {
     errors
 }
 
+/// Does one value fit one type? `None` when it does.
+///
+/// ★★ The same walk `validate` uses, exposed for a single value — so a
+/// parameter's argument is checked by exactly the rule a dimension's value is,
+/// rather than by a second opinion that could disagree with it.
+pub fn conforms(value: &Value, ty: &DimType) -> Option<String> {
+    let mut errors = Vec::new();
+    check_value(value, ty, "value", &mut errors);
+    errors.into_iter().next().map(|e| e.detail)
+}
+
 fn check_value(value: &Value, ty: &DimType, path: &str, errors: &mut Vec<TypeError>) {
     let mismatch = |errors: &mut Vec<TypeError>, want: &str| {
         errors.push(TypeError {

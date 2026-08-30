@@ -68,6 +68,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::mutation::Mutation;
 
@@ -198,6 +199,25 @@ pub struct Event {
     pub causes: Vec<String>,
     #[serde(default)]
     pub mutations: Vec<Mutation>,
+    /// What the Enzyme said when it emitted this.
+    ///
+    /// ★★★ **The seventh field, and it was missing for a reason worth keeping.**
+    /// `payload` lived on [`crate::operator::EmittedEvent`] at execution time
+    /// and never reached the durable record, because nothing bridged the two —
+    /// minting an id and stamping the two clocks needs values only a host has.
+    /// The row stayed open rather than gaining a field nobody populated.
+    ///
+    /// ★★★ **The bridge is core's job even though the values are the host's**,
+    /// which is what closes it: [`Event::from_emitted`] takes the emission and
+    /// the host's own id, clocks and source, and there is no other way to build
+    /// an `Event` from an emission — so a host cannot bridge them wrongly by
+    /// hand and lose the payload on the way.
+    ///
+    /// ★★ Additive: `#[serde(default)]` on an `Option`, so a record written
+    /// before this field existed still deserialises, and reads as *this event
+    /// carried no payload* rather than as an empty one.
+    #[serde(default)]
+    pub payload: Option<Value>,
 }
 
 impl Event {
@@ -213,6 +233,35 @@ impl Event {
     /// ever had one number*, not *it arrived instantly*. The skew reading keeps
     /// that distinction — see [`crate::clocks::skew_of`], which reports
     /// `Inferred` here rather than `Observed(0)`.
+    /// **Bridge an emission into the durable record.**
+    ///
+    /// ★★★ The one way to turn what an Enzyme said into what the log keeps.
+    /// The host supplies what only it can know — the id, the two clocks, where
+    /// it came from and what caused it — and the payload rides across
+    /// automatically rather than by a caller remembering to copy it.
+    pub fn from_emitted(
+        emitted: &crate::operator::EmittedEvent,
+        id: impl Into<String>,
+        t_event: i64,
+        t_ingest: Option<i64>,
+        stamp: CausalStamp,
+        source: Option<Source>,
+        causes: Vec<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: emitted.name.clone(),
+            t_event,
+            t_ingest,
+            provenance: Provenance::Observed,
+            source,
+            stamp,
+            causes,
+            mutations: vec![],
+            payload: Some(emitted.payload.clone()),
+        }
+    }
+
     pub fn backfilled(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -229,6 +278,9 @@ impl Event {
             stamp,
             causes: vec![],
             mutations: vec![],
+            // ★★ A legacy row carried no payload, and `None` says exactly that
+            //    rather than inventing an empty object it never had.
+            payload: None,
         }
     }
 
@@ -332,6 +384,7 @@ mod tests {
             stamp: CausalStamp { counter, node: node.into() },
             causes: vec![],
             mutations: vec![],
+            payload: None,
         }
     }
 
@@ -526,4 +579,60 @@ mod tests {
         assert_eq!(laptop, tablet);
         assert_eq!(phone.value, 2, "the latest observation wins");
     }
+    // ── EVT-1's seventh field ────────────────────────────────────────────────
+
+    #[test]
+    fn what_an_enzyme_said_now_reaches_the_durable_record() {
+        // ★★★ The residual EVT-1 carried: `payload` lived on `EmittedEvent` at
+        //     execution time and nothing bridged it across, so the log kept the
+        //     name and lost the content.
+        let emitted = crate::operator::EmittedEvent {
+            name: "event.finances.pocket_spent".into(),
+            payload: serde_json::json!({ "pocket": "rent", "amount": 15000.0 }),
+        };
+        let e = Event::from_emitted(
+            &emitted,
+            "evt-1",
+            1_000,
+            Some(1_050),
+            CausalStamp::new("phone"),
+            None,
+            vec![],
+        );
+        assert_eq!(e.name, "event.finances.pocket_spent");
+        assert_eq!(e.payload.as_ref().and_then(|p| p.get("pocket")), Some(&serde_json::json!("rent")));
+    }
+
+    #[test]
+    fn the_bridge_is_the_only_way_across_so_a_host_cannot_lose_it_by_hand() {
+        // ★★ The values are the host's — the id, the two clocks, the source —
+        //    and the bridge is the core's. Splitting it that way is what stops
+        //    a caller assembling an `Event` and forgetting the payload.
+        let emitted = crate::operator::EmittedEvent {
+            name: "event.x".into(),
+            payload: serde_json::json!({ "a": 1 }),
+        };
+        let e = Event::from_emitted(&emitted, "id", 1, None, CausalStamp::new("n"), None, vec![]);
+        assert!(e.payload.is_some());
+    }
+
+    #[test]
+    fn a_record_written_before_this_field_existed_still_reads() {
+        // ★★ Additive, exactly as `t_ingest` and `source` were: a pre-slice
+        //    wire record deserialises and reads as "carried no payload" rather
+        //    than as an empty one.
+        let old = r#"{"id":"e1","name":"event.x","t_event":1,
+                      "stamp":{"counter":1,"node":"n"}}"#;
+        let e: Event = serde_json::from_str(old).expect("an old record still reads");
+        assert_eq!(e.payload, None);
+    }
+
+    #[test]
+    fn a_backfilled_legacy_row_carries_no_payload_rather_than_an_empty_one() {
+        // ★★ `None` says we never had one; `Some({})` would say the Enzyme
+        //    emitted nothing, and those are different claims.
+        let e = Event::backfilled("e1", "event.x", 1_000, CausalStamp::new("n"));
+        assert_eq!(e.payload, None);
+    }
+
 }

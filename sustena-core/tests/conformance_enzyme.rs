@@ -100,7 +100,7 @@ fn a_proposal_never_carries_a_field_the_operator_does_not_declare() {
     let ready = p.ready().unwrap_or_else(|| panic!("{}", p.describe()));
     let reg = registry();
     let declared: BTreeSet<&str> =
-        reg.get("budget.allocate").unwrap().params.iter().map(|d| d.name).collect();
+        reg.get("budget.allocate").unwrap().params.iter().map(|d| d.name.as_ref()).collect();
     assert!(!declared.is_empty(), "the operator declares a shape at all");
     assert!(ready.call.params.keys().all(|k| declared.contains(k.as_str())));
 }

@@ -343,6 +343,129 @@ export const options = style({
   gap: "10px",
 });
 
+/**
+ * The pocket picker, and only it.
+ *
+ * ★★★ A pocket list is a different shape of question from "what should this
+ * do?". That one has two or three answers and each deserves a proper target;
+ * this one has as many answers as he has pockets, and rendering them all as
+ * full-size buttons turns one question into a wall to read. Chips wrap, so
+ * fifteen pockets are a paragraph rather than a page.
+ *
+ * ★★ Still a real target. 34px is above the floor where a thumb starts
+ * missing, and the wrapping row keeps neighbours far enough apart that a near
+ * miss lands on nothing rather than on the wrong pocket -- which matters more
+ * here than size does, because the wrong pocket is a wrong record.
+ */
+/**
+ * Constraint health, as a colour on the card's own edge.
+ *
+ * ★★★ Monitor §VII rests on Treisman's Feature Integration Theory: some visual
+ * attributes are processed in parallel across the whole field BEFORE attention
+ * engages, in roughly 150 to 200ms. Hue is one of them. The ranking was already
+ * being computed correctly and then drawn flat — every card in one weight,
+ * whatever its score — so it existed in the data and never reached the eye.
+ *
+ * ★★ On the leading edge rather than the whole card. A tinted background
+ * competes with the text sitting on it, and the point is to be readable at a
+ * glance without making anything harder to read up close.
+ *
+ * ★★ Never the only signal. A colour alone would be invisible to anyone who
+ * cannot separate these hues, so every card that carries one also says the
+ * same thing in words. This makes the glance faster; it does not carry meaning
+ * on its own.
+ */
+const edge = (color: string) =>
+  style({
+    borderLeftWidth: "3px",
+    borderLeftStyle: "solid",
+    borderLeftColor: color,
+  });
+
+export const healthGreen = edge(vars.color.teal);
+export const healthAmber = edge(vars.color.amber);
+export const healthRed = edge(vars.color.danger);
+
+export const chips = style({
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "5px",
+  alignItems: "center",
+});
+
+export const chip = style({
+  fontFamily: vars.font.ui,
+  fontSize: "12px",
+  fontWeight: 500,
+  // ★★ 28px. Below the 44px a lone button wants, and deliberately so: these
+  //    are not lone buttons. Fifteen of them at button size is a page to read
+  //    before choosing, and reading is what actually costs him here — the tap
+  //    is easy either way once he has found the word.
+  minHeight: "28px",
+  padding: "4px 9px",
+  borderRadius: "999px",
+  color: vars.color.textPrimary,
+  background: vars.color.bgRaised,
+  border: `1px solid ${vars.color.borderMid}`,
+  cursor: "pointer",
+  textAlign: "center",
+  lineHeight: 1.2,
+  whiteSpace: "nowrap",
+  // ★★ A long name is trimmed rather than allowed to set the row's width.
+  //    "Miscellaneous" was taking a whole line to itself and pushing three
+  //    short names onto the next one.
+  maxWidth: "10rem",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  transition: "transform 90ms ease, background 140ms ease, border-color 140ms ease",
+  selectors: {
+    "&:active:not(:disabled)": {
+      transform: "scale(0.94)",
+      background: vars.color.amberGlow,
+      borderColor: vars.color.amberBorder,
+    },
+    "&:disabled": { opacity: 0.4, cursor: "default" },
+  },
+});
+
+export const chipChosen = style([
+  chip,
+  {
+    background: vars.color.amberGlow,
+    borderColor: vars.color.amberBorder,
+    color: vars.color.amber,
+  },
+]);
+
+/**
+ * A pocket that is somebody.
+ *
+ * ★★★ Drawn differently because it BEHAVES differently: it runs both ways and
+ * can sit in his favour, which no envelope does. A person and a category that
+ * look identical in the picker teach that they are the same kind of thing, and
+ * the first time that matters is the moment he files a repayment as shopping.
+ *
+ * ★★ A teal rim rather than a second amber. Amber already means "chosen" three
+ * lines below, and two meanings on one colour is how a marker stops being read.
+ */
+export const chipPerson = style([
+  chip,
+  {
+    borderColor: vars.color.tealBorder,
+    color: vars.color.teal,
+  },
+]);
+
+/** The odd one out: creating a pocket is a different act from picking one. */
+export const chipNew = style([
+  chip,
+  {
+    background: "transparent",
+    borderStyle: "dashed",
+    color: vars.color.textMuted,
+  },
+]);
+
 export const option = style({
   fontFamily: vars.font.ui,
   fontSize: "16px",

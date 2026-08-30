@@ -1,0 +1,2834 @@
+# Branch log
+
+*Every branch, what it is for, where it stands, and what merging it needs.*
+
+`main` is protected and always releasable. Nothing lands on it without care, and
+releases are cut from it and nowhere else. `dev` is where finished work meets
+other finished work. Working branches fork from `dev` and merge back when green.
+
+Keep this file current in the same commit that changes a branch's state. A
+branch nobody can describe is a branch nobody can safely merge.
+
+---
+
+## Live
+
+Nothing in flight. `dev` = `origin/dev`, working tree clean.
+
+**29 Aug 2026 — the WBD closed: 227 done, 0 open, 3 declined, 38 parked.**
+The 38 parked rows are the economy layer, parked by standing decision. The 3
+declined are positions that were argued for, now carrying a marker that says so.
+
+What that day turned up, beyond the rows themselves:
+
+- **Six stale rows**, all pessimistic — IMM-7, EVT-14, OPV-29, CAP-7, CAP-11, and
+  CAP-10/19 closing on re-read. CAP-7 was the worst: it said only the boundary
+  firewall remained while **IMM-1 own status had recorded `F` as shipped for
+  twelve days**. Two rows in one tracker disagreeing with each other, and neither
+  noticing. A row that names a dependency does not update itself when the
+  dependency lands, so the tracker drifts toward understating what exists and work
+  gets rebuilt.
+- **The same failure pointed the other way**: `⬜` on a declined row reads as
+  *open*, and the natural response to an open row is to close it. Three of those
+  now carry `🚫`.
+- **A contradiction between two modules landed an hour apart** — `effect_journal`
+  said a retry always needs a person, `egress` said a declared-reversible act may
+  retry itself. They were answering different questions (audit vs authority) and
+  the journal wording ran them together.
+- **Three genuine defects found by writing the checks**: a test that passed for the
+  wrong reason (`before == after` can never be refused), a region that cannot
+  measure a missing dimension (so a phone that stopped reporting its battery is
+  *unjudgeable*, not healthy), and a council seat with no operator to act through.
+
+## Merged
+
+### `feat/intake-key` — merged into `dev` 30 Aug — **ING-5, host + real data**
+
+**Off:** `dev` / gate green (python 2,346 · core 2,090 · host 256).
+
+The core keyed a capture on the transaction it describes; the host still keyed
+on a hash of the wording. **That is a disagreement about identity, not about a
+value**, which is the sharpest kind two engines can have.
+
+★★★ **The host wiring forced the order: parse, THEN key.** The first attempt
+inserted on a text key and upgraded it after parsing, and that silently broke
+the byte-identical fast path — the first row no longer held the key the second
+capture computed, so a plain retry inserted a second row. Caught by a test, not
+by inspection. The key is a property of the fact and the fact is unknown before
+a parse, so the order is structural rather than an optimisation to revisit.
+
+★★★ **`_intake_key` and `_fact_key` disagree about the amount, and both are
+right.** The intake key runs WITHIN one source, where the same parser read both
+amounts, so a reference collision — a truncated code, a reversal pair reusing a
+reference — must not swallow a separate transaction. Correlation runs ACROSS
+sources, where two parsers format amounts differently and requiring a match
+would let the double-count back in. Recorded in both docstrings rather than
+left as an apparent contradiction for somebody to trip over.
+
+★★★ **The honest limit is pinned as a test.** The intrinsic key can only key
+on a fact the parser could read, so a reformat severe enough to BREAK parsing
+is not recognised as the same intake. The failure mode is the safe one: a
+question for a person, never a second application of the money.
+
+**The migration, on Bonnie's real captures.** Backed up first
+(`backups/sustena_pre_intake_key_20260830_085451.db`), dry-run first, applied
+second. **127 before, 127 after, 127 distinct keys, zero lost, zero merged** — and
+a fingerprint over every row's id, status and raw text is byte-identical across
+the migration, so nothing but the key column moved. All 127 keys were then
+independently recomputed through the LIVE capture path and matched, which is the
+property that actually matters: a re-send of an old message is still recognised.
+
+★★★ **It reports would-be collisions rather than merging them.** Both rows
+already exist and one may already have moved money, so collapsing them would be
+the migration deciding something about somebody's money it is not entitled to
+decide. On the real data there were none.
+
+★★ **On real data the intrinsic key caught nothing**, and that is a real
+answer rather than an assumption. Zero of the 127 saved captures would have
+collided, so the row buys protection going forward and did not quietly fix a
+past double-count.
+
+### `docs/close-the-economy-layer` — merged into `dev` 29 Aug — **MYC-5 · MYC-6 · PAWA-12 · UI-12**
+
+The last four rows, and three of them closed by **reading** rather than
+building — which is the finding worth keeping.
+
+★★★ **A row does not update itself when its dependency lands.** MYC-6 was
+declared in Rust on 18 Aug and its argument was settled by PAWA-10 hours before
+this branch opened; PAWA-12's four claims were each built weeks apart by
+different slices, and nobody went back to tick the row that asserted them
+together. Both read as *open work* and were neither. That is the same structural
+failure as the six stale rows found earlier — a tracker records what a slice
+*set out to do*, and closing it is a separate act somebody has to remember.
+
+★★★ **UI-12 gets the `🚫` marker, not `⬜`.** *The LLM proposes, the schema
+disposes* needs an LLM to propose, and this core has no model and no I/O by
+ADR-0001. The half that can live here is built — `proposal.rs` is
+schema-disposes in its general form, and `llm_policy.rs` decides when a model may
+be asked at all. Leaving it `⬜` costs somebody a re-read to reach the same
+conclusion; a stub for the generation half would be worse, a call site with
+nothing behind it.
+
+★★ **MYC-5 was the one that was genuinely wrong**, and the defect was sharper
+than bad numbers: `PawaLedger.charge`'s **signature could not express the
+ratified schedule** — no `proposer` parameter existed. It has zero callers, which
+is exactly why it mattered: a wrong schedule sitting in the tree is the kind of
+dead code that gets believed. `revenue` is now required rather than defaulted,
+and conservation is asserted at nine amounts across both schedules so the two
+engines cannot drift on the one property neither may break.
+
+**The WBD is closed: 264 done · 0 open · 0 parked · 4 declined.** `main` is
+untouched and stays frozen — promotion and release are Bonnie's call.
+
+### `feat/attention-meter` — merged into `dev` 29 Aug — **OPV-8 + ADD-1**
+
+**Off:** `dev` / gate green (core 2,090 / host 256).
+
+**OPV-8: the system had the hold without the priced scan.** The knapsack that
+fits about four things into a person's working memory was built, and nothing
+priced the looking that fills it — the inverse of the usual gap. Normally a
+system measures eagerly and cannot decide what to show; here it decided well and
+never charged for the search.
+
+★★★ **Iso-cost is the property worth having.** Deep-and-narrow and
+broad-and-shallow are the same spend, because the product is what is bounded. So
+the budget constrains how much looking happens and says nothing about its shape,
+which is right: whether to look widely or closely is a judgement about the
+question rather than about the money.
+
+★★★ **Scan and hold are scarce in different things** — pawa over the composition
+tree versus a person's working memory. A design that priced only one would either
+search forever and show four things, or search cheaply and try to show forty.
+
+★★ `κ_a` is declared and uncalibrated and says so executably, the same honest
+position the meter's own coefficients hold. And a refusal names which of breadth,
+depth or resolution to give up, because being told only "no" leaves a caller
+guessing among three.
+
+**ADD-1: the shape, deliberately not the instrument.**
+
+★★★ **§6.7 is kept structurally.** `Peg::is_live()` is false with no field and
+no constructor that could make it true, because issuing a real, public,
+transferable token backed by real reserves is a human-authorized act with legal
+weight and not a boolean this codebase sets. Nothing here can pay anybody:
+`redemption_claim()` returns a claim.
+
+★★★ **The segregated floor is checked separately from the total, and that is
+the finding.** A reserve can be hugely over-collateralised on paper and unable to
+pay — which only shows on the day somebody redeems. A test builds exactly that
+state, ten times coverage with the floor empty, and it reports a breach rather
+than health. Collapsing the two numbers lets a reserve look fine while the part
+that must always be liquid has been lent out.
+
+★★ Coverage is a ratio rather than a boolean, because a boolean cannot show a
+peg thinning: 1.02 and 4.00 are both "covered" and are not the same situation.
+And the target is a value, so a digital shilling or a basket is a reviewed
+variant rather than a rewrite.
+
+### `feat/metered-decisions` — merged into `dev` 29 Aug — **OP-11 + MON-12 + CTL-10 (+ CAP-16, PAWA-13)**
+
+**Off:** `dev` / gate green (core 2,071 / host 256).
+
+**Three rows, one idea: everything that spends, spends the same meter.** Once
+computation has a price, the price is available everywhere a decision is made —
+so watching, surfacing and intervening all become economic questions rather than
+only statistical ones.
+
+★★★ **Declared and metered stay two numbers.** A declared cost is a promise made
+before the run; a metered one is a measurement taken after it. Collapsing them
+loses the ability to notice that an operator consistently costs more than it says
+— the signal worth having, and one a single number cannot produce because there
+is nothing to compare against.
+
+★★★ **A refused call costs zero, as a function rather than a comment.** Charging
+for refusals would make the gate a revenue source, which is the worst possible
+incentive to attach to a thing whose job is to say no.
+
+★★★ **A CUSUM crossing is necessary and not sufficient.** The crossing is a
+statistical fact; surfacing is an economic decision. A detector tuned purely on
+statistics will spend a person's attention on a signal that was not worth the
+interruption — and attention is the scarcer of the two currencies, since a person
+has about four working-memory slots and rather more than four pawa.
+
+★★ **The price of a slot is required rather than defaulted**, and the reason is
+uncomfortable: putting a number on attention is a judgement about how much
+somebody's focus is worth, and a default would be this module making it for them.
+
+★★★ **Two interventions that close the same distance to V are not equally good**
+if one costs four times as much, and before the meter there was no way to say so.
+It is gain *net of* cost rather than cost alone, so an intervention that closes
+four times the distance is allowed to cost more.
+
+**Two rows closed alongside:** CAP-16 with ADD-4's settlement module, and PAWA-13
+structurally — `Rail::Ethereum` has no constructor that marks itself live, so the
+honest line is not a boolean this codebase can set.
+
+### `feat/llm-policy` — merged into `dev` 29 Aug — **OPV-24, CAP-8, IMM-13**
+
+**Off:** `dev` / gate green (core 2,059 / host 256).
+
+★★★ **A model is a last resort, not a default.** Both conjuncts of the guard are
+refusals: an Enzyme that covers the task means there is nothing to ask about, and
+an ordinary path already above the threshold means asking is spending money to be
+no better off. A system that reached for a model first would be one where the
+deterministic path quietly rotted.
+
+★★★ **A budget without a per-call cap is overshot by exactly one call.** The
+cost is only known once the call has happened, so `B` alone bounds nothing — and
+`maxtok` is required, with a cap of zero refused at construction. `budget_binds()`
+exists because "we have a budget" is not the same claim as "the budget binds": at
+ten per token, a two-thousand-token cap blows a ten-thousand budget in one call.
+
+★★★ **Deactivation is a policy, not a switch.** `Fallback` is required and has
+no `Nothing` variant, and every refusal carries one. A system whose only answer to
+"the model is unavailable" is to stop has made a model a dependency while calling
+it optional — so `allow: false` produces an answer, not an error.
+
+★★ The guard is one more predicate on the existing seam rather than a new
+mechanism, which is what makes it un-bypassable for the same reason everything
+else is. And `DeclineTheTask` is distinct from an outage precisely because
+somebody chose it: "this does not get done when the model is off" is a decision a
+person can disagree with.
+
+**Two rows closed alongside it by reading:**
+
+- **CAP-8** — duty 7 is this module; duty 8 was ARE-2, landed earlier today.
+- **IMM-13** — both halves were closed by other rows the same day: the
+  grant-must-be-a-transfer half by `abuse.rs`, and the unsigned-artefact half by
+  `publish.rs`, which keeps integrity, authenticity and quality as three separate
+  questions.
+
+### `feat/market-design` — merged into `dev` 29 Aug — **ARE-8**
+
+**Off:** `dev` / gate green (core 2,048 / host 256).
+
+★★★ **Matching theory does not apply here, and the refusal is named rather than
+passed over.** Gale-Shapley and its descendants are about rival goods under
+capacity constraints, where the binding concept is stability against blocking
+pairs. An artefact is non-rival and replicable, so there is no capacity
+constraint, no rationing and no blocking pair. Borrowing "stable matching" here
+would import a vocabulary whose central object does not exist — and the borrowing
+would not fail loudly. It would quietly mean nothing.
+
+★★★ **Only safety is achieved structurally, and that is the row.** In most
+markets safety comes from rules — disclosure, escrow, enforcement. Here nothing
+bought can act except as an admitted transition inside the buyer's own viable
+region, and a gate that cannot be bypassed is not enforced by anybody.
+
+★★★ **The consequence is the part worth having.** Where safety comes from
+rules, trying something unproven risks whatever the rules failed to cover; where
+it comes from the gate, the worst case is a refusal. So a buyer here can afford a
+low-evidence artefact that a buyer in a conventional software market cannot, and
+that changes the exploration/exploitation trade-off in the Arena's favour. It is
+a test, not a claim.
+
+★★ The four biological-market conditions are checked, so "this is a market" is
+a finding rather than a figure of speech — not analogy and referent, but two
+instances of one model, and the model is the one that has the theorems. Three out
+of four is an exchange, and the missing condition is named because "not a market"
+is unactionable.
+
+★★ Thickness is why the free tier exists, which makes it a market-design
+instrument rather than generosity: a catalogue with nothing in it has no
+selection to run.
+
+### `feat/discovery-interface` — merged into `dev` 29 Aug — **ADD-3 + ADD-4**
+
+**Off:** `dev` / gate green (core 2,039 / host 256).
+
+**Two rows, one shape the articles both name: swap behind a stable interface.**
+Discovery is a registry with the overlay mocked behind it; settlement is local
+with the L2 and the finalizer mocked behind it. In both, the interface is the
+deliverable and the backend is an implementation detail — which is the only
+arrangement in which the real thing is genuinely a drop-in later.
+
+★★★ **A mock that is indistinguishable from the real thing is how a mock
+ships.** Every mocked answer is labelled on the answer itself, not in a config
+nobody reads at the call site. The failure mode is not the mock being wrong — it
+is somebody reading a green result and believing the DHT works.
+
+★★★ **A finality claim is the most dangerous thing to fake**, because acting on
+a false one means treating money as settled that is not. So finality follows from
+the rail and a caller has no parameter through which to talk a mock into claiming
+it, and `Rail::Ethereum` has no constructor that marks itself live — issuing a
+real, public, transferable token is a human-authorized act with legal weight, not
+a boolean this codebase sets. That is §6.7's line, kept structurally.
+
+★★★ **"Nobody holds it" and "nobody could be reached" are different answers**,
+and a resolution failure says whether the other backend was tried. A lookup that
+failed at the registry and never reached the overlay has not answered the
+question, and conflating the two turns a transient outage into a permanent "no
+such name".
+
+★★★ **The composition hierarchy IS the batching structure.** Nobody designed a
+rollup scheme, because a parent folding its children already is one. Only key
+transactions and roots go up — sending everything would pay L1 prices for a
+household's grocery shopping, and would also publish it.
+
+★★ The discovery threshold is a condition rather than a constant: the
+registry's O(n) state becoming the binding constraint. A decision made on the
+reason survives a change in hardware; one made on a number does not.
+
+★★ `Rail::Local` is *real and not network-final* — two true things at once,
+and a type that collapsed them would make one of them a lie. `compression()` says
+whether a rollup is doing anything: a batch where everything is a key transaction
+has not been rolled up, it has been renamed.
+
+### `feat/abuse-economics` — merged into `dev` 29 Aug — **PAWA-10**
+
+**Off:** `dev` / gate green (core 2,019 / host 256).
+
+**Nothing in this module is a new defence**, and that is the row. Each of the
+three is the meter doing a second job: the balance check that stops an
+unaffordable run is the same check that stops a runaway one, and the term that
+rewards an elegant plan is the same term that reduces load.
+
+★★★ **The honest cost, with a number attached.** Pricing via processing prices
+the attacker and the household *identically* — a defence that could tell them
+apart would not need a price. A test asserts an ordinary household month and an
+attacker burst cost exactly the same, and `raising_the_price_changes_the_ratio()`
+returns false: raising the coefficient buys a shorter flood for a fixed attacker
+budget, not a better ratio, and the household's bill moves by the same factor.
+So the right question is never "does this stop an attacker" but "what does it
+cost the person it was not aimed at".
+
+★★★ **Where the Sybil arithmetic actually turns.** A grant that MINTS is
+profitable and unbounded whatever identity costs, because the return per identity
+is fixed and the supply of identities is not. A test walks four identity prices
+and shows none of them rescues it — "make identity expensive" is the obvious move
+and the wrong one. The fix is: do not mint per identity.
+
+★★ **A transferred grant that pays is bad and finite**, and the verdict says
+so separately. Conflating bad with unbounded would make every profitable grant
+look like an emergency, and the purse genuinely does bound the damage.
+
+★★ A free operation has no bound at all, and `calls_affordable` returns `None`
+rather than a large number — worth knowing before declaring a bound.
+
+### `feat/commons-and-symbionts` — merged into `dev` 29 Aug — **MYC-7 + MYC-9**
+
+**Off:** `dev` / gate green (core 2,008 / host 256).
+
+**A subsidy funded from a common purse is a free-rider magnet by construction.**
+The treasury is subtractable and hard to exclude members from — which is what
+membership means — so it is exactly the configuration Hardin predicted would be
+destroyed. Ostrom is the empirical reply, and mapping the eight principles is the
+specification of what the network must implement to survive its own generosity.
+
+★★★ **Each principle names the mechanism that discharges it.** "We follow
+Ostrom" is a claim; "principle 5 is the sanction ladder" is a thing somebody can
+go and read.
+
+★★★ **Principle 8 is marked as falling out of the primitive**, not adopted as
+policy. A commons that has to *remember* to be nested can stop being nested; one
+that is nested because its primitive is recursive cannot.
+
+★★★ **There is no `Unbounded` grant.** A grant bounded by nothing is a mint
+with extra steps, and the type has nowhere to express one.
+
+★★★ **A free identity is refused loudly, because principle 1 fails silently.**
+That is the whole problem: the commons looks healthy right up until it is
+drained, because every fake member is indistinguishable from a real one at the
+moment it takes its grant. `identity_is_costly` is a required argument, so
+somebody has to think about it rather than inherit an assumption.
+
+★★ Both defences tested as a pair — a costly identity with an unbounded grant
+drains the purse slowly; a bounded grant with free identity drains it quickly.
+And a grant the purse can cover to a real newcomer is admitted: a defence that
+refused everything would be a purse nobody could draw on, which is the same
+failure as one that drains.
+
+★★★ **MYC-9: the Symbiont's authority is zero as a property of the type.** No
+`privileged` field, no exception, and the two refusals are functions rather than
+comments so a change granting an exception would have to delete them and their
+test. That is the row's own point — promises are unenforceable, and a
+privileged-Symbiont exception is not a feature with a risk, it is the deletion of
+the property that makes the rest of the argument true.
+
+### `feat/android-shape-filter` — merged into `dev` 29 Aug — **IMM-11's Android half**
+
+**Off:** `dev` / APK v1.14.0 (versionCode 24) builds, verifies (v2) and aligns.
+
+**The disclosed gap from this morning, closed.** The structural detector landed
+server-side and the phone still had only the vocabulary — so a credential in
+unfamiliar wording still left the device before anything refused it. That layer
+protected the store, not the wire.
+
+★★★ **`SmsShapeFilter` reads no words at all**, and is wired into BOTH the
+real-time `SmsReceiver` and the backfill `SmsCapturePlugin.readInbox()`. A
+backfill applying a weaker check than the live path would be a second door with a
+lower lock.
+
+★★★ **Deliberately not a fourth copy of the vocabulary.** IMM-11's whole
+complaint is that the phone, the engine and the transducer share one keyword
+list; a fourth copy of that list would have deepened the coupling the row exists
+to break. This is a different algorithm, so a change to one does not silently
+need a change to the other.
+
+★★ **OR, not AND**, same as the server: either detector refusing is a refusal,
+because a false positive costs one capture re-entered by hand and a false
+negative puts a live credential on the wire. An AND would let each layer veto the
+other's catch.
+
+**Residual, stated rather than left implied.** The shape rules are now
+hand-mirrored in two runtimes — this class and `secret_shape.rs`. That is a
+smaller instance of the same problem: smaller because it is five stable
+structural features rather than a vocabulary that grows every time a bank writes
+a new sentence, but not zero. The real fix remains one shared check the phone can
+call, which needs a shared runtime the Capacitor app does not have.
+
+### `feat/network-membership` — merged into `dev` 29 Aug — **MYC-1 + MYC-3**
+
+**Off:** `dev` / gate green (core 1,998 / host 256).
+
+★★★ **There is deliberately no `Network` type.** The network is a `Sigma` whose
+members are Sustains, and the same composition folds a homestead into it that
+folds a habitat into a homestead. A distinct type would be the claim that the
+largest scale is special, and the whole article is that it is not.
+
+★★★ **Membership is a gated transition, not a fact of deployment** — a machine
+that is running is not thereby a member, and "the network" without a boundary is a
+mood.
+
+**Failure is indistinguishable from slowness, and the types say so.**
+
+★★★ **There is no `Dead` variant to reach.** A crash and a slow link look the
+same from outside, so a variant asserting death would be a claim no asynchronous
+system can make. `Suspect` carries how many witnesses were asked and that it is
+refutable, and `refute()` exists — a detector whose output could not be argued
+with would not have a false-positive *rate*, it would have victims.
+
+★★★ **One silent probe is not evidence.** A single timeout says as much about
+the prober's own network as about the target, so suspecting on it would make a
+congested minute look like a departure. `k` witnesses first, and the count is
+declared, because a knob nobody chose is a false-positive rate nobody chose.
+
+★★ **Only a stated departure is a fact.** And leaving destroys the edge and
+nothing else: this module has no method that touches a member's state at all,
+which is the holon invariant applied to the network — the whole is real, and it
+never erases the parts inside it.
+
+★★ **Nothing reads a clock and no function takes a global view** — two of the
+three things federation forbids. `probe` is handed the acks rather than waiting
+for them, so this module decides what a silence *means* while finding out stays
+the host's job, and a member never met is an ordinary state rather than an error.
+
+★★ No network power reaches past a member's gate: observe, aggregate, price,
+refuse service, and nothing else — asserted as a function rather than a comment.
+
+### `feat/order-lifecycles` — merged into `dev` 29 Aug — **ARE-9**
+
+**Off:** `dev` / gate green (core 1,986 / host 256).
+
+**One order can carry two categorically different things**, and the schema always
+knew it: a plate of pilau is rival and delivered; an Enzyme is non-rival and
+germinated. Mycelium's law — value is conserved, information is not, so they route
+differently — appearing inside a single transaction.
+
+★★★ **There is no shared `Status` type.** The two sequences have different
+lengths, names and meanings, and one type able to hold either would let a package
+be marked `DELIVERED`, which is not a claim anybody could act on. Two status
+columns are not redundancy; collapsing them makes one lifecycle inexpressible.
+
+★★★ **Two totals, never summed.** One is money and one is metered work, so a
+single `total` column is that addition waiting to happen — and the sum would be a
+number in no unit at all. There is deliberately no `Order::total()`.
+
+**Finding — a conservation check that could not fail.** The first draft compared
+the order total to itself. That is precisely the defect §IX.3 names one paragraph
+later: a field carrying the NAME of a guarantee without the mechanism. It now
+compares what was charged against what was actually distributed, and two tests
+catch a lost unit and an invented one — over-distribution being a mint wearing a
+rounding error, and the more dangerous of the two.
+
+★★ Nothing settles partially, because a part-settled order is an unbalanced
+one. The two purses are checked separately: enough money and not enough pawa is a
+real state that a single balance check could not express.
+
+★★ `Sandboxed` is a real stop rather than a formality. Germination is ⊕, and
+the approval token belongs on the transition where something stops being
+contained and starts being part of the household.
+
+★★ `Receipt::admits_anything()` returns false **as a function rather than a
+comment**, so the claim is executable and a change that made a receipt admit
+something would have to delete it and its test. The point is not that receipts
+are worthless — they are the right object for an audit trail. Only that they must
+never be presented where a capability is implied.
+
+### `feat/market-dynamics` — merged into `dev` 29 Aug — **ARE-5 + ARE-6 + ARE-7**
+
+**Off:** `dev` / gate green (core 1,973 / host 256).
+
+★★★ **There is no global-ranking function in the module.** Not discouraged, not
+behind a warning — `rank_in` takes a niche, and a caller with no niche has
+nothing to call. The marginal over niches is the one aggregation No Free Lunch
+forbids, and the shipped `ORDER BY trust_score DESC` *is* that marginal. Making it
+inexpressible is the only version of this rule that survives a deadline.
+
+★★★ **"Nobody occupies the average" is a test.** Two niches with opposite
+winners: a single top-packages list is a claim about a household that does not
+exist. `how_wrong_a_global_list_would_be()` is offered as evidence *against* the
+global list rather than as a way to build one — and two niches that agree are one
+niche wearing two names, not proof that a global list is fine.
+
+★★ **NFL used correctly, with the misuse named.** It is not the claim that
+nothing is better than anything else: its premise is uniformity, which is not the
+world. *"Better" has no meaning without a specified problem distribution, and a
+library is worth exactly the non-uniformity of the one it is built for* — which
+is what makes a library valuable, not useless.
+
+★★★ **The selection test that matters is the one with no evidence.** A market
+with no fitness signal still selects; it selects on whatever proxy is lying
+around, which is adoption. Incumbency is preserved exactly and the
+popular-but-useless artefact keeps its share — the anti-rational failure mode
+made mechanical, and the reason `reputation.rs` is not decoration.
+
+★★★ **`delist()` takes no buyer list, no state and no reach.** The signature is
+the argument: it cannot revoke anything from anybody, and
+`still_works_for_existing_buyers` is always true with no field a caller could set
+to pretend otherwise. Stated as **correct rather than as a gap** — the end-to-end
+argument, and a market with recall powers is a market that can reach into your
+state. The market makes good artefacts findable; making bad ones harmless is the
+gate's job.
+
+★★ Sanctions are graduated and **each reversible, including the last**.
+Escalation is a walk, because reaching for the final instrument first is what
+makes a sanction system feel arbitrary — and an irreversible sanction is a
+judgment nobody can appeal.
+
+### `fix/ratified-royalty-schedule` — merged into `dev` 29 Aug — **MYC-5**
+
+**Off:** `dev` / Python suite 2,324 pass; core 1,962 / host 256 unchanged.
+
+**Rust already ran the ratified schedule; the reference engine did not.**
+`PawaLedger.charge` still ran the superseded four-way 70/20/5/5.
+
+★★★ **And the finding is sharper than wrong numbers: the signature could not
+hold the right ones.** There was no `proposer` parameter, so the ratified split
+was not expressible there at all — anyone wiring it up would have inherited a
+schedule that silently dropped a role. Adding the parameter is the substance of
+the fix; the percentages are the easy half.
+
+★★★ **`revenue` is required, not defaulted.** Paying to RUN something is not
+paying to HAVE it, and one schedule could not tell them apart — which is why the
+ratified one is revenue-typed. A caller that has not decided which of the two
+happened has not decided what it is settling, so it is asked.
+
+★★ **Conservation is asserted at nine amounts across both schedules**, not at
+one convenient round number. Integer-floor with the remainder to the validator
+share is what makes it a theorem rather than a hope, and it mirrors
+`royalty::split` line for line so the two engines cannot drift on the one
+property neither may break. An absent role folds into the treasury and is never
+dropped, for the same reason.
+
+★★ **It still has zero callers**, and that is exactly why it was worth fixing:
+a wrong schedule sitting in the tree is the kind of dead code that gets believed.
+
+### `feat/publish-is-an-enzyme` — merged into `dev` 29 Aug — **ARE-2 + ARE-12**
+
+**Off:** `dev` / gate green (core 1,962 / host 256).
+
+**Publishing was a route, which is a second write path into `S_arena`** — the
+exact failure complete mediation forbids. A guard that some callers go through is
+not a guard; it is a suggestion with good adoption.
+
+★★★ **So `Published` has no public constructor.** The only way to hold one is
+`publish()`, which evaluates all five conjuncts. A host that wanted to skip the
+check has nothing to hand the catalogue — the same shape `package::Admitted`
+already uses for installs, applied to the other end of the market.
+
+★★★ **Immutability is the precondition for everything downstream.** Rebind
+`(name, version)` and per-version trust is not merely weakened, it is *undefined*:
+a content address stops being stable and a reputation attaches to a moving target.
+Everything yesterday's `reputation.rs` does rests on this one refusal, and the
+refusal text says so rather than reporting a bare conflict.
+
+★★★ **Type-checking is well-formedness, not merit**, and the vocabulary refuses
+to blur them: nothing in the module returns `Valid` or `Good`, and the refusal
+says the check *says nothing about whether the artefact is any good*. A green
+check on the first must not do duty for the second.
+
+★★ **Integrity, authenticity and quality are three questions**, and a perfectly
+signed, perfectly hashed artefact can be worthless or hostile — a test publishes
+one that passes both and is still refused, for a missing niche.
+
+★★ One variant per conjunct rather than a single `Rejected`, and every failure
+is collected: an author who fixes a signature and is then told about a niche has
+been made to resubmit twice. **A refused submission binds nothing**, or a failed
+publish would burn the version number it failed on.
+
+★★ `τ₀` is `reputation::Prior::from_author` — inherited, discounted, and never
+the author's own score, because entering at the author's score *is* the
+malicious-update vector. ARE-12's two concrete unbuilt points close with it.
+
+### `feat/reputation` — merged into `dev` 29 Aug — **ARE-4**
+
+**Off:** `dev` / gate green (core 1,950 / host 256).
+
+**The lemons market was live, not pending.** `trust_score` is written `0.0` at
+publish, updated by no code path, and every listing sorts by it — so `ORDER BY
+trust_score DESC` over an identically-zero column is an arbitrary order presented
+as a quality ranking. The unravelling needs only the ABSENCE of a quality signal,
+and a signal that is constant is absent.
+
+★★★ **A selection process with no criticism does not merely rank badly — it
+inverts.** The Deutsch distinction, which `meme.rs` already carries: a market with
+working evidence selects for what delivers value; one without it selects for
+whatever merely spreads. Trust is the error-correction that keeps selection
+rational, not marketplace decoration.
+
+★★★ **(a) Per version.** Keyed on `(name, version)`, with no method that reads a
+version standing from its neighbour. Trust earned on v1.0 must not transfer to
+v1.1 — the shape of essentially every real package-ecosystem compromise.
+
+★★★ **(d) The lower bound, and why it is not the point estimate.** A test
+asserts the LCB punishes thinness HARDER than the posterior mean does, and that
+gap is the whole reason to rank on it. Uncertainty becomes a cost the seller
+bears rather than a free option, so a new artefact must accumulate evidence.
+
+★★ **(b)** The score lies in `[0,1]` by construction, so the bound is
+structural rather than clamped — a bound enforced by arithmetic cannot be
+forgotten by a caller. Author history enters through the prior, **discounted**: at
+full weight a good author next artefact would launch as though already proven,
+which is the malicious-update vector wearing a different hat.
+
+★★ **(c)** Evidence ages **before** the new rating is added, per the article
+own pseudocode — ageing afterwards would discount the one piece of evidence
+nobody should be discounting. `effective_memory()` exists because a decay
+constant means nothing to a person while a window in observations does.
+
+★★ **(e)** Only purchasers may rate, which ties the cost of a fake rating to
+the cost of a fake purchase, and a rating is not revisable — replacement lets a
+rater test the market and settle on whichever score suits them. Stake weighting
+is offered with its limit named: transitive trust is vulnerable to collusive
+clusters, and the standard answer reintroduces an authority.
+
+★★ **An unrated artefact has no score**, and `ranked()` returns unrated
+versions apart rather than sorted in at zero: sorting them last says bad, first
+says good, and both are claims nobody made. The lower bound is a Wilson-style
+normal approximation and is **named as one** rather than presented as an exact
+interval.
+
+### `feat/two-prices` — merged into `dev` 29 Aug — **ARE-3**
+
+**Off:** `dev` / gate green (core 1,936 / host 256).
+
+**One column was doing two jobs.** The shipped `pawa_cost` is read as *"pawa to
+install"* by the surfaces and charged as a *per-call royalty* by the ledger. Those
+are not two readings of one number — they are two economics sharing a field, and
+whichever one is right the other is silently wrong.
+
+★★★ **They behave differently, which is why they cannot share a field.** An
+access price is a one-time signal and a one-time transfer; a usage price is a
+metered stream, and it is the one that makes cost proportional to the value
+actually delivered over time. A test shows the shape a single column structurally
+cannot hold: *expensive to acquire, free to run* — an ordinary, sensible artefact.
+
+★★★ **The occasion chooses the schedule, so a caller cannot mismatch them.**
+`charge_for` returns the amount **and** the `RevenueType` together: acquiring
+settles on Access, running on Usage. With one price those could only ever be
+matched by convention — and that correspondence is the whole reason MYC-5
+schedule is revenue-typed in the first place.
+
+★★★ **Unpriced is not free.** `None` means nobody has priced this; `Some(0)`
+means somebody decided. Collapsing them makes an unpriced artefact silently free,
+a decision taken by omission — in the one place where "free" ought to be a choice
+somebody made and can be asked about.
+
+★★ `crossover()` answers the comparison a buyer needs and a single column
+cannot make: 500 outright against 10 a run overtakes at 51. It returns `None` when
+two prices never cross, because a number there would be read as a threshold that
+does not exist — and `lifetime_cost` refuses to total a price nobody set, since a
+guess wearing a total is worse than no total.
+
+### `feat/pawa-fitness-term` — merged into `dev` 29 Aug — **PAWA-4 + TEN-11, the economy layer opens**
+
+**Off:** `dev` / gate green (core 1,926 / host 256).
+
+**The first economy row, and it lands on this morning work.** `score.rs` shipped
+today with three terms; Pawa §3 asks for a fourth, `− λ·Pawa(π, s)`, and the
+per-branch pawa the simulator accumulates had nowhere to be spent.
+
+★★★ **The article own sentence is the test**: *"among strategies that achieve
+the same outcome, the one with lower pawa wins."* Identical utility, viability and
+positioning, one branch burning four times the compute — the lean one wins.
+
+★★★ **The anti-scalar-collapse guard the article names is honoured.** It asks
+explicitly to *"keep the pawa term visible in the vector, don't let a
+cheap-but-harmful plan hide inside an aggregate"* — so `pawa` sits beside the
+total, and a free-and-ruinous plan still loses the whole of β with its zero cost
+still readable. That is asserted, not assumed.
+
+★★★ **`λ = 0` makes efficiency invisible, and `ignores_efficiency()` says so.**
+The same shape as `γ = 0` refusing the beaver dam: two plans reaching the same
+place for wildly different amounts of the network compute ranking identically is a
+policy somebody chose, not a parameter somebody forgot.
+
+★★ **Efficiency is a weight, not a veto** — a far better outcome still beats a
+cheaper worse one. Elegance is rewarded, not mandated. And a branch that was
+measured and not charged reads differently from one nobody measured.
+
+TEN-11 closes with it: it was the only open row in M-TEN and was parked on the
+economy rather than on Tenet. **M-TEN is complete.**
+
+### `feat/host-loop-driver` — merged into `dev` 29 Aug — **CTL-9, the last open row**
+
+**Off:** `dev` / gate green (core 1,920 / host 256).
+
+**`ooda.rs` was already the assembled loop; what was missing was the somebody who
+steps it.** The core deliberately has no clock and no scheduler, so the driver
+belongs in the host — ADR-0001 line, and the reason the decision logic is
+testable and replayable at all.
+
+★★★ **The clock is a parameter, not a call.** `tick(now_ms)` lets a test ask
+*what happens after three days* without waiting three days, and two replays of one
+log reach the same state. A driver that read the clock itself would be untestable
+in exactly the cases that matter.
+
+★★★ **No hidden backlog**, which is the row own condition. Everything parked at
+DECIDE goes into a public `awaiting()`, oldest first, because the oldest is the
+one most likely to have been decided by neglect. And **a decision that has waited
+past the declared bound has effectively been decided against** — `describe()` says
+so, because a list that reads the same on day one and day nine is how a system
+decides by neglect while still looking like it is waiting.
+
+★★★ **The driver structurally cannot authorize.** `tick` has no parameter
+through which an approval token could arrive: the loop can observe, orient, decide
+and act on something already approved, and it can never approve its own surfaced
+decision. That is the one property here that would be worth nothing as a
+convention.
+
+★★ A sustain already parked is not re-driven, or the queue becomes a count of
+ticks rather than of things needing attention. `resolve()` reports whether
+anything was actually there, or a surface reports *handled* for something nobody
+handled. And a failed pass keeps its reason, because a silently skipped sustain
+looks identical to a quiet one, and the difference is the whole of whether the
+system is working.
+
+**With this the WBD reads 227 done, 0 open, 3 declined, 38 parked.**
+
+### `fix/the-edit-fence` — merged into `dev` 29 Aug — **EDIT-14 + EDIT-15**
+
+**Off:** `dev` / Python suite 2,320 pass; core 1,920 / host 245 unchanged.
+
+**Two holes in the same fence, both recorded as real defects and both still open.**
+
+★★★ **`remove` set the path to `None` and reported success.** Under a typed
+schema that is a type violation deposited into state for a later reader to trip
+over: a declared number now holds null, every reader of it is wrong, and nothing
+was refused at the moment the mistake was made. The old comment — *"full delete
+not supported by StateAccessor"* — was **true**, and was never a reason to write a
+wrong value instead. **A missing capability should refuse, not improvise.**
+
+★★★ **And deleting properly would not have been the fix.** A dimension is
+*declared*; removing it is a change to the definition, not to the state, and the
+Rust engine organisational closure refuses that shape change at the gate. The
+refusal is what agreeing with Rust looks like — recorded in
+`conformance/README.md` as a divergence that **closed**.
+
+★★★ **Changing an Enzyme price cost nothing while using it cost pawa.** §VI
+backwards, in the row own words. A fence that lets the price through is not
+fencing the thing worth fencing — `pawa_cost` and `license_tier` are economic
+terms the rest of the system meters against, not metadata like a description.
+
+★★ **Removed rather than gated behind an authority check**, deliberately: there
+is no authority model on that path to gate them with, and a permission parameter
+nobody checks looks like a fence and is a comment. When §VI authority reaches this
+operator they can come back through it.
+
+★★ **A new section in the conformance log: divergences that CLOSED.** The log
+exists so nothing silently differs, and an entry that quietly disappears is the
+same failure as one never written — a later reader cannot tell whether it was
+fixed or forgotten.
+
+### `fix/unsubstituted-owner-token` — merged into `dev` 29 Aug — **EDIT-16**
+
+**Off:** `dev` / frontend builds clean; core 1,920 / host 245 unchanged.
+
+**The row called it "a real bug sitting in the tree today", and it still was.**
+`definition?.access_policy?.owner_ids?.[0] || 'owner'` — when `owner_ids` holds
+the unsubstituted token `"{{owner_ids}}"`, `?.[0]` indexes the **string** and
+yields `"{"`, which is truthy, so the fallback never fires and `"{"` is posted as
+the `user_id` that provisions child sustains. A defect in a definition became
+wrong ownership on real children, with nothing refused and nothing logged.
+
+★★★ **The optional chain is a null check wearing a type check clothes.** It
+protects against *absent* and does nothing about *wrong-shaped*. And a fallback
+that cannot run is worse than no fallback at all, because it reads as handled —
+anybody reviewing that line saw a default and moved on.
+
+★★ **Both checks are needed.** `Array.isArray` alone misses the token arriving
+as a one-element array, `["{{owner_ids}}"]`, which a template with a placeholder
+inside the list produces.
+
+★★ **The old comment called a wrong id "low-risk" and that was optimistic**, so
+it was corrected rather than left: this project has already had a household owned
+by the literal string `"system"` and a stray sustain owned by a typo, and both
+took a migration to undo.
+
+The row observation stands — a typed overlay or a typed edit taxonomy would each
+have caught this before it shipped, which is exactly why the Rust side has both.
+
+### `feat/spec-imports` — merged into `dev` 29 Aug — **DSL-12 complete**
+
+**Off:** `dev` / gate green (core 1,920 / host 245).
+
+★★★ **An import at head is a rule you do not control.** Pull somebody else
+invariant unpinned and their next edit silently changes what your Sustain refuses
+— a household discovering on a Tuesday that a payment it could make last month is
+now blocked, with nothing in *its own* history to explain why. The refusal says
+that, rather than saying "unpinned".
+
+★★★ **There is no wildcard import, because the source can grow.** `bringing *`
+means a declaration added upstream next year appears in your spec without anybody
+asking, and the first you hear of it is a refusal you cannot account for. `brings`
+is an explicit list and there is no variant meaning everything.
+
+★★★ **A collision is refused and never shadowed.** Two imports bringing one name
+is not a precedence question: last-wins would mean the *order of the import lines*
+decides which rule governs somebody money, which is a rule nobody wrote. Both
+sources are named, because "there is a collision on X" leaves somebody grepping.
+
+★★ A cycle is reported as the loop itself — "A imports B imports A" is fixable,
+"there is a cycle" is a search. And `resolved()` is one hop only: a transitive
+import means a name arriving from a spec the author has never read, and "where did
+this rule come from" would have no short answer.
+
+**With this, the last core row on the Rust WBD that was genuinely open is closed.**
+What remains open is three legacy-Python defects (EDIT-14/15/16) and one
+deliberately host-side driver (CTL-9).
+
+### `docs/declined-not-open` — merged into `dev` 29 Aug — **a marker for declined**
+
+**Docs only.** Three rows were carrying `⬜` for things nobody intends to build:
+MON-2 (the Kalman filter, a declined import with three concrete sites recorded),
+OPV-14 tail shape (declined for a structural reason), and CTL-6 (relocated out of
+core by ADR-0001). They now carry `🚫`.
+
+**Why it matters more than a glyph.** Six stale rows were found today, all in the
+same direction: the tracker was **pessimistic**, and work was at risk of being
+rebuilt. `⬜` on a declined row is the same failure pointed the other way — it
+reads as *open*, and the natural response to an open row is to close it. A
+position that has been argued for deserves a marker that says so, or somebody
+eventually builds the thing the argument was against.
+
+### `feat/meme-kinds` — merged into `dev` 29 Aug — **OPV-5, the last unstarted core row**
+
+**Off:** `dev` / gate green (core 1,909 / host 245).
+
+★★★ **Dawkins-Campbell: all three, and two out of three is not nearly.** A thing
+that copies perfectly and never varies cannot improve; one that varies and is
+never differentially retained is noise; one nobody copies is not transmitted at
+all. And when `selects()` refuses it **names the missing leg**, because "this is
+not a meme" is unactionable and "copies never differ, so it cannot improve" is a
+fix.
+
+★★★ **Popper-Deutsch, with the category error avoided.** Being unfalsifiable is
+not the fault; being unfalsifiable *and* retained is. A bag of rice makes no claim
+and cannot be wrong — a check that called it anti-rational would cry wolf at the
+entire pantry. So `makes_a_claim()` is false for Resource and Network, and
+`anti_rational()` needs claim-making, uncriticisable **and** actually retained,
+because each alone is ordinary: an untested idea nobody copies harms nobody, and a
+falsifiable idea that spreads is just an idea that is working.
+
+★★★ **The dangerous meme is not the wrong one.** A wrong Model loses to a better
+one on the evidence. A Model that admits no evidence never loses — it does not
+win on the evidence, it wins by admitting none. That sentence is the row.
+
+★★ `Criticism::Falsifiable` requires naming *by what* — "it is falsifiable" with
+nothing named is itself an unfalsifiable claim. And a claim with **no criticism
+declared** is a separate finding from one that escapes criticism: a blank somebody
+can fill in and a shape that resists filling need different fixes.
+
+★★ Deliberately distinct from `package::Kind`, which asks what can be
+*published*. This asks what is being *copied*, and a Resource is copied between
+households without being a publishable artifact.
+
+### `feat/event-payload` — merged into `dev` 29 Aug — **EVT-1 complete**
+
+**Off:** `dev` / gate green (core 1,897 / host 245).
+
+**Six of seven fields, and the seventh had a good reason for being missing.**
+`payload` lived on `EmittedEvent` at execution time and never reached the durable
+record, because nothing bridged the two. The row deliberately stayed open rather
+than gaining a field nobody populated — which would have closed it on paper.
+
+★★★ **What was actually missing was the bridge, and the split is the point.** The
+*values* are the host: an id, the two clocks, where it came from. The *bridge* is
+the core. So `Event::from_emitted()` is the one way across, and a host cannot
+assemble an `Event` by hand and drop the payload on the way.
+
+★★ **Additive exactly as `t_ingest` and `source` were** — `#[serde(default)]` on
+an `Option`, so a pre-slice wire record still deserialises and reads as *carried
+no payload* rather than as an empty one. `backfilled()` sets `None`, because *we
+never had one* and *the Enzyme emitted nothing* are different claims.
+
+★★ **The host durable format is untouched**, checked rather than assumed:
+`apps/mycelium` serialises its own `LoggedEvent`, so nothing on the device had to
+change. Eighteen call sites across core and the conformance tests needed the new
+field; the host needed none, which is itself the evidence that the boundary is
+where the ADR says it is.
+
+### `feat/two-surfaces-one-truth` — merged into `dev` 29 Aug — **CAP-15, + CAP-11 and CAP-2**
+
+**Off:** `dev` / gate green (core 1,893 / host 245).
+
+**"Two surfaces, one truth" was a claim nothing checked.** Mycelium and Orchie are
+supposed to be projections of the same object differing only in budget, and until
+now that was a sentence in a document.
+
+★★★ **It is checkable, and now checked: the views must nest.** Whatever the phone
+shows, the laptop shows too. If the small view ever holds something the large one
+does not, they are not two views of one truth — they are two answers, and a person
+moving between them is reading two systems that happen to share a login.
+
+★★★ **The failure would be invisible from either surface alone.** Each looks
+internally consistent. Only composing at two budgets and comparing can catch it,
+which is exactly why this had to be a check rather than a comment.
+
+★★ **Nesting is one-directional** — the laptop showing more is what a larger
+budget *is*. `only_on_the_larger()` names what the phone is not showing, because
+*"three other things stayed quiet"* is only true if somebody can say which three,
+and `extra_budget_bought_something()` answers whether the bigger surface is a
+larger view of the truth or the same view with more room.
+
+★★ **Checked at every budget between the two**, not only at the ends: an
+unstable ordering could hold at K=4 and K=64 and break at K=5, and an end-to-end
+check would have missed it. The divergence case is constructed too — a check
+that has never been seen to fail is one nobody knows the shape of.
+
+**Two more capstone rows closed by reading:**
+
+- **CAP-11** — **the fifth stale row today.** Its open leg was *the authoring
+  language*, closed by M-DSL Phase 4 earlier in this same run: `surface.rs`
+  (many surfaces, one AST), `embroidery.rs` (Enzymes authored as data rather than
+  compiled Rust), `lift.rs` (when a definition earns its keep).
+- **CAP-2** — complete as far as it is code. `sigma.rs` is the one recursive type,
+  and Corollary 2 is now *checked* rather than argued (`duality.rs`). The theorem
+  is the design justification, not a function — the fixpoint is what the type
+  system already refuses to let you break.
+
+### `feat/default-council` — merged into `dev` 29 Aug — **OPV-2**
+
+**Off:** `dev` / gate green (core 1,887 / host 245).
+
+★★★ **Orchie has a seat.** The Note Correction stood as the diagnosis for weeks:
+the member that is structurally required — the only path to a person, and
+therefore the only path to an approval token — was the one nothing enumerated. A
+council you cannot enumerate is one you cannot check Corollary 1 against.
+
+★★★ **And its lack of a graph is declared rather than empty.** `Means::NotOverState`.
+Orchie duties are over the council, not over state; forcing it into a `Dag` would
+have made it look like a councillor that happens to call no operators, which is a
+worse lie than the absence was.
+
+★★★ **Corollary 1 is checked rather than reassuring.** No capability:
+`adds_capability_beyond()` is empty against the shipped registry, and every
+councillor graph **typechecks against the real `Registry::default()`** rather than
+a mock — a default council that does not typecheck is one that fails on the
+household first real message instead of in a test. No risk: a graph is data,
+nothing on `Member` executes, and no member reaches a `test.*` operator.
+
+**Finding — a seat with nothing to act through.** Navigator remit is *who is in
+this household*, and it has no operator behind it: `roster.admit` turns out to be
+a **test-only fixture** inside `#[cfg(test)]`, and membership lives in
+`principal.rs` as data rather than something an operative can move. The obvious
+move was to write a real `roster.admit` — which would be adding a capability to
+satisfy a list I had just written, backwards, and precisely what Corollary 1
+exists to make visible. Recorded as `Means::AwaitingAnOperator` with what it
+needs, and `seats_that_cannot_act()` reports it. **A council with a silent member
+has a coverage claim smaller than its roster, and nothing else would have said so.**
+
+### `feat/provenance-thread` — merged into `dev` 29 Aug — **CAP-12, and three capstone seams closed with it**
+
+**Off:** `dev` / gate green (core 1,874 / host 245).
+
+> *"Break the thread anywhere and the audit becomes a list of assertions."*
+
+**The three links existed separately and were never joined.** A device is
+registered, an event carries a source and a principal, an approval binds a
+principal to an act. Each is sound alone, and *"Bonnie approved this payment"* is
+still worthless if nobody can say which device reported the transaction he
+approved it against — because then the thing he approved is only an assertion
+that a transaction happened.
+
+★★★ **So a broken thread is a named outcome, never a slightly weaker one.**
+`Provenance::Broken` carries where it broke and `attributable_to()` returns
+`Option`, so a partial thread cannot be reported as somebody act by a caller that
+forgot to check. The row own sentence, made structural.
+
+★★★ **The break that matters most is the one that is not an absence.**
+`ApprovedBySomebodyElse`: a thread running end to end through two *different*
+people looks complete from either end — the device really did report it, and
+somebody really did approve it.
+
+★★ A source naming an unregistered device is a different finding from no source
+at all: one is a gap in the record, the other points at something that does not
+exist, and only the second means go and look. The **earliest** break is reported,
+because a later one is its symptom and fixing the symptom wastes the trip.
+
+★★ An ordinary read needs no approval and is still fully attributed — demanding
+one for every observation would make ordinary reads look unattributed, which
+trains people to ignore the report.
+
+**Three capstone seams closed alongside it, by reading rather than building:**
+
+- **CAP-10** — its last leg was *audit / immune-memory reads*. `telemetry.rs`
+  (this morning) is the audit read; `immune.rs` (this afternoon) is literally the
+  substrate on which *this has happened before* and *this has never happened
+  before* are both answerable.
+- **CAP-19** — SIMULATE, OPTIMISE and OBSERVE were the open legs of the thesis
+  loop, and `horizon`/`probe`, `score`/`reach`/`strong_admit`, and `telemetry`
+  respectively closed them today. Driving the loop on a clock stays host-side,
+  because the core has no clock.
+- **CAP-7** — **the fourth stale row of the day.** It said only duty 6, the
+  boundary firewall `F`, remained, blocked on the membership predicate. `F`
+  shipped on 17 Aug as `flow.rs`, and **IMM-1 own status has said so since** —
+  the two rows disagreed with each other for twelve days and neither noticed.
+
+### `feat/intrinsic-intake-key` — merged into `dev` 29 Aug — **ING-5**
+
+**Off:** `dev` / gate green (core 1,863 / host 245).
+
+**`at-least-once` composed with `idempotent` is exactly-once only if the key is a
+property of the FACT.** Two wrong keys were available and both are named:
+
+★★★ **A generated id partitions by arrival.** Mint a UUID per captured message
+and the same transaction arriving twice gets two ids and applies twice — the
+retry the outbox exists to make safe becomes the thing that doubles somebody
+rent. The refusal is structural: `key_for()` takes a sustain, a source, the parsed
+fields and the raw text, and there is nowhere for a minted id to arrive.
+
+★★★ **A text hash partitions by wording**, which is the gap that was actually
+open. One sender re-sending a transaction with a reformatted date and a changed
+footer produces a different digest and applies it a second time. A test asserts
+the two real-shaped texts genuinely hash differently, so the row is proven to be
+buying something rather than assumed to be.
+
+★★★ **It closes an assumption `correlation.rs` was resting on.** Its
+`find_duplicates` deliberately never looks within one source, on the grounds that
+*"two identical-reference messages from the same sender are the raw-text dedup
+business, and it already handles them"*. That was true only for byte-identical
+re-sends — a carrier reformat slipped past both. The comment is corrected in this
+branch, and the deferral now rests on a fact rather than nearly-a-fact.
+
+★★★ **Cross-source still surfaces rather than suppresses**, unchanged and
+deliberate. `correlation.rs` argues that case at length: silently dropping the
+second message means a genuinely separate transaction that happened to share a
+reference vanishes without trace. So the KCB-and-M-Pesa pair is still two captures
+and still a question for a person. What changed is only the case within one
+sender, where a repeat really is a repeat.
+
+★★ The key includes the **amount**, reusing `correlation.rs` own earlier
+finding rather than re-deriving it — a reference collision that swallowed a real
+transaction is what put the amount in that key. And the reference floor is
+delegated to `reference_of`, so intake and correlation cannot disagree about what
+counts as a code.
+
+### `feat/log-detection` — merged into `dev` 29 Aug — **IMM-12**
+
+**Off:** `dev` / gate green (core 1,851 / host 245).
+
+**Its own row said this was correctly last**, because a detector over an
+unmediated system reports a hole it cannot close. The system is mediated now —
+IMM-1, IMM-7, CON-10 — so this was the moment.
+
+★★★ **The base-rate limit is arithmetic, not caution.** A detector that is 99%
+accurate, over a household where one event in ten thousand is genuinely hostile,
+has a precision under one percent. Treating that as a denial means blocking a
+hundred legitimate acts to stop one attack, and the household turns the detector
+off by the end of the week.
+
+★★★ **So the return type is the argument.** There is no branch of `flag()` that
+can produce a `Deny`, however good the declared rates are, because confidence is
+not what is missing — the base rate is. `false_alarms_per_real()` exists to put
+the decisive number in front of whoever wants the detector to block things: "97%
+accurate" persuades, "you will investigate a hundred innocent transactions for
+every real one" decides.
+
+★★★ **A heartbeat may deny, and it is the only thing here that may.** A declared
+expectation checked deterministically has no false-positive rate to multiply by a
+base rate. "It promised to speak every day and has not spoken for three" is a fact
+about a promise, not a classification.
+
+★★★ **Negative selection carries its own known failure, disclosed.** An immune
+system that matures alongside a pathogen learns to tolerate it, and a detector
+that learns "normal" from a window containing an attack learns the attack as
+normal. `tolerated_during_training()` answers *was this learned, and from which
+window* — a detector that cannot distinguish that is one nobody can audit after
+an incident. A test learns an attacker as self from a compromised window, confirms
+it now reads as quiet, and confirms the window is still recoverable.
+
+★★ A `Shape` is coarse on purpose — including the amount would make every
+payment its own novelty, and a detector that flags everything has told you
+nothing. `coverage()` makes the self-set usefulness a number rather than a
+feeling, `grouped()` makes four hundred repeats one finding, and a detector that
+has never fired has **no** precision rather than a perfect one, because a metric
+that flatters silence is one people learn to game.
+
+### `chore/verify-opv29` — merged into `dev` 29 Aug — **OPV-29 verified**
+
+**Docs only.** The row said *"route is OPV-28 and stays unbuilt"*. OPV-28 has since
+landed (`mixture.rs`, 16 Aug), and `presentation::discharged_by_this_build()`
+reports all three of Orchie's duties as `Discharge::Built` — route, hold the
+whole, and present the frontier. Nothing needed building; the row needed reading.
+
+Third stale row found this session, after IMM-7 and EVT-14. The pattern is worth
+naming: a row that names a dependency ("blocked on X") does not update itself when
+X lands, so the tracker drifts pessimistic and work gets rebuilt. `Discharge` is
+the antidote that already existed here — the code says what it discharged, so
+checking took a grep rather than a judgment.
+
+### `feat/duality-and-depth` — merged into `dev` 29 Aug — **OPV-9 + OPV-10**
+
+**Off:** `dev` / gate green (core 1,838 / host 245).
+
+**Two quantifiers, and the row is about how they interact.** (A) every agent holds
+both halves — it proposes and it judges. (B) the same duality recurs at all three
+scales. Reading (B) as licence to violate (A) rebuilds the half-mind council.
+
+★★★ **That failure is seductive because it sounds like architecture.** "The
+duality lives at the Orchie-Council scale, so a councillor need only propose" is a
+clean sentence, and what it builds is a room of suggesters with one judge at the
+top — a single mind with helpers, at which point every claim about independent
+judgment made anywhere else in this system quietly stops being true.
+`Violation::HalfMindExcusedByScale` exists so the excuse has a name.
+
+★★ **A half-mind nobody noticed and one that was argued for are different
+findings**, and the excuse is kept rather than discarded, because they get fixed
+differently: one is an oversight, the other is a belief somebody holds and will
+re-introduce.
+
+★★ **(B) is checked only over occupied scales.** Demanding a whole agent at a
+scale nobody has built yet would report a hole in a system that never claimed to
+have one.
+
+★★★ **OPV-10: there is deliberately no `SubOperative` type.** `compose()` takes
+and returns `Sigma`. Having one would be the claim that depth is a different kind
+of thing, and the composition law says it is not.
+
+★★★ **Corollary 2 is checked rather than asserted.** `depth_never_adds_power()`
+runs the same action against the full path and against every prefix. If a deeper
+path ever admitted what a shallower one refused, the composition would not be a
+conjunction — and the conjunction is the only thing holding the whole holon
+argument up.
+
+★★★ **Sub-region containment is enumerated, not symbolic**, for the same reason
+`kernel.rs` enumerates: containment of two interval-plus-relation regions is not
+decidable in general, and a symbolic answer that was sometimes wrong would be
+worse than an honest sample.
+
+**Finding — a test that passed for the wrong reason.** The first draft of the
+depth fixture set `before == after`. `admissible_along` refuses only a *newly
+caused* breach, so that fixture could never be refused at all, and the test
+asserting "a deeper level refusing is ordinary" was asserting nothing. Fixed by
+supplying both readings, with a comment on the fixture saying why.
+
+### `feat/llm-as-proposal` — merged into `dev` 29 Aug — **OPV-23**
+
+**Off:** `dev` · gate green (core 1,826 · host 245).
+
+**Correctness does not depend on `g`. Only efficiency does.** The
+Metropolis—Hastings posture, and AlphaGo's: a bad proposal distribution wastes
+compute and cannot produce a wrong result, because nothing reaches state except
+through a verifier that never asked where the candidate came from.
+
+★★★ **Made into a test rather than asserted in prose.** A deliberately terrible
+generator and an ideal one are sifted by the same checker, and every admitted
+move from *both* is asserted valid. What differs between them is the waste, and
+only the waste.
+
+★★★ **The signature is the safety argument.** `verify(proposal, check)` takes the
+move's content and a checker, and there is no parameter through which a
+confidence, a generator name or a reputation could reach the decision — so *"the
+model was confident" is not an argument* is structural rather than a rule
+somebody keeps. The confidence is still carried on the `Proposal`, because it is
+real evidence **about the generator**; it is simply not reachable from the
+verdict. A test gives two identical wrong moves opposite confidences and asserts
+the verdicts are equal, and another checks the reverse — a diffident correct move
+is admitted, because a verifier that quietly favoured confidence would be
+penalising honesty.
+
+★★★ **Note Correction 4, answered by shape.** The row names the real failure: a
+`call_claude()` whose return value gets acted on is a method call, **not an
+element of `T`** — by the time it returns, the decision has been made somewhere
+the gate cannot see. A `Proposal` here is data naming a move and has no method
+that performs one.
+
+★★ **`acceptance_rate` reads the generator, and says so in its own doc.** A
+council that started treating a low rate as a safety problem would be one step
+from lowering the bar to raise the number. An empty run has *no* rate rather than
+a perfect one — a metric that flatters an idle generator is one people learn to
+game.
+
+★★ **Every proposal is checked**, with no early exit on the first acceptance:
+"the first one that passed" is a property of the order the generator happened to
+emit them in. And a rejection reason is about the **move** — "no such pocket" is
+fixable, "your model is unreliable" is not.
+
+### `feat/vector-utility` — merged into `dev` 29 Aug — **OPV-25 + OPV-21**
+
+**Off:** `dev` · gate green (core 1,816 · host 245). OPV-21's own row predicted it
+would close the moment `u` became a vector, and it did — in the same branch,
+without a new object.
+
+**Arrow's wall is real and the escape is an assumption, not a trick.** No ordinal
+rule over three or more options satisfies unrestricted domain, Pareto,
+independence and non-dictatorship together. Sen and Harsanyi's escape is cardinal
+*interpersonally comparable* utilities — and that comparability is a claim
+somebody makes, never a property the numbers have.
+
+★★★ **So `Comparability::Undeclared` refuses interpersonal aggregation.** Without
+the claim, adding one person's 0.8 to another's 0.6 is arithmetic on two scales
+that happen to share a font. ★★★ **And the wall is in the right place**: a person
+weighing their own money against their own quiet needs no claim about a
+neighbour, and refusing that would be a wall in the wrong place — tested
+explicitly, because it is the easy over-correction.
+
+★★★ **`u` is a vector all the way to presentation.** `scalarise` is named so a
+reader sees where it is flattened rather than discovering it later. A test shows
+two genuinely different options — good for the money, good for the quiet —
+collapsing to one identical number: once summed, the disagreement that made it a
+choice is gone and nothing downstream can recover it.
+
+★★★ **`Ranked` has no `winner()`.** Reaching one option is
+`presentation::collapse`'s job, with its declared rule and its report of what it
+dropped. A top id handed back here would route around exactly the discipline
+§XIII asks for.
+
+★★ **An axis nobody weighed contributes nothing**, and `unweighted_axes()` makes
+that askable. A default weight of one would let an axis nobody thought about
+decide an outcome — a preference expressed by forgetting.
+
+★★ **The frontier is computed weightlessly**, from dominance alone, so it
+survives disagreement about the weights themselves. That is why a frontier can be
+honest where a total cannot.
+
+★★★ **Russell's caution, structural.** `APPRAISAL_AXES` is a `const` list, not an
+enum — an enum would make those ten the only expressible axes, which is the claim
+the caution says nobody may make. A `Utility` may carry "the way the kitchen feels
+on a Sunday", and a test says so. An emotion here is an appraisal with a sign and
+a weight, and there is no type that could hold anything more.
+
+### `feat/domain-engine-matrix` — merged into `dev` 29 Aug — **CAP-13**
+
+**Off:** `dev` · gate green (core 1,804 · host 245).
+
+**Sixteen cells, and the two that say DO NOT are why it is a matrix and not a
+sentence.** Three of the four engines run in all four regimes with only a change
+of manner. `Model` and `Learn` have a regime where the honest output is a
+refusal: a model of a chaotic system produces a confident wrong answer and a
+person acts on it, which is strictly worse than having none; learning from one
+fits noise and then carries the noise into every later decision that reads the
+parameter.
+
+★★★ **Refusing is not degrading.** A "reduced-confidence model" in chaos is the
+same wrong number in a smaller font, so `Behaviour::Refuse` has no value in it to
+read at all.
+
+★★★ **Disorder arrives exactly as §VII asks — as confidence over the estimate.**
+`Estimate` has no constructor that omits confidence, and a `Known(Complicated)`
+at 51% is disorder *however definite its label looks*: the label is not evidence
+of itself. A bare majority over four options is barely above chance, and routing
+an expert method on it is the failure the fifth state exists to name. Below the
+floor the matrix cannot be indexed and the answer is `Surface` — never a default
+row, because picking one anyway is how an unrecognised situation gets handled as
+a familiar one.
+
+★★ **`Model × Complex` is `Bounded`, carrying OPV-13's `H*` as its limit.** "It
+works, with a limit" and "it works" are different promises, and one variant for
+both loses the limit at the first call site that does not read the prose.
+
+★★ **`Observe` survives every regime**, because it assumes nothing about the
+regime — it reports what the log holds. That is why it is the thing left standing
+when the rest stops, and `refused_in()` makes "what can we still do here" askable
+as a set rather than one engine at a time.
+
+⬜ The classifier half — a Monitor producing the estimate from CUSUM
+regime-change detection — stays open. This branch builds what consumes it, and
+`cynefin.rs`'s "supplied, never computed here" discipline is untouched.
+
+### `feat/device-as-sustain` — merged into `dev` 29 Aug — **ING-9**
+
+**Off:** `dev` · gate green (core 1,793 · host 245). Desktop installers rebuilt
+green from this tree (v0.3.2 MSI + NSIS).
+
+**A device is a Sustain, not a table with a `last_seen` column.** It has state, it
+has a region it is meant to stay inside, and it leaves that region in ways that
+matter — so the machinery that already watches a household watches the phone, and
+staleness is an ordinary invariant rather than alarm code somebody wrote by hand
+next to the ingest path. `queue_depth ≤ max` is a bound like any other.
+
+★★★ **A dead device cannot report that it is dead**, and the type says so.
+`Reading::FromTheDevice` has no liveness field to read, and `is_stale()` returns
+`Option` so the device's own reading answers `None`. Every other dimension here
+is self-reported, and self-reporting is exactly what stops when the thing fails —
+so `t_last_ack` is written by the **receiver** from its own clock, from the one
+seat that can see an absence.
+
+★★★ **A test found a real design error in the first draft.** It claimed a missing
+dimension "simply is not bounded"; `Region` correctly refuses to measure a
+distance it has no number for. The fix is a third reading, not a swallowed error:
+a device that stopped reporting its battery is `Health::Unmeasurable` — neither
+fine nor drifting. Calling it healthy is precisely how a silent failure reads as a
+quiet week. And only a *missing reading* becomes `Unmeasurable`; a malformed
+region stays an error, or a declaration bug would hide behind a phone.
+
+★★ **Never having spoken is not the same as having stopped.** Only one is a
+fault, and a newly registered device should not raise one.
+
+★★ **Battery is bounded below only.** There is no such thing as too much charge,
+and a two-sided interval would report a fully charged phone as drifting.
+
+### `fix/retry-is-a-decision` — merged into `dev` 29 Aug — **EVT-14 verified, and a contradiction found**
+
+**Off:** `dev` · gate green (core 1,780 · host 245).
+
+**EVT-14 was already built and the tracker said otherwise** — the same stale-row
+class as IMM-7. `effect_journal.rs` already had all four clauses: two events
+rather than one, `apply_can_send()` returning `false` as an *executable* claim
+rather than a comment, and no-re-fire structurally (a fold applies opaque
+mutations; there is no channel in that path to send anything down). Closing the
+row was a verification job, not a build.
+
+**And the verification found a real contradiction with `feat/egress-asymmetry`,
+which had landed an hour earlier.** `effect_journal` said a failed send is never
+automatically re-sent — a retry always requires a person. `egress` said a
+declared-reversible act may retry itself up to a bound. Two modules in one crate,
+disagreeing about the same act.
+
+★★★ **The resolution is that they were answering different questions.** The
+journal owns the **audit** rule: a retry is never invisible, it is a second
+`Decided` event, and the log shows two decisions rather than pretending one
+attempt happened twice. `egress` owns the **authority** rule: who may make that
+decision — a person for an irreversible act, and the system itself for one whose
+reversibility is declared with the compensating act named. The journal's wording
+ran the two together, and taken literally it would have made Sustena interrupt
+somebody over a cancellable draft. Interrupting people about things that do not
+need them is how a gate stops being read.
+
+★★ `egress::retry_must_be_journalled` now states the obligation in code rather
+than leaving it as agreement between two doc comments, and its test says why the
+earlier draft was wrong.
+
+### `feat/council-independence` — merged into `dev` 29 Aug — **OPV-12 + OPV-26**
+
+**Off:** `dev` · gate green (core 1,779 · host 245).
+
+**Condorcet needs independent votes, and a council of forks does not have them.**
+Five councillors reasoning under one world model are not five draws from the
+world; they are one draw reported five times. The comfort of a large `N` with the
+accuracy of a small one — and it is invisible from inside, because a unanimous
+council looks like strong evidence whether the agreement came from the world or
+from the model they were all handed.
+
+★★★ **Forks buy independence of sampling, not of assumptions**, and a test proves
+it rather than the docs asserting it: three councillors, three genuinely distinct
+sandboxes, effective N of one. OPV-12 was blocked on `M_world` existing; a
+`WorldModel` with a declared fidelity claim is that object.
+
+★★★ **`effective_n` is a ceiling and is named so.** `at_most()` exists so a
+caller reading the number aloud says the qualification with it. Distinct models
+may still share assumptions — written by one person, from one dataset, on one
+afternoon — and nobody inside the system can say by how much. That is §XIII's own
+words, and a number presented here as a measurement would be the very failure it
+is reporting.
+
+★★★ **A unanimous single-model council reads as `TheModelTalking`.** Not as weak
+evidence — as no evidence about the world at all. The dangerous case is the one
+that looks best.
+
+★★ **Both of §XIII's mitigations are objects rather than advice.** `Fidelity` is
+declared per model, and `Undeclared` covers **nothing** rather than everything:
+the undeclared claim is the one that never gets checked, so a councillor whose
+model never claimed to know about this topic is named — it is adding a number,
+not a judgment. Letting councillors legitimately differ in `M_world` is the only
+thing that raises the effective N at all.
+
+★★ **A reused sandbox is reported as a separate, cruder failure.** Sharing a
+model is subtle; sharing a fork means they did not even reason separately.
+
+### `feat/scenario-probe` — merged into `dev` 29 Aug — **OPV-15**
+
+**Off:** `dev` · gate green (core 1,768 · host 245).
+
+**The bridge out of the complicated domain.** Optimisation asks what is best
+*given the world works like this*. In a complex domain nobody knows that it does,
+and an answer that is best under one starting point and catastrophic under a
+neighbouring one is not an answer — it is a bet nobody was shown.
+
+★★★ **The disagreement is the finding, and it is never collapsed.** If one
+candidate wins on a good opening and another on a late salary, that *is* what the
+probe produced: the household is being told which decision depends on how the
+month opens. `contested_between()` names which start prefers which. A single
+ranked winner destroys that information and looks more confident for having
+destroyed it.
+
+★★★ **A canon translation, declared rather than done quietly.** §VIII says
+*sample* declared perturbations. This core has no random source by construction —
+the same constraint `outbox.rs` met by deriving jitter from the message id — so
+here the declared perturbations **are** the sample. That is not a weakening: an
+enumerated set is reproducible, so a probe run twice gives the same front and
+"why did it recommend that in March" has an answer. A random sample would give a
+different front from identical inputs, which is the worse property for something
+a person is asked to act on. Asserted as a test rather than claimed here.
+
+★★★ **The front carries its horizon.** A front without one is a recommendation
+with the "for how long" taken off.
+
+★★ **Dominated candidates are reported with who beat them.** "Dropped because
+`allocate` was at least as good everywhere and better when the salary is late" is
+a finding; an absence is not.
+
+★★ **A candidate not run under every starting point is neither dominant nor
+dominated** — it has not beaten anything there, and it has not lost either.
+
+### `feat/candidate-score` — merged into `dev` 29 Aug — **OPV-18**
+
+**Off:** `dev` · gate green (core 1,758 · host 245). Only buildable once CON-10
+gave it `Viab` and OPV-20 gave it `ΔReach`.
+
+`score = Δu + β·1[∀k viable] + γ·ΔReach_H`. Three terms, and the content is in
+what each refuses to be.
+
+★★★ **Viability is a property of the trajectory.** `viability_of` takes the whole
+path and there is deliberately no overload taking an endpoint. A plan that empties
+the rent pocket in week two and refills it in week four *ends* exactly where a
+plan that never touched it ends — and one of them has a fortnight in it where the
+household cannot pay rent. Scoring the endpoint rates them identically, which is
+not a rounding error.
+
+★★★ **An indicator, not a graded penalty.** Tested rather than asserted: ten
+times the utility still does not buy the trip through ruin, and the term costs
+the same however shallow the dip was. A depth-proportional penalty would be
+smoother and would let a large enough `Δu` purchase exactly the trade this term
+exists to forbid.
+
+★★★ **`γ = 0` refuses every beaver dam, and it is a policy with a name.** A dam
+has no immediate utility; its whole value is the room it leaves. At zero it loses
+to a trinket, and `refuses_positioning()` exists so that reads as a decision
+rather than an absent parameter.
+
+★★★ **A horizon-kernel state does not earn the bonus.** `Viab^H` is a superset of
+the true kernel, so the state may still be doomed — paying the guarantee bonus on
+it is paying for the optimism.
+
+★★ **A limitation left visible rather than patched.** One β and an indicator
+means *we could not tell* lands exactly where *we watched it fail* does. Adding a
+second weight would be adding a parameter the canon does not declare, so the
+distinction is carried in `is_known_failure()`, where a caller with a tie can
+break it on evidence without anybody's score moving. The test asserts the numbers
+genuinely cannot tell them apart, so the gap is recorded rather than assumed away.
+
+★★ The terms survive the sum. A ranked list of bare numbers cannot answer *why is
+this one above that one*, which is the question a person asks of a recommendation.
+
+### `feat/positioning-reach` — merged into `dev` 29 Aug — **OPV-20**
+
+**Off:** `dev` · gate green (core 1,745 · host 245).
+
+**An act can be right on today's numbers and wrong on tomorrow's options.**
+Clearing a pocket to the shilling and clearing a loan can move a balance
+identically and leave completely different rooms to move in. Utility alone cannot
+see the difference; `ΔReach` is the term that can.
+
+★★★ **Counting reachable states is not measuring freedom.** A discretisation that
+splits one situation into ten near-identical states multiplies the count by ten
+and changes nothing about the household — and the number *looks* like a
+measurement while being an artefact of how somebody chose to enumerate. So `μ`
+carries declared weights, an undeclared state weighs **zero** (a measure whose
+value depends on what somebody forgot to list is not a measure), and raw counting
+exists only as `Measure::counting()`, spelled out so a reader can see it was
+chosen. A test shows the ten-way split scoring ten times higher under counting
+and identically under a declared μ.
+
+★★★ **The under-estimate rides on the answer.** `Reach_H ⊆ Reach_∞`, so a bounded
+`ΔReach` under-states positioning — worst for exactly the acts that pay off
+latest. That bias is systematic and one-directional, which makes it correctable
+by a reader who is told and invisible to one who is not, so `describe()` says *a
+floor and not a figure*. If either side is still growing the difference is
+truncated, so the caveat is not lost by one side happening to close.
+
+★★★ **Chaos and budget are different reasons to stop, and only one is a reason to
+buy compute.** `StoppedBy::Budget` says more compute would see further;
+`StoppedBy::Chaos` says it would see further into the arithmetic and no further
+into the world. An unknown horizon honours the budget and is **labelled**, never
+quietly treated as unbounded.
+
+★★ `Move::lands_on` was made public rather than re-implementing the transition in
+this module. Two definitions of "a legal move" would let the reach and the kernel
+disagree about what the system can do, and the disagreement would be silent.
+
+### `feat/simulation-horizon` — merged into `dev` 29 Aug — **OPV-13**
+
+**Off:** `dev` · gate green (core 1,733 · host 245).
+
+**`H* ≈ (1/λ)·ln(ε/|δ₀|)`.** Past `H*` a simulator is spending compute on noise
+and reporting it as a result. Two households differing by one shilling diverge
+exponentially under a chaotic transition model, and after enough steps the
+trajectory says nothing about *this* household — only about the arithmetic. A
+number returned without its horizon is false by omission.
+
+★★★ **So the horizon is part of the answer.** `Bounded<T>::read()` returns
+`Option`: a reading past its own horizon has no value to take. A flag beside a
+number is one a caller can forget to check; this one cannot be.
+
+★★★ **λ is measured or it is `Unknown`.** An assumed exponent produces a horizon
+that looks like a measurement, and one wrong in the generous direction licenses
+exactly the compute it should refuse — so `Unknown` covers *nothing*, not
+everything. Below five usable separations there is no estimate, and a pair too
+close to resolve is skipped rather than clamped to the floor, which would invent
+a growth rate out of the floor's own value.
+
+★★★ **`Unbounded` is not called `Infinite`.** λ ≤ 0 says chaos does not bound
+this. An unmodelled event, a changed rule or somebody deciding differently all
+still end a forecast, and a name promising forever would be silent about them.
+
+★★ **The logarithm, made askable.** `steps_bought_by(factor, λ) = ln(factor)/λ`,
+and it does not depend on where you started. The instinct on being told a
+forecast is short is to measure more carefully; against a chaotic system ten
+times the precision buys three steps, and now that is a number somebody can look
+at before funding it.
+
+★★ **`ε ≤ δ₀` reports zero, not a negative.** "You cannot simulate this usefully
+at all" is a real answer a caller can act on.
+
+### `feat/structural-secret-detector` — merged into `dev` 29 Aug — **IMM-11**
+
+**Off:** `dev` · gate green (core 1,721 · host 245).
+
+**Three layers checking the same ten regexes are one layer written three times.**
+The Android filter, the ingest engine and the transducer each refuse a message
+carrying a one-time secret, and that reads as defence in depth until you ask what
+happens when the vocabulary misses: all three miss together, for the same reason.
+Layering buys **independence of failure**, not a count.
+
+★★★ **So the second detector reads no words at all.** A bare 4–8 digit code —
+necessary and not sufficient, because a real paybill confirmation genuinely
+contains a bare eight-digit account number — plus three of four shape features:
+no transaction reference, brief, a shouted three-word run, no figure quoted in
+cents. Combined with the vocabulary by **OR**, because the costs are not
+symmetric: a false positive is one capture somebody re-enters, a false negative
+is a live credential in a database.
+
+★★★ **Independence proven rather than claimed, in both directions.** A credential
+message in Swahili passes the ten regexes completely untouched and is refused on
+shape; a wordy warning containing no code at all is invisible to shape and caught
+by vocabulary. Before this branch the Swahili message parsed as ordinary text and
+was stored.
+
+★★ **Calibrated against the real corpus, and it moved the design.** The obvious
+structural rule is "a credential message does not mention money" — and the real
+OTP sample names a USD transaction, so that rule would have missed the one
+message it was written for. It is caught on `no_cents` instead: money is quoted
+to two places and `113.8` is not. All eight real transaction shapes stay in the
+tests as a standing negative control, because a detector that refuses real
+payments is one somebody turns off, and then there is no second layer at all.
+
+★★ **A real bug the corpus found.** The first pass disqualified any token
+containing a full stop as an amount, which read the sentence-ending period in
+`000000.` as a decimal point and missed a real TAN code. Separators are only
+amount-markers **between** digits.
+
+⚠ **Disclosed, not done: the Android copy.** The device-side Java filter still
+has only the vocabulary. Writing a fourth hand-synced copy of a detector would
+re-create the exact coupling this row exists to break, and the right fix is for
+the phone to call one shared check — a larger change than this branch. **Until
+then this layer protects the store, not the wire**: a credential in unfamiliar
+wording still leaves the phone before anything refuses it.
+
+### `feat/metrics-traces` — merged into `dev` 29 Aug — **MON-3**
+
+**Off:** `dev` · gate green (core 1,708 · host 245).
+
+**Three pillars, and two of them were already in the third.** §III asks for
+Metrics, Logs and Traces. Logs shipped long ago as the event log. Building the
+other two as separate stores is the conventional shape and it would have been the
+state-cache mistake a second time — a counter written *beside* the log by the same
+code can disagree with it, and nothing can say which is wrong.
+
+★★★ **Nothing here is stored.** A metric is a fold evaluated on read; a trace is
+the `causes` graph the log already is. They cannot drift because there is no
+second write path to be inconsistent with the first. The cost is named rather
+than hidden: every read is a scan. That is right at a household's volume and
+wrong at a million events a second, and when it stops being right the answer is a
+cache that is provably a fold — not a second writer.
+
+★★★ **A span has no duration.** OpenTelemetry's carries `start` and `end`; an
+event carries `t_event` and nothing about how long anything took. Deriving one —
+"it ended when the next event began" — would be a fabricated measurement, and a
+fabricated measurement is worse than an absent one because it looks like
+evidence. `elapsed_ms` is the reading that genuinely exists: how long the world
+took to finish reacting to a cause, which is explicitly not CPU time.
+
+★★★ **`TraceCollector` declined.** `causes` is written when the events are, so a
+collector would be a second recording of a fact the log already holds — the same
+objection as the metrics store, one layer up.
+
+★★ **Multiple causes are kept.** An event can have several, and picking the first
+to force a tree invents a causality nobody recorded. **An orphan is reported, not
+reparented**: a window boundary is not an origin, and making one a root turns "we
+did not fetch far enough back" into "this is where it started". Traversal is
+bounded by span count, so a malformed window terminates and reports instead of
+overflowing.
+
+★★ **`LabelOf` is an enum, and that is the cardinality defence.** The unbounded
+label values here would be payload text — a merchant name, a typed description.
+Naming the legal sources exhaustively means a free-text label cannot be declared
+by mistake. `cardinality()` is askable because a cardinality failure is never
+caught by a series being *wrong*; every one is individually correct, and there
+are fifty thousand of them.
+
+### `feat/egress-asymmetry` — merged into `dev` 29 Aug — **ING-11**
+
+**Off:** `dev` · gate green (core 1,693 · host 245).
+
+**Egress is not ingest run backwards.** `outbox.rs` retries on `Unknown` and is
+right to — the destination is this engine, capture is keyed by fact, a duplicate
+is swallowed. Egress cannot borrow that: **we cannot make someone else's receiver
+idempotent.** There is no key to send, nobody to ask to honour it, and a second
+send of the same payment is a second payment.
+
+★★★ **The same `Unknown` produces opposite correct answers on the two sides**,
+and the test asserts both in one place rather than describing the difference in a
+comment. It is the whole row: identical input, opposite disposition, and the only
+thing that changed is who owns the receiver.
+
+★★★ **`Reversibility::Unknown` is treated as irreversible.** The two mistakes are
+not symmetric — calling a reversible act irreversible costs one interruption;
+calling an irreversible act reversible costs somebody's money. So an egress
+nobody has classified gets the cautious answer rather than the convenient one,
+and `EgressEffect::new` takes reversibility as a required argument so it cannot
+be shipped by not thinking about it.
+
+★★ **`Reversible` carries the compensating act.** "Undoable" with no undo named
+is precisely the claim an auto-retry would be relying on. And even a safe retry
+is bounded: undoable is not free, and an unbounded loop against a receiver that
+is down is a different kind of harm.
+
+★★ **A reversible live egress needs no approval token, on purpose.** The human
+gate exists because an act cannot be taken back; asking for approval on one that
+can would train people to approve without reading, which is how a gate stops
+being a gate. A token that is offered and *wrong* is still wrong either way.
+
+**Finding — the refusal that could not exist.** The obvious shape was an enum
+with two arms, "you did not approve it" and "your approval is wrong". The first
+is unconstructible: `EffectClass` has no *live and unapproved* variant, so no
+caller can reach the gate in that state. Writing the arm anyway would have put a
+refusal in the vocabulary that no input can produce — a check that reads as
+performed while nothing is checked. Removed; `admit_egress` returns `TokenError`.
+
+### `feat/strong-admit` — merged into `dev` 29 Aug — **CON-10 + CON-4 closed**
+
+**Off:** `dev` · gate green (core 1,679 · host 245).
+
+**`kernel.rs` existed and nothing ever admitted against it.** The viability
+kernel was computed, tested and unused — a fixed point nobody asked a question
+of. The row is one call, and the call is the whole point of having built it.
+
+**A monitor enforces exactly safety, never liveness** (Schneider, CON-4), and
+that is not a limitation to route around — it is what a monitor *is*. "Stays in
+`V`" is checkable one transition at a time; "a move always exists" is a claim
+about every future, and no single transition can witness it. So the weak gate
+admits states with no way out: every pocket funded, every rule satisfied, and no
+sequence of legal moves that keeps it there next month. Substituting the kernel
+moves the refusal to the last moment it can still help.
+
+**Findings — three, and each is a place a bool would have lied:**
+
+★★★ **A horizon kernel admits and says it is provisional.** `Viab^H` is a
+*superset* of the true kernel: surviving `H` steps is easier than surviving
+forever, so a state inside it may still be doomed at `H+1`. Returning
+`Survivable` on it would be the exact overstatement that makes a strong gate
+*worse* than a weak one — a confident yes into a corner. `ProvisionallySurvivable
+{ horizon }` is a third outcome and the honest one.
+
+★★★ **An empty kernel admits.** No state surviving says the model is wrong far
+more often than it says the household is doomed, and refusing every move on it
+would freeze somebody's money over an analysis nobody checked. `Unknown` admits
+for the same reason: the weak gate has already had its say, and this layer only
+ever *adds* a refusal it can justify.
+
+★★★ **What the row buys is countable, not assumed.** `doomed_but_viable()`
+returns the states the weak gate admits and this one would not. If it is empty on
+a household, the kernel is buying nothing there and the cost is not worth paying
+— which is a real answer, and better than inheriting the assumption that an
+expensive analysis earns its keep. The test fixture puts a `trap` state inside
+`V` with a positive balance and one legal move that leaves it, and asserts
+separately that the **weak gate really would have admitted it** — otherwise the
+whole layer would be proving nothing.
+
+### `feat/sigma` — merged into `dev` 29 Aug — **SUS-1 + SUS-4 closed**
+
+**Off:** `dev` at `fb494a0` · gate green (core 1,670 · host 245).
+
+**Every component existed; the object did not.** `boundary.rs` is `B`,
+`schema.rs` is `S`, `region.rs` is `V`, `Definition` is `T`, `rollup.rs`
+composes — five real things, assembled by whichever caller needed them in
+whatever combination it wanted. A household was a `Definition` here, a `Region`
+there, and a list of children somewhere else, and **nothing anywhere held the
+claim that those are one thing.**
+
+★★★ ***Components of a Sustain are Sustains* only becomes true when one type
+says so.** Two types — one for "a Sustain", one for "a Sustain that has
+children" — would put a ceiling in the model that the world does not have. A
+village adopts into a county by exactly the call a habitat joins a household by.
+
+★★★ **No privileged top is structural, not a convention.** There is no `Root`
+type and no `is_root` flag: a root is one nobody has adopted yet, and a test
+asserts a household is the *same value* alone and adopted.
+
+★★ **A cycle is unrepresentable** — children are owned, so a Sustain cannot
+contain itself and the compiler refuses to build one. Every other holon walk in
+this codebase carries a visited-set; this one has nothing to guard against.
+
+★★ Type-checking recurses, and a finding is **named by the Sustain it came
+from**: a tree of thirty households reporting "invalid" is a report nobody can
+act on. It checks the holon path too, so a household whose total ranges over a
+dimension no habitat has is caught — that one reads as *a household with no
+money* rather than as a mistake.
+
+**SUS-4 closed by verification, not by flipping a row.** Its two open halves were
+*deterministic* (now `canonical.rs`, SUS-15) and *evolvable*, which pointed at
+M-EDIT — and M-EDIT is complete every row: the append-only definition DAG, `μ`
+with Expand–Migrate–Contract, and the stranding check. The pointer outlived the
+work it pointed at.
+
+### `feat/outbox` — merged into `dev` 29 Aug — **ING-10**
+
+**Off:** `dev` at `a750e61` · gate green (core 1,659 · host 245).
+
+★★★ **`Unknown` is the whole reason this module exists.** A request that times
+out has told you nothing — the engine may have committed it and lost the reply,
+or never seen it. Treating that as failure drops real transactions; treating it
+as success loses them just as thoroughly and more quietly. Keeping it and
+sending again is safe **only** because capture is idempotent, and that is what
+idempotency was for.
+
+★★★ **An ack means durably committed, not received.** A server that
+acknowledges on receipt and then crashes has told a phone to forget something
+that exists nowhere — and the phone is the only other copy.
+
+★★★ **Jitter without randomness, and it is the better answer.** The core is
+deterministic and has no random source, so the wait is derived from the
+message's own id: two phones retrying the same failure do not thunder together —
+the usual point of jitter — *and* the schedule is reproducible, so a support
+question about why something retried at a particular moment has an answer. Full
+jitter (`[0, exponential]`), because two senders that back off to the same
+ceiling still collide if they both wait the ceiling.
+
+★★ **Queue depth is the leading metric** because it moves first: on the first
+failed send. Staleness cannot show until a whole expected interval has passed,
+and a missing transaction shows only when somebody goes looking. And "hardest to
+deliver" is by **attempts**, not age — age says how long ago it arrived, attempts
+say how hard it has been to deliver.
+
+★★ A capture keeps its id across every retry. A new id per attempt would turn
+at-least-once into as-many-times-as-it-failed.
+
+### `feat/liveness` — merged into `dev` 29 Aug — **ING-8**
+
+**Off:** `dev` at `5ebfad8` · gate green (core 1,648 · host 245).
+
+**A capture path that dies is silent, and silence is also what a quiet Tuesday
+looks like.** A revoked SMS permission, a rule that stopped matching, a bank that
+changed its sender id — every one presents as *no new messages*. Nothing else in
+the system can notice, because the failure is an absence.
+
+★★★ **"Never guess a cadence" is the row's own constraint, and it is structural
+here.** `learned_theta` returns `None` below five gaps: three observations are
+three numbers, not a distribution, and a threshold from them is an alarm about
+last week wearing a threshold's clothes. So a source nobody has watched long
+enough is **unknown** — a third answer. Healthy would hide a dead capture path;
+stale would cry wolf about a source that is simply new.
+
+★★★ **A heartbeat converts a statistical detector into a deterministic one.**
+`gap > h + δ` is a fact, not an inference — no percentile, no history, no
+warm-up, watchable from the first message. Where both exist the promise wins.
+
+★★ **Nearest-rank, not interpolation**, so the threshold shown is a gap this
+source really had rather than an average of two it never did. And the grace `δ`
+is required rather than defaulted — a declared cadence is a promise about intent,
+not about the network, and where "late" begins belongs to whoever declared it.
+
+★★ *Seen when it speaks, not when it parses* was **already right** in the host —
+verified rather than assumed, and now asserted by a test. A message nobody could
+read still proves the phone is on; counting only successful parses would send
+somebody to check the phone when the answer is *the format changed*.
+
+★★ A negative gap is discarded rather than recorded: a clock that moved backwards
+is not a cadence, and it would poison the percentile with a number no source ever
+kept.
+
+### `feat/event-time` — merged into `dev` 29 Aug — **ING-13**
+
+**Off:** `dev` at `55bfc8e` · gate green (core 1,637 · host 240).
+
+**The patterns had been capturing `date` and `time` all along and throwing them
+away.** 32 fields across 20 rules are kept now; nothing about what any rule
+*matches* changed.
+
+**Without `t_event`, skew was not merely unknown but unmeasurable.** Every
+capture carried only the moment the phone read it — so a backfill of two thousand
+texts stamped a month of spending with one afternoon, every window closed on the
+wrong side, and nothing in the system could tell, because there was no second
+reading to disagree with the first.
+
+Three ways to be wrong by a lot, each pinned by a test:
+
+- **`12 AM` is midnight and `12 PM` is noon**, and the obvious arithmetic gets
+  both backwards. A twelve-hour error puts an evening payment on the wrong day.
+- **`20/7/26` is day-first**, settled by real samples where 20 cannot be a month.
+  The other reading moves an event by up to eleven months — and only on the
+  ambiguous days, so it fails invisibly for two thirds of every month.
+- **An unreadable date yields `None`, never *now*.** *Now* makes skew exactly
+  zero — the one value that looks healthy — for precisely the messages nobody
+  could read a time from.
+
+★★ The UTC offset is the **host's** declaration about its own senders. A message
+says half past four; it does not say half past four *where*, and the core carries
+no locale data to guess with.
+
+★★★ The conformance vector's divergence block now names the two extra fields,
+and the replay allows extras **only where the block names them** — a field nobody
+declared appearing in a parse result would be a change nobody reviewed, and
+noticing that is what a vector is for.
+
+### `feat/unscored-dimensions` — merged into `dev` 29 Aug — **SUS-17**
+
+**Off:** `dev` at `b57b151` · gate green (core 1,626 · host 237).
+
+**Goodhart's law is not about the measured dimension going wrong — it is about
+the unmeasured ones.** Optimise the pockets and the inventory quietly empties;
+optimise the total and one member's tab quietly runs. The dimension nobody
+scored is the one that moves, precisely because nothing is looking.
+
+★★★ **`goodhart.rs` deliberately did not build the auto-emit half, and its
+reason was right:** emitting a *bound* needs to know what bound, and a
+fabricated threshold over a dimension nobody watches is a confident number from
+nowhere. That reasoning stands and is honoured here.
+
+★★★ **But there is a bound that is not invented: the household's own declared
+type.** `Number { lo: 0 }` is the definition saying this does not go below zero.
+Emitting an invariant from it is *using their number*, not choosing one — and it
+converts a bound the schema **describes** into a bound the gate **holds**.
+
+**Everything else is named, not bounded.** Unscored *and* unbounded dimensions
+are listed rather than guessed at: filling them with a floor would replace a
+visible gap with an invisible wrong answer.
+
+Two judgments: **a label gets no bound** — it cannot drift, and a rule that can
+never fire makes the list of guards look longer than the protection is. And **an
+open map is left to a quantifier rather than enumerated** — a pocket is named by
+a person, so rules over today's keys would silently fail to cover tomorrow's,
+which is the worst kind of gap because the list looks complete.
+
+★★ The emitted invariants are parsed and *evaluated* in tests, not just
+generated — a guard the evaluator cannot read is a guard that silently never
+holds.
+
+### `feat/runway-bound` — merged into `dev` 29 Aug — **SUS-11 + IMM-2 closed**
+
+**Off:** `dev` at `2450dc2` · gate green (core 1,616 · host 237).
+
+**`⌈W/α⌉` — how many turns until this is over.** Lyapunov guarantees each step
+moves toward the region; it does **not** guarantee arrival. A loop that closes
+half the remaining gap every turn descends forever, arrives never, and passes
+the stability check at every single step. The bound is what turns *this is
+improving* into *this ends*.
+
+★★★ **`Unbounded` is named rather than reported as a very large number.**
+"Never, at this rate" is the actionable fact — it says *look for a bigger move*.
+A big number reads as patience being enough.
+
+★★ The projection is computed from the descent **actually achieved**, not from a
+rate somebody declared and nothing checks. And `Arrived` is distinct from
+`Steps(0)`: "nought turns away" and "already here" are the same number and
+different facts.
+
+**IMM-2 closed by CON-8's module rather than by a second one.** The row is the
+same claim from the Immune side, and the article is explicit that there is *no
+separate layering construct* — so building one would have been the deviation.
+Verified rather than flipped: `admissibility.rs` is monotone and
+order-independent by test, and person-first survives as refusal-only-on-a-newly-
+caused breach.
+
+### `feat/durable-calls` — merged into `dev` 29 Aug — **SUS-6 + the wire "flake", fixed**
+
+**Off:** `dev` at `9ceb61c` · gate green (core 1,610 · host **237**, in 4.1 s).
+
+**`semantic::replay_under` had nothing real to read.** It re-runs the logged
+Enzyme **calls** under a chosen definition — that is what makes *would this
+still have been admissible under `D′`?* answerable, and what EDIT-11's stranding
+check stands on. It needs `(operator, params)`. The durable log recorded the
+operator and the resulting mutations, so **half the call was durable** and the
+mechanism could only be exercised from hand-built fixtures.
+
+`LoggedEvent.params` is additive and `Option`, with `#[serde(default)]`, so
+every line written before this deserialises byte-identically — the row's own
+"addable later without migration" turned out to be true.
+
+★★★ **`None` means *we do not know what it was called with*, which is genuinely
+different from *called with nothing*.** `enzyme_calls` returns `(calls,
+skipped)` and never hands on an empty map: an Enzyme called with nothing is a
+different call, and replaying it would be reporting confidently on something
+that did not happen. A caller can say *these are the ones we could check* rather
+than implying it checked everything.
+
+★★ Genesis and transfer legs carry `None` deliberately — neither is an ordinary
+Enzyme call, and filling them with an empty map would claim they were called
+with nothing.
+
+**The `wire` "flake" was a real bug, and it is fixed.** Two of its tests failed
+under a full parallel run, then four as the suite grew, and all eleven passed in
+isolation — taking **342 seconds**. The cause: each wire test unlocks **five**
+identities at PBKDF2's 600,000-iteration production cost, then talks over a
+socket with a **20-second IO timeout**. Under parallel load an unlock takes
+longer than the peer will wait, so the handshake times out mid-flight. It fails
+more as the suite grows, which is why it looked like a flake and was not one.
+
+★★★ Lowering the timeout was the wrong fix — 20 seconds is a real protection
+against a peer that stalls, and weakening production to make a test suite
+comfortable is backwards. The KDF cost is `cfg(test)`-lowered instead, with
+OWASP's floor kept as its **own constant and asserted** in `identity.rs`, so the
+number that ships is still guarded. The wire tests are about the wire.
+
+**The host suite went from 250+ seconds to 4.1.** It had been spending
+essentially all of its time deriving keys.
+
+### `feat/domain-map` — merged into `dev` 29 Aug — **SUS-16**
+
+**Off:** `dev` at `4ea27d4` · gate green (core 1,600 · host builds clean).
+
+**`cynefin.rs` had the taxonomy and nothing that could produce a reading.** It
+could say what each domain presupposes and refuse a mismatched operative — and
+its own doc said plainly that inventing a classifier would be *a confident
+classification from nowhere*. The article says where the reading comes from: the
+household declares it, **per region of its own state space**.
+
+**A household is not in one domain.** Its rent is clear — there is a best
+practice and it works. A new side business is complex — you probe, you see what
+happens, you amplify what worked. Conant–Ashby's *a good regulator is a model of
+the system* is exactly the claim that a one-domain model of a many-domain
+household regulates it badly.
+
+★★★ **A state no declared region covers is DISORDER, never `clear`.** That is
+the dangerous default: *clear* licenses best practice, so an unrecognised
+situation would be met with the method that presupposes it is already
+understood. Disorder means *we do not know which rules apply*, and saying so is
+what lets somebody find out.
+
+★★★ **Two declarations that disagree are disorder too** — genuinely "we hold two
+incompatible models of this situation", which is the failure mode §X names.
+Picking the first by declaration order would hide a real contradiction behind a
+confident answer. Two that **agree** are not a conflict, so a household's regions
+need not be a perfect partition.
+
+★★ A region naming a dimension that does not exist is caught at load. Otherwise
+it silently never matches and the household sits in disorder for a reason nobody
+can see.
+
+### `feat/cross-source-correlation` — merged into `dev` 29 Aug — **ING-12**
+
+**Off:** `dev` at `ec6057a` · gate green (core 1,591 · host 230).
+
+**One transfer, two senders, one fact.** The raw-text dedup cannot see this by
+construction — it keys on the text, and the two texts are genuinely different.
+Both get captured, correctly, and applying both puts forty thousand shillings
+into the books twice.
+
+**The finding, and it is the serious one: the host was already joining these —
+on the REFERENCE ALONE.** A reference is not a fact. Codes are allocated by
+different systems and collide, and when they did, a real separate transaction
+was silently treated as already-applied and **vanished without trace**. Nobody
+finds out, because the whole effect of the join is that nothing is shown. The
+key is reference **and** amount now.
+
+An unknown amount falls back to the reference rather than refusing to join —
+narrowing further would miss real pairs for messages whose rules extract no
+amount, and the failure directions are not symmetric: a **missed** join shows a
+duplicate a person can undo; a **wrong** join hides a transaction nobody knows
+to look for.
+
+★★★ The core module **surfaces rather than suppresses**, naming both messages.
+A false positive that asks costs one tap; a false positive that hides costs a
+transaction and the trust in every other number.
+
+Two judgments: **no text-hash fallback across sources** — two descriptions of
+one event have different text by definition, so a text key would be exactly
+backwards here; and **opposite directions are evidence FOR**, because one side
+sent and the other received is what a single transfer looks like from two
+vantage points.
+
+### `feat/control-system` — merged into `dev` 29 Aug — **CTL-1 · M-CTL COMPLETE**
+
+**Off:** `dev` at `b3f448d` · gate green (core 1,580 · host builds clean).
+
+**Every piece of the loop existed; the loop did not.** `region.rs` gave `e`,
+`controller.rs` gave Lyapunov and the Sheridan dispatch, `ooda.rs` gave the
+phases — and each caller assembled them in whatever order it chose. Four callers
+is four loops, and the day two of them disagree about whether to measure before
+or after the candidate, nobody can say which one is the Controller.
+
+★★★ **The Actuator is deliberately not here.** §I closes the loop through a
+*human*, and ADR-0001 keeps I/O out of the core. `step()` computes what the loop
+would do and returns it; acting is the host's and authorising is the person's. A
+step that could act would close the loop through itself, which is the one shape
+supervisory control is defined in opposition to. A test asserts the plant comes
+back untouched.
+
+Three judgments: **a move that increases `W` is not a candidate at all** —
+Lyapunov is the definition of a good decision, not a ranking, and offering a
+worsening move would be offering to make things worse and calling it an option.
+**Inside the region it proposes nothing**, because a controller that acts when
+nothing is wrong is the over-corrector damping exists to catch. **A tie goes to
+declared preference**, never to whichever candidate the vector happened to hold
+first.
+
+★★ *Nothing helps* is an answer, not an error. Reporting it as a failure would
+push a caller toward acting anyway; saying so plainly is what lets a person go
+and find something that does.
+
+**This closes M-CTL.** The module header still read *NOT STARTED* while most of
+its rows were ✅ — corrected, with the original note kept for the record.
+
+### `feat/canonical-hash` — merged into `dev` 29 Aug — **SUS-15 + CON-8**
+
+**Off:** `dev` at `6a728b2` · gate green (core 1,571 · host 223).
+
+Two rows, landed together because the second was found while wiring the first.
+
+**SUS-15 — `H(s) = hash(canonical(s))`.** `fold(log) == cache` is the law the
+whole engine rests on, and checking it meant comparing two whole state trees.
+Across a peer link that is not a question anyone can ask: you cannot send a
+household's entire finances to find out whether two nodes agree, and a node that
+answers *mostly* has answered nothing. Sixty-four characters either match or they
+do not.
+
+★★★ Sorting object keys is not tidiness — this crate builds its `Map` with
+`preserve_order`, so hashing insertion order would report a household as diverged
+**from itself**. Numbers go through the engine's own `num` rule for the same
+reason. Array order is preserved, because in a list order IS the value.
+
+★★ `sha2` is the first hashing dependency, named rather than slipped in: `H(s)`
+is compared across peers that need not trust each other, and a hash somebody can
+collide on purpose verifies nothing.
+
+**CON-8 — `⋀_{H∈path} admit_H`, the full path.** Only the immediate parent was
+ever asked, so a village-level rule two edges up did not apply — silently, with
+nothing saying a level had been skipped. A holon three deep is not exotic; it is
+the shape the model is named after.
+
+Judgments kept: **refusal only on a newly-caused breach** (a household already
+over its limit freezing every member would punish exactly the household that
+most needs its members able to act); **advisory by default**; **every level
+reported**, not just the first to refuse.
+
+★★★ **The finding:** an unreadable rule evaluates false both before and after,
+so it looked exactly like a pre-existing breach and was waved through as *not
+newly caused* — a gate failing open at the worst possible moment, right after
+somebody mistyped a law. The reading is three-valued now: held / failed /
+**unreadable**. DSL-5's *a broken document is not a violated law* turns out to
+apply here too, and a test caught the conflation rather than a reading of it.
+
+### `feat/dsl-mdl-lift` — merged into `dev` 29 Aug — **DSL-15 · PHASE 4 COMPLETE**
+
+**Off:** `dev` at `b29907e` · gate green (core 1,548 · host 223).
+
+**Learning is compression, made arithmetic.** A household writes the same rule
+into six pockets — *never let this go below zero* — and six copies is six places
+to be wrong. The count IS the evidence: a shape written once is somebody's
+particular rule; a shape written six times is a concept they have and have not
+named.
+
+Judgments:
+
+- **`n` is the whole formula, not a rounding detail.** A pattern used twice
+  usually costs more than it saves, because the definition has a length of its
+  own. The formula says so instead of leaving it to taste, and the threshold
+  falls out of the numbers rather than being chosen. A test pins that two is not
+  yet a concept and six is.
+- **Length is counted over the typed AST, never the text.** Two rules differing
+  only in spacing are one rule; counting characters would make the formatter
+  part of the arithmetic.
+- **A call is charged two nodes, not zero.** Pretending a call is free is how
+  every abstraction looks worth it.
+- **A proposal is not an edit.** `ΔL > 0` says a lift would be shorter — not
+  that the household wants it, that the name is good, or that six pockets
+  rhyming this month is a concept rather than a coincidence. A person and the
+  migration predicate stand between, the same division `learned.rs` keeps.
+
+★★ The hole is the **open-map key** — a pocket's name is a value the household
+chose, the segments around it are structure. Holing every segment would make
+every rule identical; holing none would make a lift impossible.
+
+**★★★ This closes Phase 4.** Every DSL row landed on 29 Aug. The one declared
+residual is DSL-12's `imports` + enforced versioning, which has no mechanism
+anywhere yet.
+
+### `feat/dsl-surface` — merged into `dev` 29 Aug — **DSL-14**
+
+**Off:** `dev` at `616a48f` · gate green (core 1,538 · host 223).
+
+**JSON was the only way to write an Enzyme, and JSON is a terrible thing to ask
+a person to write a rule in** — quoting, commas, nesting, and a shape that
+obscures the one thing that matters: *when this, do that*. The row sits last in
+the phase for a good reason: a friendlier surface built before the AST was
+settled would have been a friendlier way to write the wrong thing.
+
+**The theorem, executed:** text and builder produce a value that is `==`. Many
+surfaces over ONE core is a feature; many surfaces over two cores is two
+languages wearing one name, which is exactly what DSL-6 forbids. And
+`parse(render(e)) == e` runs, which is what makes this a surface rather than an
+importer.
+
+★★★ **The guard is handed to the one predicate parser, untouched.** A second
+predicate parser here would be the two-evaluator failure in miniature, arriving
+silently — the same words meaning two things depending on which file they were
+written in.
+
+Judgments: **line-oriented, no nesting** (total by construction, and every error
+gets a real line number — "invalid syntax" for forty lines makes somebody re-read
+all forty); **quoting is the only thing separating a literal from a path**,
+because guessing would make one string mean two things on one line; and
+**letting money go below zero has to be typed out** (`or below zero`) rather than
+defaulted.
+
+**A real defect found on the way:** `ParamDecl::name` was `&'static str`, so a
+parameter named at run time could only be obtained by **leaking** it. A person
+editing their own rule ten times would leak ten times — a defect that grows with
+use rather than one a test sees. It is a `Cow` now; every compile-time
+registration still borrows.
+
+### `feat/dsl-authored-enzymes` — merged into `dev` 29 Aug — **DSL-13 (the large one)**
+
+**Off:** `dev` at `2e75491` · gate green (core 1,525 · host 223).
+
+**A definition named Enzymes; it never said what they DO.** `⟦operator⟧` was a
+name lookup, so the only people who could add a capability to a Sustain were the
+people who could compile one — and the language a household is supposedly
+written in could not express its own rules.
+
+`⟨g, e, ε, μ⟩` is now data: guards in the same language invariants use, actions
+over declared paths, declared emissions, declared movements.
+
+**It runs INSIDE the gate**, through one dispatch at the single existing call
+site — same admission, same invariants, same double-entry reconciliation. Four
+tests pin that: an authored Enzyme commits and folds; its guard refuses and
+leaves no trace; the household's own invariants still refuse it (authoring an
+Enzyme does not author a way around the law); and one that lowers a cash account
+without declaring what it moved is refused as a single-sided entry.
+
+★★★ **Its effect summary is DERIVED from the actions, so it cannot lie.**
+`obligation` is explicit that a native summary is a *claim about a body* which
+may be wrong. An authored Enzyme has no separate body to disagree with, so
+composition reasons about what will actually happen.
+
+Two deliberate absences: **no arithmetic in expressions** — it lives in the
+actions, which is exactly how `StateAccessor` already works, so this is the
+engine's own shape rather than a second one; and **no control flow** — sequencing
+belongs to `dag.rs`, where it is checked, and an effect that could branch would
+put an unchecked second sequencer inside the one place that must stay total.
+
+★★ `run` still holds a real function for an authored Enzyme, and it refuses. If
+the dispatch is ever got wrong the result is an honest error rather than a native
+body running with an authored Enzyme's parameters. A test calls it directly.
+
+### `feat/dsl-spec-validator` — merged into `dev` 29 Aug — **DSL-12 (mostly)**
+
+**Off:** `dev` at `3862ddb` · gate green (core 1,509 · host 223).
+
+**One door, and everything a definition names goes through it.** `typecheck`
+checked the invariants — one of several things a definition *names*. It also
+names Enzymes it may run and aggregates it will total, and neither was bound to
+anything.
+
+**Same class of failure as DSL-5, in a different place.** A spec naming an Enzyme
+this engine does not provide loaded perfectly; the first person to try it was
+told the operator *is not available on this sustain* — which sounds like a
+permission, reads like a rule, and is a typo in a document.
+
+Judgments: **names first, then types** — reporting a mistyped rule while an
+unknown Enzyme is outstanding sends somebody to fix the wrong thing. **Every
+finding is collected**, because the second error is often what explains the
+first. **Duplicate ids are findings, not tie-breaks** — somebody meant two things
+and one is silently unreachable; picking a winner would be this module deciding
+which of their rules to discard. And an **aggregate id that shadows a real
+dimension** is refused: a parent rule reading that name would silently get the
+total instead.
+
+**Residual, declared rather than quietly dropped:** `imports` + enforced
+versioning, which has no mechanism anywhere yet, and widget-name binding, which
+`WidgetSet::load` already performs at its own door.
+
+### `feat/dsl-holon-typing` — merged into `dev` 29 Aug — **DSL-10**
+
+**Off:** `dev` at `169ebb2` · gate green (core 1,500 · host 223).
+
+**A parent and its children are one program.** A parent declares *sum every
+child's `finances.liquid.balance`* and writes rules about the total. Three things
+must agree: the child must HAVE that dimension, it must be a kind you can SUM,
+and the parent's rule must treat the result as what it is. Check the parent alone
+and all three can be wrong at once with nothing to report it.
+
+**Both failures are silent, which is what makes author-time work worth it.** An
+aggregate over a dimension no child declares does not crash — it totals **zero
+contributions**. Summing a string does not crash — it skips every child as
+unreadable and reports the same zero. Both read exactly like a household that
+genuinely has nothing, and there is no later moment at which anyone can tell.
+
+Judgments: **every child is checked, not a sample** — a holon of habitats and a
+shop is ordinary, and checking one is how a roll-up silently drops the members
+that differ. **`COUNT` is exempt on purpose** — how many children have a label is
+a real question; what their labels sum to is not. **An empty holon is not an
+error** — a holon is declared before it is populated.
+
+★★ `AggregateDecl::segments()` was exposed so the check resolves against a
+child's schema with the same segments roll-up will read with, rather than a
+re-parse free to disagree.
+
+### `feat/dsl-typed-overlay` — merged into `dev` 29 Aug — **DSL-9**
+
+**Off:** `dev` at `6f8bc11` · gate green (core 1,491 · host 223).
+
+**`ρ`: you hand a person the overlay, never the definition.** A definition says
+what a Sustain *is*; an overlay says only what some of its values *are*. A
+surface that had to hand out the definition would have to decide, per field,
+whether this person may change this thing — a judgment made in the UI, where it
+cannot be checked. As a type, the check runs once before anybody sees a form.
+
+**The finding, and it is the interesting one: per-path typing is not enough.**
+Every path in an overlay can be a declared dimension of exactly the right type
+and the RESULT can still be malformed — setting one field of a new open-map key
+invents half a pocket, a name with no allocation. The shape changes anyway, one
+key at a time, which is precisely what the Curated UI leans on an overlay not to
+allow. A test found it, not a reading. `apply` now validates the whole candidate;
+the per-path judgment stays because it gives the better message when it is the
+one that fails.
+
+Two more judgments: **right-biased** because somebody who types a value, thinks
+again and types another has changed their mind — left-bias would make the first
+edit of a session unchangeable. And **type-correct is not the same word as
+permitted**: an overlay putting a balance below zero is perfectly well-typed and
+still refused by the gate. A test pins that distinction.
+
+★★ `predicate::parse_path` was exposed rather than splitting on `.` somewhere
+convenient — a second spelling of what a path means is how two parts of one
+language drift, silently, until a path resolves differently in an invariant than
+in the surface that wrote it.
+
+### `feat/dsl-typed-params` — merged into `dev` 29 Aug — **DSL-8**
+
+**Off:** `dev` at `5e2aaa7` · gate green (core 1,476 · host builds clean).
+
+**`Def(θ)`: a definition is a typed function into Sustains, checked once.**
+Definitions had no parameters at all, so there was nothing to check and
+substitution was textual — a token nobody supplied **survived as the literal
+string** and landed in real state. That is the `role_in_family` bug, and it is
+now caught at **author time**: the mistake was never in anybody's argument, it
+was a template referring to something it never declared. Textual substitution
+has no step at which to notice.
+
+The substitution lemma is asserted as a **property**, not claimed: one check,
+then many θ, each result conforming to the schema without being re-checked.
+
+Three judgments:
+
+- **A whole-value `"{{limit}}"` keeps the parameter's own type**; an embedded
+  `"pocket for {{name}}"` interpolates. A template that stringified the first
+  would fill a number dimension with a word and the schema would refuse the very
+  Sustain the template exists to build.
+- **"Checked once" has to cover the RESULT**, so the template's own shape is
+  checked against the schema using a canonical witness per declared type — not
+  the defaults, which a caller is free to replace.
+- **An argument nobody declared is named, not ignored.** Silently dropping it is
+  how a typo in a caller goes unnoticed for months.
+
+★★ `schema::conforms` was extracted rather than written fresh, so a parameter's
+argument is checked by exactly the rule a dimension's value is.
+
+### `feat/dsl-type-judgment` — merged into `dev` 29 Aug — **WBD Phase 4 opened**
+
+**Off:** `dev` at `130176c`
+**State:** merged, gate green (core 1,463 · host 223).
+
+**DSL-5 + DSL-1's type-check half** (GENOME §V), taken together because they are
+one tree-walk: the judgment, and the door it guards.
+
+**The gate has three outcomes — refuse, clamp, defer — and no fourth for "this
+rule is broken".** So an untyped mistake arrived dressed as a refusal: a rule
+comparing a pocket's NAME to a number reported that the household had broken a
+law, and somebody would go looking for money that never moved. `editing::typecheck`
+**bound names without typing anything**, so `label >= 5` loaded cleanly.
+
+Three judgments the article settles and one it does not:
+
+- **Ordering needs the same type; equality is total.** `a == b` across two types
+  is honestly `false` — they are different values. `a > b` has no answer at all.
+  Refusing both would outlaw a perfectly good "is this empty" test. My first
+  pass applied the type rule to both and a test caught it.
+- **`Any` and an undeclared param are compatible with everything.** `Any` exists
+  so a schema can be adopted one dimension at a time; a checker that complained
+  about silence would make adopting it cost a full re-declaration first.
+  Unstated is not the same as wrong.
+- **An undeclared path makes no type complaint.** `bind` already reports it, and
+  a person who reads two complaints for one mistake learns to read neither.
+- **Not settled, so not invented:** whether `notes == 5` deserves an
+  always-false lint. That is a lint, not a type error, and the article does not
+  ask for it.
+
+★★ `type_at` reuses `Schema::resolve` rather than growing a second path-walker.
+The first draft had its own, which would have been a second answer to a question
+the binder and the evaluator already agree on, free to drift from both.
+
+### `feat/parser-signs` — merged into `dev` 29 Aug — **money model §8 COMPLETE**
+
+**Off:** `dev` at `80f5709`
+**State:** merged, gate green (core 1,445 · host 223).
+
+**§6's settled signs, implemented.** Nine instrument shapes that all asked a
+person now route themselves: Fuliza borrow / interest / repayment, M-Shwari in
+and out, cash withdrawal at a till and at an agent, Pochi in and out.
+
+**The finding underneath it: an overdraft was inexpressible.** No operator
+anywhere wrote `finances.liabilities.*`, so borrowed money could only be filed
+as income — which overstates the household by the whole of what it owes.
+`budget.borrow`, `budget.charge_debt` and `budget.repay_debt` are the first
+operators that write it. A borrow is one transaction with **two positive
+postings** (§3): the money arrives and the obligation appears, and a test pins
+that borrowing leaves the household's position exactly where it was, because
+borrowed money is not wealth. The charge for borrowing gathers in a pocket of
+its own (§6.2) so the running cost of an overdraft is visible over time.
+
+**A money-safety test had to be restated, and that deserved care.** The old rule
+was *"the only auto-applied operator is income"* — true, and the right rule,
+while income was the one unambiguous shape. The rule it was standing in for is
+**nothing files money into a CATEGORY without being asked**, and that has not
+moved: `budget.spend` and `budget.allocate` remain un-auto-appliable by any
+rule, and a payment to somebody outside the household still always asks. What
+the settled shapes have in common is that no category is involved — an overdraft
+names its lender, a transfer has the household at both ends, a withdrawal moves
+money to your own pocket. Asking which pocket a cash withdrawal belongs to is a
+question with no true answer. The rule is now asserted directly instead of
+through a proxy that had stopped holding.
+
+**A second finding, from the same failure:** the transducer's `Real` operator
+universe — the thing `typecheck_rule` was checked against — was a **stub that
+knew one operator**. Every rule naming an operator that does not exist, or
+handing it a parameter it does not declare, would have passed. It is the real
+registry now.
+
+**Divergence recorded, not papered over.** These nine are mapped in Rust and
+`parsed_unmapped` in the Python reference, which cannot express an overdraft at
+all. `conformance/vectors/transducer.json` carries a `divergence` block, the
+replay skips those cases **by name**, and a test fails if the block disappears.
+`conformance/README.md` §Recorded divergences has the entry.
+
+**§8 is now complete** — 1 double entry, 2 parser signs, 3 person accounts,
+4 realignment, 5 operative DAGs, 6 net worth. The one piece left open is
+graduation to a real child Sustain, which needs `holon.create_child` and is
+noted under `feat/operative-dag`.
+
+### `feat/net-worth` — merged into `dev` 29 Aug
+
+**Off:** `dev` at `ca90fb7`
+**State:** merged, gate green (core 1,435 · host 223). APK built and verified;
+**not installed — the phone was off USB for this whole stretch.**
+
+**Money out is not money gone.** A week's shopping leaves the account and
+becomes food in the cupboard; a payment to somebody who will pay it back leaves
+the account and becomes a claim. A position that counted only cash calls both a
+loss, and a household that shops well looks identical to one losing money —
+which is the exact failure `inventory` was added to fix, finished here.
+
+`ledger::position` reads four sides off state: cash in accounts, things held,
+owed to you, owed by you. Two judgments:
+
+- **Ordinary pockets are not counted.** An envelope is a view of money already
+  in an account, so adding it would count the same shilling twice and the total
+  would grow every time he budgeted — the opposite of what budgeting does. Only
+  person pockets contribute, because those are claims rather than envelopes, and
+  `is_person_pocket` is what tells them apart.
+
+- **Money no account has claimed is still money.** Leaving the unattributed part
+  of liquid out would understate the position by exactly the amount nobody had
+  got round to filing.
+
+Three tests exist to pin the invariant that makes it worth having: lending,
+shopping and being repaid all move the position **nowhere**. If any of them
+moved it, a loan would read as a loss and a repayment as income.
+
+**The card draws four lines, never one number.** A single total hides the
+distinction that makes it true, and rows at zero are not drawn — a household
+with nothing lent out should not read past a row of noughts.
+
+### `feat/operative-dag` — merged into `dev` 29 Aug
+
+**Off:** `dev` at `1b7bcf0`
+**State:** merged, gate green (core 1,428 · host 223). APK built and verified; **not
+yet installed — the phone was disconnected from USB when the build finished.**
+
+**The keystone: operatives are graphs of operator calls, and the graph is data.**
+Every deciding step was already an operator — `vendor.identify`, `vendor.suggest`,
+`budget.spend` — called from a screen in an order written in a host function. An
+operative that lives in a screen cannot be inspected, cannot be checked before it
+runs, and cannot be changed without editing the app.
+
+`compose.rs` had held Hoare sequencing since it was written and **nothing had
+ever called it**. `Dag::typecheck` now runs every root-to-leaf path through
+`Pathway::try_chain`, so a chain whose third step can never fire is refused when
+the graph is *written*. `OperatorMeta::as_step` is the bridge that was missing.
+
+Three findings, each from testing rather than reading:
+
+- **`vendor.remember` could never commit on a real household.** `vendors` was
+  DECLARED in the schema and never seeded into the opening state, and
+  organisational closure refuses an operator that introduces a top-level
+  dimension — correctly, since that changes what the Sustain *is*. So the memory
+  had no choice but to live in a side file. That is the actual root of the
+  double-write, not carelessness. Fixed by seeding `vendors: {}`, plus a logged
+  one-time backfill at `World::open` for households that already exist —
+  a shape change made at the level shape changes belong to, never behind the
+  log's back.
+
+- **Ordering by topological position is not a promise.** Two nodes with no edge
+  between them have no order; a binding that reads a sibling works for exactly
+  as long as the sort keeps favouring it. The check is ancestry now, so only an
+  edge counts.
+
+- **My own test was wrong about vendor matching.** `NAIVAS` and
+  `NAIVAS SUPERMARKET` are deliberately different vendors — dropping a word is
+  the conservative half of the only tradeoff `vendor_key` makes, and the test
+  was asserting the loose behaviour we specifically refuse.
+
+**Mentor and Attaché read the same `suggest` step opposite ways** — Mentor acts
+when the household already knows a counterparty, Attaché when it does not — and
+a test asserts they never both act, because if that ever stopped being true one
+would be silently duplicating the other on real money.
+
+**Honestly missing:** graduation into a real child Sustain (§4) needs
+`holon.create_child`, which this engine does not have. Attaché takes a
+counterparty as far as linked-and-known and stops. There is no `parse` node
+either: the transducer runs at the ingest boundary and is not an operator.
+Naming nodes for either would make the picture prettier and the graph
+unrunnable.
+
+### `feat/person-tab-display` — merged into `dev` 29 Aug
+
+**Off:** `dev` at `3f5b78c`
+**State:** merged, gate green (core 1,411 · host 220), installed and verified on device.
+
+**A person pocket was drawn exactly like `food`.** It nets correctly and always
+did, but a screen that draws a relationship identically to a category is telling
+him they are the same kind of thing — and the first time that matters is the
+moment he files a repayment as shopping.
+
+**The two sides are DERIVED, never stored.** A pocket keeps one number, `spent`,
+which already says where the tab stands. What it cannot say is how it got there:
+KES 1,000 outstanding reads identically whether he sent 1,000 once or sent
+40,000 across a year and got 39,000 back. `sustena-core/src/tab.rs` reads both
+sides back off the log, because `state = fold(events)` means the history the
+state was folded from is still there. Running totals kept beside `spent` would
+be a second source that could disagree with the first, with no way to say which
+was right — and a tab that appeared to begin the day it was linked.
+
+Two judgments worth disagreeing with:
+
+- **The tab is bounded on ONE side only.** Sending somebody more than the
+  household set aside for them is a real departure, measured against their own
+  allocation. Their owing HIM money is not — it is the tab doing what a tab
+  does. A two-sided interval would have made every repayment read as a fault.
+
+- **One tab on screen, not all of them.** Orchie's premise is an attention
+  budget; a list of everyone he has ever paid is the flood it exists to prevent.
+  The one shown is the relationship with the most money in play, either
+  direction — measured, not guessed. Every linked pocket is still marked in the
+  picker, so nothing is hidden, only unranked.
+
+The card says **who owes whom in words**. A negative balance is a convention the
+ledger uses and a person has to decode; getting the sign backwards on a screen
+is how somebody pays a debt that was never theirs. The number appears masked
+(`072···961`) — he linked it as an identifier, and the pocket name already says
+which person it is.
+
+### `feat/person-pockets` — merged into `dev` 26 Aug at `111435b`
+
+**Off:** `dev` at `66af726`
+**State:** merged, gate green (core 1,404 · host 214), installed and verified on device.
+
+**A pocket can now be somebody, not just something.** `vendor.link_number` ties a
+real phone number to a pocket, and from then on money to that number comes OUT of
+that pocket and money from it goes BACK IN — one running tab that nets, rather
+than a spend in one place and an unrelated lump of income in another.
+
+Three findings, none of them visible from reading the code:
+
+- **`budget.unspend` was reporting success on a mutation that never happened.**
+  It called `state.decrement(..., allow_negative = false)` and discarded the
+  `Result`. Where the decrement was refused, the operator still returned `ok`:
+  the card said filed and the ledger said nothing. Found by a test that expected
+  a number to move and watched it stay. Now the refusal is returned.
+
+- **An envelope and a tab need different rules, and it is the pocket that
+  decides.** Taking back more than ever went out is meaningless for spending and
+  ordinary for a person — she sends first, or sends back more than she was sent.
+  `allow_negative` now follows `is_person_pocket`, which is derived from a link
+  existing rather than stored as a second flag that could disagree with it.
+
+- **A mask and a key are written in different dialects.** Messages print
+  `0726***961`; the key is the bare nine digits. Matching them straight fails on
+  the leading zero alone, which would have made the link useless for exactly the
+  messages it exists to route.
+
+**The design call worth disagreeing with:** a receive from a linked number is
+REDIRECTED automatically (it was already going to be applied — only *where* was
+in question, and filing it as income while her tab still showed everything
+outstanding made both halves wrong). A send is only PRE-FILLED and still waits
+for his tap. Nothing new started applying itself.
+
+**Left open:** the tab is a pocket like any other on screen. It nets correctly,
+but nothing yet says "this one is a person" or shows the two sides separately.
+
+### `feat/reclassify` — merged into `dev` 26 Aug at `30b0e34`
+
+**Off:** `dev` at `4f69c7d`
+**State:** merged, gate green (core clean, 202 host tests), installed
+
+**There was no way to fix a wrong pocket.** "pick another pocket" existed only
+inside the refusal branch, before anything was recorded, and once a spend landed
+there was no list of recorded transactions anywhere in Orchie to reach it by.
+
+`budget.reclassify` is a correction, never an edit — the original filing stays
+and the move is appended after it, so the log says both. Semantically it is
+`unspend(from)` then `spend(to)`, and it is ONE operator only for atomicity:
+nothing runs two calls as a single gate decision yet, and a half-landed
+reclassify would leave the money in neither pocket. **When the graph runner
+arrives with transactional semantics this becomes a two-node path**, which is
+the point of building it as an operator.
+
+It refuses with the same numbers a spend does when the destination has no room,
+so a screen can reuse the fund-or-backfill branch rather than growing a second
+answer for the same situation. Assets from that purchase move with it; assets
+from other purchases do not.
+
+### `feat/vendor-operator` — merged into `dev` 26 Aug at `4f69c7d`
+
+**Off:** `dev` at `0d700db`
+**State:** merged, gate green, **not yet wired into the classify UI**
+
+Three operators — `identify`, `suggest`, `remember` — because they are three
+kinds of act, and one call would make a lookup and a write indistinguishable to
+anything composing them. `identify` and `suggest` are read-only and are
+operators anyway: a node in a DAG has to be one.
+
+**Closes an audit deviation.** Merchant memory lived in a side JSON file beside
+the log, so a rebuild could not reproduce it and no other Sustain could read it.
+It is a `vendors` state dimension now.
+
+**Open:** the classify UI still reads the old side-file history. Swapping it is
+small but changes behaviour in the thing he uses daily, so it is deliberate work
+rather than a drive-by.
+
+### `feat/inventory-consume` — merged into `dev` 26 Aug at `aaf2586`
+
+**Off:** `dev` at `d029d60`
+**State:** merged, gate green (core clean, 197 host tests), installed
+
+Buying rice left the household no poorer — cash became rice. Eating it is what
+does. Until now the ledger called the purchase the expense, which is off by
+however long the thing lasts: a month's shopping looks like a terrible week and
+the week it is eaten looks free.
+
+`inventory.consume` moves no money, for the same reason `itemize` does not. What
+changes is what the household still HAS. Partial by design, since half a sack is
+the normal case — an asset used in part keeps its identity and loses value,
+because splitting it would multiply the list every time anyone cooked.
+
+Consuming is not deleting: the asset keeps its name, pocket and purchase, so
+"what did the food money buy" still answers after the food is gone. It leaves
+the held total because it is no longer held, and stays on the record because it
+still happened.
+
+**UI ships whole-asset only.** Partial consumption is real and the operator
+handles it; asking for an amount before the loop is proven would be guessing at
+how he wants to say it. That is the next slice here.
+
+### `feat/recoverable-skips` — merged into `dev` 26 Aug at `d029d60`
+
+**Off:** `dev` at `e453a1c`
+**State:** merged, gate green, installed
+
+He waved both halves of a real self-transfer past impatiently and they were gone
+for good. A shared transaction reference now brings a skipped message back.
+
+**The line that makes it safe is which evidence may overturn a decision he
+made.** Amount and merchant say two texts COULD be the same movement; a shared
+reference says they ARE. Only the reference reaches a skipped message — the
+amount-and-merchant fallback is filtered to messages still in the queue, in both
+the transfer pass and the reversal pass. A promo, a balance notice, an advert:
+none quotes a reference another message shares, so a genuine "not a transaction"
+stays skipped for good, and one without a reference is not even a candidate.
+
+Both facts are kept: `reclaimed` sits alongside `ignored` cleared, so "why is
+this here again?" has an answer. Counted and said on screen, because a queue that
+GREW needs a reason as much as one that shrank.
+
+### `feat/supplies-inventory` — merged into `dev` 26 Aug at `0016d5b`
+
+**Off:** `dev` at `b51f0cb`
+**State:** merged, gate green (core clean, 190 host tests), installed
+**Touches:** `sustena-core/src/operator/inventory.rs` (new), `operator/{mod,meta}.rs`,
+`templates.rs`, `dto.rs`, `commands.rs`, `Orchie.tsx`
+
+**Purpose.** A spend records money leaving. It does not record that beans,
+onions and carrots arrived, and those are real things the household holds.
+`inventory.itemize` takes a spend that has already landed and records what it
+turned into.
+
+**The design decision worth keeping.** Itemizing moves **no money**. The spend
+already took it out of the account; if this took it again the same shilling
+would leave twice. Net worth is unchanged at the moment of buying, because cash
+became beans — the expense is later, when they are used up. That is `consume`,
+designed for and deliberately not built.
+
+`inventory` is a state dimension, itemize is an operator through the gate, the
+log is append-only, and asset ids are derived from the purchase rather than
+minted — so a replay lands byte-identical and this embroiders into a Sustain
+later without rework.
+
+**Refusals, all real:** a list that exceeds the spend (value from nowhere); the
+same purchase itemized twice (doubles the shopping while the spend stands); a
+line with no name or no amount, named by position; supplies with no purchase
+behind them. A list *under* the spend is allowed and reports what stays a plain
+spend, because a receipt half remembered is still worth recording.
+
+**No migration.** Households opened before this dimension existed create the
+list on the way in. Verified with a test that strips the key first, which is
+exactly how his state is on disk.
+
+**Deferred by the timebox:** consumption, and subpockets are stored per line and
+grouped in the view but have no dedicated picker yet.
+
+### `fix/compact-pocket-chips` — merged into `dev` 26 Aug at `8058b02`
+
+**Off:** `dev` at `31a797e`
+**State:** merged, verified on the device
+
+Bonnie said the pocket pills were still too large, twice. They had already
+become 34px chips; that was still too big for fifteen of them, because what
+costs him is reading the list rather than hitting the target. Now 28px at 12px,
+with long names trimmed instead of setting the row width.
+
+The change that matters more: compactness is decided by **how many options there
+are**, not by whether the field is called `pocket_name`. The old check failed
+silently and open — any other long list got full-size buttons, and a rename
+would have landed straight back in the wall of buttons.
+
+**Verified on his phone over CDP**, not asserted: chips render at 28px, and
+eight pockets fit in two rows of a 393px container. Previously four rows.
+
+### `feat/skip-all-like-this` — merged into `dev` 26 Aug at `f065725`
+
+**Off:** `dev` at `8058b02`
+**State:** merged, gate green (core clean, 187 host tests)
+**Touches:** `ingest.rs`, `world.rs`, `commands.rs`, `dto.rs`, `lib.rs`, `Orchie.tsx`
+
+Design doc §5 item 8, outstanding since 25 Aug. One answer clears a whole shape
+instead of the same decision made hundreds of times.
+
+Keyed on source plus parser name — the shape the transducer recognised — never
+on raw text, which never repeats exactly. An unparsed message can never teach
+one: `parser_name` is empty there, so the rule would mean "skip everything I
+cannot read", which is the pile that most needs his eyes. Retroactive, because
+he answers this in the middle of the pile it is meant to clear.
+
+**New file on disk:** `skip_rules.json` in the ingest directory. No schema
+change, so nothing to migrate.
+
+
+### `feat/shared-ref-join` — merged into `dev` 26 Aug at `31a797e`
+
+**Off:** `dev` at `4ef4168`
+**State:** merged, gate green at merge (core clean, 179 host tests)
+**Touches:** `sustena-core/assets/parse_rules_seed.json`,
+`apps/mycelium/src-tauri/src/{ingest.rs, world.rs, commands.rs}`
+
+**Purpose.** Bonnie's insight, 26 Aug: the two halves of a self-transfer quote
+the *same reference code*. KCB's "SEND TO M-PESA" prints `M-PESA REF:
+UHPB9480T9`; the M-Pesa text confirming the same money opens with that identical
+code. That is a join key, and it is a better one than amount plus time.
+
+The distinction is not degree. Amount and merchant ask whether two texts *could*
+be the same movement, and have to refuse whenever more than one candidate fits.
+A shared reference says they *are*. Two identical KES 2,000 transfers to the same
+person on the same day are hopeless for the first question and trivial for the
+second.
+
+**What it changed, in three places:**
+
+1. **Transfer detection** joins on the reference first, falling back to amount
+   and account only when neither text quoted one.
+2. **Reversal matching** does the same, which retires the ambiguity that used to
+   force a refusal whenever two identical charges sat in the queue together.
+3. **The cross-source double count**, which had been deferred since 1 Aug
+   explicitly for want of a reliable correlation key. This is that key. Two
+   banks writing about one payment hash differently, so the raw-text dedup lets
+   both in — correctly, they are two real messages — and applying both counted
+   the money twice. `same_event_as` records which got there first; the second
+   keeps its text and stops asking.
+
+**Merge notes.** Added `same_event_as` to `IngestedMessage`,
+`#[serde(default)]`, so records written before it read back fine. Extended
+`kcb_send_to_mpesa`'s pattern with an *optional* ref group, so the earlier
+example without one still matches — asserted by the rule carrying both. It was
+the only branch touching `ingest.rs`, so the merge was clean.
+
+### `feat/orchie-imc` — P1 to P4 (merged into `dev`, 26 Aug)
+
+Capture, the phone as a Sustain, the trend series, and drawing salience. See
+`docs/ORCHIE_IMC_PLAN.md`, which records what each step turned up as well as
+what it built.
+
+### Earlier, all fully merged into `dev`
+
+Confirmed with `git branch --merged dev`: none of these hold anything `dev` does
+not, so the local copies were deleted. Named here because a branch that existed
+and did something is worth being able to look up.
+
+| Branch | What it was for |
+|---|---|
+| `fix/orchie-android-label` | Renamed the Android app to Orchie, keeping the applicationId so it installed as an update |
+| `feat/orchie-face-toggle` | Made the cockpit's Ingest screen reachable from the phone |
+| `feat/sms-autoreader` | The on-device SMS reader: receiver, filters, local queue |
+| `fix/sms-bulk-freeze` | The freeze on a large inbox — a card per message, against the attention budget |
+
+### Accounts and reversal netting (landed directly on `dev`, 25–26 Aug)
+
+Cases 1 to 3 of reversal netting, the accounts model, reconciliation against the
+balance each text reports, and internal-transfer detection. See
+`Projects/IO/design/Orchie_Onboarding_UX.md` §5c and §5d.
+
+---
+
+## Live — build resumed on the settled money model (26 Aug)
+
+Halt lifted; building to `Orchie_Money_Model.md` §8. Order: double entry →
+settled parser signs → person accounts → realignment → operative DAGs →
+inventory net worth.
+
+### `feat/double-entry` — merged into `dev` 26 Aug, installed
+
+**Step 1 of §8.** Every transaction is postings that sum to zero, and the check
+is now a **gate refusal** rather than a test.
+
+What is checked is not "do the declared postings sum to zero" — a movement is
+two-sided by construction, so that proves nothing. It is: **does what actually
+changed match what was declared?**
+
+**Measuring before enforcing found six single-sided entries**, which is the
+whole argument for measuring first: `record_income`, `spend`, `unspend` and
+`unrecord_income` declared the ENVELOPE (liquid or a pocket) while the money
+really moved in a cash account; `inventory.consume` lowered an asset and
+declared nothing; `place_unaccounted` credited an account out of nowhere.
+
+**Two modelling points the measurement forced**, both of which would have been
+wrong if assumed:
+
+- **Liquid and pockets are the envelope view** of money a cash account already
+  holds. Balancing them in the same ledger would count every shilling twice and
+  make allocating to a pocket look like acquiring money.
+- **`income.monthly_total` is a tally, not a balance.** Treating it as an
+  account would make one arrival look like two. The income side of the entry is
+  the outside party it came from.
+
+An endpoint outside the household is the counterpart that makes a spend
+two-sided, not an imbalance.
+
+**Next in order:** the settled parser signs (Fuliza as cash + liability, fee
+subpocket; M-Shwari as an account; cash-out to a Cash account; Pochi labelled
+and directional), which needs the liability and person account types the ledger
+now understands.
+
+## Architecture audit
+
+Lives in `docs/OPERATOR_AUDIT.md`, completed 26 Aug. Short version: every state
+change is an operator behind the gate and that holds without exception; nothing
+composes those operators into a graph and no operative is declared as one. The
+realignment plan is in that document, in dependency order.
+
+**One live inconsistency it found, worth knowing before resuming:** vendor
+memory now exists twice — the `vendors` state dimension written by
+`vendor.remember`, and `history.json` written by `ingest.rs::remember`, which is
+what the classify UI still reads. Nothing is corrupt; they simply disagree about
+who knows what. Resolving it is step 1 of the realignment.
+
+## Halt point, 26 Aug
+
+Building stopped here by Bonnie's call, to finish designing the money model
+before more is built on it. State at the halt:
+
+- `dev` = `origin/dev`, `main` = `origin/main`, working tree clean.
+- `git branch --no-merged dev` is empty: nothing stranded, nothing half-built.
+- Core suite clean; 202 host tests pass.
+- His phone is running the build installed 09:56 on 26 Aug.
+
+## The "known flake" was a real defect — fixed 29 Aug
+
+`wire::tests` failed intermittently under a full parallel run and passed in
+isolation. Carried as a flake; it was not one. Each test did five PBKDF2 unlocks
+at the OWASP floor of 600,000 iterations against a 20-second socket timeout, and
+under parallel load they lost the race. Fixed by lowering the KDF cost under
+`cfg(test)` while asserting `PBKDF2_FLOOR` separately, so the production cost is
+still checked. **The host suite went from 250+ seconds to 4.1.** The lesson is
+the label: a test inherited as flaky stops being investigated.
+
+## Conventions
+
+- Branch from `dev`, never from `main`.
+- One idea per branch. If a branch needs a second idea to be useful, that is a
+  sign the first one was not finished.
+- Run the full gate before merging: `cargo test` in both `sustena-core` and
+  `apps/mycelium/src-tauri`, plus `npx tsc --noEmit` and `npm run build`.
+- Record the finding, not only the feature. Most of these branches turned up a
+  defect that reading the code had not, and the finding is usually worth more
+  than the change.

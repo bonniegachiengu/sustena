@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 
 use crate::operator::EmittedEvent;
-use crate::compose::EffectSummary;
+use crate::compose::{EffectSummary, Step};
 use crate::flow::Movement;
 use crate::state::State;
 
@@ -98,7 +98,15 @@ pub enum ParamKind {
 /// guessing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParamDecl {
-    pub name: &'static str,
+    /// ★★★ `Cow` rather than `&'static str`, and the reason is DSL-14.
+    ///
+    /// Every Enzyme this crate ships names its parameters at compile time, and
+    /// a borrowed static was right while that was the only way an Enzyme could
+    /// exist. An Enzyme **authored in Embroidery** names them at run time, from
+    /// text somebody typed — and the only way to get a `&'static str` from that
+    /// is to leak it. A person editing their own rule ten times would leak ten
+    /// times, which is a defect that grows with use rather than one a test sees.
+    pub name: std::borrow::Cow<'static, str>,
     pub kind: ParamKind,
     /// Whether `θ` is incomplete without it.
     pub required: bool,
@@ -113,18 +121,31 @@ pub struct ParamDecl {
 }
 
 impl ParamDecl {
-    pub fn number(name: &'static str) -> Self {
-        ParamDecl { name, kind: ParamKind::Number, required: true, names_within: None }
+    pub fn number(name: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+        ParamDecl {
+            name: name.into(),
+            kind: ParamKind::Number,
+            required: true,
+            names_within: None,
+        }
     }
 
-    pub fn text(name: &'static str) -> Self {
-        ParamDecl { name, kind: ParamKind::Text, required: true, names_within: None }
+    pub fn text(name: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+        ParamDecl {
+            name: name.into(),
+            kind: ParamKind::Text,
+            required: true,
+            names_within: None,
+        }
     }
 
     /// A name drawn from a live-state collection.
-    pub fn naming(name: &'static str, within: &'static str) -> Self {
+    pub fn naming(
+        name: impl Into<std::borrow::Cow<'static, str>>,
+        within: &'static str,
+    ) -> Self {
         ParamDecl {
-            name,
+            name: name.into(),
             kind: ParamKind::Text,
             required: true,
             names_within: Some(within),
@@ -173,8 +194,42 @@ pub struct OperatorMeta {
     /// row — so an operator without one yields `Unavailable` rather than a
     /// guess. See [`crate::obligation`].
     pub effect: Option<EffectSummary>,
+    /// ★★★ **The body, when it was written in Embroidery rather than in Rust.**
+    ///
+    /// `None` for every Enzyme this crate ships. When it is `Some`, the
+    /// interpreter runs it and `run` is never called — but `run` still holds a
+    /// real function that REFUSES, so if the dispatch is ever got wrong the
+    /// result is an honest error rather than a native body running with an
+    /// authored Enzyme's parameters.
+    pub authored: Option<std::sync::Arc<crate::embroidery::AuthoredEnzyme>>,
     pub run: OperatorFn,
 }
+impl OperatorMeta {
+    /// **This operator, as composition needs to see it.**
+    ///
+    /// ★★★ The bridge that was missing. `compose.rs` has held Hoare sequencing
+    /// since it was written, and nothing ever handed it a real operator — so a
+    /// chain that could never run was only ever discovered by running it. Every
+    /// part is read off the declaration that already exists: the guard is the
+    /// operator's own constraints, the postcondition its own post-constraints,
+    /// the emissions its own declared side effects.
+    ///
+    /// ★★ Nothing is invented. An operator with no `EffectSummary` yields a
+    /// step with no effect, and composition then declines to pull a successor's
+    /// guard back through it rather than guessing what it did — the same
+    /// honesty `obligation` already applies to the same absence.
+    pub fn as_step(&self) -> Step {
+        Step {
+            name: self.name.to_string(),
+            guard: self.constraints.iter().map(|c| c.to_string()).collect(),
+            post: self.post_constraints.iter().map(|c| c.to_string()).collect(),
+            emits: self.side_effects.iter().map(|e| e.to_string()).collect(),
+            pawa_cost: self.pawa_cost,
+            effect: self.effect.clone(),
+        }
+    }
+}
+
 
 impl std::fmt::Debug for OperatorMeta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -219,6 +274,9 @@ impl Registry {
     pub fn with_builtins() -> Self {
         let mut r = Registry::new();
         crate::operator::budget::register(&mut r);
+        crate::operator::device::register(&mut r);
+        crate::operator::inventory::register(&mut r);
+        crate::operator::vendor::register(&mut r);
         r
     }
 }

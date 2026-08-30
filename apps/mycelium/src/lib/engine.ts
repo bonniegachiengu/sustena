@@ -28,7 +28,15 @@ import {
   type IdentityDto,
   type IngestDto,
   type CaptureResult,
+  type ChoiceDto,
+  type DeviceDto,
+  type NettingDto,
+  type OwnIdentifiersDto,
+  type FiledSpendDto,
+  type SkipLearnedDto,
+  type TransferDto,
   type SmsSweep,
+  type CaptureContextDto,
   type NetworkDto,
   type PeerDto,
   type SyncDto,
@@ -50,10 +58,12 @@ import {
   type SustainSummary,
   type TemplateId,
   type WorldDto,
+  type PersonHint,
 } from "../bindings";
 
 export type {
   AccessDto,
+  PersonHint,
   AuthoredDefinition,
   Branch,
   CouncilOutcomeDto,
@@ -73,7 +83,15 @@ export type {
   IdentityDto,
   IngestDto,
   CaptureResult,
+  ChoiceDto,
+  DeviceDto,
+  NettingDto,
+  OwnIdentifiersDto,
+  FiledSpendDto,
+  SkipLearnedDto,
+  TransferDto,
   SmsSweep,
+  CaptureContextDto,
   NetworkDto,
   PeerDto,
   SyncDto,
@@ -139,15 +157,68 @@ export const engine = {
   /** "granted" | "denied" | "prompt" | "prompt-with-rationale" */
   smsPermission: async (): Promise<string> => unwrap(await commands.smsPermissionState()),
   smsRequestPermission: async (): Promise<string> => unwrap(await commands.smsRequestPermission()),
-  /** Reads texts already on the phone. 0 days means all of them. */
-  smsImport: async (sustainId: string, sinceDays: number): Promise<SmsSweep> =>
-    unwrap(await commands.smsImportInbox(sustainId, sinceDays)),
-  /** Hands over what arrived while the app was shut, and clears it. */
-  smsDrain: async (sustainId: string): Promise<SmsSweep> =>
-    unwrap(await commands.smsDrainQueue(sustainId)),
+  /**
+   * ONE PAGE of the texts already on the phone. 0 days means the whole inbox.
+   *
+   * Paged because it has to be. A phone holding a few thousand texts froze the
+   * app when every match was read and captured in one call. The caller loops
+   * while `hasMore` and shows progress between pages.
+   */
+  smsImportPage: async (
+    sustainId: string,
+    sinceDays: number,
+    offset: number,
+    limit: number,
+  ): Promise<SmsSweep> =>
+    unwrap(await commands.smsImportPage(sustainId, sinceDays, offset, limit)),
+  /** ONE BATCH of what arrived while the app was shut. Loop while `hasMore`. */
+  smsDrain: async (sustainId: string, limit: number): Promise<SmsSweep> =>
+    unwrap(await commands.smsDrainQueue(sustainId, limit)),
+  /** How many texts are waiting, without taking any. */
+  smsQueueDepth: async (): Promise<number> => unwrap(await commands.smsQueueDepth()),
 
   declareSource: async (id: string, label: string, minutes: number | null): Promise<null> =>
     unwrap(await commands.declareSource(id, label, minutes)),
+  /** The phone and account numbers this household calls its own. */
+  ownIdentifiers: async (): Promise<OwnIdentifiersDto> =>
+    unwrap(await commands.getOwnIdentifiers()),
+  /** Record them. Stays on the device. */
+  setOwnIdentifiers: async (own: OwnIdentifiersDto): Promise<OwnIdentifiersDto> =>
+    unwrap(await commands.setOwnIdentifiers(own)),
+  /** Turn each pair of texts that is really one move into one move. */
+  applyTransfers: async (sustainId: string): Promise<TransferDto> =>
+    unwrap(await commands.applyTransfers(sustainId)),
+  /** Cancel refunds against their charges. Returns what it did. */
+  netReversals: async (sustainId: string): Promise<NettingDto> =>
+    unwrap(await commands.netReversals(sustainId)),
+  /** Move a spend filed to the wrong pocket. Appends a correction. */
+  reclassify: async (
+    sustainId: string,
+    messageId: string,
+    fromPocket: string,
+    toPocket: string,
+    amount: number,
+  ): Promise<GateResult> =>
+    unwrap(await commands.reclassifySpend(sustainId, messageId, fromPocket, toPocket, amount)),
+  /** Does this message carry a number, and is it already somebody's tab? */
+  personHint: async (sustainId: string, messageId: string): Promise<PersonHint> =>
+    unwrap(await commands.personHint(sustainId, messageId)),
+  /** Tie a phone number to a pocket, so money both ways lands in that tab. */
+  linkNumber: async (
+    sustainId: string,
+    pocketName: string,
+    number: string,
+  ): Promise<GateResult> =>
+    unwrap(await commands.linkNumber(sustainId, pocketName, number)),
+  /** Put a message off until he remembers. It returns at the top next open. */
+  deferMessage: async (sustainId: string, messageId: string): Promise<boolean> =>
+    unwrap(await commands.deferMessage(sustainId, messageId)),
+  /** "Never ask me about these again" — learn a skip from one message. */
+  learnSkip: async (sustainId: string, messageId: string): Promise<SkipLearnedDto> =>
+    unwrap(await commands.learnSkip(sustainId, messageId)),
+  /** Set a captured message aside as not a transaction. Keeps the record. */
+  ignoreMessage: async (id: string): Promise<boolean> =>
+    unwrap(await commands.ignoreMessage(id)),
   resolveMessage: async (id: string): Promise<boolean> =>
     unwrap(await commands.resolveMessage(id)),
   // ── Orchie ──────────────────────────────────────────────────────────────
@@ -170,8 +241,18 @@ export const engine = {
     params: JsonValue,
     messageId: string | null,
     description: string | null,
+    /**
+     * Whether this call finishes the message off.
+     *
+     * Filing a past charge takes two calls, and only the second one deals with
+     * it. Both are recorded against the message either way, because undoing a
+     * charge later needs to know both halves of how it was filed.
+     */
+    resolves: boolean | null = null,
   ): Promise<GateResult> =>
-    unwrap(await commands.orchieConfirm(sustainId, operator, params, messageId, description)),
+    unwrap(
+      await commands.orchieConfirm(sustainId, operator, params, messageId, description, resolves),
+    ),
 
   /** "remember this format" — synthesise a rule from a confirmed correction. */
   learnRule: async (messageId: string, operator: string, params: JsonValue): Promise<string> =>

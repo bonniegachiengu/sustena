@@ -74,6 +74,7 @@ fn meta(post: &[&str], guard: &[&str], eff: Option<EffectSummary>) -> OperatorMe
         protocol: sustena_core::operator::meta::Protocol::Rpc,
         min_privilege: 0,
         effect: eff,
+        authored: None,
         run: |_s, _p, _e, _m| OperatorResult::ok(json!({})),
     }
 }

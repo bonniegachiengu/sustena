@@ -84,9 +84,28 @@ async def edit_state_patch(
                     ctx.state.set(path, value)
                 applied.append({"op": op, "path": path})
             elif op == "remove":
-                # Set to None — full delete not supported by StateAccessor
-                ctx.state.set(path, None)
-                applied.append({"op": op, "path": path})
+                # ★★★ REFUSED, and it used to set the path to None.
+                #
+                #     Under a typed schema that is a type violation deposited
+                #     into state for something downstream to trip over: a
+                #     declared number dimension now holds null, every reader of
+                #     it is wrong, and nothing was refused at the moment the
+                #     mistake was made. "Full delete not supported by
+                #     StateAccessor" was true and was not a reason to write a
+                #     wrong value instead — a missing capability should refuse,
+                #     not improvise.
+                #
+                # ★★★ And deleting properly would not be the fix either. A
+                #     dimension is DECLARED; removing it is a change to the
+                #     definition, not to the state, and the Rust engine's
+                #     organisational closure refuses that shape change at the
+                #     gate. This refusal is what agreeing with it looks like.
+                errors.append(
+                    f"Cannot remove '{path}': a declared dimension cannot be made "
+                    f"absent by a state patch — setting it to null would deposit a "
+                    f"type violation for a later reader to trip over. Use 'replace' "
+                    f"with an explicit value, or edit the definition."
+                )
         except Exception as exc:
             errors.append(f"Failed to apply op '{op}' at '{path}': {exc}")
 
@@ -116,7 +135,24 @@ async def edit_state_patch(
 # ── edit.operator_spec ─────────────────────────────────────────────────────────
 
 # Mutable metadata fields (restrict to safe, non-functional fields)
-_EDITABLE_FIELDS = {"description", "pawa_cost", "license_tier", "author", "ui_schema"}
+# ★★★ `pawa_cost` and `license_tier` were in this set, and that was §VI
+#     backwards: changing an Enzyme's PRICE cost nothing, while USING it cost
+#     pawa. A fence that lets the price through is not fencing the thing worth
+#     fencing.
+#
+# ★★★ They are not metadata. `description`, `author` and `ui_schema` are how an
+#     Enzyme is DESCRIBED; a price and a licence tier are economic terms the
+#     rest of the system meters against, and an economic term that any caller
+#     can set for free at runtime is not a term at all.
+#
+# ★★ Removed rather than gated behind an authority check, because there is no
+#    authority model on this path to gate them with — adding a permission
+#    parameter nobody checks would look like a fence and be a comment. When
+#    §VI's authority reaches this operator they can come back through it.
+_EDITABLE_FIELDS = {"description", "author", "ui_schema"}
+
+# Named so the refusal can say WHY rather than only listing what is allowed.
+_ECONOMIC_FIELDS = {"pawa_cost", "license_tier"}
 
 
 @sustena_operator(
@@ -152,6 +188,16 @@ async def edit_operator_spec(
         return OperatorResult.fail(
             reason=f"Operator '{operator_name}' not found in OPERATOR_REGISTRY.",
             constraint_violated="operator_exists",
+        )
+
+    if field in _ECONOMIC_FIELDS:
+        return OperatorResult.fail(
+            reason=(
+                f"Field '{field}' is an economic term, not metadata — changing an "
+                f"operator's price at runtime, for free, costs less than using it. "
+                f"It is set where the operator is declared."
+            ),
+            constraint_violated="field_editable",
         )
 
     if field not in _EDITABLE_FIELDS:

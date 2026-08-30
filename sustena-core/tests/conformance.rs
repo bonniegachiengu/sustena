@@ -560,6 +560,7 @@ fn event_vectors() {
                 .map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect())
                 .unwrap_or_default(),
             mutations: vec![],
+            payload: None,
         }
     }
 

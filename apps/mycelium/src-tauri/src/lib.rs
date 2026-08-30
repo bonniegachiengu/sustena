@@ -5,6 +5,7 @@
 //! beyond the one that carries the answer to the webview. The app works with
 //! the machine offline because there is nothing to be offline *from*.
 
+pub mod driver;
 pub mod arena;
 #[cfg(test)]
 mod arena_test;
@@ -66,10 +67,22 @@ pub fn specta_builder() -> Builder {
         commands::capture_message,
         commands::sms_permission_state,
         commands::sms_request_permission,
-        commands::sms_import_inbox,
+        commands::sms_import_page,
         commands::sms_drain_queue,
+        commands::sms_queue_depth,
         commands::declare_source,
         commands::resolve_message,
+        commands::ignore_message,
+        commands::net_reversals,
+        commands::get_own_identifiers,
+        commands::set_own_identifiers,
+        commands::apply_transfers,
+        commands::learn_skip,
+        commands::reclassify_spend,
+        commands::defer_message,
+        commands::sustain_hash,
+        commands::person_hint,
+        commands::link_number,
         commands::learn_rule,
         commands::get_feed,
         commands::orchie_infer,

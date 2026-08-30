@@ -41,10 +41,32 @@ export default function NetworkZone({ sustainId, definition }) {
   const provision = async () => {
     setProvisioning(true);
     try {
-      // best-effort owner id from the definition's access_policy, else a
-      // literal placeholder — provision-children only fills already-declared
-      // slots, it can't invent new ones, so a wrong id here is low-risk.
-      const ownerId = definition?.access_policy?.owner_ids?.[0] || 'owner';
+      // ★★★ `owner_ids?.[0]` used to sit here, and it is the live example of
+      //     why edits must be typed. When `owner_ids` holds the unsubstituted
+      //     token "{{owner_ids}}", `?.[0]` indexes the STRING and yields "{",
+      //     which is truthy — so the `|| 'owner'` fallback never fired and "{"
+      //     was posted as the user_id that provisions child sustains. A defect
+      //     in a definition became wrong ownership on real children, with
+      //     nothing refused and nothing logged.
+      //
+      // ★★★ The optional chain is a NULL check wearing a type check's clothes.
+      //     It protects against absent and does nothing about wrong-shaped, and
+      //     a fallback that cannot run is worse than no fallback, because it
+      //     reads as handled.
+      //
+      // ★★ Both checks are needed. `Array.isArray` alone misses the token
+      //    arriving as a one-element array, ["{{owner_ids}}"], which a template
+      //    with a placeholder inside the list produces.
+      //
+      // ★★ And wrong ownership is not low-risk, whatever the earlier comment
+      //    here said: this project has already had a household owned by the
+      //    literal string "system" and a stray sustain owned by a typo, and
+      //    both took a migration to undo.
+      const declaredOwners = definition?.access_policy?.owner_ids;
+      const firstOwner = Array.isArray(declaredOwners) ? declaredOwners[0] : undefined;
+      const looksSubstituted =
+        typeof firstOwner === 'string' && firstOwner.length > 0 && !firstOwner.includes('{{');
+      const ownerId = looksSubstituted ? firstOwner : 'owner';
       await api.post(`/devui/sustain/${encodeURIComponent(sustainId)}/provision-children`, { user_id: ownerId });
       await load();
     } catch { /* honest no-op on failure — load() already ran and reflects reality */ }

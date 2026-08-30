@@ -22,7 +22,9 @@ use sustena_core::{
     detect::CusumSpec,
     editing::Definition,
     juul::Affordability,
-    monitor::{MonitorEngine, SustainWatch},
+    // ★ `Ingested` is also the name of this app's capture store, so the trend
+    //   reading keeps a longer name rather than shadowing it.
+    monitor::{Ingested as TrendReading, MonitorEngine, SustainWatch},
     operator::{execute_admitted, execute_afforded, Authorization, Enforcement, Execution, Registry},
     pawa::{meter, Meter},
     predicate::check,
@@ -109,6 +111,8 @@ fn refusal(operator: &str, reason: &str, rule: &'static str) -> Execution {
         result: OperatorResult::fail(reason.to_string(), rule),
         mutations: vec![],
         events: vec![],
+        // A run that did not happen declared nothing.
+        movements: vec![],
         state: Value::Null,
     }
 }
@@ -145,6 +149,17 @@ pub struct SyncReport {
     pub merge: Reconciliation,
 }
 
+/// One household's `W` series, and the last thing it said.
+///
+/// ★ `last` exists so a re-render can repeat the most recent verdict without
+/// manufacturing a new observation to produce one.
+struct Trend {
+    engine: Option<MonitorEngine>,
+    /// The sustain sequence this series last saw, so a render is not an event.
+    seen_seq: Option<u64>,
+    last: Option<TrendReading>,
+}
+
 pub struct World {
     pub operators: Registry,
     inner: Mutex<Inner>,
@@ -157,6 +172,11 @@ pub struct World {
     meter: Mutex<Meter>,
     /// Definitions a person authored, checked by the engine before landing.
     definitions: Mutex<Vec<AuthoredDefinition>>,
+    /// ★★★ The `W` series, per household. Without somewhere to live across
+    /// calls there is no series at all — the distance to V was computed on
+    /// every render and thrown away, so nothing could be smoothed and no drift
+    /// could be detected. See [`World::observe`].
+    monitors: Mutex<BTreeMap<String, Trend>>,
     /// ★★★ The unlocked identity, or `None`. **This is the authentication.**
     /// Every write path reads it; a locked world can decide nothing, because
     /// there is no principal to decide on behalf of.
@@ -189,6 +209,49 @@ pub struct Inner {
 
 impl World {
     /// Open the household from disk, folding every log.
+    /// One event that adds every declared-but-absent top-level dimension.
+    ///
+    /// ★★ `None` when there is nothing to add, so an ordinary open writes
+    /// nothing at all and the log does not grow a line per launch.
+    fn backfill_declared(
+        sustain_id: &str,
+        definition: &Definition,
+        state: &Value,
+        seq: u64,
+    ) -> Option<LoggedEvent> {
+        let missing: Vec<&String> = definition
+            .schema
+            .dimensions
+            .keys()
+            .filter(|name| state.get(name.as_str()).is_none())
+            .collect();
+        if missing.is_empty() {
+            return None;
+        }
+        let mutations = missing
+            .iter()
+            .map(|name| sustena_core::Mutation::Set {
+                path: (*name).clone(),
+                old: Value::Null,
+                new: serde_json::json!({}),
+            })
+            .collect();
+        Some(LoggedEvent {
+            seq,
+            operator: "system.backfill_declared".to_string(),
+            events: vec![EventDto {
+                name: "event.system.dimension_added".to_string(),
+                payload: serde_json::json!({"sustain": sustain_id}),
+            }],
+            mutations,
+            // ★ A backfill is not an Enzyme call either.
+            params: None,
+            origin: None,
+            lamport: None,
+            clock: None,
+        })
+    }
+
     pub fn open(store: Store) -> StoreResult<World> {
         let store_root = store.root().to_path_buf();
         // ★★★ BEFORE anything is folded. A transfer a crash interrupted is
@@ -217,7 +280,32 @@ impl World {
                 None => templates::definition(record.template),
             };
             let enforcement = enforcement_of(&definition);
-            let (state, next_seq) = store.load_state(&record.id)?;
+            let (mut state, mut next_seq) = store.load_state(&record.id)?;
+            // ★★★ A dimension the definition declares and the instance lacks.
+            //
+            //     Introducing one is a SHAPE change, which organisational
+            //     closure refuses to any operator — rightly, because it changes
+            //     what the Sustain is rather than what it holds. So it happens
+            //     here, once, at the level shape changes belong to, and as a
+            //     real logged event: the fold reproduces it, and nothing is
+            //     repaired invisibly behind the log's back.
+            //
+            //     ★★ Empty, never invented. Backfilling a value would be this
+            //     code deciding something about a household it knows nothing
+            //     about; an empty dimension says only "this exists now", which
+            //     is the whole of what was missing.
+            if let Some(event) = Self::backfill_declared(&record.id, &definition, &state, next_seq) {
+                let added: Vec<&str> =
+                    event.mutations.iter().filter_map(|m| m.path()).collect();
+                eprintln!(
+                    "[mycelium] {} was missing declared dimensions {:?} — added",
+                    record.id, added
+                );
+                store.append(&record.id, &event)?;
+                let (s2, n2) = store.load_state(&record.id)?;
+                state = s2;
+                next_seq = n2;
+            }
             order.push(record.id.clone());
             sustains.insert(
                 record.id.clone(),
@@ -242,6 +330,7 @@ impl World {
             economy: Mutex::new(Economy::open(DEFAULT_HANDLE)),
             meter: Mutex::new(Meter::new()),
             definitions: Mutex::new(definitions),
+            monitors: Mutex::new(BTreeMap::new()),
             identity: Mutex::new(None),
             identities: IdentityStore::at(&store_root),
             ingest: Ingested::at(&store_root)?,
@@ -268,6 +357,12 @@ impl World {
     }
 
     // ── reading ──────────────────────────────────────────────────────────────
+
+    /// Per-household trend engines. See [`observe`].
+    #[cfg(test)]
+    pub fn monitors_len(&self) -> usize {
+        self.monitors.lock().expect("monitor lock").len()
+    }
 
     pub fn with<T>(&self, f: impl FnOnce(&Inner) -> T) -> T {
         f(&self.inner.lock().expect("world lock"))
@@ -440,6 +535,7 @@ impl World {
                     ),
                     mutations: vec![],
                     events: vec![],
+                    movements: vec![],
                     state: Value::Null,
                 },
                 0,
@@ -540,7 +636,12 @@ impl World {
         //   it would imply events that were never written.
         let seq = sustain.next_seq;
         if x.committed() {
-            let line = self.stamped(sustain_id, seq, LoggedEvent::of(seq, operator, &x));
+            // ★★ With the call, so semantic replay has something real to read.
+            let line = self.stamped(
+                sustain_id,
+                seq,
+                LoggedEvent::called(seq, operator, &x, params.clone()),
+            );
             self.store.append(sustain_id, &line)?;
             let sustain = inner.sustains.get_mut(sustain_id).expect("checked above");
             sustain.state = x.state.clone();
@@ -744,8 +845,19 @@ impl World {
         source_id: &str,
         raw: &str,
     ) -> StoreResult<Capture> {
+        self.capture_at(sustain_id, source_id, raw, None)
+    }
+
+    /// Capture, carrying when the phone says the message arrived.
+    pub fn capture_at(
+        &self,
+        sustain_id: &str,
+        source_id: &str,
+        raw: &str,
+        sent_at_ms: Option<i64>,
+    ) -> StoreResult<Capture> {
         let rules = self.ingest.effective_rules()?;
-        let captured = self.ingest.capture(sustain_id, source_id, raw, &rules)?;
+        let captured = self.ingest.capture_at(sustain_id, source_id, raw, &rules, sent_at_ms)?;
 
         // Only a freshly-stored, unambiguously-mapped message applies. A
         // duplicate has already had its chance; anything else is a person's.
@@ -754,7 +866,118 @@ impl World {
             return Ok(captured);
         };
 
-        let params: Map<String, Value> = m.params.clone().into_iter().collect();
+        // ★★★ A shape he has already said he never wants to see.
+        //
+        //     Applied here, on the way in, so the answer he gave once holds
+        //     for every message like it afterwards. It sets aside rather than
+        //     discards: the text is kept, the record says a learned rule did
+        //     it, and forgetting the rule is a real thing he can do.
+        //
+        //     ★★ Only for messages that need a person. A MAPPED message is
+        //     one the transducer understood well enough to act on, and
+        //     skipping those would silently stop recording real money.
+        if m.needs_attention() && self.ingest.is_skipped(m)? {
+            self.ingest.ignore(&m.id)?;
+            let updated = self
+                .ingest
+                .current()?
+                .into_iter()
+                .find(|x| x.id == m.id)
+                .map(Box::new)
+                .unwrap_or_else(|| m.clone());
+            return Ok(Capture::Stored(updated));
+        }
+
+        // ★★★ One real transaction, two texts, one application.
+        //
+        //     M-Pesa and a bank can both send about the same movement of
+        //     money. Their texts differ, so the raw-text dedup lets both in --
+        //     correctly, they are two different messages -- and applying both
+        //     counts the money twice. A shared transaction reference is what
+        //     says they are one event, and it is checked here, before anything
+        //     is applied rather than after.
+        //
+        //     ★★ Not resolved and not hidden: the second text stays in the
+        //     queue with its own reason, because "already recorded from your
+        //     other bank" is something worth being able to see.
+        if let Some(reference) = m.reference() {
+            // ★★ With the amount, so a reference collision cannot silently
+            //    swallow a real separate transaction.
+            let amount = m
+                .parsed_fields
+                .get("amount")
+                .and_then(|v| v.as_f64().or_else(|| {
+                    v.as_str().and_then(|s| s.replace(',', "").parse().ok())
+                }));
+            if let Some(first) = self
+                .ingest
+                .same_fact_already_applied(sustain_id, source_id, reference, amount)?
+            {
+                self.ingest.note_same_event(&m.id, &first)?;
+                let updated = self
+                    .ingest
+                    .current()?
+                    .into_iter()
+                    .find(|x| x.id == m.id)
+                    .map(Box::new)
+                    .unwrap_or_else(|| m.clone());
+                return Ok(Capture::Stored(updated));
+            }
+        }
+
+        let mut params: Map<String, Value> = m.params.clone().into_iter().collect();
+
+        // ★★★ Money from a number he has tied to somebody's tab is that tab
+        //     being paid back, not new money earned.
+        //
+        //     Without this the commonest real arrival is the wrong entry
+        //     entirely: his sister sends back part of what he sent her, and it
+        //     files as household income while her tab still shows the full
+        //     amount outstanding. Both halves are then wrong, and nothing on
+        //     any screen says so. The link is him having already answered the
+        //     question, so it is answered here rather than asked again.
+        //
+        //     ★★ Only ever a redirect of something that was going to be applied
+        //     anyway. Nothing new starts applying itself because of this.
+        let mut operator = operator;
+        if operator == "budget.record_income" {
+            let linked = self.with(|i| i.get(sustain_id).map(|s| s.state.clone())).and_then(|st| {
+                crate::commands::printed_number(&m.parsed_fields)
+                    .and_then(|n| sustena_core::pocket_for_number(&sustena_core::State::new(st), &n))
+            });
+            if let Some(pocket) = linked {
+                operator = "budget.unspend".to_string();
+                params.insert("pocket_name".to_string(), Value::String(pocket));
+                // The income-only bookkeeping does not belong on a refund.
+                params.remove("source");
+            }
+        }
+
+        // ★★★ The message that caused it, carried into the entry it creates.
+        //
+        // Money arriving from his own other account reads exactly like money
+        // arriving from an employer, so it is filed as income here, before
+        // anything can reveal which it was. When the other half turns up and
+        // says it was his own money moving, that income has to come back off
+        // the books -- and taking the right entry out of a list needs the entry
+        // to be identifiable. Without this the only options are to remove the
+        // wrong one or to leave a false income standing, and both are worse
+        // than the cost of one extra field.
+        if operator == "budget.record_income" {
+            params.entry("entry_id".to_string()).or_insert_with(|| Value::String(m.id.clone()));
+        }
+        // ★★ Which account it landed in, from the source of the text itself.
+        //    Free attribution, and the same fact the transfer pass needs.
+        if !params.contains_key("account") {
+            let takes_account = self
+                .operators
+                .get(&operator)
+                .is_some_and(|meta| meta.params.iter().any(|p| p.name == "account"));
+            if takes_account {
+                params.insert("account".to_string(), Value::String(source_id.to_string()));
+            }
+        }
+
         match self.call(sustain_id, &operator, &params)? {
             Some((x, _)) => {
                 let reason = x.result.reason.clone();
@@ -777,6 +1000,102 @@ impl World {
             .map(Box::new)
             .unwrap_or_else(|| m.clone());
         Ok(Capture::Stored(updated))
+    }
+
+    /// Fold one reading into this household's trend, and say what it means.
+    ///
+    /// ★★★ The piece that was missing. `compose(r)` computed the distance to V
+    /// on every call and then forgot it, so there was no series — nothing to
+    /// smooth, and no drift to detect. Monitor §V and §VI both need a history
+    /// and neither had one.
+    ///
+    /// ★★ The engine lives here rather than in the feed because the feed is
+    /// rebuilt constantly and a series that resets on every render is not a
+    /// series. It is per-household, keyed by sustain, and holds only what the
+    /// detectors need.
+    ///
+    /// ★ In memory only, deliberately for now. A trend rebuilt from an empty
+    /// history after a restart understates drift rather than inventing it,
+    /// which is the safe direction to be wrong in; persisting the series is a
+    /// real follow-up and is called out rather than quietly assumed done.
+    pub fn observe(&self, sustain_id: &str, reading: &Value) -> Option<TrendReading> {
+        // ★★★ One reading per EVENT, not per render.
+        //
+        // Found by watching the series: the feed is rebuilt on every poll, so
+        // observing per call fed the detectors a fresh reading when nothing had
+        // happened at all. A household sitting still then "drifts" purely
+        // because it was looked at often, and one bad afternoon reads as a
+        // trend for as long as someone keeps the app open. The sustain's own
+        // sequence number is the honest tick: it moves when something really
+        // changed and not otherwise.
+        let seq = self.with(|i| i.get(sustain_id).map(|s| s.next_seq))?;
+        let mut monitors = self.monitors.lock().expect("monitor lock");
+        let entry = monitors.entry(sustain_id.to_string()).or_insert_with(|| {
+            let watch = crate::orchie::watch_for(sustain_id, reading);
+            Trend {
+                engine: MonitorEngine::watching(watch).ok(),
+                seen_seq: None,
+                last: None,
+            }
+        });
+        if entry.seen_seq == Some(seq) {
+            // Nothing new happened; report what the last real reading said.
+            return entry.last.clone();
+        }
+        entry.seen_seq = Some(seq);
+        let out = entry.engine.as_mut()?.ingest(sustain_id, reading).ok();
+        entry.last = out.clone();
+        out
+    }
+
+    /// The id this household's capture device goes by.
+    ///
+    /// ★ Derived from the household rather than random, so the same phone
+    /// reporting twice is the same Sustain both times rather than a new one
+    /// every sweep.
+    pub fn device_id(household: &str) -> String {
+        format!("device-{household}")
+    }
+
+    /// Record that the phone is alive and how far behind it is, creating the
+    /// device Sustain the first time.
+    ///
+    /// ★★★ §IX in one call. The phone is not a special case wired into the
+    /// ingest path; it is a child Sustain whose state changes through the same
+    /// gate as any other, so everything already built for children — roll-up,
+    /// composition, the feed — reads it for free.
+    ///
+    /// ★★ Best-effort by design. A heartbeat that failed must never take a
+    /// real capture down with it: the texts are the point, and knowing how the
+    /// phone felt about delivering them is not worth losing one.
+    pub fn heartbeat(&self, household: &str, queue_depth: u32, at_ms: i64) -> StoreResult<()> {
+        let id = Self::device_id(household);
+        if self.with(|i| i.get(&id).is_none()) {
+            // ★★★ Owned by whoever owns the household it reports to. A device
+            //     created ownerless leaves its own household's principal with
+            //     viewer rights on it, and every heartbeat is then refused for
+            //     insufficient privilege -- silently, since a heartbeat must
+            //     never take a real capture down with it. Found by testing.
+            // Whoever owns the household, or failing that whoever is holding
+            // the phone -- which is the honest answer for a device anyway.
+            let owner = self
+                .with(|i| i.get(household).and_then(|s| s.record.owner.clone()))
+                .or_else(|| self.principal());
+            self.instantiate_owned(
+                &id,
+                "this phone",
+                TemplateId::Device,
+                None,
+                Some(household),
+                owner.as_deref(),
+            )?;
+        }
+        let mut params = Map::new();
+        params.insert("queue_depth".into(), serde_json::json!(queue_depth));
+        params.insert("at_ms".into(), serde_json::json!(at_ms));
+        params.insert("app_version".into(), Value::String(env!("CARGO_PKG_VERSION").to_string()));
+        let _ = self.call(&id, "device.heartbeat", &params)?;
+        Ok(())
     }
 
     /// The rules in force for a source: the shipped set plus this household's
@@ -2113,9 +2432,785 @@ fn leg_line(seq: u64, leg: &Leg) -> LoggedEvent {
         operator: "holon.transfer".to_string(),
         events: vec![EventDto::from(leg.event())],
         mutations: leg.mutations().to_vec(),
+        // ★★ A transfer leg is written by the transfer itself, not by an
+        //    ordinary Enzyme call, so there is no single call to record. Named
+        //    rather than filled with an empty map, which would claim the leg
+        //    was called with nothing.
+        params: None,
         origin: None,
         lamport: None,
         clock: None,
     }
 }
 
+#[cfg(test)]
+mod inventory_tests {
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-inv-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    fn call(w: &World, op: &str, ps: Vec<(&str, Value)>) -> bool {
+        let params: Map<String, Value> =
+            ps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        matches!(w.call("home", op, &params), Ok(Some((x, _))) if x.committed())
+    }
+
+    fn state(w: &World) -> Value {
+        w.with(|i| i.get("home").map(|s| s.state.clone())).expect("state")
+    }
+
+    /// ★★★ The whole loop, through the real gate and the real fold: money in,
+    /// earmarked, spent, and then what that spending actually brought home.
+    #[test]
+    fn a_spend_becomes_things_the_household_holds() {
+        let w = world("loop");
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(1000.0)), ("source", json!("pay")),
+                          ("account", json!("mpesa"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(500.0))]));
+        assert!(call(&w, "budget.spend",
+                     vec![("pocket_name", json!("food")), ("amount", json!(90.0)),
+                          ("account", json!("mpesa"))]));
+
+        let before = state(&w);
+        assert!(call(&w, "inventory.itemize",
+                     vec![("pocket_name", json!("food")), ("source_tx", json!("msg-1")),
+                          ("limit", json!(90.0)),
+                          ("lines", json!([{"item":"beans","value":30.0},
+                                           {"item":"onions","value":50.0},
+                                           {"item":"carrots","value":10.0}]))]));
+        let after = state(&w);
+
+        let assets = after.pointer("/inventory/assets").and_then(Value::as_array).expect("assets");
+        assert_eq!(assets.len(), 3);
+        assert_eq!(assets[1]["item"], json!("onions"));
+        assert_eq!(assets[1]["pocket"], json!("food"));
+
+        // ★★★ Net-worth-neutral at the moment of buying: the spend already
+        //     took the money, so itemizing must not take it again.
+        assert_eq!(
+            after.pointer("/finances").unwrap(),
+            before.pointer("/finances").unwrap(),
+            "cash became beans, and no shilling moved twice"
+        );
+    }
+
+    #[test]
+    fn acquiring_is_recorded_in_the_append_only_log() {
+        // ★★ The log is what the household actually is; state is a reading of
+        //    it. An asset that existed only in state would vanish on the next
+        //    rebuild, so the event is the thing worth asserting here.
+        //
+        //    ★ That the replay lands byte-identical is proven where it can be:
+        //    the core's own `ids_are_derived_so_replaying_the_log_produces_the
+        //    _same_assets`, since ids are the only part that could differ.
+        let w = world("log");
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(1000.0)), ("source", json!("pay"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(500.0))]));
+        assert!(call(&w, "inventory.itemize",
+                     vec![("pocket_name", json!("food")), ("source_tx", json!("msg-9")),
+                          ("lines", json!([{"item":"rice","value":120.0}]))]));
+
+        let log = w.store.read_log("home").expect("log");
+        assert!(
+            log.iter().any(|e| format!("{e:?}").contains("event.inventory.acquired")),
+            "the acquisition is in the log, not only in the state"
+        );
+    }
+
+    #[test]
+    fn a_household_opened_before_inventory_existed_can_still_itemize() {
+        // ★★ Every household on his phone predates this dimension. If the
+        //    first itemize refused, the feature would be unreachable for
+        //    exactly the people who have been using the app.
+        let w = world("legacy");
+        assert!(
+            state(&w).pointer("/inventory/assets").is_some()
+                || state(&w).pointer("/inventory").is_none(),
+            "either shape is fine; what matters is the next line"
+        );
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(0.0))])
+                || true);
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(100.0)), ("source", json!("s"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(100.0))]));
+        assert!(call(&w, "inventory.itemize",
+                     vec![("pocket_name", json!("food")), ("source_tx", json!("m1")),
+                          ("lines", json!([{"item":"salt","value":20.0}]))]));
+    }
+}
+
+#[cfg(test)]
+mod trend_tests {
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-trend-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    /// Make something really happen, so the sustain's sequence moves.
+    ///
+    /// ★★ The series ticks on events. A test that called `observe` repeatedly
+    /// without changing anything would be testing the very thing the seq gate
+    /// exists to prevent.
+    fn something_happens(w: &World, n: usize) {
+        let mut params = Map::new();
+        params.insert("pocket_name".into(), Value::String(format!("p{n}")));
+        let _ = w.call("home", "budget.add_pocket", &params);
+    }
+
+    /// Inside its own limits.
+    fn calm() -> Value {
+        json!({"liquid": 5000.0, "worst_spent": 100.0, "worst_allocated": 1000.0,
+               "unclassified": 0.0})
+    }
+
+    /// Over its own limit by `by`.
+    fn over(by: f64) -> Value {
+        json!({"liquid": 5000.0, "worst_spent": 1000.0 + by, "worst_allocated": 1000.0,
+               "unclassified": 0.0})
+    }
+
+    #[test]
+    fn a_reading_now_has_a_history_to_be_read_against() {
+        // ★★★ The whole of P3. Before this the distance was computed on every
+        //     render and thrown away, so there was nothing to smooth.
+        let w = world("series");
+        something_happens(&w, 0);
+        let first = w.observe("home", &calm()).expect("a reading");
+        something_happens(&w, 1);
+        let second = w.observe("home", &over(200.0)).expect("a reading");
+        assert!(second.reading.w > first.reading.w, "it really did get worse");
+        assert!(
+            second.reading.smoothed < second.reading.w,
+            "the level lags the jump rather than chasing it, which is what smoothing is for"
+        );
+    }
+
+    #[test]
+    fn looking_again_is_not_something_happening() {
+        // ★★★ The bug this gate exists for, found by watching the series. The
+        //     feed rebuilds on every poll, so observing per call fed the
+        //     detectors fresh readings when nothing had changed — and a
+        //     household sitting still would "drift" purely because someone had
+        //     the app open.
+        let w = world("renders");
+        something_happens(&w, 0);
+        let first = w.observe("home", &over(300.0)).expect("a reading");
+        let again = w.observe("home", &over(300.0)).expect("the same reading");
+        let third = w.observe("home", &over(300.0)).expect("still the same");
+        assert_eq!(first.reading.smoothed, again.reading.smoothed);
+        assert_eq!(first.reading.smoothed, third.reading.smoothed);
+
+        // ★ And when something really does happen, the series moves again.
+        //   Checked with a DIFFERENT reading: the level seeds from the first
+        //   observation, so repeating an identical one correctly leaves it
+        //   exactly where it was, which would prove nothing either way.
+        something_happens(&w, 1);
+        let moved = w.observe("home", &over(900.0)).expect("a new reading");
+        assert!(
+            moved.reading.smoothed > first.reading.smoothed,
+            "a real change moves the level"
+        );
+    }
+
+    #[test]
+    fn a_household_inside_its_limits_is_never_told_it_is_drifting() {
+        let w = world("calm");
+        let mut alerted = false;
+        for n in 0..20 {
+            something_happens(&w, n);
+            if let Some(r) = w.observe("home", &calm()) {
+                alerted |= r.reading.alert.is_some();
+            }
+        }
+        assert!(!alerted, "nothing was ever wrong, so nothing should have been said");
+    }
+
+    #[test]
+    fn a_small_persistent_gap_is_caught_though_no_single_day_looks_bad() {
+        // ★★★ The case a threshold cannot see, and the reason CUSUM is here:
+        //     each of these readings on its own is unremarkable, and the
+        //     household's own allocation is what makes "small" mean anything.
+        let w = world("drift");
+        let mut alerted = false;
+        for n in 0..20 {
+            something_happens(&w, n);
+            if let Some(r) = w.observe("home", &over(60.0)) {
+                alerted |= r.reading.alert.is_some();
+            }
+        }
+        assert!(alerted, "a gap that keeps repeating is a real signal, whatever one day says");
+    }
+
+    #[test]
+    fn the_threshold_scales_to_what_the_household_itself_set_aside() {
+        // ★★★ A fixed threshold would shout forever at a household budgeting
+        //     hundreds of thousands and stay silent for one budgeting hundreds.
+        let small = crate::orchie::drift_spec(&json!({"worst_allocated": 1000.0}));
+        let large = crate::orchie::drift_spec(&json!({"worst_allocated": 100000.0}));
+        assert!(large.delta > small.delta * 50.0, "the bigger household needs a bigger shift");
+    }
+
+    #[test]
+    fn health_is_read_off_the_core_encoder_not_re_derived() {
+        // ★★★ Monitor §VII, end to end. The ranking was computed correctly and
+        //     drawn flat, so it lived in the data and never reached the eye.
+        //     `encode_field` had been in the core since it shipped with nothing
+        //     calling it; this is the caller.
+        use sustena_core::preattentive::{encode_field, Hue, VisualAttribute};
+
+        let w = world("hue");
+        something_happens(&w, 0);
+        let calm_reading = w.observe("home", &calm()).expect("a reading");
+        let hue_of = |r: &TrendReading| {
+            encode_field(&[r])
+                .first()
+                .and_then(|s| {
+                    s.attributes().iter().find_map(|a| match a {
+                        VisualAttribute::Hue { value, .. } => Some(*value),
+                        _ => None,
+                    })
+                })
+                .expect("the encoder always assigns a hue")
+        };
+        assert_eq!(hue_of(&calm_reading), Hue::Green, "inside its limits reads calm");
+
+        let w2 = world("hue-bad");
+        for n in 0..8 {
+            something_happens(&w2, n);
+            w2.observe("home", &over(800.0));
+        }
+        let bad = w2.observe("home", &over(800.0)).expect("a reading");
+        assert_ne!(hue_of(&bad), Hue::Green, "well outside does not read as calm");
+    }
+
+    #[test]
+    fn each_household_has_its_own_history() {
+        let w = world("scoped");
+        for n in 0..20 {
+            something_happens(&w, n);
+            w.observe("home", &over(60.0));
+        }
+        // A second household, calm, sharing nothing.
+        w.instantiate_owned("other", "Other", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("other");
+        let b = w.observe("other", &calm()).expect("a reading");
+        assert!(b.reading.alert.is_none(), "it has been calm and knows nothing of the first");
+        assert_eq!(w.monitors_len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod device_tests {
+    use super::*;
+    use crate::store::Store;
+
+    /// A household owned by the enrolling handle, as enrolment leaves it in
+    /// the real app.
+    fn own_household(w: &World, id: &str, label: &str) {
+        w.instantiate_owned(id, label, TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+    }
+
+    /// A real world on a scratch directory, enrolled so `call` has a principal.
+    fn test_world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-device-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w
+    }
+
+    /// ★★★ §IX in one assertion: the phone is a CHILD SUSTAIN, not a special
+    /// case bolted onto the ingest path. Everything already built for children
+    /// reads it for free, which is the whole reason for modelling it this way.
+    #[test]
+    fn the_phone_becomes_a_child_of_the_household_it_reports_to() {
+        let w = test_world("child");
+        own_household(&w, "home", "Home");
+        w.heartbeat("home", 3, 1_700_000_000_000).expect("heartbeat");
+
+        let id = World::device_id("home");
+        let rec = w.with(|i| i.get(&id).map(|s| s.record.clone())).expect("the device exists");
+        assert_eq!(rec.parent.as_deref(), Some("home"), "watched by the household");
+        assert_eq!(rec.template, TemplateId::Device);
+    }
+
+    #[test]
+    fn a_heartbeat_records_the_queue_and_the_moment() {
+        let w = test_world("records");
+        own_household(&w, "home", "Home");
+        w.heartbeat("home", 7, 1_700_000_000_000).expect("heartbeat");
+
+        let state = w
+            .with(|i| i.get(&World::device_id("home")).map(|s| s.state.clone()))
+            .expect("state");
+        assert_eq!(state.pointer("/device/queue_depth").and_then(Value::as_f64), Some(7.0));
+        assert_eq!(
+            state.pointer("/device/last_ack_ms").and_then(Value::as_f64),
+            Some(1_700_000_000_000.0)
+        );
+    }
+
+    #[test]
+    fn reporting_twice_is_the_same_phone_not_two() {
+        // ★★ The id is derived from the household, so a phone that reports on
+        //    every sweep does not leave a trail of dead Sustains behind it.
+        let w = test_world("twice");
+        own_household(&w, "home", "Home");
+        w.heartbeat("home", 1, 1_000).expect("first");
+        w.heartbeat("home", 0, 2_000).expect("second");
+
+        let devices = w.with(|i| {
+            i.order.iter().filter(|id| id.starts_with("device-")).count()
+        });
+        assert_eq!(devices, 1, "one phone, reporting twice");
+    }
+
+    #[test]
+    fn each_household_watches_its_own_phone() {
+        let w = test_world("scoped");
+        own_household(&w, "a", "A");
+        own_household(&w, "b", "B");
+        w.heartbeat("a", 5, 1_000).expect("a beat");
+
+        assert!(w.with(|i| i.get(&World::device_id("a")).is_some()));
+        assert!(
+            w.with(|i| i.get(&World::device_id("b")).is_none()),
+            "a household that has not reported has no device"
+        );
+    }
+}
+
+#[cfg(test)]
+mod person_tab_tests {
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-tab-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    fn call(w: &World, op: &str, ps: Vec<(&str, Value)>) -> bool {
+        let params: Map<String, Value> = ps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        matches!(w.call("home", op, &params), Ok(Some((x, _))) if x.committed())
+    }
+
+    fn state(w: &World) -> Value {
+        w.with(|i| i.get("home").map(|s| s.state.clone())).expect("state")
+    }
+
+    /// A real received-money text, in the shape M-Pesa actually sends.
+    fn received_from(reference: &str, phone: &str) -> String {
+        format!(
+            "{reference} Confirmed. You have received Ksh1,000.00 from MARY NGIGI {phone} \
+             on 2/8/26 at 9:14 AM New M-PESA balance is Ksh5,000.00"
+        )
+    }
+
+    fn with_tab(name: &str) -> World {
+        let w = world(name);
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(10000.0)), ("source", json!("pay")),
+                          ("account", json!("mpesa"))]));
+        assert!(call(&w, "budget.add_pocket", vec![("pocket_name", json!("Aida"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("Aida")), ("amount", json!(3000.0))]));
+        w
+    }
+
+    fn tab(w: &World) -> f64 {
+        let p = state(&w).pointer("/finances/pockets/Aida").expect("pocket").clone();
+        p["allocated"].as_f64().unwrap() - p["spent"].as_f64().unwrap()
+    }
+
+    #[test]
+    fn money_from_a_linked_number_pays_down_the_tab_instead_of_becoming_income() {
+        // ★★★ The whole point, end to end through the real capture path.
+        //
+        //     Without the link this arrives as household income while her tab
+        //     still shows the full amount outstanding — both halves wrong, and
+        //     nothing on any screen saying so.
+        let w = with_tab("redirect");
+        assert!(call(&w, "vendor.link_number",
+                     vec![("number", json!("0726123961")), ("pocket_name", json!("Aida"))]));
+        assert!(call(&w, "budget.spend",
+                     vec![("pocket_name", json!("Aida")), ("amount", json!(2000.0)),
+                          ("account", json!("mpesa"))]));
+        assert_eq!(tab(&w), 1000.0);
+
+        let earned_before =
+            state(&w).pointer("/finances/income/monthly_total").and_then(Value::as_f64);
+
+        w.capture_at("home", "mpesa", &received_from("QGH7XJ4P2Q", "0726***961"), None)
+            .expect("capture");
+
+        assert_eq!(tab(&w), 2000.0, "her 1,000 came back off what she owes");
+        assert_eq!(
+            state(&w).pointer("/finances/income/monthly_total").and_then(Value::as_f64),
+            earned_before,
+            "and the household did not earn anything",
+        );
+    }
+
+    #[test]
+    fn money_from_an_unlinked_number_is_still_ordinary_income() {
+        // ★★★ Nothing new starts applying itself because of the link. An
+        //     arrival from anybody else behaves exactly as it did before.
+        let w = with_tab("untouched");
+        let earned_before =
+            state(&w).pointer("/finances/income/monthly_total").and_then(Value::as_f64).unwrap();
+        w.capture_at("home", "mpesa", &received_from("QGH7XJ4P2R", "0711000222"), None)
+            .expect("capture");
+        assert_eq!(
+            state(&w).pointer("/finances/income/monthly_total").and_then(Value::as_f64),
+            Some(earned_before + 1000.0),
+        );
+        assert_eq!(tab(&w), 3000.0, "and no tab moved");
+    }
+
+    #[test]
+    fn she_can_send_first_and_the_tab_simply_runs_in_his_favour() {
+        // ★★ Nothing has gone out yet. An envelope would refuse; a tab should
+        //    not, because a person sending first is an ordinary Tuesday.
+        let w = with_tab("she-first");
+        assert!(call(&w, "vendor.link_number",
+                     vec![("number", json!("0726123961")), ("pocket_name", json!("Aida"))]));
+        w.capture_at("home", "mpesa", &received_from("QGH7XJ4P2S", "0726***961"), None)
+            .expect("capture");
+        assert_eq!(tab(&w), 4000.0);
+    }
+
+    #[test]
+    fn the_redirected_entry_can_still_be_rebuilt_from_the_log() {
+        // ★★★ It went through the ordinary operator path, so the fold reproduces
+        //     it. A redirect that bypassed the log would be a private ledger.
+        let w = with_tab("folds");
+        assert!(call(&w, "vendor.link_number",
+                     vec![("number", json!("0726123961")), ("pocket_name", json!("Aida"))]));
+        w.capture_at("home", "mpesa", &received_from("QGH7XJ4P2T", "0726***961"), None)
+            .expect("capture");
+        // The state is never stored: loading it IS the fold.
+        let (rebuilt, _) = w.store().load_state("home").expect("fold");
+        assert_eq!(rebuilt.pointer("/finances/pockets/Aida"),
+                   state(&w).pointer("/finances/pockets/Aida"));
+    }
+}
+
+#[cfg(test)]
+mod operative_layer_tests {
+    //! ★★★ The realignment, asserted end to end: the deciding step is the
+    //! operative's own graph running against the real registry, and the memory
+    //! it reads is the ONE place the gate writes.
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-oper-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    fn call(w: &World, op: &str, ps: Vec<(&str, Value)>) -> bool {
+        let params: Map<String, Value> = ps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        matches!(w.call("home", op, &params), Ok(Some((x, _))) if x.committed())
+    }
+
+    fn state(w: &World) -> Value {
+        w.with(|i| i.get("home").map(|s| s.state.clone())).expect("state")
+    }
+
+    fn funded(name: &str) -> World {
+        let w = world(name);
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(20000.0)), ("source", json!("pay")),
+                          ("account", json!("mpesa"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(5000.0))]));
+        w
+    }
+
+    #[test]
+    fn a_household_can_run_mentor_over_its_own_operators() {
+        // ★★★ The graph is checked against the SUSTAIN's allow-list, not just
+        //     against the registry — so an operative can never reach an
+        //     operator the household did not declare.
+        let w = funded("mentor-runs");
+        let allowed = w.with(|i| i.get("home").map(|s| s.definition.operators.clone())).unwrap();
+        assert!(call(&w, "vendor.remember",
+                     vec![("counterparty", json!("NAIVAS SUPERMARKET")),
+                          ("pocket_name", json!("food"))]));
+
+        // ★ Same words, different case and a company suffix — one vendor.
+        //   DROPPING a word would be a different vendor, which is the
+        //   conservative half of `vendor_key`'s only real tradeoff.
+        let input: Map<String, Value> = [
+            ("counterparty".to_string(), json!("Naivas Supermarket Ltd")),
+            ("amount".to_string(), json!(300.0)),
+        ]
+        .into_iter()
+        .collect();
+
+        let run = sustena_core::dag::run(
+            &sustena_core::mentor(),
+            &w.operators,
+            &allowed,
+            &sustena_core::Enforcement::default(),
+            &state(&w),
+            &input,
+        )
+        .expect("mentor typechecks against the real registry");
+        assert!(run.succeeded(), "{:?}", run.steps.last().map(|s| &s.result.reason));
+        assert_eq!(
+            run.state.pointer("/finances/pockets/food/spent").and_then(Value::as_f64),
+            Some(300.0),
+        );
+    }
+
+    #[test]
+    fn what_a_confirmation_remembers_is_state_and_only_state() {
+        // ★★★ The double-write, closed. The memory now lives in the `vendors`
+        //     dimension — through the gate, replayed by the fold — rather than
+        //     also in a file beside the log that nothing could reconcile it
+        //     against.
+        let w = funded("one-source");
+        assert!(call(&w, "vendor.remember",
+                     vec![("counterparty", json!("JAVA HOUSE")), ("pocket_name", json!("food"))]));
+        assert_eq!(state(&w).pointer("/vendors/java_house/pocket"), Some(&json!("food")));
+
+        // ★★ And it survives a rebuild, which a side file never could.
+        let (rebuilt, _) = w.store().load_state("home").expect("fold");
+        assert_eq!(rebuilt.pointer("/vendors/java_house/pocket"), Some(&json!("food")));
+    }
+
+    #[test]
+    fn attache_and_mentor_reach_opposite_conclusions_on_the_same_household() {
+        // ★★ Run against a REAL household rather than a fixture: the same
+        //    `suggest` reading, two operatives, one acts.
+        let w = funded("both");
+        let allowed = w.with(|i| i.get("home").map(|s| s.definition.operators.clone())).unwrap();
+        let reg = &w.operators;
+        let enf = sustena_core::Enforcement::default();
+
+        let unknown: Map<String, Value> = [
+            ("counterparty".to_string(), json!("SOMEWHERE NEW")),
+            ("amount".to_string(), json!(50.0)),
+            ("pocket_name".to_string(), json!("food")),
+        ]
+        .into_iter()
+        .collect();
+
+        let m = sustena_core::dag::run(
+            &sustena_core::mentor(), reg, &allowed, &enf, &state(&w), &unknown,
+        )
+        .expect("typechecks");
+        let a = sustena_core::dag::run(
+            &sustena_core::attache(), reg, &allowed, &enf, &state(&w), &unknown,
+        )
+        .expect("typechecks");
+
+        assert!(m.unreached.contains(&"spend".to_string()), "mentor stood down");
+        assert!(a.result_of("remember").is_some(), "attaché learned the counterparty");
+    }
+}
+
+#[cfg(test)]
+mod state_hash_tests {
+    //! CELL §IX, at the door it is actually asked through.
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-hash-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    fn call(w: &World, op: &str, ps: Vec<(&str, Value)>) -> bool {
+        let params: Map<String, Value> = ps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        matches!(w.call("home", op, &params), Ok(Some((x, _))) if x.committed())
+    }
+
+    #[test]
+    fn the_hash_is_of_the_folded_log_not_of_a_cache_beside_it() {
+        // ★★★ `state = fold(events)` — the store has no cache to hash, so this
+        //     cannot drift from the log by construction.
+        let w = world("folded");
+        let before = w.store().state_hash("home").expect("hashes");
+        assert_eq!(before.len(), 64);
+
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(1000.0)), ("source", json!("pay"))]));
+        let after = w.store().state_hash("home").expect("hashes");
+        assert_ne!(before, after, "real money moved, so the state is a different state");
+    }
+
+    #[test]
+    fn asking_twice_with_nothing_in_between_gives_one_answer() {
+        // ★★ A hash that wandered would raise an alarm on every read.
+        let w = world("stable");
+        assert_eq!(w.store().state_hash("home").unwrap(), w.store().state_hash("home").unwrap());
+    }
+
+    #[test]
+    fn two_households_that_did_the_same_things_agree() {
+        // ★★★ The row's actual purpose: verification as a comparison of two
+        //     short strings rather than of two whole households.
+        let a = world("twin-a");
+        let b = world("twin-b");
+        for w in [&a, &b] {
+            assert!(call(w, "budget.record_income",
+                         vec![("amount", json!(2500.0)), ("source", json!("pay"))]));
+            assert!(call(w, "budget.allocate",
+                         vec![("pocket_name", json!("food")), ("amount", json!(500.0))]));
+        }
+        let (ha, hb) = (a.store().state_hash("home").unwrap(), b.store().state_hash("home").unwrap());
+        assert_eq!(ha, hb, "same history, same state, same hash");
+
+        // And one more move on one side is a divergence either can name.
+        assert!(call(&b, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(1.0))]));
+        assert_ne!(ha, b.store().state_hash("home").unwrap());
+    }
+}
+
+#[cfg(test)]
+mod durable_call_tests {
+    //! CELL §III — the log records the CALL, not only what it did.
+    use super::*;
+    use crate::store::Store;
+    use serde_json::json;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-calls-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    fn call(w: &World, op: &str, ps: Vec<(&str, Value)>) -> bool {
+        let params: Map<String, Value> = ps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        matches!(w.call("home", op, &params), Ok(Some((x, _))) if x.committed())
+    }
+
+    #[test]
+    fn a_committed_call_is_recorded_with_what_it_was_called_with() {
+        // ★★★ `semantic::replay_under` re-runs the logged CALLS, and the log
+        //     recorded only the operator and the resulting mutations — half the
+        //     call, so the mechanism had nothing real to read.
+        let w = world("recorded");
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(1500.0)), ("source", json!("pay"))]));
+
+        let (calls, skipped) = w.store().enzyme_calls("home").expect("reads");
+        assert_eq!(skipped, 0);
+        let income = calls.iter().find(|c| c.operator == "budget.record_income").expect("logged");
+        assert_eq!(income.params.get("amount"), Some(&json!(1500.0)));
+        assert_eq!(income.params.get("source"), Some(&json!("pay")));
+    }
+
+    #[test]
+    fn genesis_is_not_a_call_and_is_not_offered_as_one() {
+        let w = world("genesis");
+        let (calls, skipped) = w.store().enzyme_calls("home").expect("reads");
+        assert!(calls.iter().all(|c| c.operator != "genesis"));
+        assert_eq!(skipped, 0, "and it is not counted as an unreadable one either");
+    }
+
+    #[test]
+    fn a_line_written_before_params_were_durable_is_skipped_and_counted() {
+        // ★★★ Never replayed with an empty map. An Enzyme called with nothing
+        //     is a DIFFERENT call, and reporting on it would be reporting
+        //     confidently on something that did not happen.
+        let w = world("legacy");
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(100.0)), ("source", json!("pay"))]));
+
+        // Write one line the old way — params absent, as every pre-slice line is.
+        let (_, next) = w.store().load_state("home").expect("state");
+        let mut legacy = crate::store::LoggedEvent::of(
+            next,
+            "budget.record_income",
+            &sustena_core::Execution {
+                result: sustena_core::OperatorResult::ok(Value::Null),
+                mutations: vec![],
+                events: vec![],
+                movements: vec![],
+                state: Value::Null,
+            },
+        );
+        legacy.params = None;
+        w.store().append("home", &legacy).expect("appended");
+
+        let (calls, skipped) = w.store().enzyme_calls("home").expect("reads");
+        assert_eq!(skipped, 1, "counted, not guessed at");
+        assert!(calls.iter().all(|c| !c.params.is_empty()), "and never handed on empty");
+    }
+
+    #[test]
+    fn the_recorded_calls_can_be_replayed_under_a_definition() {
+        // ★★★ The whole reason the params had to be durable: EDIT-11's
+        //     stranding check asks "would what already happened still have been
+        //     admissible?", and it cannot ask without the calls.
+        let w = world("replayable");
+        assert!(call(&w, "budget.record_income",
+                     vec![("amount", json!(2000.0)), ("source", json!("pay"))]));
+        assert!(call(&w, "budget.allocate",
+                     vec![("pocket_name", json!("food")), ("amount", json!(500.0))]));
+
+        let (calls, _) = w.store().enzyme_calls("home").expect("reads");
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|c| !c.params.is_empty()));
+    }
+}

@@ -128,6 +128,25 @@ impl Move {
         self
     }
 
+    /// **Where this move lands from `state`, if it is legal and stays in the
+    /// enumerated space.**
+    ///
+    /// ★★★ Public so [`crate::reach`] can ask the same question the kernel asks,
+    /// through the same code. Two definitions of "a legal move" would let the
+    /// kernel and the reach disagree about what the system can do, and the
+    /// disagreement would be silent.
+    pub fn lands_on(
+        &self,
+        space: &Space,
+        state: &Value,
+    ) -> Result<Option<String>, KernelError> {
+        if !self.admissible(state)? {
+            return Ok(None);
+        }
+        let after = apply_effect(state, &self.effect)?;
+        Ok(successor(space, &after))
+    }
+
     fn admissible(&self, state: &Value) -> Result<bool, KernelError> {
         let empty = Map::new();
         for g in &self.guard {

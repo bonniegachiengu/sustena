@@ -283,24 +283,53 @@ async smsRequestPermission() : Promise<Result<string, string>> {
 }
 },
 /**
- * The backfill. Reads texts already on the phone, so a person never pastes a
- * thousand messages by hand. `since_days` of 0 means all of them.
+ * ★★★ **`(async)` on a sync body, and it is the whole freeze fix.**
+ * 
+ * Tauri's macro defaults a plain `fn` command to `ExecutionContext::Blocking`,
+ * which the generated handler runs INLINE on the IPC thread. On a phone that
+ * is the UI thread, so a command that takes a while takes the interface with
+ * it. Marking it `async` on a synchronous body selects the `sync_threadpool`
+ * path instead: the same code, run off the thread that draws.
+ * 
+ * Found the hard way. 6,078 texts on the reporting device, 2,779 of them
+ * matching, every one captured before the one call returned. The button sat
+ * reading "read my texts" the entire time, and unlocking did the same thing
+ * because the queue drains there.
+ * 
+ * ONE PAGE of the backfill. The caller loops, and shows progress between
+ * pages. `since_days` of 0 means the whole inbox.
  */
-async smsImportInbox(sustainId: string, sinceDays: number) : Promise<Result<SmsSweep, string>> {
+async smsImportPage(sustainId: string, sinceDays: number, offset: number, limit: number) : Promise<Result<SmsSweep, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("sms_import_inbox", { sustainId, sinceDays }) };
+    return { status: "ok", data: await TAURI_INVOKE("sms_import_page", { sustainId, sinceDays, offset, limit }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
 /**
- * Whatever arrived while the app was closed. Draining clears the queue, so a
- * text is offered once; the engine's own dedup covers the rest.
+ * ONE BATCH of whatever arrived while the app was closed. Taking clears what
+ * was taken, so a text is offered once; the engine's own dedup covers the
+ * rest. The caller loops while `has_more`.
+ * 
+ * Bounded and off the UI thread for the same reason as the page above: this
+ * runs on unlock, and a queue that had built up froze the unlock itself.
  */
-async smsDrainQueue(sustainId: string) : Promise<Result<SmsSweep, string>> {
+async smsDrainQueue(sustainId: string, limit: number) : Promise<Result<SmsSweep, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("sms_drain_queue", { sustainId }) };
+    return { status: "ok", data: await TAURI_INVOKE("sms_drain_queue", { sustainId, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * How many texts are waiting, without taking any. Cheap enough to ask before
+ * deciding whether to show progress at all.
+ */
+async smsQueueDepth() : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sms_queue_depth") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -329,6 +358,158 @@ async resolveMessage(id: string) : Promise<Result<boolean, string>> {
 }
 },
 /**
+ * Set a captured message aside as not a transaction.
+ * 
+ * ★★ A real state on the message, never a delete. A reversal, a promo or a
+ * notice has nothing to file, and saying so should not mean losing the record
+ * that it arrived.
+ */
+async ignoreMessage(messageId: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ignore_message", { messageId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Cancel refunds against their charges, where both are still unclassified.
+ * 
+ * ★★★ Case 1 of the netting design. A charge and its refund net to zero, so
+ * if neither has been filed the honest outcome is that both leave the queue
+ * and nothing is recorded: no money moved on balance, and no event should
+ * claim it did. Nothing is deleted; each keeps its text and gains the id of
+ * the other.
+ * 
+ * ★★ Where more than one charge could be the match, it nets NOTHING. Getting
+ * the pair wrong would make two real transactions disappear.
+ */
+async netReversals(sustainId: string) : Promise<Result<NettingDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("net_reversals", { sustainId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The numbers this household calls its own.
+ * 
+ * ★★ Read and written on the device only. They exist so a move between his
+ * own accounts can be told apart from a payment to someone else, which is not
+ * a distinction any wording makes.
+ */
+async getOwnIdentifiers() : Promise<Result<OwnIdentifiersDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_own_identifiers") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setOwnIdentifiers(own: OwnIdentifiersDto) : Promise<Result<OwnIdentifiersDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_own_identifiers", { own }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Turn each pair of texts that is really one move into one move.
+ * 
+ * ★★★ Net zero by construction: `budget.transfer` takes money out of one
+ * account and puts the same amount into another, touches no pocket and adds
+ * nothing to income. Booking the two texts separately would record an expense
+ * and an income that never happened, and his income would grow every time he
+ * moved his own money.
+ */
+async applyTransfers(sustainId: string) : Promise<Result<TransferDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("apply_transfers", { sustainId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **Never ask me about these again** — learn a skip from one message.
+ * 
+ * ★★ Retroactive by design. He answers this in the middle of a backlog full
+ * of the same shape, so a rule that only covered future messages would leave
+ * the pile it was meant to clear exactly as it was.
+ */
+async learnSkip(sustainId: string, messageId: string) : Promise<Result<SkipLearnedDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("learn_skip", { sustainId, messageId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **Move a spend filed to the wrong pocket.**
+ * 
+ * ★★★ A correction, appended. The original filing is not rewritten: the
+ * operator moves what is counted, and the message records the move after the
+ * filing it corrects, so the log keeps both.
+ */
+async reclassifySpend(sustainId: string, messageId: string, fromPocket: string, toPocket: string, amount: number) : Promise<Result<GateResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("reclassify_spend", { sustainId, messageId, fromPocket, toPocket, amount }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **Put this off until he remembers what it was.**
+ * 
+ * ★★★ An honest defer, and a different act from setting something aside as
+ * not a transaction. That one says there is nothing here; this says there is
+ * something here and he cannot answer it yet. It stays in the queue and comes
+ * back at the TOP next time he opens the app, because burying it under new
+ * arrivals would make deferring indistinguishable from discarding.
+ */
+async deferMessage(sustainId: string, messageId: string) : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("defer_message", { sustainId, messageId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Does this message carry a number, and is that number already somebody's tab?
+ */
+async personHint(sustainId: string, messageId: string) : Promise<Result<PersonHint, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("person_hint", { sustainId, messageId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **Tie a phone number to a pocket, so money both ways lands in that tab.**
+ * 
+ * ★★★ Through the gate like everything else. The link changes what future
+ * money does, which makes it a decision the household records, not a setting
+ * tucked into a preferences file where the fold could never see it.
+ * 
+ * ★★ The number is typed in full on purpose. Messages print it masked, and a
+ * mask is missing its middle — linking one would claim an identity nobody
+ * actually gave, and every later match would inherit the guess.
+ */
+async linkNumber(sustainId: string, pocketName: string, number: string) : Promise<Result<GateResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("link_number", { sustainId, pocketName, number }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * **Remember this format** — synthesise a rule from a confirmed correction.
  * 
  * ★★ Verified before it is ever added: it must be well-typed, must match the
@@ -345,7 +526,13 @@ async learnRule(messageId: string, operator: string, params: JsonValue) : Promis
 }
 },
 /**
- * **The curated feed** — `compose(r)` over one household.
+ * ★★★ `(async)`, because this reads the whole ingest log.
+ * 
+ * A sync command runs inline on the IPC thread, which on a phone is the thread
+ * that draws. `get_feed` parses every stored message to find the ones still
+ * waiting, and on an inbox that had been read that was thousands of them. The
+ * screen froze for about a minute after unlocking, with no reading happening
+ * at all: this is what it was doing.
  */
 async getFeed(sustainId: string, query: string | null) : Promise<Result<FeedDto, string>> {
     try {
@@ -375,9 +562,9 @@ async orchieInfer(sustainId: string, messageId: string | null, effectText: strin
  * honestly fail at T+n if the household moved, and that is the correct
  * outcome, not an error.
  */
-async orchieConfirm(sustainId: string, operator: string, params: JsonValue, messageId: string | null, description: string | null) : Promise<Result<GateResult, string>> {
+async orchieConfirm(sustainId: string, operator: string, params: JsonValue, messageId: string | null, description: string | null, resolves: boolean | null) : Promise<Result<GateResult, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("orchie_confirm", { sustainId, operator, params, messageId, description }) };
+    return { status: "ok", data: await TAURI_INVOKE("orchie_confirm", { sustainId, operator, params, messageId, description, resolves }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -599,6 +786,23 @@ tier: number | null; memberships: number; operators: OperatorAccessDto[];
  */
 enforced: boolean; note: string }
 /**
+ * One account, on the wire.
+ */
+export type AccountDto = { id: string; label: string; balance: number; 
+/**
+ * ★★★ What the bank itself last said was in there.
+ * 
+ * The only figure in the whole system that is not our own arithmetic,
+ * which is exactly what makes it able to check it. `None` where no
+ * captured message for this account carried a running balance.
+ */
+reported: number | null; 
+/**
+ * Reported minus ours. Positive means the bank says there is more there
+ * than we have accounted for.
+ */
+drift: number | null }
+/**
  * One declared aggregate, answered by the engine.
  */
 export type AggregateDto = { id: string; childPath: string; 
@@ -617,6 +821,15 @@ value: number | null;
  * to say so rather than print a confident zero.
  */
 grounded: boolean; included: ContributionDto[]; excluded: ExclusionDto[]; includesHouseholdOwn: boolean }
+/**
+ * One thing the household holds, bought with a spend.
+ */
+export type AssetDto = { id: string; item: string; value: number; 
+/**
+ * The purchase it came out of, so a pocket can show what its spending
+ * actually bought.
+ */
+sourceTx: string; pocket: string; subpocket: string | null }
 /**
  * One standing thing that needs a person, and why.
  */
@@ -686,6 +899,43 @@ export type BranchStep = { operator: string; verdict: Verdict; reason: string | 
  * The hypothetical state after this step.
  */
 state: JsonValue }
+/**
+ * What the classify card needs in order to show a person WHAT they are filing.
+ * 
+ * ★★★ The card used to ask "which pocket does this belong to?" without showing
+ * the message. A person was being asked to file something they could not see.
+ * Everything here was already on the ingested message; none of it was reaching
+ * the screen.
+ */
+export type CaptureContextDto = { id: string; 
+/**
+ * The text exactly as it arrived.
+ */
+raw: string; 
+/**
+ * Which sender it came from: "mpesa" or "kcb".
+ */
+source: string; 
+/**
+ * What the transducer made of it, when it could.
+ */
+amount: number | null; counterparty: string | null; direction: string | null; 
+/**
+ * The transducer's own words about why this is waiting.
+ */
+reason: string; 
+/**
+ * `pending`, `deferred`, or `processed`.
+ * 
+ * ★★ A processed message stays in the list on purpose: the back arrow
+ * has to reach a filing he wants to change, and a correction path with
+ * nothing to correct from is not a path.
+ */
+status: string; 
+/**
+ * Where a processed one currently sits, so the card can say so.
+ */
+filedPocket: string | null; filedAmount: number | null }
 /**
  * What one capture did, on the wire.
  */
@@ -819,6 +1069,35 @@ export type DefinitionVerdict =
  */
 { kind: "wouldStrand"; instances: string[] }
 /**
+ * How the capture device is doing, as its WATCHER sees it.
+ * 
+ * ★★★ Judged here rather than on the device, and that is Ingest §IX rather
+ * than a convenience. A phone that has stopped cannot report that it has
+ * stopped, so a liveness clause evaluated by the phone is worthless exactly
+ * when it matters. The device records two plain readings; whether they add up
+ * to "fine" is the watcher's call.
+ * 
+ * ★★ Not a declared invariant either, and this is a real limit rather than a
+ * choice: the predicate DSL has no arithmetic and no notion of now, so
+ * `now − t_last_ack <= theta` cannot be written as a rule. It is computed
+ * here, against the same two dimensions a declared rule would have read.
+ */
+export type DeviceDto = { sustainId: string; 
+/**
+ * Texts caught but not yet handed over. §IX's leading indicator: it rises
+ * before anything else visibly breaks, because a device that cannot
+ * deliver keeps accepting.
+ */
+queueDepth: number; 
+/**
+ * Minutes since it last said anything. `None` means it never has.
+ */
+quietForMinutes: number | null; 
+/**
+ * Whether the watcher considers it late.
+ */
+stale: boolean; appVersion: string }
+/**
  * One dimension a person declared.
  */
 export type DimDecl = { path: string; 
@@ -878,6 +1157,27 @@ export type ExclusionDto = { sustainId: string; label: string; isHousehold: bool
  */
 export type FeedDto = { sustainId: string; label: string; cards: CardDto[]; 
 /**
+ * ★★★ The queue he can walk, in the order he should meet it.
+ * 
+ * Recently answered first — so the back arrow reaches them — then what is
+ * waiting, with anything he deferred at the head of that. ONE card renders
+ * at a time; this is the list it steps through, not a list to display.
+ */
+queue: CaptureContextDto[]; 
+/**
+ * Where in `queue` the first unanswered message sits, so the card opens
+ * on work rather than on history.
+ */
+queueStart: number; 
+/**
+ * The oldest capture still needing a person, if there is one.
+ * 
+ * ★★ ONE message rather than a list. The classify card works the queue one
+ * at a time; a list here would be the unbounded second surface the
+ * attention budget exists to prevent.
+ */
+queueHead: CaptureContextDto | null; 
+/**
  * ★ What stayed quiet — withdrawn and excluded alike, each saying which.
  */
 quiet: QuietDto[]; budget: number; spent: number; candidatesConsidered: number; 
@@ -889,7 +1189,55 @@ reading: JsonValue; attention: AttentionDto[];
 /**
  * The calm read: the household's own roll-up ρ, when it declares one.
  */
-rollup: RollupDto | null; liquid: number | null }
+rollup: RollupDto | null; liquid: number | null; 
+/**
+ * Where the money is, as against what it is for.
+ */
+accounts: AccountDto[]; 
+/**
+ * The phone, as a Sustain the household watches. `None` before it has
+ * ever reported.
+ */
+device: DeviceDto | null; 
+/**
+ * Where the household is heading, not just where it is. `None` until the
+ * series has a reading in it.
+ */
+trend: TrendDto | null; 
+/**
+ * What the household holds, grouped by the pocket that bought it.
+ */
+inventory: InventoryGroupDto[]; 
+/**
+ * Recent spends, so one filed to the wrong pocket can be reached at all.
+ */
+filed: FiledSpendDto[]; 
+/**
+ * ★★★ Which pockets are PEOPLE rather than envelopes.
+ * 
+ * A pocket tied to somebody's number behaves differently — it runs both
+ * ways and can sit in his favour — and a screen that draws it identically
+ * to `food` is telling him it is the same kind of thing. Sent as names
+ * rather than as a flag per pocket so any surface that lists pockets can
+ * mark them without a second call.
+ */
+personPockets: string[]; 
+/**
+ * ★★★ Money the household holds that no account claims.
+ * 
+ * Zero once every shilling has a place. Non-zero means the pooled balance
+ * has not been migrated yet, and it is shown rather than quietly folded
+ * into a total, because "how much is in M-Pesa" cannot be answered
+ * honestly while some of it is nowhere.
+ */
+unaccounted: number }
+/**
+ * A spend that landed, and where it currently sits.
+ * 
+ * ★★ Read off what the message recorded it DID, so the list is the log's own
+ * account of the filing rather than a guess reconstructed from a balance.
+ */
+export type FiledSpendDto = { messageId: string; pocket: string; amount: number; counterparty: string }
 /**
  * The gate's own words about one call.
  */
@@ -915,7 +1263,16 @@ mutations: number; events: EventDto[];
 /**
  * The resulting state, or the **untouched original** if refused.
  */
-state: JsonValue }
+state: JsonValue; 
+/**
+ * ★★★ What the operator returned alongside its verdict.
+ * 
+ * A refusal from `budget.spend` carries `remaining`, `requested` and
+ * `shortfall`, put there so a caller can build an allocate-then-retry
+ * without reading an English sentence. It was being dropped here, which
+ * left the surface with a dead end and a paragraph.
+ */
+data: JsonValue }
 /**
  * Whether the composition tree holds, **as the engine judges it**.
  * 
@@ -1002,6 +1359,13 @@ export type InvariantDecl = { id: string; expression: string }
  * A rule the household declared it must stay within.
  */
 export type InvariantDto = { id: string; expression: string }
+/**
+ * What the household holds, and what it is grouped under.
+ * 
+ * ★★ Grouped by pocket rather than listed flat, because the question people
+ * actually ask is "what did the food money buy", not "what do I own".
+ */
+export type InventoryGroupDto = { pocket: string; total: number; assets: AssetDto[] }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 /**
  * One line of the juul ledger.
@@ -1091,6 +1455,38 @@ rawPayload: string; amount: number | null; counterparty: string | null; directio
  */
 gateReason: string | null; resolved: boolean; needsAttention: boolean }
 /**
+ * What a netting pass did.
+ */
+export type NettingDto = { 
+/**
+ * Charge/refund pairs cancelled. Each removes TWO from the queue.
+ */
+netted: number; 
+/**
+ * Refunds of charges already filed, where the money really went back
+ * through the gate.
+ */
+givenBack: number; 
+/**
+ * Compensating calls the gate refused. The pair stays unsettled and comes
+ * back next pass, rather than being marked done on a move that never
+ * landed.
+ */
+refused: number; 
+/**
+ * Matched a filed charge, but nothing recorded HOW it was filed, so there
+ * is no honest way to undo it.
+ */
+uncompensable: number; 
+/**
+ * Refunds with no charge to cancel, left for a person.
+ */
+unmatched: number; 
+/**
+ * Refunds with more than one candidate. Deliberately untouched.
+ */
+ambiguous: number }
+/**
  * This node on the network.
  */
 export type NetworkDto = { 
@@ -1172,6 +1568,14 @@ export type OrderDto = { reference: string; packageId: string; packageName: stri
  * where they already were.
  */
 shares: ([string, string, number])[]; placedAt: string }
+/**
+ * The numbers a household calls its own, on the wire.
+ * 
+ * ★★★ These cross between this process and its own webview and nowhere else.
+ * A phone number and a bank account are the address of a person; there is no
+ * code path that sends them off the device, and there should not be one.
+ */
+export type OwnIdentifiersDto = { mpesa: string[]; kcb: string[] }
 /**
  * One published package, as a screen sees it.
  */
@@ -1283,6 +1687,21 @@ export type PeerShelfDto = { peer: string; handle: string; address: string; pack
  * it does not appear as a peer with nothing to offer.
  */
 unreachable?: string | null }
+/**
+ * What a message says about whose tab it might be.
+ * 
+ * ★★ Asked by the card rather than carried on every capture, because it is
+ * only ever needed at the moment somebody is looking at one message.
+ */
+export type PersonHint = { 
+/**
+ * The number as the message printed it — usually masked.
+ */
+printed: string | null; 
+/**
+ * The pocket it is already tied to, if it is tied to one.
+ */
+pocket: string | null }
 /**
  * A pocket, at summary scale.
  * 
@@ -1407,6 +1826,20 @@ status: string; operator: string | null;
  */
 trust: string; examples: number }
 /**
+ * What "skip all like this" did.
+ */
+export type SkipLearnedDto = { 
+/**
+ * How many already-waiting messages the new rule cleared.
+ */
+cleared: number; 
+/**
+ * ★★ True when nothing could be learned: no rule recognised this message,
+ * so the only shape it could describe is "everything I cannot read" — and
+ * that pile is exactly the one that needs a person's eyes.
+ */
+unlearnable: boolean }
+/**
  * What one sweep did. Every number is counted from a real outcome.
  */
 export type SmsSweep = { 
@@ -1445,7 +1878,24 @@ skippedSecrets: number;
 /**
  * A text the engine refused outright, with the first reason.
  */
-failed: number; firstFailure: string | null }
+failed: number; firstFailure: string | null; 
+/**
+ * Another page or batch is waiting.
+ */
+hasMore: boolean; 
+/**
+ * Where the next page starts. Reading only.
+ */
+nextOffset: number; 
+/**
+ * Still queued after this batch. Draining only.
+ */
+remaining: number; 
+/**
+ * Charge/refund pairs cancelled once the read finished. Each took TWO out
+ * of the queue and recorded nothing, because together they are zero.
+ */
+nettedPairs: number }
 /**
  * A declared capture source.
  */
@@ -1558,7 +2008,44 @@ export type TemplateId =
 /**
  * A person — the smallest Sustain that still holds its own money.
  */
-"habitat"
+"habitat" | 
+/**
+ * ★★★ A capture device — the phone itself, as a Sustain.
+ * 
+ * Ingest §IX: a sensor IS a Sustain, so noticing it has gone quiet needs
+ * no alerting subsystem of its own. Staleness becomes an ordinary reading
+ * of an ordinary child, and the connection panel is a view over its state
+ * rather than a separate thing to build.
+ */
+"device"
+/**
+ * What a transfer pass did.
+ */
+export type TransferDto = { 
+/**
+ * Pairs recognised as one move and recorded as one.
+ */
+moved: number; 
+/**
+ * The gate refused it. The pair stays in the queue rather than being
+ * marked done on a move that never landed.
+ */
+refused: number; 
+/**
+ * A leg to one of his own numbers whose other half is not here.
+ */
+unpaired: number; 
+/**
+ * ★★ Messages he had set aside that a shared reference brought back.
+ * Counted so a queue that GREW can say why, the same way one that shrank
+ * does.
+ */
+reclaimed: number; 
+/**
+ * A partner leg that had already been filed as income and could not be
+ * taken back. Reported rather than left as a silent zero.
+ */
+blocked: number; ambiguous: number }
 /**
  * One side of a settled transfer, as the cockpit shows it.
  */
@@ -1581,6 +2068,43 @@ export type TransferResult =
  * got `total_before`. Exactly what the typed seam is for.
  */
 { kind: "committed"; path: string; amount: number; from: TransferLegDto; to: TransferLegDto; totalBefore: number; totalAfter: number } | { kind: "refused"; rule: string; reason: string }
+/**
+ * The household's own distance from where it wants to be, over time.
+ * 
+ * ★★★ One reading is a number; a series is a story. Monitor §V smooths it so
+ * a figure that jitters between reads does not train the eye to ignore it,
+ * and §VI watches for the case a threshold cannot see — a household spending
+ * slightly over every day for two weeks reads, on any single day, exactly
+ * like one that had a bad afternoon and recovered.
+ */
+export type TrendDto = { 
+/**
+ * `W` — the raw distance to the viable region on this reading.
+ */
+now: number; 
+/**
+ * The smoothed level, which is what salience is read off.
+ */
+smoothed: number; 
+/**
+ * ★★ True when the drift has accumulated past what a single bad day
+ * explains. Not the same as being far away today.
+ */
+drifting: boolean; 
+/**
+ * Whether that crossing is severe enough to hand to the Controller.
+ */
+escalates: boolean; 
+/**
+ * ★★★ Constraint health as a colour: `green`, `amber` or `red`.
+ * 
+ * Monitor §VII rests on Treisman: some visual attributes are processed in
+ * parallel across the whole field before attention engages, in roughly
+ * 150 to 200ms. Hue is one, and it is the one with a settled three-way
+ * meaning already in the palette. Assigned by the core's own encoder, so
+ * the colour on screen means what the engine meant by it.
+ */
+health: string }
 /**
  * What the gate decided about one call.
  * 
