@@ -11,6 +11,8 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 
 from sustena.config import settings
@@ -148,6 +150,49 @@ app.add_middleware(
 )
 
 
+# -- Sustena Lore ---------------------------------------------------------------
+#
+# ★★ The Lore blog is a different SITE, not a different path on this one: the
+#    essays are for anyone, and the app behind them is not. Serving it from the
+#    same process is a reliability decision rather than a convenience one --
+#    node zero already learned, expensively, what a second process bound near
+#    the first one costs (two listeners on :9000, a watchdog checking the wrong
+#    one). One process, one watchdog, dispatched by Host.
+#
+# ★ It is deliberately the FIRST middleware registered after logging and it
+#   never touches the API: a request on the lore host is answered from static
+#   files and returns before any router, auth dependency or database session is
+#   reached. A reader cannot fall through into the application.
+
+_LORE_DIST = _Path(__file__).resolve().parent.parent / "lore_site" / "dist"
+
+
+def is_lore_host(host: str | None) -> bool:
+    """True for the blog's own hostname (and its local stand-in)."""
+    if not host:
+        return False
+    h = host.split(":")[0].lower()
+    return h.startswith("lore.") or h == "lore.localhost"
+
+
+@app.middleware("http")
+async def serve_lore(request: Request, call_next):
+    if not is_lore_host(request.url.hostname):
+        return await call_next(request)
+    if request.method not in ("GET", "HEAD"):
+        return PlainTextResponse("read only", status_code=405)
+    if not _LORE_DIST.is_dir():
+        return PlainTextResponse("the lore site has not been built", status_code=503)
+
+    rel = request.url.path.lstrip("/") or "index.html"
+    candidate = (_LORE_DIST / rel).resolve()
+    # ★ Containment, the same check the SPA route makes: a path is only served
+    #   if it really lands inside the built site.
+    if not candidate.is_relative_to(_LORE_DIST.resolve()) or not candidate.is_file():
+        return FileResponse(_LORE_DIST / "index.html", status_code=404)
+    return FileResponse(candidate)
+
+
 # -- Request logging middleware ------------------------------------------------
 
 
@@ -279,9 +324,6 @@ if settings.is_development:
 # pytest or a backend-only dev setup. Registered LAST: FastAPI matches routes
 # in registration order, so every API route above still takes precedence over
 # the catch-all below.
-
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 
 _DIST_DIR = _Path(__file__).resolve().parent.parent.parent.parent / "web" / "dist"
 

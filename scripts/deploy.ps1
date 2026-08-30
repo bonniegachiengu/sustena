@@ -109,6 +109,24 @@ try {
 }
 Write-Host "Frontend build OK." -ForegroundColor Green
 
+# -- 1b. Sustena Lore ----------------------------------------------------------
+# The blog is served by the same process, dispatched by Host, so its static
+# build belongs to the same deploy. It is generated (dist/ is gitignored), and
+# the build is strict: an essay with a construct the renderer does not know
+# stops the deploy here rather than losing a paragraph in public.
+Write-Step "Building Sustena Lore (static essays)"
+Push-Location $ApiDir
+try {
+    & $PythonExe -m sustena.lore_site.build
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "LORE BUILD FAILED (exit $LASTEXITCODE) - stopping, backend NOT touched." -ForegroundColor Red
+        exit 1
+    }
+} finally {
+    Pop-Location
+}
+Write-Host "Lore build OK." -ForegroundColor Green
+
 # -- 2. Stop the public-facing backend process only ----------------------------
 Write-Step "Stopping the public-facing (0.0.0.0:9000) backend process"
 $conn = Get-NetTCPConnection -LocalPort 9000 -LocalAddress 0.0.0.0 -ErrorAction SilentlyContinue
