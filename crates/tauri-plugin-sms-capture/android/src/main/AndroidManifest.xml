@@ -14,6 +14,14 @@
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
 
+    <!--
+      POST_NOTIFICATIONS is what makes the capture worth having. Without it the
+      receiver still fires and still writes the text down, and nobody is told
+      until the app is next opened. Runtime from Android 13; asked for in the
+      app with a reason, and a refusal is quiet rather than fatal.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application>
         <!--
           Registered in the manifest rather than at runtime so it fires when

@@ -21,6 +21,58 @@ Read M-Pesa and KCB texts on this device.
 <tr>
 <td>
 
+`sms-capture:allow-clear-classify-prompt`
+
+</td>
+<td>
+
+Enables the clear_classify_prompt command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`sms-capture:deny-clear-classify-prompt`
+
+</td>
+<td>
+
+Denies the clear_classify_prompt command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`sms-capture:allow-consume-pending-classify`
+
+</td>
+<td>
+
+Enables the consume_pending_classify command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`sms-capture:deny-consume-pending-classify`
+
+</td>
+<td>
+
+Denies the consume_pending_classify command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `sms-capture:allow-drain-queue`
 
 </td>

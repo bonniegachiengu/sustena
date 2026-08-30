@@ -2770,6 +2770,12 @@ pub fn sms_permission_state(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 /// Ask for it. The reason is shown in the app first, before this is called.
+///
+/// ★★ Asks for BOTH declared aliases — reading texts, and posting the prompt
+/// about one. Returns the reading state, which is the one that gates the
+/// feature; `sms_notify_state` reports the other separately, because declining
+/// to be notified still leaves a working importer and should not read as the
+/// larger refusal.
 #[tauri::command(async)]
 #[specta::specta]
 pub fn sms_request_permission(app: tauri::AppHandle) -> Result<String, String> {
@@ -2777,6 +2783,23 @@ pub fn sms_request_permission(app: tauri::AppHandle) -> Result<String, String> {
     app.sms_capture()
         .request_permission()
         .map(|p| p.sms)
+        .map_err(|e| e.to_string())
+}
+
+/// Whether the classify prompt may be posted.
+///
+/// ★★★ The difference between a real-time reader and a batch importer, and
+/// worth being able to SAY. Without it the receiver still fires and still
+/// writes the text down — and nobody is told until the app is next opened,
+/// which on a normal day is hours. A surface that can read this can tell him
+/// that, instead of leaving him to notice.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn sms_notify_state(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_sms_capture::SmsCaptureExt;
+    app.sms_capture()
+        .permission_state()
+        .map(|p| p.notify)
         .map_err(|e| e.to_string())
 }
 
@@ -2881,6 +2904,35 @@ pub fn sms_drain_queue(
 pub fn sms_queue_depth(app: tauri::AppHandle) -> Result<u32, String> {
     use tauri_plugin_sms_capture::SmsCaptureExt;
     app.sms_capture().queue_depth().map_err(|e| e.to_string())
+}
+
+/// The text a notification tap was about, taken once.
+///
+/// ★★★ This is the other half of a real-time reader. The receiver already
+/// fired while the app was closed and already wrote the text down; what was
+/// missing was anybody being told, and then being taken to the right card when
+/// they were. Returns `None` on every launch that was not a tap, which is most
+/// of them.
+///
+/// ★★ The raw text rather than an id: the engine keys an intake on the fact
+/// (ING-5), so this is the only handle that survives the unlock in between.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn sms_pending_classify(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_sms_capture::SmsCaptureExt;
+    app.sms_capture().consume_pending_classify().map_err(|e| e.to_string())
+}
+
+/// Take the prompt down, once the queue has actually been swept.
+///
+/// ★★ Not on launch. A notification cancelled by opening the app says the work
+/// is done when nothing has been filed yet, and a prompt that lies once is a
+/// prompt that gets swiped away every time after.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn sms_clear_prompt(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_sms_capture::SmsCaptureExt;
+    app.sms_capture().clear_classify_prompt().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

@@ -273,6 +273,12 @@ async smsPermissionState() : Promise<Result<string, string>> {
 },
 /**
  * Ask for it. The reason is shown in the app first, before this is called.
+ * 
+ * ★★ Asks for BOTH declared aliases — reading texts, and posting the prompt
+ * about one. Returns the reading state, which is the one that gates the
+ * feature; `sms_notify_state` reports the other separately, because declining
+ * to be notified still leaves a working importer and should not read as the
+ * larger refusal.
  */
 async smsRequestPermission() : Promise<Result<string, string>> {
     try {
@@ -330,6 +336,58 @@ async smsDrainQueue(sustainId: string, limit: number) : Promise<Result<SmsSweep,
 async smsQueueDepth() : Promise<Result<number, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("sms_queue_depth") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Whether the classify prompt may be posted.
+ * 
+ * ★★★ The difference between a real-time reader and a batch importer, and
+ * worth being able to SAY. Without it the receiver still fires and still
+ * writes the text down — and nobody is told until the app is next opened,
+ * which on a normal day is hours. A surface that can read this can tell him
+ * that, instead of leaving him to notice.
+ */
+async smsNotifyState() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sms_notify_state") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The text a notification tap was about, taken once.
+ * 
+ * ★★★ This is the other half of a real-time reader. The receiver already
+ * fired while the app was closed and already wrote the text down; what was
+ * missing was anybody being told, and then being taken to the right card when
+ * they were. Returns `None` on every launch that was not a tap, which is most
+ * of them.
+ * 
+ * ★★ The raw text rather than an id: the engine keys an intake on the fact
+ * (ING-5), so this is the only handle that survives the unlock in between.
+ */
+async smsPendingClassify() : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sms_pending_classify") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Take the prompt down, once the queue has actually been swept.
+ * 
+ * ★★ Not on launch. A notification cancelled by opening the app says the work
+ * is done when nothing has been filed yet, and a prompt that lies once is a
+ * prompt that gets swiped away every time after.
+ */
+async smsClearPrompt() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sms_clear_prompt") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -474,6 +532,22 @@ async reclassifySpend(sustainId: string, messageId: string, fromPocket: string, 
 async deferMessage(sustainId: string, messageId: string) : Promise<Result<boolean, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("defer_message", { sustainId, messageId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **`H(s)` for one Sustain** — its state as one short string.
+ * 
+ * ★★★ The point of a hash here is that it is ASKABLE. Two nodes comparing
+ * whole households is not a conversation that fits over a phone link, and a
+ * node that answers "mostly the same" has answered nothing. Sixty-four
+ * characters either match or they do not.
+ */
+async sustainHash(sustainId: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sustain_hash", { sustainId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

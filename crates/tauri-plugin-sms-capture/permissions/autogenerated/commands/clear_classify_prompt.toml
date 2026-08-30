@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-clear-classify-prompt"
+description = "Enables the clear_classify_prompt command without any pre-configured scope."
+commands.allow = ["clear_classify_prompt"]
+
+[[permission]]
+identifier = "deny-clear-classify-prompt"
+description = "Denies the clear_classify_prompt command without any pre-configured scope."
+commands.deny = ["clear_classify_prompt"]

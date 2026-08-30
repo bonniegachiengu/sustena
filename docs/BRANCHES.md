@@ -42,6 +42,67 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/orchie-realtime-classify` — 30 Aug — **the notification the rewrite dropped**
+
+**Off:** `dev` / gate green (core 2,091 · host 256 · APK builds, signs, aligns).
+
+★★★ **The diagnosis, and it is not what a permissions problem looks like.**
+Bonnie is on the Rust/Tauri Orchie, and its `SmsReceiver` was **already**
+manifest-registered, already fired with the app closed, already filtered sender
+and secret, and already wrote the text down. Its own docstring said what was
+wrong with it: *"THIS RECEIVER DOES NOTHING ELSE."* The Capacitor app it
+replaced had `IngestWorker` — WorkManager, a POST and a `NotificationCompat`
+prompt. **The rewrite kept the sensing half and dropped the telling half.**
+Sensing without telling anybody is not a real-time reader; it is a batch
+importer with extra steps, and the text sat in a queue until the app next
+opened.
+
+★★★ **The constraint that shapes the fix.** When a text arrives the identity
+is SEALED, so the authoritative parse genuinely cannot run: the engine cannot be
+opened without the passphrase. So the choice was never *parse here or parse in
+the engine* — it was *put a figure on the notification, or show one that says
+nothing*. `SmsGlance` is a display-only reader for that one line, and its
+failure mode is silence: anything it cannot read is simply absent, never
+guessed. A prompt reading *"Ksh 680 — NAIVAS"* can be judged on the lock
+screen; *"New M-Pesa message"* costs a full app open to find out if it
+mattered.
+
+★★ **One notification, replaced rather than stacked**, with the count in the
+title. A doorbell that rings once per caller and keeps ringing is worse than one
+that says somebody is here. And it comes down **after the sweep**, not on launch
+★★★ a prompt cancelled by opening the app claims the work is done while the
+texts are still sitting there, and a prompt that lies once is one that gets
+swiped away every time after.
+
+★★★ **The tap is answered by the ORDERING, not by a target threaded into the
+view.** The notification always fires for the text that just arrived, and the
+queue is now newest-first, so the card already waiting is the one he tapped
+about. Threading an id through `compose(r)` would add a second way to decide
+what is on screen, and two answers to *what am I looking at* is how a surface
+starts disagreeing with itself. Consuming the target is for knowing the launch
+WAS a tap — so the sweep runs at once rather than waiting for a visibility
+change — and for taking it once, so it cannot re-fire later.
+
+★★ **Newest-first, within the group that has not been put off.** The
+just-arrived transaction is the one he still remembers making, so it is the
+cheapest to answer; recall decays fast and an oldest-first queue asks the
+hardest question first. Deferred items still lead, because burying them under
+new arrivals would make deferring indistinguishable from discarding — recency
+orders things competing equally, it does not overrule a decision he already
+made.
+
+★★ **`notify` is a separate permission alias from `sms`.** The two refusals
+mean different things: declining to be told still leaves a working importer,
+declining to have texts read leaves nothing. One field would make the smaller
+refusal read as the larger one.
+
+**Verified in the built APK**, not inferred: `POST_NOTIFICATIONS` present,
+`SmsReceiver` merged in as exported and `BROADCAST_SMS`-protected, and
+`ClassifyNotifier` / `SmsGlance` / `consumePendingClassify` all present in the
+dex. Signed (v2) and zipalign-clean. **What cannot be verified from here is the
+only thing that finally matters: a real M-Pesa or KCB text landing on a real
+phone.**
+
 ### `fix/royalty-split-4way` — merged into `dev` 30 Aug — **the split reverted to 70/20/5/5**
 
 **Off:** `dev` / gate green (python 2,347 · core 2,091 · host 256 · clippy clean).
