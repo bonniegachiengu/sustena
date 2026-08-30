@@ -51,6 +51,8 @@ import {
   Show,
   untrack,
 } from "solid-js";
+
+import { onPulse } from "../lib/pulse";
 import {
   engine,
   fmt,
@@ -478,6 +480,24 @@ export default function Orchie(props: { onFace?: () => void }) {
    */
   const sustain = () => world.selected;
   const [feed, { refetch }] = createResource(sustain, (id) => engine.feed(id, null));
+
+  /**
+   * ★★★ **Orchie's liveness, and it is one line because of how Orchie is
+   *     built — Multiparty §III.**
+   *
+   * Every card on this shell reads the SAME `feed`: the queue, accounts,
+   * inventory, filed spends, own numbers, net worth, tabs, the SMS card and
+   * the classifier. One subscription makes all of them live, and there is no
+   * per-card wiring to forget.
+   *
+   * Before this, `feed` refetched only when the PERSON did something --
+   * `onChanged` after classifying, sweeping, filing. That covers what he
+   * causes and nothing else: a change made on the laptop, or state arriving
+   * from a peer, reached the store and this shell went on showing what it had.
+   * §III is the relay for exactly that, and `onPulse`'s refractory window is
+   * what stops a burst of arriving entries queueing one refetch each.
+   */
+  onPulse(refetch);
 
   /**
    * Texts that arrived while the app was shut are sitting in a local queue,
