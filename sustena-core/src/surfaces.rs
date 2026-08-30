@@ -161,7 +161,7 @@ mod tests {
     /// More widgets than any small budget can hold, all genuinely eligible.
     fn widgets() -> WidgetSet {
         let decls: Vec<WidgetDecl> = (0..8)
-            .map(|i| WidgetDecl::new(&format!("w{i}"), "card").unit().reading("balance"))
+            .map(|i| WidgetDecl::new(format!("w{i}"), "card").unit().reading("balance"))
             .collect();
         WidgetSet::load(decls, &definition(), &Registry::default()).expect("loads")
     }

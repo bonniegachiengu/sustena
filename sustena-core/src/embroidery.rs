@@ -608,10 +608,6 @@ mod through_the_gate_tests {
     use serde_json::json;
     use std::sync::Arc;
 
-    fn number() -> DimType {
-        DimType::Number { lo: None, hi: None }
-    }
-
     fn household() -> Value {
         json!({"finances": {
             "liquid": {"balance": 1000.0},

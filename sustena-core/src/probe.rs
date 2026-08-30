@@ -179,7 +179,7 @@ pub fn front(outcomes: &[Outcome], horizon: Horizon) -> Front {
 /// ★★★ The report a household can act on: *this* is the decision that depends on
 /// how the month opens. A front says several things survive; this says where the
 /// disagreement actually is.
-pub fn contested_between<'a>(outcomes: &'a [Outcome]) -> Vec<(&'a str, &'a str)> {
+pub fn contested_between(outcomes: &[Outcome]) -> Vec<(&str, &str)> {
     let mut best_per_start: BTreeMap<&str, (&str, f64)> = BTreeMap::new();
     for o in outcomes {
         let slot = best_per_start.entry(o.under.as_str()).or_insert((o.candidate.as_str(), f64::NEG_INFINITY));

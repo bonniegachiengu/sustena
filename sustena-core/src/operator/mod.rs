@@ -618,7 +618,7 @@ pub fn execute_afforded(
     // agree is one whose story about itself is wrong, and letting it commit
     // means the ledger is wrong from then on with nothing to point at.
     {
-        let imbalances = crate::ledger::reconcile(&working.mutations(), &movements);
+        let imbalances = crate::ledger::reconcile(working.mutations(), &movements);
         if let Some(first) = imbalances.first() {
             return Execution {
                 result: OperatorResult::fail(

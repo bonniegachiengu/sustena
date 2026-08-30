@@ -70,7 +70,7 @@ fn read_lines(params: &Map<String, Value>) -> Result<Vec<Line>, (String, &'stati
             return Err((format!("Line {n} has no name."), "line_has_a_name"));
         }
         let value = entry.get("value").and_then(Value::as_f64).unwrap_or(0.0);
-        if !(value > 0.0) {
+        if value.is_nan() || value <= 0.0 {
             return Err((format!("'{item}' has no amount."), "line_has_an_amount"));
         }
         let subpocket = entry
