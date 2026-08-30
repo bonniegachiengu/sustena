@@ -223,6 +223,33 @@ export function NoteRow(props: { tone: Tone; onClick?: () => void; children: JSX
   );
 }
 
+/**
+ * A sheet over the screen, for a job with its own beginning and end.
+ *
+ * (*) **Dismissal is on the backdrop and on the button, and both are real.** A
+ * modal that can only be closed by finishing is a trap: somebody who opened one
+ * by mistake should not have to complete a flow to leave it.
+ *
+ * It scrolls INSIDE its own frame rather than growing the page -- rule 1
+ * applied to the element most likely to break it, since a classify flow with a
+ * long message and fifteen pockets is taller than a phone.
+ */
+export function Modal(props: { title: string; onClose: () => void; children: JSX.Element }) {
+  return (
+    <div class={S.modalScrim} onClick={props.onClose}>
+      <div class={S.modalSheet} onClick={(e) => e.stopPropagation()}>
+        <div class={S.modalHead}>
+          <span class={S.modalTitle}>{props.title}</span>
+          <button class={S.modalClose} onClick={props.onClose} aria-label="close">
+            close
+          </button>
+        </div>
+        <div class={S.modalBody}>{props.children}</div>
+      </div>
+    </div>
+  );
+}
+
 /** Pushes what follows to the far end of a `Row`, `Cluster` or card header. */
 export function Spacer() {
   return <span class={S.spacer} />;

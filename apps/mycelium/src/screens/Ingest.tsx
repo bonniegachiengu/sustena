@@ -15,7 +15,7 @@
  * purpose, because which pocket it belongs to is a person's decision and a
  * heuristic for it would be inventing a spending decision on their behalf.
  */
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import {
   Badge,
   Button,
@@ -29,6 +29,7 @@ import {
   Field,
   Label,
   Meta,
+  Modal,
   Note,
   NoteRow,
   Row,
@@ -41,6 +42,7 @@ import {
 } from "../ui";
 import { engine, fmt, type CaptureResult, type MessageDto } from "../lib/engine";
 import { world } from "../lib/live";
+import { Classify } from "./Orchie";
 
 /** Tier → how it reads. ★ One place, so a tier cannot mean two things. */
 const TIER: Record<string, { tone: "ok" | "warn" | "danger" | "quiet"; says: string }> = {
@@ -53,6 +55,22 @@ const TIER: Record<string, { tone: "ok" | "warn" | "danger" | "quiet"; says: str
 export default function Ingest() {
   const sustain = () => world.selected ?? "";
   const [data, { refetch }] = createResource(sustain, (id) => engine.ingest(id));
+
+  /** How many rows paint at once. See the note beside "show more". */
+  const PAGE = 40;
+  const [shown, setShown] = createSignal(PAGE);
+  /** Which message the classifier is open on, if any. */
+  const [classifying, setClassifying] = createSignal<string | null>(null);
+
+  /**
+   * (*) **Newest first.** The message a person still remembers is the cheapest
+   * to answer, and an oldest-first backlog asks the hardest question first.
+   * `current()` is ordered by seq ascending, so reversing it is the recency
+   * order rather than a re-sort.
+   */
+  const ordered = createMemo(() => [...(data()?.messages ?? [])].reverse());
+  const page = createMemo(() => ordered().slice(0, shown()));
+  const waiting = createMemo(() => ordered().filter((m) => m.needsAttention).length);
 
   const [source, setSource] = createSignal("mpesa");
   const [raw, setRaw] = createSignal("");
@@ -84,6 +102,7 @@ export default function Ingest() {
   };
 
   return (
+    <>
     <Split>
       <Column>
         <Card
@@ -248,14 +267,30 @@ export default function Ingest() {
 
           <Note gap="lg">
             <Label>messages</Label>
+            {/* (*) The counts are of EVERYTHING, not of what is rendered. A
+                backlog of two and a half thousand is a fact about the household
+                and it must not shrink because a list was capped. */}
+            <Caption>
+              {waiting()} waiting on a decision · {(data()?.messages.length ?? 0)} captured
+              {shown() < ordered().length ? ` · showing the newest ${shown()}` : ""}
+            </Caption>
           </Note>
           <Show
-            when={(data()?.messages.length ?? 0) > 0}
+            when={ordered().length > 0}
             fallback={<Empty>nothing captured yet · paste a message on the left</Empty>}
           >
-            <For each={[...(data()?.messages ?? [])].reverse()}>
+            <For each={page()}>
               {(m) => (
-                <div class={S.pocketBlock}>
+                /* (*) Rule 2. The whole block is the door, not a chip inside it:
+                   a captured message IS a decision waiting to be made, and the
+                   thing a person wants when they look at one is to make it. */
+                <div
+                  class={S.pocketBlock}
+                  role={m.needsAttention ? "button" : undefined}
+                  tabindex={m.needsAttention ? 0 : undefined}
+                  style={m.needsAttention ? { cursor: "pointer" } : undefined}
+                  onClick={m.needsAttention ? () => setClassifying(m.id) : undefined}
+                >
                   <Cluster>
                     <Badge tone={TIER[m.status]?.tone ?? "quiet"}>{m.status}</Badge>
                     <Meta>{m.parserName || "—"}</Meta>
@@ -291,16 +326,38 @@ export default function Ingest() {
                     )}
                   </Show>
                   <Show when={m.needsAttention}>
+                    {/* (*) The chips sit inside their own click boundary. The
+                        block around them is a door to the classifier, and
+                        "mark handled" is a different decision -- letting it
+                        bubble would open the flow the person just declined. */}
+                    <div onClick={(e) => e.stopPropagation()}>
                     <Cluster>
+                      {/* (*) The dead end this replaced read "you choose the
+                          pocket in Orchie" -- a surface telling a person that
+                          the thing they came to do happens somewhere else. It
+                          happens here now, in the same classifier Orchie and the
+                          notification tap open. */}
+                      <Chip onClick={() => setClassifying(m.id)}>classify</Chip>
                       <Chip onClick={() => void resolve(m)}>mark handled</Chip>
-                      <Caption>
-                        you choose the pocket in Orchie
-                      </Caption>
+                      <Caption>filed here · nothing moves until you confirm</Caption>
                     </Cluster>
+                    </div>
                   </Show>
                 </div>
               )}
             </For>
+            {/* (*) Progressive rather than paged. Two and a half thousand
+                messages rendered at once is the freeze this codebase already
+                met with a large backfill, and the answer there was the same:
+                bound what paints, keep the count honest. */}
+            <Show when={shown() < ordered().length}>
+              <Cluster>
+                <Chip onClick={() => setShown(shown() + PAGE)}>
+                  show {Math.min(PAGE, ordered().length - shown())} more
+                </Chip>
+                <Caption>{ordered().length - shown()} older still below</Caption>
+              </Cluster>
+            </Show>
           </Show>
         </Card>
 
@@ -329,5 +386,27 @@ export default function Ingest() {
         </Card>
       </Column>
     </Split>
+
+    {/* (*) ONE classifier, another door. This is the same `Classify` the
+        Orchie feed renders and the notification tap opens -- imported, not
+        reimplemented, so a change to how classifying works reaches every
+        entry point at once. */}
+    <Show when={classifying()}>
+      {(id) => (
+        <Modal title="classify" onClose={() => setClassifying(null)}>
+          <Classify
+            sustain={sustain()}
+            messageId={id()}
+            autoStart
+            backfill
+            onDone={() => {
+              setClassifying(null);
+              void refetch();
+            }}
+          />
+        </Modal>
+      )}
+    </Show>
+    </>
   );
 }
