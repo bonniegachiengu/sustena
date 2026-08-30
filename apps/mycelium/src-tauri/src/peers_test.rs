@@ -733,3 +733,79 @@ fn a_peer_that_only_ever_dialled_in_is_not_swept() {
 
     assert!(world.reconnect_all().is_empty(), "nothing to dial, and that is correct");
 }
+
+// ── coming up without a person ──────────────────────────────────────────────
+
+#[test]
+fn a_remembered_unlock_brings_a_node_up_peering_with_nobody_present() {
+    // ★★★ The whole point: a node that waits for a person stops peering the
+    //     moment nobody is looking, which defeats a standing peering.
+    let home = scratch("remembered").join("node");
+    let first = standing(&home, 39781, true);
+    first.remember_unlock(PASS).expect("remember");
+    assert!(first.unlock_is_remembered());
+    drop(first);
+
+    // A new World over the same directory: a restart.
+    let second = standing(&home, 39782, false);
+    assert!(!second.is_unlocked(), "nothing has opened it yet");
+    let handle = second.unlock_if_remembered().expect("came up unlocked");
+    assert_eq!(handle, DEFAULT_HANDLE);
+    assert!(second.is_unlocked(), "and it can act, with nobody present");
+    assert_eq!(second.peering().port(), Some(39782), "and it is listening");
+}
+
+#[test]
+fn forgetting_restores_the_passphrase_gate_exactly() {
+    // ★★ A complete undo, not a repair: the sealed identity was never touched.
+    let home = scratch("forget").join("node");
+    let world = standing(&home, 39783, true);
+    world.remember_unlock(PASS).expect("remember");
+    world.forget_unlock().expect("forget");
+
+    assert!(!world.unlock_is_remembered());
+    assert!(
+        world.unlock_if_remembered().is_none(),
+        "it will not come up on its own any more"
+    );
+    // And the identity still opens the ordinary way.
+    world.lock();
+    assert_eq!(world.unlock(PASS).expect("unlock"), DEFAULT_HANDLE);
+}
+
+#[test]
+fn a_wrong_passphrase_is_never_remembered() {
+    // ★★★ It unlocks BEFORE it caches, so a wrong passphrase cannot be written
+    //     down as if it were right.
+    let home = scratch("wrong-pass").join("node");
+    let world = standing(&home, 39784, true);
+    assert!(world.remember_unlock("not-the-passphrase-at-all").is_err());
+    assert!(!world.unlock_is_remembered(), "and nothing was written");
+}
+
+#[test]
+fn a_merged_node_folds_the_same_state_as_its_peer_after_a_restart() {
+    // ★★★ Caught by two real processes: they converged on the wire and then
+    //     DISAGREED on the next open, because `World::open` folded the log in
+    //     file order while `reload` folded it causally. Same entries, two
+    //     states -- the one thing §VI says cannot happen ("same set of updates,
+    //     same state, order-independent").
+    let (a, b, id) = twin_pair("restart-converge");
+    a.income(&id, 300.0, "node-a");
+    b.income(&id, 700.0, "node-b");
+    b.world.sync_peer(&a.address(), &id).expect("sync");
+    a.absorb();
+
+    let (state_a, state_b) = (a.state(&id), b.state(&id));
+    assert_eq!(state_a, state_b, "converged while running");
+
+    // Re-open both from disk: a restart, and the fold must not change.
+    let reopened_a = World::open(Store::at(&a.home).expect("store")).expect("world");
+    let reopened_b = World::open(Store::at(&b.home).expect("store")).expect("world");
+    let after_a = reopened_a.with(|i| i.get(&id).map(|s| s.state.clone())).expect("a");
+    let after_b = reopened_b.with(|i| i.get(&id).map(|s| s.state.clone())).expect("b");
+
+    assert_eq!(after_a, after_b, "and still converged after a restart");
+    assert_eq!(after_a, state_a, "the restart changed nothing on A");
+    assert_eq!(after_b, state_b, "nor on B");
+}

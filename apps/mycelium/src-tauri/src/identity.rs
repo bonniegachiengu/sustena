@@ -267,6 +267,61 @@ impl IdentityStore {
         Ok(Unlocked { handle: file.handle, signing })
     }
 
+    /// Where a cached unlock key lives, when one is allowed to exist.
+    fn cache_path(&self) -> PathBuf {
+        self.path.with_file_name("local_unlock.key")
+    }
+
+    /// Whether this node can come up without being asked for a passphrase.
+    pub fn has_cached_unlock(&self) -> bool {
+        self.cache_path().exists()
+    }
+
+    /// **Remember the unlock**, so this node never stalls waiting for a person.
+    ///
+    /// ★★★ **What this genuinely costs, stated plainly.** The cached value
+    /// unseals the private key. Anyone who can read the file can act as this
+    /// node. It is off by default, it is never written unless somebody asks
+    /// for it in so many words, and deleting the file restores the passphrase
+    /// gate exactly as it was -- the sealed identity is untouched.
+    ///
+    /// ★★ The *derived* key is cached rather than the passphrase. It unseals
+    /// this identity file and nothing else, so a passphrase reused elsewhere is
+    /// not put at risk by a machine-local convenience.
+    ///
+    /// ★ Written only after the passphrase has actually opened the identity, so
+    /// a wrong one can never be cached.
+    pub fn remember_unlock(&self, passphrase: &str) -> Result<(), IdentityError> {
+        self.unlock(passphrase)?;
+        let file = self.read()?;
+        let salt = unhex(&file.salt)?;
+        let key = derive(passphrase, &salt, file.iterations);
+        let tmp = self.cache_path().with_extension("tmp");
+        fs::write(&tmp, hex(&key)).map_err(|e| IdentityError::Io(e.to_string()))?;
+        fs::rename(&tmp, self.cache_path()).map_err(|e| IdentityError::Io(e.to_string()))
+    }
+
+    /// Stop remembering. ★ The sealed identity is untouched, so this is a
+    /// complete undo and not a repair.
+    pub fn forget_unlock(&self) -> Result<(), IdentityError> {
+        match fs::remove_file(self.cache_path()) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(IdentityError::Io(e.to_string())),
+        }
+    }
+
+    /// Unlock from the remembered key, if there is one.
+    ///
+    /// ★ Every check `unlock` makes still runs -- the cached key only replaces
+    /// the derivation, not the proof that the recovered key is this identity.
+    pub fn unlock_remembered(&self) -> Result<Unlocked, IdentityError> {
+        let hexed = fs::read_to_string(self.cache_path()).map_err(|_| IdentityError::Unlock)?;
+        let key = unhex(hexed.trim())?;
+        let key: [u8; 32] = key.try_into().map_err(|_| IdentityError::Unlock)?;
+        self.open_with(&key)
+    }
+
     /// **Unlock**: recover the private key, then make it prove itself.
     ///
     /// ★★★ There is no comparison against a stored answer anywhere in here.
@@ -311,6 +366,38 @@ impl IdentityStore {
             .verify(PROOF_MESSAGE, &Signature::from_bytes(&proof))
             .map_err(|_| IdentityError::Unlock)?;
 
+        Ok(Unlocked { handle: file.handle, signing })
+    }
+
+    /// Open the identity with an already-derived key.
+    ///
+    /// ★★ Deliberately runs the SAME checks `unlock` does after decryption --
+    /// the recovered key must match the public half and reproduce the stored
+    /// proof. A cached key is a shortcut past the KDF, never past the proof.
+    fn open_with(&self, key: &[u8; 32]) -> Result<Unlocked, IdentityError> {
+        let file = self.read()?;
+        let nonce = unhex(&file.nonce)?;
+        let sealed = unhex(&file.sealed_secret)?;
+        let cipher = XChaCha20Poly1305::new(key.into());
+        let opened = cipher
+            .decrypt(XNonce::from_slice(&nonce), sealed.as_slice())
+            .map_err(|_| IdentityError::Unlock)?;
+        let bytes: [u8; 32] = opened.try_into().map_err(|_| IdentityError::Unlock)?;
+        let signing = SigningKey::from_bytes(&bytes);
+        let declared = unhex(&file.public_key)?;
+        let declared: [u8; 32] =
+            declared.try_into().map_err(|_| IdentityError::Malformed("public key".into()))?;
+        let verifying = VerifyingKey::from_bytes(&declared)
+            .map_err(|_| IdentityError::Malformed("public key is not on the curve".into()))?;
+        if signing.verifying_key() != verifying {
+            return Err(IdentityError::Unlock);
+        }
+        let proof = unhex(&file.proof)?;
+        let proof: [u8; 64] =
+            proof.try_into().map_err(|_| IdentityError::Malformed("proof".into()))?;
+        verifying
+            .verify(PROOF_MESSAGE, &Signature::from_bytes(&proof))
+            .map_err(|_| IdentityError::Unlock)?;
         Ok(Unlocked { handle: file.handle, signing })
     }
 }

@@ -32,6 +32,10 @@ name = "mycelium"
 path = "src/main.rs"
 
 [[bin]]
+name = "two_nodes"
+path = "src/bin/two_nodes.rs"
+
+[[bin]]
 name = "export_bindings"
 path = "src/bin/export_bindings.rs"
 required-features = ["dev-bins"]

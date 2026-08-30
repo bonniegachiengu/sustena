@@ -2238,6 +2238,24 @@ pub fn set_peer_address(
     world.peering().edit(|b| b.seen(&public_key, &handle, Some(address)))
 }
 
+/// Come up unlocked from now on, without being asked.
+///
+/// ★★★ Costs what it sounds like: the cached value unseals the private key, so
+/// anyone who can read the file can act as this node. Off unless asked for,
+/// never in a build anybody else runs, and `forget_unlock` is a complete undo.
+#[tauri::command]
+#[specta::specta]
+pub fn remember_unlock(world: State<'_, World>, passphrase: String) -> Result<(), String> {
+    world.remember_unlock(&passphrase)
+}
+
+/// Stop coming up unlocked. ★ Restores the passphrase gate exactly as it was.
+#[tauri::command]
+#[specta::specta]
+pub fn forget_unlock(world: State<'_, World>) -> Result<(), String> {
+    world.forget_unlock()
+}
+
 /// Settle on a different port.
 ///
 /// ★★★ Changing it does NOT move a running listener: the socket a peer is

@@ -256,6 +256,25 @@ impl World {
         })
     }
 
+    /// Fold one Sustain in causal order when this machine has an identity, and
+    /// in file order when it does not yet.
+    ///
+    /// ★ Before enrolment there is exactly one history and no peers, so the two
+    /// orders are the same sequence and the fallback is not a compromise.
+    fn fold_causally(
+        store: &Store,
+        node_id: &Option<String>,
+        id: &str,
+    ) -> StoreResult<(Value, u64)> {
+        match node_id {
+            Some(node) => {
+                let (out, next) = store.load_replicated(id, node, None)?;
+                Ok((out.state, next))
+            }
+            None => store.load_state(id),
+        }
+    }
+
     pub fn open(store: Store) -> StoreResult<World> {
         let store_root = store.root().to_path_buf();
         // ★★★ BEFORE anything is folded. A transfer a crash interrupted is
@@ -268,6 +287,11 @@ impl World {
         for id in store.recover_transfers()? {
             eprintln!("[mycelium] recovered an interrupted transfer: {id}");
         }
+
+        // ★ The public key, read without unlocking anything. Legacy lines with
+        //   no origin are attributed to it, so the fold needs it even when the
+        //   node is locked.
+        let node_id = IdentityStore::at(&store_root).read().ok().map(|f| f.public_key);
 
         let records = store.load_registry()?;
         let mut sustains = BTreeMap::new();
@@ -284,7 +308,22 @@ impl World {
                 None => templates::definition(record.template),
             };
             let enforcement = enforcement_of(&definition);
-            let (mut state, mut next_seq) = store.load_state(&record.id)?;
+            // ★★★ **Causal order, not file order — Multiparty §VI/§IV.**
+            //     `load_state` folds the lines in the order they sit in the
+            //     file. While every line was written here those are the same
+            //     sequence; they diverge the moment a peer's entry lands
+            //     mid-history, and from then on only the causal one is right.
+            //     Opening with the file order meant a node that had merged
+            //     showed a DIFFERENT state from its peer after a restart --
+            //     caught by two real processes converging on the wire and then
+            //     disagreeing on the next open, which is the one thing §VI
+            //     says cannot happen: "same set of updates, same state,
+            //     order-independent."
+            //
+            // ★★ The node id comes from the PUBLIC half of the identity, which
+            //    reads without a passphrase. Folding correctly must not require
+            //    being unlocked -- a locked cockpit still shows the household.
+            let (mut state, mut next_seq) = Self::fold_causally(&store, &node_id, &record.id)?;
             // ★★★ A dimension the definition declares and the instance lacks.
             //
             //     Introducing one is a SHAPE change, which organisational
@@ -306,7 +345,7 @@ impl World {
                     record.id, added
                 );
                 store.append(&record.id, &event)?;
-                let (s2, n2) = store.load_state(&record.id)?;
+                let (s2, n2) = Self::fold_causally(&store, &node_id, &record.id)?;
                 state = s2;
                 next_seq = n2;
             }
@@ -1170,6 +1209,54 @@ impl World {
         //   same reason an unlocked one does.
         self.start_listening_if_configured();
         Ok(handle)
+    }
+
+    /// Come up unlocked, if this node has been told to remember its unlock.
+    ///
+    /// ★★★ **Why this exists.** A node that waits for a person is a node that
+    /// stops peering the moment nobody is looking, which defeats the whole
+    /// point of a standing peering. With an unlock remembered, a restart is
+    /// invisible: the key is recovered, the listener comes up, and trusted
+    /// peers are swept, with nobody present.
+    ///
+    /// ★★ It is OFF unless somebody asked for it in so many words -- see
+    /// `IdentityStore::remember_unlock` for what it costs -- and deleting
+    /// `local_unlock.key` restores the passphrase gate exactly as it was.
+    pub fn unlock_if_remembered(&self) -> Option<String> {
+        if !self.identities.has_cached_unlock() {
+            return None;
+        }
+        match self.identities.unlock_remembered() {
+            Ok(u) => {
+                let handle = u.handle().to_string();
+                self.peering.set_identity(Some(u.clone()));
+                *self.identity.lock().expect("identity lock") = Some(u);
+                self.start_listening_if_configured();
+                eprintln!("[mycelium] came up unlocked as {handle} (unlock remembered)");
+                Some(handle)
+            }
+            Err(e) => {
+                // ★ Loud. A remembered unlock that stopped working is a node
+                //   that will quietly never peer again.
+                eprintln!("[mycelium] the remembered unlock did not open the identity: {e}");
+                None
+            }
+        }
+    }
+
+    /// Remember this unlock, so this node never stalls waiting for a person.
+    pub fn remember_unlock(&self, passphrase: &str) -> Result<(), String> {
+        self.identities.remember_unlock(passphrase).map_err(|e| e.to_string())
+    }
+
+    /// Stop remembering, restoring the passphrase gate.
+    pub fn forget_unlock(&self) -> Result<(), String> {
+        self.identities.forget_unlock().map_err(|e| e.to_string())
+    }
+
+    /// Whether this node comes up without being asked.
+    pub fn unlock_is_remembered(&self) -> bool {
+        self.identities.has_cached_unlock()
     }
 
     /// Bring the listener up, if this node is configured to do that on its own.

@@ -96,6 +96,8 @@ pub fn specta_builder() -> Builder {
         commands::start_listening,
         commands::set_listen_port,
         commands::set_peer_address,
+        commands::remember_unlock,
+        commands::forget_unlock,
         commands::reconnect_peers,
         commands::add_peer,
         commands::set_peer_standing,
@@ -200,6 +202,10 @@ pub fn run() {
             );
             // ★★★ The receiver is taken BEFORE the world is handed over, so
             //     no merge can land in the gap between opening and listening.
+            // ★★★ Before anything else can want it: a node told to remember
+            //     its unlock comes up already able to peer, so a restart never
+            //     costs a person a keystroke.
+            world.unlock_if_remembered();
             let merges = world.merges();
             app.manage(world);
 
