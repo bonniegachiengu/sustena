@@ -10,7 +10,7 @@
  * channel. An entry appears because the engine decided something, never because
  * this screen asked.
  */
-import { createMemo, For, Show } from "solid-js";
+import { createMemo, For, Show, type JSX } from "solid-js";
 import {
   Badge,
   Caption,
@@ -30,10 +30,72 @@ import {
   sx as S,
 } from "../ui";
 import { fmt } from "../lib/engine";
+import { openRow } from "../lib/nav";
 import { ATTENTION_AT, attentionAcross, attentionFor, world } from "../lib/live";
 
-const RADIUS = 132;
-const CENTER = { x: 190, y: 168 };
+/**
+ * ★★★ **The ring GROWS with the ring.** A fixed radius is the bug this screen
+ * shipped with: eight households on a circle sized for four put their labels on
+ * top of each other and pushed the lowest node out of the frame. Circumference
+ * is what has to hold them, so the radius follows the count rather than the
+ * other way round.
+ */
+const NODE_R = 26;
+const ROOT_R = 40;
+/**
+ * How wide a label paints, near enough to bound it.
+ *
+ * ★★ An estimate, and deliberately a GENEROUS one. It is used only to decide
+ * how much room to leave, so reading it high costs a little margin and reading
+ * it low costs a clipped name — the two errors are not the same size, and the
+ * cheap one is the one to make.
+ */
+const labelHalfWidth = (text: string) => Math.max(NODE_R, text.length * 3.4);
+
+/** Clear space between two neighbours on the ring. */
+const NODE_GAP = 16;
+const MIN_RADIUS = 96;
+
+/**
+ * A ring wide enough that no two neighbours touch.
+ *
+ * ★★ Sized from the WIDEST LABEL rather than a constant, because the thing
+ * that collides is the name, not the disc. A household of eight short names
+ * needs less room than a household of four long ones, and a constant per-node
+ * arc is wrong for both. The chord between neighbours is `2·R·sin(π/n)`, so
+ * solving it for the radius is the whole calculation.
+ */
+const ringRadius = (labels: string[]) => {
+  const n = Math.max(labels.length, 1);
+  const widest = labels.reduce((w, l) => Math.max(w, labelHalfWidth(l) * 2), NODE_R * 2);
+  const needed = n === 1 ? 0 : (widest + NODE_GAP) / (2 * Math.sin(Math.PI / n));
+  return Math.max(MIN_RADIUS, ROOT_R + NODE_R + 24, needed);
+};
+
+
+type Node = { id: string; label: string; x: number; y: number };
+
+/**
+ * One line of the gate stream, navigable when there is somewhere to go.
+ *
+ * ★★ Same contract as `Row` and `NoteRow`: the handler decides both the
+ * behaviour and the appearance, so a line cannot look live and be dead.
+ */
+function StreamRow(props: {
+  refused: boolean;
+  onClick?: () => void;
+  children: JSX.Element;
+}) {
+  const cls = () =>
+    `${props.refused ? S.streamRowRefused : S.streamRow}${props.onClick ? ` ${S.noteRowButton}` : ""}`;
+  return props.onClick ? (
+    <button class={cls()} onClick={props.onClick}>
+      {props.children}
+    </button>
+  ) : (
+    <div class={cls()}>{props.children}</div>
+  );
+}
 
 const toneOf = (t: "ok" | "warn" | "danger") =>
   t === "danger" ? vars.color.danger : t === "warn" ? vars.color.warn : vars.color.teal;
@@ -43,22 +105,63 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
     world.order.map((k) => world.sustains[k]!).filter((x) => x && x.summary.parent === null),
   );
 
-  /** The graph: one root at the centre, its children on a ring. */
+  /**
+   * The graph: one root at the centre, its children on a ring — and a viewBox
+   * measured from what was actually drawn.
+   *
+   * ★★★ **The frame is derived, not declared.** The screen used to carry a
+   * literal `viewBox="0 0 380 336"` while placing nodes at a fixed radius, so
+   * the drawing and the frame were two independent guesses that agreed for
+   * four households and disagreed for eight. Bonnie's bottom node ("Mum")
+   * ended up outside the box and under the status bar. Measuring the content
+   * and sizing the frame to it makes "everything fits" a property of the
+   * layout rather than a coincidence of the numbers.
+   */
   const layout = createMemo(() => {
     const root = roots()[0];
-    if (!root) return { root: null, kids: [] as { id: string; x: number; y: number }[] };
+    if (!root) {
+      return { root: null, kids: [] as Node[], box: "0 0 380 336", center: { x: 190, y: 168 } };
+    }
     const kids = world.order
       .map((k) => world.sustains[k]!)
       .filter((x) => x && x.summary.parent === root.summary.id);
+
+    const radius = ringRadius(kids.map((k) => k.summary.label ?? k.summary.id));
+    const center = { x: 0, y: 0 };
     const step = (Math.PI * 2) / Math.max(kids.length, 1);
-    return {
-      root,
-      kids: kids.map((k, i) => ({
-        id: k.summary.id,
-        x: CENTER.x + RADIUS * Math.cos(i * step - Math.PI / 2),
-        y: CENTER.y + RADIUS * Math.sin(i * step - Math.PI / 2),
-      })),
+
+    const placed: Node[] = kids.map((k, i) => ({
+      id: k.summary.id,
+      label: k.summary.label ?? k.summary.id,
+      x: center.x + radius * Math.cos(i * step - Math.PI / 2),
+      y: center.y + radius * Math.sin(i * step - Math.PI / 2),
+    }));
+
+    // ★★ Bounds over everything that PAINTS, not just the circles: the label
+    //    and the figure sit inside the node, but a long name is wider than the
+    //    disc that holds it, and the attention dot sits outside it.
+    let minX = center.x - ROOT_R;
+    let maxX = center.x + ROOT_R;
+    let minY = center.y - ROOT_R;
+    let maxY = center.y + ROOT_R;
+    const grow = (x: number, y: number, halfW: number, halfH: number) => {
+      minX = Math.min(minX, x - halfW);
+      maxX = Math.max(maxX, x + halfW);
+      minY = Math.min(minY, y - halfH);
+      maxY = Math.max(maxY, y + halfH);
     };
+    grow(center.x, center.y, labelHalfWidth(root.summary.label ?? ""), ROOT_R + 4);
+    for (const n of placed) grow(n.x, n.y, labelHalfWidth(n.label), NODE_R + 4);
+
+    const pad = 10;
+    const box = [
+      (minX - pad).toFixed(1),
+      (minY - pad).toFixed(1),
+      (maxX - minX + pad * 2).toFixed(1),
+      (maxY - minY + pad * 2).toFixed(1),
+    ].join(" ");
+
+    return { root, kids: placed, box, center };
   });
 
   /** ★ Only what can be honestly computed from summaries alone. */
@@ -105,13 +208,18 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
           fallback={<Empty>no sustains yet · the store is empty</Empty>}
         >
           {(root) => (
-            <svg viewBox="0 0 380 336" class={S.constellationSvg} role="img">
+            <svg
+              viewBox={layout().box}
+              preserveAspectRatio="xMidYMid meet"
+              class={S.constellationSvg}
+              role="img"
+            >
               {/* composition edges — one per real ⊕ link */}
               <For each={layout().kids}>
                 {(k) => (
                   <line
-                    x1={CENTER.x}
-                    y1={CENTER.y}
+                    x1={layout().center.x}
+                    y1={layout().center.y}
                     x2={k.x}
                     y2={k.y}
                     stroke={vars.color.border}
@@ -143,7 +251,7 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
                         class={S.nodeLabel}
                         fill={vars.color.textPrimary}
                       >
-                        {n()?.summary.label ?? k.id}
+                        {k.label}
                       </text>
                       <text
                         x={k.x}
@@ -167,8 +275,8 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
                 tabindex="0"
               >
                 <circle
-                  cx={CENTER.x}
-                  cy={CENTER.y}
+                  cx={layout().center.x}
+                  cy={layout().center.y}
                   r="40"
                   fill={
                     world.selected === root().summary.id
@@ -181,14 +289,14 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
                   stroke-width="1"
                 />
                 <circle
-                  cx={CENTER.x + 28}
-                  cy={CENTER.y - 28}
+                  cx={layout().center.x + 28}
+                  cy={layout().center.y - 28}
                   r="4"
                   fill={toneOf(attentionFor(root().summary.id))}
                 />
                 <text
-                  x={CENTER.x}
-                  y={CENTER.y - 4}
+                  x={layout().center.x}
+                  y={layout().center.y - 4}
                   text-anchor="middle"
                   class={S.nodeLabel}
                   fill={vars.color.textPrimary}
@@ -196,8 +304,8 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
                   {root().summary.label}
                 </text>
                 <text
-                  x={CENTER.x}
-                  y={CENTER.y + 12}
+                  x={layout().center.x}
+                  y={layout().center.y + 12}
                   text-anchor="middle"
                   class={S.nodeFigure}
                   fill={vars.color.textSecondary}
@@ -280,7 +388,13 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
           >
             <For each={world.stream}>
               {(e) => (
-                <div class={e.kind === "refused" ? S.streamRowRefused : S.streamRow}>
+                /* ★★★ Every line names the Sustain it happened to, and none of
+                   them could take you there. A stream that shows a refusal in
+                   Cira's habitat and leaves you to find Cira yourself is a
+                   notification board, not a cockpit. `openRow` returns nothing
+                   when the store has no such Sustain — a line about one that
+                   has since been dissolved stays a fact rather than a door. */
+                <StreamRow onClick={openRow(e.sustainId)} refused={e.kind === "refused"}>
                   <span
                     class={S.streamVerdict}
                     style={{ color: e.kind === "refused" ? vars.color.danger : vars.color.teal }}
@@ -303,7 +417,7 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
                       <Caption>nothing changed · nothing logged</Caption>
                     </Show>
                   </Fill>
-                </div>
+                </StreamRow>
               )}
             </For>
           </Show>

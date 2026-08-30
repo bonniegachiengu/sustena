@@ -16,6 +16,8 @@
  * rules is said out loud. Every entry survives; a value may not.
  */
 import { createResource, createSignal, For, Show } from "solid-js";
+import { world } from "../lib/live";
+import { openRow } from "../lib/nav";
 import {
   Badge,
   Button,
@@ -450,10 +452,41 @@ function AddPeer(props: {
 
 /* ── what the merge could not decide ──────────────────────────────────────── */
 
+/**
+ * A Sustain's name in a header, navigable when the store really holds it.
+ *
+ * ★★★ RULE 2's honest half in one component: `openRow` returns `undefined`
+ * when there is nowhere to go, and that same value decides whether this paints
+ * as a button or as plain metadata. One value, both decisions — so it cannot
+ * end up looking live and doing nothing.
+ */
+function NavMeta(props: { id: string }) {
+  const go = () => openRow(props.id);
+  const label = () => world.sustains[props.id]?.summary.label ?? props.id;
+  return (
+    <Show when={go()} fallback={<Meta>{label()}</Meta>}>
+      {(fn) => (
+        <button class={`${S.metaButton}`} onClick={fn()}>
+          {label()}
+        </button>
+      )}
+    </Show>
+  );
+}
+
 function SyncResult(props: { report: SyncDto }) {
   const r = () => props.report;
   return (
-    <Card title="last sync" right={<Meta>{r().sustainId}</Meta>}>
+    <Card
+      title="last sync"
+      right={
+        /* ★★ A sync report names the Sustain it synced and could not take you
+           to it. `NavMeta` renders a plain label when the store does not hold
+           it — a report about a Sustain this node no longer has is a fact, and
+           must not look like a door. */
+        <NavMeta id={r().sustainId} />
+      }
+    >
       <Split>
         <Readout label="received">{String(r().received)}</Readout>
         <Readout label="sent">{String(r().sent)}</Readout>

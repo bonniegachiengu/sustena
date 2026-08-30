@@ -351,6 +351,105 @@ export const noteRow = style({
 
 export const noteDotShift = style({ marginTop: "6px" });
 
+/**
+ * ★★ A navigable note reads as navigable, and it is the SAME hover the rest of
+ * the cockpit uses. A second, prettier affordance for one row type would teach
+ * a person that this app has more than one kind of clickable thing, which is
+ * the maze it is trying not to be.
+ */
+/* -- modal ---------------------------------------------------------------- */
+
+export const modalScrim = style({
+  position: "fixed",
+  inset: 0,
+  zIndex: 50,
+  background: "rgba(0,0,0,0.72)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: vars.space.md,
+});
+
+/** ★★ Rule 1 on the element most likely to break it: capped, and it scrolls
+ *  inside itself rather than growing the page. */
+export const modalSheet = style({
+  width: "min(640px, 100%)",
+  maxHeight: "min(88vh, 100%)",
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+  background: vars.color.bgSurface,
+  border: `1px solid ${vars.color.borderMid}`,
+  borderRadius: "10px",
+  overflow: "hidden",
+});
+
+export const modalHead = style({
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: vars.space.sm,
+  padding: `${vars.space.sm} ${vars.space.md}`,
+  borderBottom: `1px solid ${vars.color.border}`,
+  flexShrink: 0,
+});
+
+export const modalTitle = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10.5px",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  color: vars.color.textSecondary,
+});
+
+export const modalClose = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10.5px",
+  background: "transparent",
+  border: "none",
+  color: vars.color.textMuted,
+  cursor: "pointer",
+  selectors: {
+    "&:hover": { color: vars.color.amber },
+    "&:focus-visible": { outline: `1px solid ${vars.color.amber}`, outlineOffset: "2px" },
+  },
+});
+
+export const modalBody = style({
+  padding: vars.space.md,
+  overflowY: "auto",
+  minHeight: 0,
+});
+
+/** ★★ A meta label that is also a door. Same hover as every other one. */
+export const metaButton = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10.5px",
+  color: vars.color.textSecondary,
+  background: "transparent",
+  border: "none",
+  padding: 0,
+  cursor: "pointer",
+  selectors: {
+    "&:hover": { color: vars.color.amber },
+    "&:focus-visible": { outline: `1px solid ${vars.color.amber}`, outlineOffset: "2px" },
+  },
+});
+
+export const noteRowButton = style({
+  width: "100%",
+  textAlign: "left",
+  background: "transparent",
+  border: "none",
+  color: "inherit",
+  font: "inherit",
+  cursor: "pointer",
+  selectors: {
+    "&:hover": { background: vars.color.bgRaised },
+    "&:focus-visible": { outline: `1px solid ${vars.color.amber}`, outlineOffset: "-1px" },
+  },
+});
+
 /* ── meter ──────────────────────────────────────────────────────────────── */
 
 export const meterTrack = style({
@@ -533,7 +632,22 @@ export const lockPanel = style({
 
 /* ── constellation ──────────────────────────────────────────────────────── */
 
-export const constellationSvg = style({ width: "100%", height: "auto", display: "block" });
+/**
+ * ★★★ **`height: auto` was the clip.** With a fixed aspect ratio, `auto`
+ * height means the drawing is only ever sized by the WIDTH available — so on a
+ * short pane it paints taller than the pane and the bottom of the graph goes
+ * under whatever is below. Constraining both axes and letting
+ * `preserveAspectRatio` scale into whatever box it gets makes fitting a
+ * property of the element rather than of the window.
+ */
+export const constellationSvg = style({
+  width: "100%",
+  height: "100%",
+  maxWidth: "100%",
+  maxHeight: "100%",
+  minHeight: 0,
+  display: "block",
+});
 export const node = style({ cursor: "pointer" });
 globalStyle(`${node}:hover circle`, { stroke: vars.color.amber });
 export const nodeLabel = style({ fontFamily: vars.font.ui, fontSize: "11px", fontWeight: 500 });

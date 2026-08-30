@@ -198,12 +198,54 @@ export function Row(props: { onClick?: () => void; children: JSX.Element }) {
   );
 }
 
-/** A dot and a block of prose that wraps beside it. */
-export function NoteRow(props: { tone: Tone; children: JSX.Element }) {
-  return (
-    <div class={S.noteRow}>
+/**
+ * A dot and a block of prose that wraps beside it.
+ *
+ * ★★★ RULE 2: `onClick` decides **both** the behaviour and the appearance, the
+ * same contract `Row` keeps. Passing a handler makes it a button that looks
+ * like one; passing nothing leaves a plain note. A caller cannot accidentally
+ * produce a row that looks like a door and behaves like a wall, because there
+ * is only one value to get right.
+ */
+export function NoteRow(props: { tone: Tone; onClick?: () => void; children: JSX.Element }) {
+  const inner = (
+    <>
       <span class={`${S.dot[props.tone]} ${S.noteDotShift}`} />
       <span style={{ "min-width": 0 }}>{props.children}</span>
+    </>
+  );
+  return props.onClick ? (
+    <button class={`${S.noteRow} ${S.noteRowButton}`} onClick={props.onClick}>
+      {inner}
+    </button>
+  ) : (
+    <div class={S.noteRow}>{inner}</div>
+  );
+}
+
+/**
+ * A sheet over the screen, for a job with its own beginning and end.
+ *
+ * (*) **Dismissal is on the backdrop and on the button, and both are real.** A
+ * modal that can only be closed by finishing is a trap: somebody who opened one
+ * by mistake should not have to complete a flow to leave it.
+ *
+ * It scrolls INSIDE its own frame rather than growing the page -- rule 1
+ * applied to the element most likely to break it, since a classify flow with a
+ * long message and fifteen pockets is taller than a phone.
+ */
+export function Modal(props: { title: string; onClose: () => void; children: JSX.Element }) {
+  return (
+    <div class={S.modalScrim} onClick={props.onClose}>
+      <div class={S.modalSheet} onClick={(e) => e.stopPropagation()}>
+        <div class={S.modalHead}>
+          <span class={S.modalTitle}>{props.title}</span>
+          <button class={S.modalClose} onClick={props.onClose} aria-label="close">
+            close
+          </button>
+        </div>
+        <div class={S.modalBody}>{props.children}</div>
+      </div>
     </div>
   );
 }

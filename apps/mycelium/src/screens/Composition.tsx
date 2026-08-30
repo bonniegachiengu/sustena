@@ -40,6 +40,7 @@ import {
   sx as S,
 } from "../ui";
 import { engine, fmt, type TransferResult } from "../lib/engine";
+import { openRow } from "../lib/nav";
 import { childrenOf, hydrate, selectedSustain, world } from "../lib/live";
 
 /** ★ Named in the app, not the core: the engine takes the dimension as a param. */
@@ -116,7 +117,11 @@ export default function Composition() {
           </Note>
           <Show when={parent()} fallback={<Empty>none · this is a root Sustain</Empty>}>
             {(p) => (
-              <Row>
+              /* ★★ The parent is a door in the other direction, and was the
+                 same dead end. Going UP is how somebody gets out of a habitat
+                 they drilled into — without it the only way back is the
+                 constellation, which is a maze wall wearing a breadcrumb. */
+              <Row onClick={openRow(p().id)}>
                 <Value>{p().label}</Value>
                 <Meta>{p().template}</Meta>
                 <Spacer />
@@ -132,7 +137,12 @@ export default function Composition() {
           <Show when={kids().length > 0} fallback={<Empty>no children linked</Empty>}>
             <For each={kids()}>
               {(k) => (
-                <Row>
+                /* ★★★ A linked child is the plainest "there is more here" row
+                   in the cockpit: it names another Sustain that exists, is
+                   loaded, and has its own everything. It was not clickable.
+                   `openRow` returns a handler only when the store really holds
+                   it, so a stale link renders as a fact rather than a door. */
+                <Row onClick={openRow(k.id)}>
                   <Value>{k.label}</Value>
                   <Meta>{k.template}</Meta>
                   <Spacer />

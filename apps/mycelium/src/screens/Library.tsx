@@ -27,6 +27,7 @@ import {
   Empty,
   ErrorState,
   Field,
+  Fill,
   Label,
   Meta,
   Note,
@@ -113,8 +114,11 @@ export function Library() {
                 when={l().packages.length > 0}
                 fallback={
                   <Empty>
-                    nothing published yet · an artifact becomes a package when it is
-                    stamped, hashed and passes its own typecheck
+                    nothing published yet · this shelf holds what someone chose to
+                    PUBLISH — a definition, widget or operator stamped, hashed and
+                    passed through its own typecheck. It is empty because nobody has
+                    published one, not because anything is missing. What already runs
+                    here is below.
                   </Empty>
                 }
               >
@@ -132,6 +136,9 @@ export function Library() {
                 </For>
               </Show>
             </Card>
+
+            {/* ── what already runs here ───────────────────────── */}
+            <BuiltIn target={target()} />
 
             {/* ── from peers ───────────────────────────────────── */}
             <Card
@@ -317,6 +324,117 @@ export function Library() {
 }
 
 /* ── one package ──────────────────────────────────────────────────────────── */
+
+/**
+ * **What already runs here** — the operators this Sustain may actually call.
+ *
+ * ★★★ **The screen was empty and the reading was reasonable.** "Library" was
+ * built as the ARENA — the shelf of things somebody chose to *publish* — and
+ * nobody has published anything, so it showed nothing. But a person looking for
+ * *what this system can do* looks in the library, and being told "nothing" when
+ * there are dozens of working operators is a wrong answer to a fair question.
+ * The two shelves are genuinely different and both belong here: **what runs**
+ * and **what was published**.
+ *
+ * ★★ **It is the Sustain's `T`, not the whole registry** — the same list
+ * `get_operators` gives the Console, for the same reason: an operator this
+ * definition does not permit would be refused with `operator_allowed`, and
+ * listing it would be advertising a refusal a person could not have predicted.
+ * So the shelf changes with the subject, which is correct rather than a
+ * limitation.
+ *
+ * ★★★ **Every row opens** (rule 2). An operator names its parameters, its side
+ * effects and what it has actually cost — that is real detail, and a row that
+ * shows a name and hides the rest is the dead end this pass exists to close.
+ */
+function BuiltIn(props: { target: string | null }) {
+  const [ops] = createResource(
+    () => props.target,
+    (id) => engine.operators(id),
+  );
+  const [open, setOpen] = createSignal<string | null>(null);
+  const toggle = (name: string) => setOpen(open() === name ? null : name);
+
+  return (
+    <Card
+      title="what already runs here"
+      right={<Meta>{ops()?.length ?? 0}</Meta>}
+    >
+      <Caption>
+        The operators this household may call. They ship with the engine — nothing
+        was published to get them, and nothing can remove them but the definition
+        that permits them.
+      </Caption>
+
+      <Show
+        when={props.target}
+        fallback={<Empty>no household chosen · pick one to see what it may run</Empty>}
+      >
+        <Show
+          when={(ops() ?? []).length > 0}
+          fallback={<Empty>this definition permits no operators</Empty>}
+        >
+          <For each={ops()}>
+            {(o) => (
+              <>
+                <Row onClick={() => toggle(o.name)}>
+                  <Fill>
+                    <Value>{o.name}</Value>
+                    <Caption>{o.description}</Caption>
+                  </Fill>
+                  <Spacer />
+                  {/* ★★ The measurement or "not measured" — never a zero standing
+                      in for a number nobody took. */}
+                  <Meta>
+                    {o.measured
+                      ? `~${o.measured.meanPawa.toFixed(1)} pwa · ${o.measured.runs} run${o.measured.runs === 1 ? "" : "s"}`
+                      : "not yet measured"}
+                  </Meta>
+                </Row>
+                <Show when={open() === o.name}>
+                  <Note>
+                    <Label>parameters</Label>
+                    <Show
+                      when={o.params.length > 0}
+                      fallback={<Caption>none — it takes no arguments</Caption>}
+                    >
+                      <For each={o.params}>
+                        {(p) => (
+                          <Row>
+                            <Value>{p.name}</Value>
+                            <Meta>{p.kind}</Meta>
+                            <Spacer />
+                            <Meta>{p.required ? "required" : "optional"}</Meta>
+                          </Row>
+                        )}
+                      </For>
+                    </Show>
+
+                    <Label>side effects</Label>
+                    <Show
+                      when={o.sideEffects.length > 0}
+                      fallback={<Caption>none declared — it only reads</Caption>}
+                    >
+                      <Caption>{o.sideEffects.join(" · ")}</Caption>
+                    </Show>
+
+                    <Label>cost</Label>
+                    <Caption>
+                      declared {o.declaredPawa} pwa
+                      {o.measured
+                        ? ` · measured ${o.measured.totalPawa.toFixed(1)} pwa over ${o.measured.runs} run${o.measured.runs === 1 ? "" : "s"}`
+                        : " · never run here, so nothing measured"}
+                    </Caption>
+                  </Note>
+                </Show>
+              </>
+            )}
+          </For>
+        </Show>
+      </Show>
+    </Card>
+  );
+}
 
 function PackageRow(props: {
   pkg: PackageDto;

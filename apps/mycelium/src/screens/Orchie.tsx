@@ -2065,7 +2065,20 @@ function Itemize(props: {
   );
 }
 
-function Classify(props: {
+/**
+ * **The classifier.** One definition, several doors.
+ *
+ *(*) **Exported deliberately.** This is reached from the Orchie feed, from a
+ * notification tap, and from the Ingest message list -- and it must be the SAME
+ * flow in all three, not three surfaces that agree today. A second classifier
+ * would drift the moment one of them learned something the others did not, and
+ * what drifts is what a household believes about its own money.
+ *
+ * It renders a self-contained stack and owns all its own state, so a caller
+ * supplies the subject and is told when it is finished. Nothing about where it
+ * was opened from changes what it does.
+ */
+export function Classify(props: {
   sustain: string;
   messageId: string | null;
   autoStart?: boolean;

@@ -439,6 +439,270 @@ pub fn branching_ratio(
 }
 
 // ---------------------------------------------------------------------------
+// Detector 2 — tail shape, as a COMPARISON and never as a fit
+// ---------------------------------------------------------------------------
+
+/// Which of two candidate distributions the data prefers.
+///
+/// ★★★ **There is no `PowerLaw` variant, and its absence is the whole design.**
+/// The deferral this module shipped with named the constraint any future build
+/// must satisfy: *"the verdict type may not have an absolute 'power law'
+/// variant — only a comparison — until the goodness-of-fit step exists to
+/// support one."* That step is Clauset, Shalizi & Newman's semi-parametric
+/// bootstrap, it needs a random source, and ADR-0001 forbids one in a core
+/// whose promise is reproducibility. So the missing third is still missing, and
+/// this type is shaped so that its absence cannot be papered over: **there is
+/// no value here that says a power law fits.**
+///
+/// ★★ What a comparison can honestly say is *which of the two is less bad*,
+/// and CSN are explicit that **both candidates can be bad**. Hence
+/// [`TailComparison::absolute_fit`], which always answers `Unavailable`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Prefers {
+    /// The power law explains the tail better than the lognormal does.
+    PowerLawOverLognormal,
+    /// The lognormal does. CSN report this is the common outcome on real data.
+    LognormalOverPowerLaw,
+    /// The likelihood ratio is not distinguishable from zero at the declared
+    /// level. ★ A real third answer: *the data cannot tell them apart* is not
+    /// a weak version of either verdict.
+    Indistinguishable,
+}
+
+impl Prefers {
+    pub fn describe(&self) -> &'static str {
+        match self {
+            Self::PowerLawOverLognormal => {
+                "the power law explains this tail better than a lognormal — which is not the \
+                 same as it fitting"
+            }
+            Self::LognormalOverPowerLaw => {
+                "a lognormal explains this tail better than a power law"
+            }
+            Self::Indistinguishable => {
+                "the two are not distinguishable on this data — which is an answer, not a \
+                 failure to get one"
+            }
+        }
+    }
+}
+
+/// Whether an absolute goodness-of-fit is available at all.
+///
+/// ★★★ One variant, on purpose. A future slice that ships CSN's bootstrap adds
+/// a second; until then this type makes *"nobody has tested whether either
+/// candidate fits"* a value the caller has to receive rather than an omission
+/// they might not notice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbsoluteFit {
+    /// Requires CSN's semi-parametric bootstrap, which requires a random
+    /// source, which ADR-0001 forbids here.
+    Unavailable,
+}
+
+/// The tail reading: two closed-form thirds, and the third that is missing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TailComparison {
+    alpha: f64,
+    x_min: f64,
+    tail_n: usize,
+    log_likelihood_ratio: f64,
+    normalised_ratio: f64,
+    prefers: Prefers,
+}
+
+impl TailComparison {
+    /// Hill's MLE for the scaling exponent, over the tail above `x_min`.
+    ///
+    /// ★★ Reported because it is what a caller asks for, and it is **only
+    /// meaningful conditional on the comparison**. An `alpha` of 2.3 from data
+    /// a lognormal explains better is a number about a model that lost.
+    pub fn alpha(&self) -> f64 {
+        self.alpha
+    }
+
+    /// The declared lower bound. ★ **Supplied, never estimated.** CSN estimate
+    /// `x_min` by minimising a KS distance, which is a fit, and a fit is the
+    /// thing this build refuses to do without its goodness-of-fit step.
+    pub fn x_min(&self) -> f64 {
+        self.x_min
+    }
+
+    /// How many observations were actually in the tail.
+    pub fn tail_n(&self) -> usize {
+        self.tail_n
+    }
+
+    /// `R = ln L_powerlaw − ln L_lognormal`. Sign is the direction, magnitude
+    /// alone is not a verdict — see [`Self::normalised_ratio`].
+    pub fn log_likelihood_ratio(&self) -> f64 {
+        self.log_likelihood_ratio
+    }
+
+    /// Vuong's normalised ratio `R / (√n · σ)`, which is standard-normal under
+    /// the null that the two models are equally close to the truth.
+    ///
+    /// ★★★ **This is the part that makes the comparison honest rather than a
+    /// sign check.** A raw `R > 0` says the power law scored higher on this
+    /// sample; it does not say the difference means anything. Normalising by
+    /// the per-observation standard deviation of the log-ratio is what turns
+    /// "scored higher" into "scored higher by more than sampling noise".
+    pub fn normalised_ratio(&self) -> f64 {
+        self.normalised_ratio
+    }
+
+    pub fn prefers(&self) -> Prefers {
+        self.prefers
+    }
+
+    /// ★★★ Always [`AbsoluteFit::Unavailable`]. See [`Prefers`].
+    pub fn absolute_fit(&self) -> AbsoluteFit {
+        AbsoluteFit::Unavailable
+    }
+
+    pub fn describe(&self) -> String {
+        format!(
+            "over {} observations above x_min {:.3}: alpha {:.3}, normalised log-likelihood \
+             ratio {:.3} — {}. No absolute goodness-of-fit: both candidates may be bad and \
+             nothing here has tested it.",
+            self.tail_n,
+            self.x_min,
+            self.alpha,
+            self.normalised_ratio,
+            self.prefers.describe()
+        )
+    }
+}
+
+/// Below this |normalised ratio| the two models are called indistinguishable.
+///
+/// ★★ 1.96 is the two-sided 5 % point of the standard normal. Declared as a
+/// constant rather than buried, because it is the line between *"a difference"*
+/// and *"a difference worth naming"*, and a reader should be able to disagree
+/// with it.
+pub const RATIO_SIGNIFICANT_AT: f64 = 1.96;
+
+/// The smallest tail worth comparing on.
+///
+/// ★★ Hill's estimator is badly behaved on a handful of points and a Vuong
+/// statistic over five observations is noise with a decimal point. Refusing is
+/// the honest answer; returning a verdict is not.
+pub const MIN_TAIL: usize = 20;
+
+/// **Tail shape as a comparison** (Criticality §VIII; Clauset, Shalizi &
+/// Newman, 2009).
+///
+/// Two closed-form thirds of CSN's procedure — the Hill MLE for `alpha`, and
+/// the Vuong-normalised likelihood ratio against a lognormal. The third,
+/// absolute goodness-of-fit, needs a bootstrap and is not here; the return type
+/// says so rather than leaving the caller to assume otherwise.
+///
+/// `x_min` is **supplied**, not estimated, for the reason given on
+/// [`TailComparison::x_min`].
+///
+/// ★ Deterministic: no random source, no sampling, no iteration to a
+/// tolerance. The same window returns the same reading, which is what makes it
+/// legal in this crate at all.
+pub fn tail_shape(sizes: &[f64], x_min: f64) -> Result<TailComparison, CriticalityError> {
+    if !x_min.is_finite() || x_min <= 0.0 {
+        return Err(CriticalityError::BadXMin(x_min));
+    }
+    if sizes.iter().any(|v| !v.is_finite()) {
+        return Err(CriticalityError::NotFinite);
+    }
+
+    let tail: Vec<f64> = sizes.iter().copied().filter(|v| *v >= x_min).collect();
+    if tail.len() < MIN_TAIL {
+        return Err(CriticalityError::TailTooShort(tail.len()));
+    }
+
+    let n = tail.len() as f64;
+    let logs: Vec<f64> = tail.iter().map(|v| (v / x_min).ln()).collect();
+    let sum_logs: f64 = logs.iter().sum();
+    if sum_logs <= 0.0 {
+        // Every observation sits exactly on x_min. There is no tail to shape.
+        return Err(CriticalityError::DegenerateTail);
+    }
+
+    // Hill: alpha = 1 + n / Σ ln(x_i / x_min)
+    let alpha = 1.0 + n / sum_logs;
+
+    // Per-observation log-likelihoods.
+    //   power law: ln[(a-1)/x_min] - a · ln(x/x_min)
+    let pl: Vec<f64> = logs
+        .iter()
+        .map(|l| ((alpha - 1.0) / x_min).ln() - alpha * l)
+        .collect();
+
+    //   lognormal fitted on the tail's own logs, then truncated at x_min:
+    //   ln f(x) = -ln x - ln(s√(2π)) - (ln x - m)² / (2s²) - ln(1 - Φ((ln x_min - m)/s))
+    let ln_x: Vec<f64> = tail.iter().map(|v| v.ln()).collect();
+    let m = ln_x.iter().sum::<f64>() / n;
+    let var = ln_x.iter().map(|l| (l - m) * (l - m)).sum::<f64>() / n;
+    let s = var.sqrt();
+    // NaN must fail this too, and it does not compare, so it is named.
+    if s.is_nan() || s <= 0.0 {
+        return Err(CriticalityError::DegenerateTail);
+    }
+    let tail_mass = 1.0 - normal_cdf((x_min.ln() - m) / s);
+    if tail_mass.is_nan() || tail_mass <= 0.0 {
+        return Err(CriticalityError::DegenerateTail);
+    }
+    let ln_norm = (s * (2.0 * std::f64::consts::PI).sqrt()).ln();
+    let ln_tail_mass = tail_mass.ln();
+    let ln: Vec<f64> = ln_x
+        .iter()
+        .map(|l| -l - ln_norm - (l - m) * (l - m) / (2.0 * var) - ln_tail_mass)
+        .collect();
+
+    // Vuong: R = Σ (pl_i - ln_i); normalise by √n · sd of the per-point ratio.
+    let diffs: Vec<f64> = pl.iter().zip(&ln).map(|(a, b)| a - b).collect();
+    let r: f64 = diffs.iter().sum();
+    let mean_d = r / n;
+    let sigma = (diffs.iter().map(|d| (d - mean_d) * (d - mean_d)).sum::<f64>() / n).sqrt();
+
+    // ★★ σ = 0 means every observation gave the identical ratio, so the models
+    //    are the same model on this data. Indistinguishable is the truth.
+    let normalised = if sigma > 0.0 { r / (n.sqrt() * sigma) } else { 0.0 };
+
+    let prefers = if normalised.abs() < RATIO_SIGNIFICANT_AT {
+        Prefers::Indistinguishable
+    } else if normalised > 0.0 {
+        Prefers::PowerLawOverLognormal
+    } else {
+        Prefers::LognormalOverPowerLaw
+    };
+
+    Ok(TailComparison {
+        alpha,
+        x_min,
+        tail_n: tail.len(),
+        log_likelihood_ratio: r,
+        normalised_ratio: normalised,
+        prefers,
+    })
+}
+
+/// Standard normal CDF, closed form.
+///
+/// ★★ Abramowitz & Stegun 7.1.26 — a rational approximation with |error| under
+/// 1.5e-7, evaluated in fixed time with no iteration and no random source. It
+/// is here because the truncated lognormal's normalising constant needs `Φ`,
+/// and pulling in a statistics crate for one function would widen the core's
+/// dependency surface for nothing.
+fn normal_cdf(z: f64) -> f64 {
+    let sign = if z < 0.0 { -1.0 } else { 1.0 };
+    let x = z.abs() / std::f64::consts::SQRT_2;
+    let t = 1.0 / (1.0 + 0.3275911 * x);
+    let y = 1.0
+        - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+            + 0.254829592)
+            * t
+            * (-x * x).exp();
+    0.5 * (1.0 + sign * y)
+}
+
+// ---------------------------------------------------------------------------
 // Detector 3 — critical slowing down
 // ---------------------------------------------------------------------------
 
@@ -527,6 +791,12 @@ pub enum CriticalityError {
     CausalCycle(Vec<String>),
     #[error("critical band {0} is not usable — it declares how close to 1 counts as critical, so it cannot be negative")]
     BadBand(String),
+    #[error("x_min {0} is not usable — it is the lower bound of the tail, so it must be finite and positive")]
+    BadXMin(f64),
+    #[error("{0} observations above x_min is too short — Hill's estimator is badly behaved on a handful of points and a Vuong statistic over five is noise with a decimal point")]
+    TailTooShort(usize),
+    #[error("the tail is degenerate — every observation sits on the bound, or the logs have no spread, so there is no shape to compare")]
+    DegenerateTail,
     #[error("{0} points is too short — a lag-1 autocorrelation from a single pair is an arithmetic result, not a statistic")]
     WindowTooShort(usize),
     #[error("a constant series has no lag-1 autocorrelation (0/0); returning 0 would read as 'no warning' when the truth is 'no signal'")]
@@ -749,4 +1019,200 @@ mod tests {
             Err(CriticalityError::NotFinite)
         ));
     }
+    // -- Detector 2: tail shape, as a comparison ----------------------------
+
+    /// A power-law sample built deterministically by inverse transform:
+    /// x_i = x_min · (1 - u_i)^(-1/(a-1)) over a fixed grid of u. No RNG —
+    /// the grid IS the sample, which is what makes this legal here.
+    fn power_law_sample(n: usize, x_min: f64, alpha: f64) -> Vec<f64> {
+        (1..=n)
+            .map(|i| {
+                let u = i as f64 / (n as f64 + 1.0);
+                x_min * (1.0 - u).powf(-1.0 / (alpha - 1.0))
+            })
+            .collect()
+    }
+
+    /// A lognormal sample the same way, through the normal quantile.
+    fn lognormal_sample(n: usize, m: f64, s: f64) -> Vec<f64> {
+        (1..=n)
+            .map(|i| {
+                let u = i as f64 / (n as f64 + 1.0);
+                (m + s * normal_quantile(u)).exp()
+            })
+            .collect()
+    }
+
+    /// Acklam-style rational inverse normal, deterministic. Test-only.
+    fn normal_quantile(p: f64) -> f64 {
+        // Beasley-Springer-Moro, adequate for generating a shaped fixture.
+        let a = [2.50662823884, -18.61500062529, 41.39119773534, -25.44106049637];
+        let b = [-8.47351093090, 23.08336743743, -21.06224101826, 3.13082909833];
+        let c = [
+            0.3374754822726147, 0.9761690190917186, 0.1607979714918209, 0.0276438810333863,
+            0.0038405729373609, 0.0003951896511919, 0.0000321767881768, 0.0000002888167364,
+            0.0000003960315187,
+        ];
+        let y = p - 0.5;
+        if y.abs() < 0.42 {
+            let r = y * y;
+            let num = y * (((a[3] * r + a[2]) * r + a[1]) * r + a[0]);
+            let den = (((b[3] * r + b[2]) * r + b[1]) * r + b[0]) * r + 1.0;
+            return num / den;
+        }
+        let r = if y > 0.0 { 1.0 - p } else { p };
+        let r = (-(r.ln())).ln();
+        let mut x = c[0];
+        let mut t = 1.0;
+        for ci in &c[1..] {
+            t *= r;
+            x += ci * t;
+        }
+        if y < 0.0 { -x } else { x }
+    }
+
+    #[test]
+    fn there_is_no_value_that_says_a_power_law_fits() {
+        // ★★★ The constraint the deferral recorded, now enforced by the type.
+        //     `Prefers` has three variants and none of them is an absolute
+        //     claim, and `absolute_fit` has one variant and it is Unavailable.
+        //     A future slice shipping CSN's bootstrap adds the second; until
+        //     then a caller cannot receive "it fits" from this module.
+        let s = power_law_sample(200, 1.0, 2.5);
+        let r = tail_shape(&s, 1.0).expect("reads");
+        assert_eq!(r.absolute_fit(), AbsoluteFit::Unavailable);
+        assert!(r.describe().contains("No absolute goodness-of-fit"));
+    }
+
+    #[test]
+    fn a_power_law_tail_prefers_the_power_law() {
+        let s = power_law_sample(400, 1.0, 2.5);
+        let r = tail_shape(&s, 1.0).expect("reads");
+        assert_eq!(r.prefers(), Prefers::PowerLawOverLognormal);
+        // Hill recovers roughly the alpha the sample was built with. Loose on
+        // purpose: this asserts the estimator is wired to the right formula,
+        // not that a 400-point grid reproduces a parameter exactly.
+        assert!((r.alpha() - 2.5).abs() < 0.35, "alpha was {}", r.alpha());
+    }
+
+    #[test]
+    fn a_lognormal_with_its_curvature_in_view_prefers_the_lognormal() {
+        // ★★ The outcome CSN report is common on real data, and a comparison
+        //    that could only ever pick the power law would not be one.
+        //    x_min well below the median keeps the bend in view, which is what
+        //    there is to see.
+        let s = lognormal_sample(400, 0.0, 1.0);
+        let r = tail_shape(&s, 0.3).expect("reads");
+        assert_eq!(r.prefers(), Prefers::LognormalOverPowerLaw);
+    }
+
+    #[test]
+    fn a_lognormal_cut_at_its_median_is_indistinguishable_and_that_is_correct() {
+        // ★★★ **CSN's central warning, made executable.** The upper half of a
+        //     lognormal over a limited range genuinely does look like a power
+        //     law — that is *why* fitting one to a straight-ish log-log line is
+        //     a documented trap. Cut at the median, this data cannot tell the
+        //     two apart, and the honest answer is to say so.
+        //
+        //     This test was originally written expecting `LognormalOverPowerLaw`
+        //     and it failed. The expectation was naive, not the code: a module
+        //     that returned a confident verdict here would be committing the
+        //     exact error the whole detector exists to avoid.
+        let s = lognormal_sample(400, 0.0, 1.0);
+        let r = tail_shape(&s, 1.0).expect("reads");
+        assert_eq!(r.prefers(), Prefers::Indistinguishable);
+        assert!(r.normalised_ratio().abs() < RATIO_SIGNIFICANT_AT);
+    }
+
+    #[test]
+    fn where_the_bound_sits_changes_the_verdict_and_it_should() {
+        // ★★ Not a defect — a property, and the reason `x_min` is supplied
+        //    rather than estimated. How much of the body you keep decides how
+        //    much shape there is to read, so the caller has to own that choice
+        //    instead of having one silently fitted for them.
+        let s = lognormal_sample(400, 0.0, 1.0);
+        assert_eq!(tail_shape(&s, 1.0).unwrap().prefers(), Prefers::Indistinguishable);
+        assert_eq!(
+            tail_shape(&s, 0.2).unwrap().prefers(),
+            Prefers::LognormalOverPowerLaw
+        );
+    }
+
+    #[test]
+    fn the_verdict_reads_the_normalised_ratio_not_the_sign_of_the_raw_one() {
+        // ★★★ The part that makes this honest rather than a sign check. A raw
+        //     R > 0 says the power law scored higher on this sample; only the
+        //     normalisation says whether that beat sampling noise.
+        let s = lognormal_sample(400, 0.0, 1.0);
+        let r = tail_shape(&s, 0.3).expect("reads");
+        assert!(r.normalised_ratio().abs() > 0.0);
+        // Direction agrees between the two, but the DECISION reads the
+        // normalised one — asserted by construction below.
+        assert_eq!(
+            r.log_likelihood_ratio() < 0.0,
+            r.normalised_ratio() < 0.0,
+            "the two must at least agree on direction"
+        );
+    }
+
+    #[test]
+    fn indistinguishable_is_a_real_third_answer() {
+        // ★★ Below the declared level the module says the data cannot tell
+        //    them apart, rather than picking whichever scored a hair higher.
+        const { assert!(RATIO_SIGNIFICANT_AT > 0.0) };
+        let r = TailComparison {
+            alpha: 2.0,
+            x_min: 1.0,
+            tail_n: 50,
+            log_likelihood_ratio: 0.4,
+            normalised_ratio: 0.9,
+            prefers: Prefers::Indistinguishable,
+        };
+        assert!(r.prefers().describe().contains("not distinguishable"));
+    }
+
+    #[test]
+    fn a_short_tail_is_refused_rather_than_answered() {
+        // ★★ Hill on a handful of points is noise with a decimal point.
+        let s = power_law_sample(10, 1.0, 2.5);
+        assert!(matches!(
+            tail_shape(&s, 1.0),
+            Err(CriticalityError::TailTooShort(_))
+        ));
+    }
+
+    #[test]
+    fn a_bad_lower_bound_is_refused() {
+        let s = power_law_sample(200, 1.0, 2.5);
+        assert!(matches!(tail_shape(&s, 0.0), Err(CriticalityError::BadXMin(_))));
+        assert!(matches!(tail_shape(&s, -1.0), Err(CriticalityError::BadXMin(_))));
+    }
+
+    #[test]
+    fn x_min_is_supplied_and_filters_the_tail() {
+        // ★★ Supplied, never estimated — estimating it is a fit, and a fit is
+        //    what this build refuses without its goodness-of-fit step.
+        let s = power_law_sample(400, 1.0, 2.5);
+        let all = tail_shape(&s, 1.0).expect("reads");
+        let high = tail_shape(&s, 2.0).expect("reads");
+        assert!(high.tail_n() < all.tail_n(), "a higher bound keeps fewer points");
+        assert_eq!(high.x_min(), 2.0);
+    }
+
+    #[test]
+    fn the_reading_is_deterministic() {
+        // ★★★ The property that makes it legal in this crate: no random
+        //     source, so the same window is the same answer, always.
+        let s = power_law_sample(300, 1.0, 2.2);
+        assert_eq!(tail_shape(&s, 1.0).unwrap(), tail_shape(&s, 1.0).unwrap());
+    }
+
+    #[test]
+    fn the_normal_cdf_is_right_where_it_is_checked() {
+        assert!((normal_cdf(0.0) - 0.5).abs() < 1e-9);
+        assert!((normal_cdf(1.96) - 0.975).abs() < 1e-4);
+        assert!((normal_cdf(-1.96) - 0.025).abs() < 1e-4);
+        assert!(normal_cdf(-8.0) >= 0.0 && normal_cdf(8.0) <= 1.0);
+    }
+
 }

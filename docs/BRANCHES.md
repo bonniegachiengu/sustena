@@ -42,6 +42,71 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/ui-universal-rules` — 30 Aug — **two rules, not two patches**
+
+**Off:** `dev` / gate green (tsc clean · builds · geometry verified at 5 pane sizes).
+
+## Rule 1 — everything fits its container
+
+★★★ **The layout primitives were already right, and that is why this was
+missed.** Every `Split`, `Stack` and `Card` sets `min-width: 0` and
+`min-height: 0`. What no layout rule can reach is content carrying its own
+INTRINSIC size. The constellation's `height: auto` on a fixed aspect ratio
+means the drawing is only ever sized by the WIDTH available — so on a short
+pane it painted taller than the pane and Bonnie's bottom node went under the
+status bar. Nothing about the layout was wrong.
+
+★★★ **The frame is now DERIVED rather than declared.** The screen carried a
+literal `viewBox="0 0 380 336"` while placing nodes at a fixed radius: two
+independent guesses that agreed for four households and disagreed for eight.
+Bounds are measured over everything that paints — labels and the attention dot
+included — so *fits* is a property of the layout rather than a coincidence of
+the numbers.
+
+★★ **The ring grows with the ring, and it is sized from the WIDEST LABEL.**
+A constant per-node arc is wrong in both directions: eight short names need
+less room than four long ones. The chord between neighbours is `2·R·sin(π/n)`,
+so solving it for the radius is the whole calculation.
+
+★★ The rule is stated once in `layout.css.ts` as a floor under every screen.
+A swept audit found the constellation is the **only** intrinsically-sized
+content in the app, so the rule is universal by construction rather than by
+vigilance.
+
+**Verified, not asserted:** the shipped math run at 5 pane sizes × 5 household
+shapes (8 real members, the 6 declared, 3 chama, long names, 14 as a stress
+case). **Zero clipping and zero label overlap in all 25.** The ring moves 96 →
+117 → 158 as it should.
+
+## Rule 2 — navigable-looking implies navigable
+
+★★★ **The dead end was structural, not a run of forgotten handlers.** The
+cockpit had exactly one way to change the subject — `open(id)` in `App.tsx` —
+and it was handed to exactly ONE screen. Every other screen's rows were not
+screens that forgot to be clickable; they were screens with **nothing to click
+to**. No per-screen patching could have fixed that.
+
+★★★ **So navigation is ambient.** `lib/nav.ts` is registered once and
+reachable from anywhere, which is the only way this survives contact with the
+next screen somebody writes.
+
+★★★ **`openRow(id)` returns `undefined` when there is nowhere to go**, and
+the SAME value decides whether a row paints as a button or as plain text. One
+value, both decisions — so a row cannot look like a door and behave like a
+wall. An affordance that lies once teaches a person the app's rows lie, and
+they stop trying the ones that work.
+
+**Dead ends found and closed:** a linked child and the parent in Composition;
+every gate-stream line in Constellation; household attention rows; Monitor's
+attention rows (to the Console, where a person can actually act — not to
+Define, since changing the rule is rarely the answer to the rule being
+broken); the Sustain named on a sync report in Network.
+
+**Left plain, deliberately, because there is genuinely nowhere to go:** the
+rule-library entries in Ingest, identity owners in Network, economy parameters,
+and Define's definition rows — a definition is a template rather than a
+Sustain, and its row already carries the real action as a chip.
+
 ### `feat/orchie-realtime-classify` — 30 Aug — **the notification the rewrite dropped**
 
 **Off:** `dev` / gate green (core 2,091 · host 256 · APK builds, signs, aligns).

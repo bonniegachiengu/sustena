@@ -11,6 +11,7 @@
  * the capability lives — in the cockpit's own layout, at the cockpit's own
  * fidelity. A disabled item told a person nothing.
  */
+import { registerNav } from "./lib/nav";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import * as L from "./ui/layout.css";
 import * as S from "./ui/ui.css";
@@ -174,6 +175,20 @@ export default function App() {
     await select(id);
     setPanel("monitor");
   };
+
+  /**
+   * ★★★ RULE 2, registered once.
+   *
+   * This used to be handed to `Constellation` alone, which is why every other
+   * screen's rows were dead ends: they were not screens that forgot a handler,
+   * they were screens with nothing to hand them. Registering it makes the one
+   * navigation path reachable from anywhere without threading a prop through
+   * components that do not care about it.
+   */
+  registerNav({
+    openSustain: (id) => void open(id),
+    goPanel: (p) => setPanel(p as Panel),
+  });
 
   const attentionCount = () => attentionAcross().length;
 
