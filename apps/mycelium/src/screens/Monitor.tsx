@@ -33,6 +33,7 @@ import {
   sx as S,
 } from "../ui";
 import { fmt, pockets, type Pocket } from "../lib/engine";
+import { panelRow } from "../lib/nav";
 import { childrenOf, selectedSustain } from "../lib/live";
 
 /**
@@ -150,7 +151,16 @@ export default function Monitor() {
           >
             <For each={attention()}>
               {(a) => (
-                <NoteRow tone={a.tone}>
+                /* ★★★ "Something needs you" that cannot take you anywhere is
+                   the worst dead end in the app: a signal whose entire content
+                   is that you must now go and find the thing yourself.
+                   ★★ These are about the Sustain already on screen, so the
+                   target is not another Sustain — it is the place a person can
+                   ACT. Both a broken rule and a strained pocket are answered
+                   by running something, and the Console is where running
+                   happens. Not Define: changing the rule is rarely the answer
+                   to the rule being broken. */
+                <NoteRow tone={a.tone} onClick={panelRow("console")}>
                   <Value>{a.what}</Value> <Meta>{a.kind}</Meta>
                   <Caption>{a.why}</Caption>
                 </NoteRow>

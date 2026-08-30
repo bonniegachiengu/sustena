@@ -351,6 +351,41 @@ export const noteRow = style({
 
 export const noteDotShift = style({ marginTop: "6px" });
 
+/**
+ * ★★ A navigable note reads as navigable, and it is the SAME hover the rest of
+ * the cockpit uses. A second, prettier affordance for one row type would teach
+ * a person that this app has more than one kind of clickable thing, which is
+ * the maze it is trying not to be.
+ */
+/** ★★ A meta label that is also a door. Same hover as every other one. */
+export const metaButton = style({
+  fontFamily: vars.font.mono,
+  fontSize: "10.5px",
+  color: vars.color.textSecondary,
+  background: "transparent",
+  border: "none",
+  padding: 0,
+  cursor: "pointer",
+  selectors: {
+    "&:hover": { color: vars.color.amber },
+    "&:focus-visible": { outline: `1px solid ${vars.color.amber}`, outlineOffset: "2px" },
+  },
+});
+
+export const noteRowButton = style({
+  width: "100%",
+  textAlign: "left",
+  background: "transparent",
+  border: "none",
+  color: "inherit",
+  font: "inherit",
+  cursor: "pointer",
+  selectors: {
+    "&:hover": { background: vars.color.bgRaised },
+    "&:focus-visible": { outline: `1px solid ${vars.color.amber}`, outlineOffset: "-1px" },
+  },
+});
+
 /* ── meter ──────────────────────────────────────────────────────────────── */
 
 export const meterTrack = style({
@@ -533,7 +568,22 @@ export const lockPanel = style({
 
 /* ── constellation ──────────────────────────────────────────────────────── */
 
-export const constellationSvg = style({ width: "100%", height: "auto", display: "block" });
+/**
+ * ★★★ **`height: auto` was the clip.** With a fixed aspect ratio, `auto`
+ * height means the drawing is only ever sized by the WIDTH available — so on a
+ * short pane it paints taller than the pane and the bottom of the graph goes
+ * under whatever is below. Constraining both axes and letting
+ * `preserveAspectRatio` scale into whatever box it gets makes fitting a
+ * property of the element rather than of the window.
+ */
+export const constellationSvg = style({
+  width: "100%",
+  height: "100%",
+  maxWidth: "100%",
+  maxHeight: "100%",
+  minHeight: 0,
+  display: "block",
+});
 export const node = style({ cursor: "pointer" });
 globalStyle(`${node}:hover circle`, { stroke: vars.color.amber });
 export const nodeLabel = style({ fontFamily: vars.font.ui, fontSize: "11px", fontWeight: 500 });

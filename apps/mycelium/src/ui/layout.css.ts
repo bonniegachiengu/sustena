@@ -21,8 +21,35 @@
  * the single most common cause of the horizontal scroll this file exists to
  * prevent.
  */
-import { style, styleVariants } from "@vanilla-extract/css";
+import { globalStyle, style, styleVariants } from "@vanilla-extract/css";
 import { bp, vars } from "./tokens.css";
+
+/* -- RULE 1: everything fits its container ---------------------------------
+ *
+ * ★★★ **The primitives already handled the layout half of this and it was not
+ * enough.** Every `Split`, `Stack` and `Card` below sets `min-width: 0` and
+ * `min-height: 0`, which stops a flex or grid child refusing to shrink. What
+ * that cannot reach is content carrying its own INTRINSIC size -- an `svg`
+ * with a viewBox, an image, a canvas. Those size themselves from their own
+ * aspect ratio and quietly paint past the box that holds them.
+ *
+ * That is exactly how the constellation clipped: `height: auto` on a fixed
+ * aspect ratio means the drawing is only ever sized by the WIDTH available, so
+ * on a short pane the bottom of the graph went under the status bar. No layout
+ * primitive could have caught it, because nothing about the layout was wrong.
+ *
+ * ★★ So the rule is stated here, once, as a floor under every screen rather
+ * than a thing each one remembers: **intrinsically-sized content may not
+ * exceed the box it is in.** A screen that wants a drawing to scale gets it by
+ * default; a screen that wants one to overflow now has to say so explicitly,
+ * which is the right way round.
+ */
+globalStyle("svg, img, canvas, video", {
+  maxWidth: "100%",
+});
+globalStyle("img, canvas, video", {
+  height: "auto",
+});
 
 /* ── the app frame ──────────────────────────────────────────────────────── */
 

@@ -198,13 +198,28 @@ export function Row(props: { onClick?: () => void; children: JSX.Element }) {
   );
 }
 
-/** A dot and a block of prose that wraps beside it. */
-export function NoteRow(props: { tone: Tone; children: JSX.Element }) {
-  return (
-    <div class={S.noteRow}>
+/**
+ * A dot and a block of prose that wraps beside it.
+ *
+ * ★★★ RULE 2: `onClick` decides **both** the behaviour and the appearance, the
+ * same contract `Row` keeps. Passing a handler makes it a button that looks
+ * like one; passing nothing leaves a plain note. A caller cannot accidentally
+ * produce a row that looks like a door and behaves like a wall, because there
+ * is only one value to get right.
+ */
+export function NoteRow(props: { tone: Tone; onClick?: () => void; children: JSX.Element }) {
+  const inner = (
+    <>
       <span class={`${S.dot[props.tone]} ${S.noteDotShift}`} />
       <span style={{ "min-width": 0 }}>{props.children}</span>
-    </div>
+    </>
+  );
+  return props.onClick ? (
+    <button class={`${S.noteRow} ${S.noteRowButton}`} onClick={props.onClick}>
+      {inner}
+    </button>
+  ) : (
+    <div class={S.noteRow}>{inner}</div>
   );
 }
 
