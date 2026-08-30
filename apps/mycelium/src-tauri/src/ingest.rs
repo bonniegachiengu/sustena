@@ -31,6 +31,7 @@
 //! source with no declared cadence is never flagged, because inventing one
 //! would be exactly the fabricated state the queue exists to prevent.
 
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -1320,11 +1321,20 @@ impl Ingested {
 
     /// The queue in the order he should meet it.
     ///
-    /// ★★★ Deferred first, oldest deferral first. He put those off because he
-    /// could not answer them yet; bringing them back at the top next time he
-    /// opens the app is the whole point of an honest defer, and burying them
+    /// ★★★ **NEWEST FIRST within the waiting queue.** The just-arrived
+    /// transaction is the one he was notified about and the one he still
+    /// remembers making, so it is the cheapest to answer — recall is at its
+    /// best within minutes and decays fast. An oldest-first queue asks the
+    /// hardest question first and makes the pile feel like homework.
+    ///
+    /// ★★ Deferred still leads the waiting group, oldest deferral first. He
+    /// put those off because he could not answer them yet, and burying them
     /// under new arrivals would make deferring indistinguishable from
-    /// discarding.
+    /// discarding. Newest-first applies **within** each group rather than
+    /// flattening the two — the ordering rule is about recency among things
+    /// competing equally, not about overriding a decision he already made.
+    /// (A notification tap does not depend on this order at all: it carries
+    /// its own target and opens that card directly.)
     ///
     /// ★★ Recently answered messages come BEFORE both, so the back arrow
     /// reaches them. A filing he wants to change is otherwise unreachable, and
@@ -1347,7 +1357,7 @@ impl Ingested {
 
         let mut waiting: Vec<IngestedMessage> =
             all.into_iter().filter(|m| m.needs_attention()).collect();
-        waiting.sort_by_key(|m| (m.deferred_at.is_none(), m.deferred_at, m.seq));
+        waiting.sort_by_key(|m| (m.deferred_at.is_none(), m.deferred_at, Reverse(m.seq)));
 
         let mut out = processed;
         out.extend(waiting.into_iter().take(limit));
@@ -3727,11 +3737,15 @@ mod queue_tests {
     }
 
     #[test]
-    fn the_queue_runs_oldest_first_when_nothing_has_been_put_off() {
+    fn the_queue_runs_newest_first_when_nothing_has_been_put_off() {
+        // ★★★ The just-arrived transaction is the one he was notified about
+        //     and the one he still remembers making, so it is the cheapest to
+        //     answer. Recall decays fast; an oldest-first queue asks the
+        //     hardest question first and makes the pile feel like homework.
         let (ing, rules) = store("plain");
         let a = capture(&ing, &rules, "SHOPA");
         let b = capture(&ing, &rules, "SHOPB");
-        assert_eq!(ids(&ing.navigable("h", 5, 50).expect("q")), vec![a, b]);
+        assert_eq!(ids(&ing.navigable("h", 5, 50).expect("q")), vec![b, a]);
     }
 
     #[test]
@@ -3747,7 +3761,10 @@ mod queue_tests {
 
         let q = ids(&ing.navigable("h", 5, 50).expect("q"));
         assert_eq!(q[0], second, "the one he put off is first next time");
-        assert_eq!(q[1..], [first, third][..], "the rest keep their order");
+        // ★★ Newest-first applies WITHIN the group that has not been put off,
+        //    rather than flattening the two. Recency orders things competing
+        //    equally; it does not override a decision he already made.
+        assert_eq!(q[1..], [third, first][..], "and the rest are newest-first");
     }
 
     #[test]

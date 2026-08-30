@@ -176,6 +176,22 @@ export const engine = {
     unwrap(await commands.smsDrainQueue(sustainId, limit)),
   /** How many texts are waiting, without taking any. */
   smsQueueDepth: async (): Promise<number> => unwrap(await commands.smsQueueDepth()),
+  /**
+   * The text a notification tap was about, taken once.
+   *
+   * Null on every launch that was not a tap, which is most of them.
+   */
+  smsPendingClassify: async (): Promise<string | null> =>
+    unwrap(await commands.smsPendingClassify()),
+  /** Take the prompt down, once the queue has actually been swept. */
+  smsClearPrompt: async (): Promise<null> => unwrap(await commands.smsClearPrompt()),
+  /**
+   * Whether the classify prompt may be posted.
+   *
+   * The difference between a real-time reader and a batch importer: without
+   * it the text is still captured and nobody is told until the app is opened.
+   */
+  smsNotifyState: async (): Promise<string> => unwrap(await commands.smsNotifyState()),
 
   declareSource: async (id: string, label: string, minutes: number | null): Promise<null> =>
     unwrap(await commands.declareSource(id, label, minutes)),

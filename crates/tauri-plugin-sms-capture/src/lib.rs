@@ -77,6 +77,19 @@ pub struct SmsBatch {
 pub struct PermissionStatus {
     /// "granted" | "denied" | "prompt" | "prompt-with-rationale"
     pub sms: String,
+    /// The same, for posting the classify prompt.
+    ///
+    /// ★★★ Reported SEPARATELY rather than folded into `sms`, because the two
+    /// refusals mean different things and have different remedies. Declining
+    /// to be notified still leaves a working importer; declining to have texts
+    /// read leaves nothing. A single field would make the smaller refusal look
+    /// like the larger one, and a surface cannot say *"reading works, telling
+    /// you does not"* if it was never told which failed.
+    ///
+    /// Defaulted, so an older plugin build that does not report it deserialises
+    /// rather than failing the whole permission check.
+    #[serde(default)]
+    pub notify: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -105,6 +118,18 @@ pub struct DrainArgs {
 #[serde(rename_all = "camelCase")]
 pub struct QueueDepth {
     pub depth: u32,
+}
+
+/// What a notification tap was about, if there was one.
+///
+/// ★★★ The RAW TEXT rather than an id, because the engine keys an intake on
+/// the fact rather than on an identifier the Android side could mint (ING-5).
+/// The text is the only handle that means the same thing on both sides of an
+/// unlock, and it is the same handle the sweep will key on a moment later.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingClassify {
+    pub body: Option<String>,
 }
 
 /// A command that takes nothing still needs a body to serialize.
@@ -176,6 +201,39 @@ impl<R: Runtime> SmsCapture<R> {
         }
         #[cfg(not(target_os = "android"))]
         Err(Error::Unsupported)
+    }
+
+    /// The text a notification tap was about, taken once.
+    ///
+    /// ★★ Consumed rather than read, so a target that was already acted on
+    /// cannot re-open the same card on a later, unrelated launch.
+    pub fn consume_pending_classify(&self) -> Result<Option<String>> {
+        #[cfg(target_os = "android")]
+        {
+            self.0
+                .run_mobile_plugin::<PendingClassify>("consumePendingClassify", Empty {})
+                .map(|p| p.body)
+                .map_err(|e| Error::PluginInvoke(e.to_string()))
+        }
+        #[cfg(not(target_os = "android"))]
+        Ok(None)
+    }
+
+    /// Take the prompt down.
+    ///
+    /// ★★ Called once the queue has actually been swept rather than when the
+    /// app merely opens: a prompt cancelled by launching claims the work is
+    /// done when it is not.
+    pub fn clear_classify_prompt(&self) -> Result<()> {
+        #[cfg(target_os = "android")]
+        {
+            self.0
+                .run_mobile_plugin::<serde_json::Value>("clearClassifyPrompt", Empty {})
+                .map(|_| ())
+                .map_err(|e| Error::PluginInvoke(e.to_string()))
+        }
+        #[cfg(not(target_os = "android"))]
+        Ok(())
     }
 }
 

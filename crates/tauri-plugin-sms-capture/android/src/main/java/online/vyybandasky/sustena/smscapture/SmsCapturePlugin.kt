@@ -63,7 +63,13 @@ class DrainArgs {
         Permission(
             strings = [Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS],
             alias = "sms"
-        )
+        ),
+        // ★★★ A SEPARATE alias, deliberately. Reading texts and telling
+        //     somebody about one are different asks, and a person who declines
+        //     the second should still get a working importer rather than
+        //     nothing. Bundling them would make the notification refusal look
+        //     like an SMS refusal.
+        Permission(strings = ["android.permission.POST_NOTIFICATIONS"], alias = "notify")
     ]
 )
 class SmsCapturePlugin(private val activity: Activity) : Plugin(activity) {
@@ -166,6 +172,38 @@ class SmsCapturePlugin(private val activity: Activity) : Plugin(activity) {
         val o = JSObject()
         o.put("depth", SmsQueueStore.depth(activity))
         invoke.resolve(o)
+    }
+
+    /**
+     * What the notification tap was about, taken once.
+     *
+     * ★★★ Consumed rather than read. A target that survived being acted on
+     * would re-open the same card on the next unrelated launch, and a surface
+     * that keeps asking about something already dealt with is how a person
+     * learns to ignore it.
+     *
+     * Returns the RAW TEXT, not an id: the engine keys an intake on the fact
+     * rather than on an identifier this side could mint (ING-5), so the text is
+     * the only handle that means the same thing on both sides of the unlock.
+     */
+    @Command
+    fun consumePendingClassify(invoke: Invoke) {
+        val o = JSObject()
+        o.put("body", ClassifyNotifier.consumePending(activity))
+        invoke.resolve(o)
+    }
+
+    /**
+     * Take the prompt down.
+     *
+     * ★★ Called once the queue has actually been swept, not when the app
+     * merely opens: a notification cancelled by launching says the work is
+     * done when it is not.
+     */
+    @Command
+    fun clearClassifyPrompt(invoke: Invoke) {
+        ClassifyNotifier.clear(activity)
+        invoke.resolve(JSObject())
     }
 
     private fun row(sender: String, body: String, ts: Long) =

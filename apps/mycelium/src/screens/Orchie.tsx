@@ -526,16 +526,56 @@ export default function Orchie(props: { onFace?: () => void }) {
         // No numbers declared yet, which is the ordinary first run.
       }
       if (handled > 0 || moved > 0) await refetch();
+
+      // ★★★ The prompt comes down only once the queue has actually been
+      //     swept. Cancelling it on launch would say the work is done while
+      //     the texts were still sitting there, and a prompt that lies once is
+      //     one that gets swiped away every time after.
+      try {
+        await engine.smsClearPrompt();
+      } catch {
+        // Not an Android build, or notifications were never granted.
+      }
     } catch {
       // No permission yet, or not an Android build. Nothing to say.
+    }
+  };
+
+  /**
+   * A launch that came from tapping the notification.
+   *
+   * ★★★ The tap is answered by the ORDERING rather than by carrying a target
+   * into the view: the notification always fires for the text that just
+   * arrived, and the queue is newest-first, so the card already waiting is the
+   * one he tapped about. Threading an explicit id through `compose(r)` would
+   * add a second way to choose what is on screen, and two answers to "what am
+   * I looking at" is how a surface starts disagreeing with itself.
+   *
+   * What consuming the target IS for: knowing the launch was a tap at all, so
+   * the sweep runs immediately instead of waiting for the next visibility
+   * change — and taking the target once, so it cannot re-fire on an unrelated
+   * launch later.
+   */
+  const answerTap = async () => {
+    try {
+      const pending = await engine.smsPendingClassify();
+      if (pending) await drain();
+    } catch {
+      // Not an Android build. There is no tap to answer.
     }
   };
   createEffect(() => {
     if (sustain()) void drain();
   });
   onMount(() => {
+    void answerTap();
     const onVisible = () => {
-      if (document.visibilityState === "visible") void drain();
+      if (document.visibilityState === "visible") {
+        void drain();
+        // ★★ A tap can land on an app that was merely backgrounded, which
+        //    never remounts. Asked here too, for the same reason the drain is.
+        void answerTap();
+      }
     };
     document.addEventListener("visibilitychange", onVisible);
     onCleanup(() => document.removeEventListener("visibilitychange", onVisible));

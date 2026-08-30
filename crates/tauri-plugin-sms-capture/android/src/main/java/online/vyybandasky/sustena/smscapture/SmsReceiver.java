@@ -20,12 +20,20 @@ import android.telephony.SmsMessage;
  * filter before receiving. So a message that fails either check is read here
  * and dropped here. It is never queued, never written down, never logged.
  *
- * THIS RECEIVER DOES NOTHING ELSE. It does not open a socket and it does not
- * touch the engine. A receiver has about ten seconds before Android considers
- * it wedged; one small write fits comfortably and a network call does not. It
- * also could not write to the engine if it wanted to, because the identity is
- * usually locked when a text arrives. Capturing costs nothing and needs nobody.
- * Applying needs a key, and happens later, when the app is open and unlocked.
+ * IT QUEUES AND IT RINGS, AND IT DOES NOTHING ELSE. It does not open a socket
+ * and it does not touch the engine. A receiver has about ten seconds before
+ * Android considers it wedged; one small write and one notification fit
+ * comfortably and a network call does not. It also could not write to the
+ * engine if it wanted to, because the identity is usually SEALED when a text
+ * arrives. Capturing costs nothing and needs nobody. Applying needs a key, and
+ * happens later, when the app is open and unlocked.
+ *
+ * THE RING IS THE HALF THAT WAS MISSING. Queueing without telling anybody is
+ * not a real-time reader, it is a batch importer with extra steps: the text
+ * sat silently until the app was next opened, which on a normal day is hours.
+ * ClassifyNotifier is best-effort and cannot fail the capture -- by the time it
+ * runs the message is already written down, so a missing permission or a
+ * manufacturer's notification policy costs the prompt and never the record.
  */
 public class SmsReceiver extends BroadcastReceiver {
 
@@ -62,5 +70,6 @@ public class SmsReceiver extends BroadcastReceiver {
         }
 
         SmsQueueStore.enqueue(context, sender, bodyText, System.currentTimeMillis());
+        ClassifyNotifier.prompt(context, sender, bodyText, SmsQueueStore.depth(context));
     }
 }
