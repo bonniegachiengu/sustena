@@ -79,11 +79,20 @@ live and is the better name anyway: shorter, and one label means it is covered
 by the certificate you already have. Say the word and I will make it the only
 name.
 
-**Reboot persistence.** The site is served by its own process, kept up by a
-watchdog. I could not register it as a scheduled task — Task Scheduler and the
-service manager both refuse without elevation on this account — so it survives
-everything except a reboot or a logoff. One elevated PowerShell, once, fixes
-that permanently:
+**Reboot persistence.** The site is served by its own process with a watchdog
+checking every 5 minutes and restarting it if it stops. That was tested rather
+than assumed: I killed the server, left it dead, and the watchdog brought it
+back unaided — down at 23:37, noticed at 23:41:30, serving again at 23:41:35,
+public site back to 200 with all 18 essays. **So the worst case is about five
+minutes of downtime**, which is the checking interval and matches the cadence
+the machine's existing keepalive already uses.
+
+The gap is narrower than it sounds but it is real: I could not register the
+watchdog as a **scheduled task**, because Task Scheduler and the service manager
+both refuse without elevation on this account. So it runs as a detached loop
+instead, which survives this session ending and a crash of the site, **but not a
+reboot or a logoff**. One elevated PowerShell, once, closes that last gap
+permanently:
 
 ```powershell
 # Run as Administrator
@@ -98,10 +107,21 @@ Register-ScheduledTask -TaskName 'SustenaLore' -Action $action `
   -Trigger $t1,$t2 -Settings $set -Force
 ```
 
-Until then, if the machine reboots, bring it back with:
+Once that task exists, the loop is redundant: kill it and forget it.
+
+Until then, if the machine reboots, one line brings back both the site and its
+watchdog:
 
 ```powershell
-wscript.exe "C:\Users\DELL\dev\sustena-lore\scripts\lore_keepalive_launcher.vbs"
+wscript.exe "C:\Users\DELL\dev\sustena-lore\scripts\lore_watchdog_launcher.vbs"
+```
+
+To check it is healthy at any time — this says whether the *blog* answered, not
+merely whether something did:
+
+```powershell
+(Invoke-WebRequest http://127.0.0.1:9100/ -UseBasicParsing).Content -match 'Sustena Lore'
+Get-Content C:\Users\DELL\dev\sustena-lore\apps\api\lore-keepalive.log -Tail 5
 ```
 
 ---
@@ -201,13 +221,15 @@ way.
 
 | What | Where |
 |---|---|
-| Branch (not merged) | `feat/sustena-lore` — 2 commits, pushed |
+| Branch (not merged) | `feat/sustena-lore` — 4 commits, pushed |
 | Working checkout | `C:\Users\DELL\dev\sustena-lore` (git worktree) |
 | Published drafts | `apps/api/lore_content/001..018-*.md` |
 | Drafts, in the vault | `…\OneDrive\Documents\Projects\IO\lore-drafts\` |
 | **Snapshots of the originals** | `Articles (Serious)\_snapshots\2026-08-30-pre-lore-publish\` |
 | **Snapshots, offsite copy** | `…\OneDrive\Documents\Projects\IO\lore-snapshots\2026-08-30-pre-lore-publish\` |
 | Tunnel config | `C:\Users\DELL\.cloudflared\config-vyyb-os.yml` (backed up before edit) |
+| The server | `apps/api/sustena/lore_site/serve.py` on 127.0.0.1:9100 |
+| Watchdog | `scripts/lore-keepalive.ps1`, looped by `scripts/lore-watchdog-loop.ps1` |
 | Watchdog log | `apps\api\lore-keepalive.log` |
 
 **The originals were never edited.** They are gitignored, so git could not have
