@@ -286,7 +286,7 @@ pub fn scored_at(
 ///
 /// ★★ A ranking that reorders equal candidates between runs is one people stop
 /// trusting, and equal scores are common once a term is an indicator.
-pub fn rank<'a>(scored: &'a [(String, Score)]) -> Vec<&'a (String, Score)> {
+pub fn rank(scored: &[(String, Score)]) -> Vec<&(String, Score)> {
     let mut out: Vec<&(String, Score)> = scored.iter().collect();
     out.sort_by(|a, b| {
         b.1.total.partial_cmp(&a.1.total).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0))

@@ -475,10 +475,12 @@ mod kdf_cost_tests {
     fn the_test_build_pays_less_and_says_so() {
         // ★★ Named rather than left for somebody to discover while wondering
         //    why a local unlock feels instant.
-        assert!(
-            PBKDF2_ITERATIONS < PBKDF2_FLOOR,
-            "tests run at a reduced cost on purpose — see the constant's note",
-        );
+        const {
+            assert!(
+                PBKDF2_ITERATIONS < PBKDF2_FLOOR,
+                "tests run at a reduced cost on purpose — see the constant's note"
+            )
+        };
     }
 
     #[test]

@@ -128,7 +128,8 @@ pub fn parse_date(raw: &str) -> Option<(i64, u32, u32)> {
 
 /// `4:30 PM`, `12:25pm`, `09:14 A.M.`, or a bare `16:30`.
 pub fn parse_time(raw: &str) -> Option<(u32, u32)> {
-    let cleaned = raw.trim().to_uppercase().replace('.', "").replace(' ', "");
+    let cleaned: String =
+        raw.trim().to_uppercase().chars().filter(|c| *c != '.' && *c != ' ').collect();
     let (digits, meridiem) = if let Some(rest) = cleaned.strip_suffix("AM") {
         (rest, Some(false))
     } else if let Some(rest) = cleaned.strip_suffix("PM") {

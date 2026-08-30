@@ -2054,6 +2054,11 @@ pub fn orchie_infer(
 /// A refusal comes back as a normal verdict — an inference made at time T can
 /// honestly fail at T+n if the household moved, and that is the correct
 /// outcome, not an error.
+// Eight parameters because a confirmation carries everything the capture
+// needs to become a real operator call, and splitting them into a struct
+// would only move the count into the type without making a caller's job
+// simpler.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 #[specta::specta]
 pub fn orchie_confirm(

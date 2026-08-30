@@ -946,10 +946,10 @@ fn reclassify(
             .and_then(|v| v.as_array().cloned())
             .unwrap_or_default();
         for (i, a) in assets.iter().enumerate() {
-            if a.get("source_tx").and_then(Value::as_str) == Some(source_tx.as_str()) {
-                if state.set(&format!("inventory.assets[{i}].pocket"), json!(to)).is_ok() {
-                    moved_assets += 1;
-                }
+            if a.get("source_tx").and_then(Value::as_str) == Some(source_tx.as_str())
+                && state.set(&format!("inventory.assets[{i}].pocket"), json!(to)).is_ok()
+            {
+                moved_assets += 1;
             }
         }
     }

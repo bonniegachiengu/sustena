@@ -176,10 +176,7 @@ pub fn worth(lyapunov_gain: f64, pawa: f64, lambda: f64) -> f64 {
 
 /// Of several interventions, the one worth most. Ties broken by name so the
 /// answer does not move between runs.
-pub fn best<'a>(
-    options: &'a [(String, f64, f64)],
-    lambda: f64,
-) -> Option<&'a (String, f64, f64)> {
+pub fn best(options: &[(String, f64, f64)], lambda: f64) -> Option<&(String, f64, f64)> {
     options.iter().reduce(|a, b| {
         let (wa, wb) = (worth(a.1, a.2, lambda), worth(b.1, b.2, lambda));
         match wb.partial_cmp(&wa) {

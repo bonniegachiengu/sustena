@@ -1121,7 +1121,7 @@ impl Ingested {
                 seq: m.seq,
             });
         }
-        out.sort_by(|a, b| b.seq.cmp(&a.seq));
+        out.sort_by_key(|m| std::cmp::Reverse(m.seq));
         out.truncate(limit);
         Ok(out)
     }
@@ -2360,7 +2360,7 @@ mod netting_tests {
         assert_eq!(waiting(&ing), 0);
     }
 
-    /// One household's reversal never cancels another's charge.
+    // One household's reversal never cancels another's charge.
     // ── case 2: the charge was already filed ─────────────────────────────────
 
     /// File a charge the way the card does: allocate to make room, then spend.
@@ -2665,7 +2665,7 @@ mod reconciliation_tests {
         let (ing, rules) = store("undated");
         ing.capture_at("h", "mpesa", &paid("CCCCCCCCCC", "100.00", "7,777.00"), &rules, None)
             .expect("undated");
-        assert!(ing.reported_balances("h").expect("balances").get("mpesa").is_none());
+        assert!(!ing.reported_balances("h").expect("balances").contains_key("mpesa"));
     }
 
     #[test]
