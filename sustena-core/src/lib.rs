@@ -192,6 +192,7 @@ pub mod preattentive;
 pub mod principal;
 pub mod router;
 pub mod resolution;
+pub mod root_join;
 pub mod rollup;
 pub mod royalty;
 pub mod scan;

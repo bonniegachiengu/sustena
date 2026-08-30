@@ -476,15 +476,14 @@ fn a_merge_that_leaves_the_household_outside_its_rules_says_so() {
 ///     happens when a person installs the app on their laptop and their phone
 ///     and sets up the same household on each, which is exactly what happened.
 ///
-/// ★★★ **What it exposes, and why it is `#[ignore]` rather than deleted.** The
-///     entries cross and land on disk -- that part works. What does not is the
-///     fold: the receiver ends up holding TWO genesis events for one id, and
-///     the state it folds is still its own. A genesis is not an ordinary
-///     entry; it asserts a beginning, and two of them are a contradiction the
-///     fold has no rule for. Merging two independent histories of the same
-///     Sustain needs a decision -- adopt one lineage, or make genesis
-///     idempotent -- and inventing that at speed would be worse than recording
-///     it precisely.
+/// ★★★ **What it exposed.** The entries crossed and landed, but the fold applied
+///     each genesis as a `ReplaceRoot` -- an OVERWRITE -- so the second one
+///     erased the history before it. Multiparty §VI settles this and leaves no
+///     room to choose: shared state is a join-semilattice, merges take the
+///     least upper bound, and "the holon invariant -- never erase the node --
+///     is not a policy sitting on top of the merge. It IS the merge." A root is
+///     now joined rather than replaced (`root_join`), so twin genesis is
+///     `s ⊔ s = s` and converges without discarding either lineage.
 fn twin_pair(name: &str) -> (Node, Node, String) {
     let root = scratch(name);
     let a = Node::start(&root, "alice");
@@ -512,7 +511,6 @@ fn twin_pair(name: &str) -> (Node, Node, String) {
 }
 
 #[test]
-#[ignore = "OPEN BUG: two independent histories of one Sustain id do not converge             -- see the note above. Kept as the reproduction, not deleted."]
 fn two_nodes_that_each_created_the_same_sustain_still_converge() {
     let (a, b, id) = twin_pair("twins");
     a.income(&id, 300.0, "laptop-side");
@@ -534,6 +532,25 @@ fn two_nodes_that_each_created_the_same_sustain_still_converge() {
     //     it is folded from a sequence that no longer describes its own log.
     assert_eq!(a.absorb(), 1, "the listener announced exactly one merged Sustain");
     assert_eq!(a.state(&id), b.state(&id), "byte for byte, once the receiver re-folds");
+
+    // ★★★ §VI's third law, on the wire rather than on a value: "arrival order,
+    //     duplication, and retry cannot change the result." A second sync must
+    //     move nothing and change nothing.
+    let converged = a.state(&id);
+    let again = b.world.sync_peer(&a.address(), &id).expect("second sync");
+    assert_eq!(again.outcome.received, 0, "nothing left to pull");
+    assert_eq!(again.outcome.sent, 0, "nothing left to push");
+    assert_eq!(a.absorb(), 0, "and nothing to re-fold");
+    assert_eq!(a.state(&id), converged, "s ⊔ s = s");
+    assert_eq!(b.state(&id), converged);
+
+    // ★★ And the fold is reproducible from the log alone -- the merged state is
+    //    not an artefact of the order things happened to arrive in.
+    assert_eq!(
+        a.world.reload(&id).expect("re-fold from disk").state,
+        converged,
+        "rebuilding from the log gives the state it reports"
+    );
 }
 
 #[test]

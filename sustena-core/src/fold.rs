@@ -34,7 +34,33 @@ pub struct FoldEvent {
 pub fn apply_mutation(state: &mut State, mutation: &Mutation) -> FoldResult<()> {
     match mutation {
         Mutation::ReplaceRoot { value } => {
-            state.replace_root(value.clone());
+            // ★★★ **Joined, not replaced — Multiparty §VI.** A root that lands
+            //     on an existing one used to erase it, which is exactly the
+            //     overwrite a join-semilattice forbids. It only ever mattered
+            //     once two nodes each created the same Sustain before they met:
+            //     two genesis lines in one log, and the later one wiping the
+            //     history folded before it.
+            //
+            // ★★ On a fresh fold the state is empty, so the join IS the
+            //    replacement and nothing about a single-history household
+            //    changes. On a merged log it is `s ⊔ s = s` for two genesis
+            //    states of the same template — which is the case that was
+            //    broken — and a real least upper bound otherwise.
+            let (joined, disagreements) =
+                crate::root_join::join_roots(&state.snapshot(), value);
+            state.replace_root(joined);
+            if !disagreements.is_empty() {
+                // ★ Reported, never resolved by fiat: picking one of two
+                //   unordered values would be an overwrite with better manners,
+                //   and whoever synced last would win.
+                for d in &disagreements {
+                    let at = if d.path.is_empty() { "the root" } else { &d.path };
+                    eprintln!(
+                        "[fold] two histories disagree at {at}: {} vs {}",
+                        d.left, d.right
+                    );
+                }
+            }
             Ok(())
         }
         Mutation::Set { path, new, .. } => {
@@ -167,13 +193,67 @@ mod tests {
     }
 
     #[test]
-    fn genesis_replace_root_discards_what_came_before() {
+    fn a_root_is_joined_onto_what_came_before_rather_than_discarding_it() {
+        // ★★★ **This test used to assert the opposite**, and asserting it was
+        //     the bug: a `ReplaceRoot` that discards is an overwrite, and
+        //     Multiparty §VI is explicit that a merge takes the least upper
+        //     bound and never overwrites -- "the holon invariant, never erase
+        //     the node, is not a policy sitting on top of the merge, it IS the
+        //     merge." Discarding only looked harmless while a Sustain had one
+        //     history. Two nodes that each created the same household before
+        //     they met put two genesis lines in one log, and the later one
+        //     erased everything folded before it.
         let out = fold_events(
             &[FoldEvent { mutations: vec![Mutation::ReplaceRoot { value: json!({"a":1}) }] }],
             Some(json!({"stale":true})),
         )
         .unwrap();
-        assert_eq!(out, json!({"a":1}));
+        assert_eq!(out, json!({"a": 1, "stale": true}), "both survive the join");
+    }
+
+    #[test]
+    fn a_fresh_fold_is_unchanged_by_the_join() {
+        // ★★ The join must not alter what a single-history household folds to.
+        //    On a fresh fold the state is empty, so the join IS the
+        //    replacement.
+        let genesis = json!({"finances": {"liquid": {"balance": 0.0}}});
+        let out = fold_events(
+            &[FoldEvent { mutations: vec![Mutation::ReplaceRoot { value: genesis.clone() }] }],
+            None,
+        )
+        .unwrap();
+        assert_eq!(out, genesis);
+    }
+
+    #[test]
+    fn twin_genesis_in_one_log_converges_and_keeps_the_history_between_them() {
+        // ★★★ The whole point, end to end through the fold: two genesis lines
+        //     for one Sustain, with real history folded in between, and the
+        //     second one erases none of it.
+        let genesis = json!({"finances": {"liquid": {"balance": 0.0}}, "pockets": {}});
+        let out = fold_events(
+            &[
+                FoldEvent {
+                    mutations: vec![Mutation::ReplaceRoot { value: genesis.clone() }],
+                },
+                FoldEvent {
+                    mutations: vec![Mutation::Set {
+                        path: "finances.liquid.balance".into(),
+                        old: json!(0.0),
+                        new: json!(516_699.48),
+                    }],
+                },
+                // The other node's genesis, arriving by sync.
+                FoldEvent { mutations: vec![Mutation::ReplaceRoot { value: genesis }] },
+            ],
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            out["finances"]["liquid"]["balance"],
+            json!(516_699.48),
+            "the household survived the twin"
+        );
     }
 
     #[test]
