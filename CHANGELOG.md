@@ -9,6 +9,32 @@ move: a **minor** bump (0.1 → 0.2) is where new capability lands and where
 something may change how it behaves, and a **patch** bump (0.2.0 → 0.2.1) is a
 fix that does not add anything.
 
+## v1.1.0 - 2026-08-31
+
+- fix(fold): genesis joins, ReplaceRoot still replaces — two jobs, two mutations
+- chore(core): refresh the lockfile after the merge
+- fix(ui): a card is never shorter than what is in it, at any width
+- feat(live): state that arrives relays a pulse — Multiparty §III
+- fix(fold): open in causal order, and come up without a person
+- docs: start the night status file
+- fix(fold): a root is joined, not replaced — Multiparty §VI
+- feat(peers): let a person give a dialled-in peer an address
+- feat(peers): a peering is a relationship, not a session
+- fix(peers): assert the receiver re-fold in the test that has a receiver
+- fix(peers): the node being synced TO never learned it had changed
+- docs(peers): log what the first live two-device run found
+- feat(lore): stand up Sustena Lore, and publish the first essay
+- feat(ingest): a correction teaches a shape, not a sentence
+- feat(ingest): universal field shapes -- read a message nobody wrote a rule for
+- docs(canon): fold the money model into three papers, add the two UI laws
+- feat(criticality): tail shape, as a comparison and never as a fit -- OPV-14
+- docs(peers): the five rungs -- what two-node sync actually proves
+- feat(ui): the Library says what runs, and Ingest classifies in place
+- docs(audit): the bidirectional canon-code audit, and the two UI rules' grounding
+- feat(ui): two universal rules -- fit-to-container, and navigable-looking implies navigable
+- feat(orchie): the notification the Rust rewrite dropped
+- fix(royalty): revert the split to the canonical four-way 70/20/5/5
+
 ## v1.0.0 - 2026-08-30
 
 The complete build. The WBD is closed: 264 rows done, 0 open, 0 parked, 4 declined -- every one traced to the 18 canon papers.,Sustena is Sigma = <B, S, V, T, +>: state as a fold over events, an admission gate that refuses rather than corrects, composition and roll-up over nested holons, a council of operatives that advise and never act, a simulator that cannot touch reality, human-gated egress that can never move money, and an economy in which juul is the coin and pawa is the gas.,Ships alongside it: idempotent intake keyed on the transaction rather than the wording, cross-source correlation, an immune layer that keeps a one-time code on the phone it arrived on, and both apps -- Mycelium on the desktop, Orchie on Android.
