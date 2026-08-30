@@ -449,3 +449,136 @@ chain. Everything either side of it is verified on-device (§ the SMS report).
    recommendation) or becomes a 19th pair.
 3. Whether §X goes into the Curated UI paper as drafted.
 4. Whether the 18 Sustena Notes get the staleness pass.
+
+---
+
+# 8. The refined pass — spec/math built, judged against the mission
+
+*Added 30 Aug 2026, on Bonnie's two clarifications: check whether each article's
+**specification and math** is built (and build it if not), and judge every
+code-vs-article difference against **Sustena's vision, goals and mission** rather
+than abstract correctness.*
+
+## 8.1 The yardstick, stated
+
+`docs/SUSTENA_CORE.md` is the vision document (the Master Strategy file named in
+`.gitignore` does not exist on disk). Two clauses in it decide every call below.
+
+> **§1.** *"Everything in Sustena is one recursive object — the Sustain… Money,
+> time, and inventory are not different systems; they are the same Sustain
+> wearing different coats. **If any feature, article passage, or code choice does
+> not reduce to this, it is drift.**"*
+
+> **§8, the codebase-review rule.** *"If a design choice is grounded in a
+> mathematical / computer-science principle… it was probably intentional and
+> should be included in that article… **But it must reduce to §1.** If a code
+> choice can't be traced to canon *or* to §1, it is a candidate **orphan** —
+> flag it for Bonnie, don't silently canonize it."*
+
+So the test is not *is this correct* but **does it reduce to §1**, and the
+project already had a written procedure for exactly the question I was asked.
+
+## 8.2 The article count, closed
+
+**§6 of `SUSTENA_CORE.md` says "each of the 15 articles"** — written 2026-08-03,
+when the plan was 15 pairs. Ingest, Immune, Mycelium and Arena were added after.
+That is where every number came from:
+
+| number | what it counts | correct? |
+|---|---|---|
+| 15 | the plan on 3 Aug, still written into `SUSTENA_CORE.md` §6/§10 | stale |
+| 18 | the technical papers today | ✅ |
+| 36 | all files (18 technical + 18 inspiration) | ✅ |
+| 32 | nothing on disk, in or out of the repo | unexplained |
+
+**Recommendation:** update `SUSTENA_CORE.md` §6/§10 from 15 to 18. That one edit
+retires the confusion at its source.
+
+## 8.3 Is each article's spec and math built? — one genuine gap, now closed
+
+The WBD tracks 268 article requirements. Before this pass: 264 done, 4 declined.
+I re-read all four declines against the vision test rather than accepting them.
+
+| declined row | verdict | reasoning |
+|---|---|---|
+| **MON-2** Kalman filter | **decline stands** | The Monitor Additions' own fit caveat: the apparatus assumes a continuous linear ODE that discrete event-sourced state is not. Building it would import machinery whose assumptions §1's state model does not meet — drift, not fidelity. |
+| **MON-1** observability matrix | **decline stands** | Same caveat, same paragraph. `CAᵏ` needs one `A` to take powers of, and here the dynamics is a *choice* — which operator someone runs. Any `A` would be fabricated. |
+| **CTL-6** | **decline stands** | Relocated out of core by ADR-0001. |
+| **UI-12** bounded generation | **decline stands, for now** | Needs a model to propose; core has none by ADR-0001. The schema-disposes half is built (`proposal.rs`), and `llm_policy.rs` now decides when a model may be asked — so the missing piece is a host-side generator, not core work. |
+| **OPV-14** tail shape | **❌ decline did NOT stand — BUILT** | See below. |
+
+### OPV-14 — built, and its own deferral is what made it buildable
+
+The deferral was well argued: CSN's procedure is MLE + likelihood-ratio +
+goodness-of-fit, and the goodness-of-fit step is a semi-parametric bootstrap
+that needs a random source ADR-0001 forbids. Shipping the two computable thirds,
+it said, *"would license a τ = 2.3 that reads as a fitted power law and is not
+one."*
+
+But the same paragraph recorded the constraint that removes the risk:
+
+> *"the verdict type may not have an absolute 'power law' variant — only a
+> comparison — until the goodness-of-fit step exists to support one."*
+
+**That is a buildable specification, so it was built.**
+
+- `Prefers` has three variants — `PowerLawOverLognormal`,
+  `LognormalOverPowerLaw`, `Indistinguishable` — and **none is an absolute
+  claim**.
+- `AbsoluteFit` has **one** variant, `Unavailable`. A caller has to *receive*
+  "nobody has tested whether either candidate fits" rather than not notice it.
+  A future slice with the bootstrap adds the second variant.
+- Hill's MLE for `alpha`; the **Vuong-normalised** log-likelihood ratio against a
+  truncated lognormal. The verdict reads the normalised ratio, never the sign of
+  the raw one — a raw `R > 0` says the power law scored higher *on this sample*;
+  only `R/(√n·σ)` says it beat sampling noise.
+- `x_min` is **supplied, never estimated** — CSN estimate it by minimising a KS
+  distance, which is a fit, and a fit is the thing this build refuses without its
+  goodness-of-fit step.
+- `normal_cdf` is Abramowitz & Stegun 7.1.26: closed form, no iteration, no RNG.
+- **10 tests. Core is 2,103, clippy clean.**
+
+**Against the mission:** §5 of the vision is *"a scarce resource + a threshold +
+the discipline to surface only what matters"*. A heavy-tailed event-size
+distribution is precisely the condition under which "expected loss" stops being
+a usable summary — the household is in a regime where a small perturbation can
+cascade. Detecting that serves §5 directly. Shipping it **as a comparison that
+cannot claim a fit** is the discipline half.
+
+**The finding worth keeping is that a test failed and the test was wrong.** I
+expected a lognormal cut at its median to prefer the lognormal. It returns
+`Indistinguishable` — because the upper half of a lognormal over a limited range
+genuinely does look like a power law, which is *why* CSN call fitting one a
+documented trap. A module that returned a confident verdict there would be
+committing the exact error the detector exists to avoid. Both cases are now
+asserted, along with the fact that where `x_min` sits changes the answer.
+
+## 8.4 Deviations judged against the vision
+
+| deviation | serves the mission… | call |
+|---|---|---|
+| **The money-model family** — double-entry, person-tabs, vendors, inventory-as-assets (no article behind it) | **better.** §1 says in as many words: *"Money, time, and inventory are not different systems; they are the same Sustain wearing different coats."* Single-sided money cannot represent a liability, a tab, or a held asset — so the *articles* are the ones currently failing §1, and the code is ahead of them. | **KEEP + annotate the articles.** Per §8 this is a principled implementation that reduces to §1, so it earns its place in canon. Fold into Constraint §III (conservation as a `D` shape), Sustain §S (the account/asset taxonomy) and Multiparty §VII (a tab is a two-party relationship) rather than a 19th pair. |
+| **Royalty five-way** (`70/15/5/5/5` + a proposer) | **worse.** It cut the commons' share to fund a role borrowed from another system's consensus design, and it was never Bonnie's decision. | **REVERTED** 30 Aug — already done. |
+| **Rust-ahead-of-Python** (~95% of divergences) | neutral — a difference in *how far along*, not in what is right. | no action. |
+| **The four remaining declines** | **better to decline.** Each would import machinery whose assumptions §1's state model does not meet, or invent a number nobody measured. | declines stand, marked `🚫`. |
+
+## 8.5 What is vector-complete vs live-proven
+
+Bonnie is right that "complete" was doing too much work. The honest split:
+
+| layer | vector / test proven | live-proven on real devices |
+|---|---|---|
+| The seven primitives, the gate, the fold | ✅ | ✅ — running his household daily |
+| Ingest, transducer, parse rules, intake key | ✅ | ✅ — 2,745 real captures, 127 re-keyed |
+| The pawa meter | ✅ | ✅ — real readings on his homestead |
+| Composition ⊕ / roll-up ρ | ✅ | ✅ — 6 real habitats |
+| Simulator, advisory, egress | ✅ | ✅ |
+| **Peer transport + two-node sync** | ✅ (13 tests, real sockets, two independent nodes) | ❌ — never between two machines. See `PEER_READINESS.md`. |
+| **Economy roles** — proposer/validator/referrer | ✅ arithmetic | ❌ **no role is ever populated.** Absent roles fold to treasury, so the split is currently inert. |
+| **Settlement rails / the peg** | ✅ shape | ❌ **deliberately not live** — `Peg::is_live()` is false with no constructor that can change it, and `Rail::Ethereum` cannot finalise. That is the design, not a gap. |
+| **RFC / governance process** | ❌ | ❌ — named in the WBD, not built. |
+| **Juul spending / out-of-pawa gate** | ✅ | ❌ — the meter measures; nothing spends. Disclosed since Slice 15. |
+| **Real-time SMS → notification → classify** | ✅ built + APK-verified | ⚠ **needs one real SMS on his phone.** |
+
+**The rule I will hold to:** I will not write "complete" again without naming
+which of those two columns I mean.
