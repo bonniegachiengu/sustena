@@ -218,3 +218,59 @@ class TestHostDispatch:
         r = c.get("/health", headers={"host": "sustena.vyybandasky.online"})
         assert r.status_code == 200
         assert "git_commit" in r.text
+
+
+# -- the standalone server -----------------------------------------------------
+
+
+class TestStandaloneServer:
+    """
+    ★★ The second door must make the SAME promises as the Host-dispatch
+       middleware, or moving between them would change behaviour for readers.
+    """
+
+    @property
+    def client(self):
+        from sustena.lore_site.serve import app as lore_app
+
+        return TestClient(lore_app)
+
+    def test_it_serves_the_index(self):
+        r = self.client.get("/")
+        assert r.status_code == 200
+        assert "Sustena Lore" in r.text
+
+    def test_it_serves_every_published_essay(self):
+        c = self.client
+        for e in load_all():
+            r = c.get(f"/{e.path}")
+            assert r.status_code == 200, e.path
+            # ★ The right essay, not merely a 200: the kicker and the module
+            #   both belong to this one and to no other.
+            assert e.kicker in r.text, e.path
+            assert e.module in r.text, e.path
+
+    def test_it_is_read_only(self):
+        assert self.client.post("/anything").status_code == 405
+
+    def test_a_miss_gets_the_index_as_its_404(self):
+        r = self.client.get("/no-such-essay.html")
+        assert r.status_code == 404
+        assert "Sustena Lore" in r.text
+
+    def test_a_traversal_cannot_escape_dist(self):
+        # ★★★ The one thing a static server must never get wrong.
+        from sustena.lore_site.serve import _resolve
+
+        for bad in ("/../../../main.py", "/../serve.py", "/../../api/main.py"):
+            assert _resolve(bad) is None, bad
+
+    def test_it_holds_no_database_and_no_application_routes(self):
+        # ★★★ "Cannot disturb the app" asserted structurally: the module graph
+        #      simply does not contain the application.
+        import sustena.lore_site.serve as s
+
+        src = __import__("pathlib").Path(s.__file__).read_text(encoding="utf-8")
+        assert "sustena.api" not in src
+        assert "sqlite" not in src.lower()
+        assert "get_shared_engine" not in src
