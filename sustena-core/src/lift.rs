@@ -33,8 +33,9 @@
 //! division `learned.rs` already keeps for parse rules.
 //!
 //! ★★ **Patterns are matched up to their differing leaves**, which is what
-//! makes a lift a *function* rather than a duplicate. `pockets.food.allocated
-//! >= 0` and `pockets.rent.allocated >= 0` are one pattern with one hole; two
+//! makes a lift a *function* rather than a duplicate. The rules
+//! `pockets.food.allocated >= 0` and `pockets.rent.allocated >= 0` are one
+//! pattern with one hole; two
 //! rules with nothing in common are not a pattern at all.
 
 use std::collections::BTreeMap;

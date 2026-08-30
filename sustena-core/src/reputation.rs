@@ -149,7 +149,7 @@ pub fn decay(evidence: &Evidence, lambda: f64) -> Evidence {
 /// ★★ Reportable, because "λ = 0.95" means nothing to a person and "it
 /// remembers about the last twenty" means something.
 pub fn effective_memory(lambda: f64) -> Option<f64> {
-    (lambda < 1.0 && lambda >= 0.0).then(|| 1.0 / (1.0 - lambda))
+    (0.0..1.0).contains(&lambda).then(|| 1.0 / (1.0 - lambda))
 }
 
 /// **`rank = LCB₁₋δ(τ)`** — the lower end of a credible interval.

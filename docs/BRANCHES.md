@@ -42,6 +42,32 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `fix/clippy-clean` — merged into `dev` 30 Aug — **the release gate refused, and it was right**
+
+**Off:** `dev` / gate green (python 2,346 · core 2,090 · host 256 · clippy clean).
+
+★★★ **The finding is about the marathon, not about the lints.** `release.ps1`
+runs clippy as part of its gate and refused to cut anything: 17 findings in the
+core, 10 in the host. Every one of them was introduced during the WBD build,
+because the per-slice loop I had been running was `cargo test` and not `cargo
+clippy` — so a check that exists and is wired into the release stayed unrun for
+the whole marathon. The gate caught it at the last possible moment, which is
+exactly the moment a gate is for, and none of it reached `main`.
+
+★★★ **Two were real, not cosmetic.** `!(x > 0.0)` in `horizon.rs` and
+`inventory.rs` is deliberate NaN handling — NaN fails every comparison, so the
+negation catches it — and clippy is right that it reads as a typo. Rewritten to
+say what it means (`x.is_nan() || x <= 0.0`), which is the same behaviour and
+stops the next reader from "simplifying" it into a bug. And `store.rs` was
+taking a reference to a temporary `String` it had just built, which compiles and
+is one allocation nobody needed.
+
+★★ The rest were genuine tidying: elided lifetimes, `or_default`,
+`checked_div`, `sort_by_key`, `contains_key`, a `const` assertion, an orphaned
+doc comment attached to nothing, and a duplicated test helper in `embroidery.rs`
+that was dead. One `#[allow]` was added, for `orchie_confirm`'s eight arguments,
+with a comment saying why a struct would only move the count into the type.
+
 ### `feat/intake-key` — merged into `dev` 30 Aug — **ING-5, host + real data**
 
 **Off:** `dev` / gate green (python 2,346 · core 2,090 · host 256).

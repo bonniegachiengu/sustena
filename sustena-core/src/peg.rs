@@ -238,7 +238,7 @@ mod tests {
         // ★★★ 1.02 and 4.00 are both "covered" and are not the same situation.
         let p = peg(1_000_000, 20_000, 1_000_000, 10_000);
         match p.health() {
-            Health::Thin { ratio } => assert!(ratio >= 1.0 && ratio < COMFORTABLE_RATIO),
+            Health::Thin { ratio } => assert!((1.0..COMFORTABLE_RATIO).contains(&ratio)),
             other => panic!("{other:?}"),
         }
         assert!(!p.health().is_sound());
@@ -312,6 +312,6 @@ mod tests {
     fn the_comfortable_ratio_is_declared_rather_than_being_one() {
         // ★★ "Fully backed" at 1.00 leaves no room for an instrument to move a
         //    percent before the peg is a claim nobody can honour.
-        assert!(COMFORTABLE_RATIO > 1.0);
+        const { assert!(COMFORTABLE_RATIO > 1.0) };
     }
 }

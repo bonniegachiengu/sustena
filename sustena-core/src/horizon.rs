@@ -134,7 +134,8 @@ pub fn horizon(lambda: Option<f64>, delta0: f64, epsilon: f64) -> Horizon {
             why: format!("fewer than {MIN_OBSERVATIONS} usable separations were observed"),
         };
     };
-    if !(delta0 > 0.0) || !(epsilon > 0.0) {
+    // NaN must fail this too, and it does not compare, so it is named.
+    if delta0.is_nan() || epsilon.is_nan() || delta0 <= 0.0 || epsilon <= 0.0 {
         return Horizon::Unknown {
             why: "the starting uncertainty and the tolerance must both be positive and known"
                 .into(),

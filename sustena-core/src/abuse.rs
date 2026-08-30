@@ -142,7 +142,7 @@ pub fn sybil(grant: u64, identity_cost: u64, funding: Funding) -> SybilVerdict {
         Funding::Mint => SybilVerdict::ProfitableAndUnbounded { profit_per_identity: profit },
         Funding::Transfer { treasury_balance } => SybilVerdict::ProfitableButBounded {
             profit_per_identity: profit,
-            identities_fundable: if grant > 0 { treasury_balance / grant } else { 0 },
+            identities_fundable: treasury_balance.checked_div(grant).unwrap_or(0),
         },
     }
 }

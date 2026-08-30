@@ -194,7 +194,7 @@ pub fn independence(seats: &[Seat], models: &[WorldModel], topic: &str) -> Indep
                 // ★★ A model nobody declared is treated as not covering the
                 //    topic, which is the same answer `Fidelity::Undeclared`
                 //    gives — a missing model is not a permissive one.
-                .map_or(true, |m| !m.fidelity.covers(topic))
+                .is_none_or(|m| !m.fidelity.covers(topic))
         })
         .map(|s| s.councillor.clone())
         .collect();

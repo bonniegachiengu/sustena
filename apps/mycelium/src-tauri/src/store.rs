@@ -625,7 +625,7 @@ impl Store {
                 None => skipped += 1,
                 Some(params) => {
                     let mut call =
-                        sustena_core::EnzymeCall::new(&line.seq.to_string(), &line.operator);
+                        sustena_core::EnzymeCall::new(line.seq.to_string(), &line.operator);
                     call.params = params;
                     calls.push(call);
                 }

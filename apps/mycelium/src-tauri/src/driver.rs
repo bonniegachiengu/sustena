@@ -142,7 +142,7 @@ impl Driver {
         prefs: &Preferences,
         now_ms: u64,
     ) -> Pass {
-        let machine = self.machines.entry(sustain_id.to_string()).or_insert_with(Ooda::new);
+        let machine = self.machines.entry(sustain_id.to_string()).or_default();
 
         // ★★ A sustain already parked for a person is not re-driven. Stepping
         //    it again would surface the same decision twice and make the queue
@@ -227,7 +227,7 @@ mod tests {
         // ★★★ A queue a person cannot see is a system making decisions by not
         //     making them, and the oldest is the one most likely to have been
         //     decided by neglect.
-        let d = with(vec![surfaced("b", 5 * HOUR), surfaced("a", 1 * HOUR)]);
+        let d = with(vec![surfaced("b", 5 * HOUR), surfaced("a", HOUR)]);
         let q = d.awaiting();
         assert_eq!(q.len(), 2);
         assert_eq!(q[0].sustain_id, "a");

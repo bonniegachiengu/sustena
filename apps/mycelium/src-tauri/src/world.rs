@@ -2855,7 +2855,7 @@ mod person_tab_tests {
     }
 
     fn tab(w: &World) -> f64 {
-        let p = state(&w).pointer("/finances/pockets/Aida").expect("pocket").clone();
+        let p = state(w).pointer("/finances/pockets/Aida").expect("pocket").clone();
         p["allocated"].as_f64().unwrap() - p["spent"].as_f64().unwrap()
     }
 
