@@ -145,3 +145,79 @@ passphrase on both ends.**
 
 I will not call the module complete again without saying which of those five
 rungs I mean.
+
+---
+
+## Findings from the first live two-device run (30 Aug 2026)
+
+Three things came out of driving the phone and the laptop against each other over
+the cable. All three are real, and none of them is the transport.
+
+### 1. Data crossed — laptop → phone, verified by origin stamp
+
+The phone's `events/homestead.jsonl` went 283 → 285, and the two new lines carry
+the **laptop's** public key as their origin:
+
+```
+origin f86df2ca8458 | lamport 1 | seq 0 | genesis
+origin f86df2ca8458 | lamport 2 | seq 1 | system.backfill_declared
+```
+
+Both peer books record the other node, `trusted`, sharing `homestead`. Rung 5 —
+two physical devices — is reached in that direction, and it is checkable from
+the file rather than from a screen.
+
+### 2. The push half of `sync_peer` moves nothing — open bug
+
+Phone → laptop has never written a byte. Three sessions completed with
+`last_error: null` and a fresh `last_synced`, and the laptop's
+`events/homestead.jsonl` has not been modified since the day before.
+
+Read of the exchange, for whoever picks this up: the initiator pulls
+(`Want`/`Give`, merges — this works), then re-reads its replica and sends
+`missing_from(theirs)`. `theirs` is the responder's `replica.frontier()`, which
+for the laptop is `{laptop: 2}`; every one of the phone's own entries has a
+counter above `theirs.get(phone) == 0`, so `missing_from` should yield all of
+them. On the responder, `accept_give` passes `may_have` (homestead is shared)
+and `refuse_forged_origin` (the node ids are distinct public keys — note the two
+devices share the *handle* `bg.myc`, but identity is the key, so that guard is
+not the cause). Every step says it should work.
+
+**Next step is instrumentation, not more reading**: capture the real
+`sent`/`received` off the wire instead of inferring them.
+
+Worth checking while there: `read_replica` attributes legacy unstamped lines to
+the reading node, so on the phone the two pre-stamping lines become
+`(phone, 1)` and `(phone, 2)` — the same keys as its first two *stamped*
+entries. Whether one silently displaces the other is untested and would be its
+own defect regardless of this bug.
+
+### 3. The surfaces do not update as state arrives — open bug
+
+Canon requires it: the Monitor, Curated UI and Multiparty papers all describe a
+surface that changes as state does. Today a peer sync appends to the store and
+**no view re-renders** — the footer even says "no polling". The Network row's
+"never synced", the event counts, Constellation and Monitor all keep showing
+what they showed before.
+
+The fix is to make the views reactive to store appends — subscribe to a change
+signal emitted where events land, rather than a manual reload. Its own branch.
+
+*One honest caveat on this one*: on the laptop a reopen would **not** reveal
+Homestead data, because per finding 2 nothing was written there. The genuine
+instance is on the phone, which really did receive two entries its open view
+never showed. And those two are `genesis` and `system.backfill_declared`, which
+change no balance — so this gap is proven by the log, not by a visible number.
+
+### 4. Two R1 (fit-to-container) violations on the Network screen
+
+- **Phone**: the panel is taller than the viewport and ignores swipe entirely.
+  ADD A PEER and SYNC were only reachable by moving keyboard focus with Tab.
+- **Laptop**: the expanded peer detail collides with ADD A PEER below it and the
+  `SHARED WITH THIS PEER` chip row is clipped.
+
+### Operational note
+
+The listener does not survive an app restart, and it binds a fresh port each
+time (2872 → 3915 observed). Anything automating against it must re-detect the
+port rather than hold one.
