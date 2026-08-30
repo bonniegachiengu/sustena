@@ -16,6 +16,8 @@
  * heuristic for it would be inventing a spending decision on their behalf.
  */
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
+
+import { onPulse } from "../lib/pulse";
 import {
   Badge,
   Button,
@@ -55,6 +57,9 @@ const TIER: Record<string, { tone: "ok" | "warn" | "danger" | "quiet"; says: str
 export default function Ingest() {
   const sustain = () => world.selected ?? "";
   const [data, { refetch }] = createResource(sustain, (id) => engine.ingest(id));
+
+  // ★★★ §III: relayed change, refreshed surface. A capture classified anywhere -- here, from a card, from a notification -- leaves this list.
+  onPulse(refetch);
 
   /** How many rows paint at once. See the note beside "show more". */
   const PAGE = 40;

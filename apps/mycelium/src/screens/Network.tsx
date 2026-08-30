@@ -16,6 +16,8 @@
  * rules is said out loud. Every entry survives; a value may not.
  */
 import { createResource, createSignal, For, Show } from "solid-js";
+
+import { onPulse } from "../lib/pulse";
 import { world } from "../lib/live";
 import { openRow } from "../lib/nav";
 import {
@@ -54,6 +56,14 @@ const when = (secs: string | null) => {
 export function Network() {
   const [net, { refetch }] = createResource(() => engine.network());
   const [bodies, { refetch: refetchBodies }] = createResource(() => engine.bodies());
+
+  // ★★★ §III: refresh when a change is relayed -- local or arrived by
+  //     sync -- so this surface is never showing an answer that has stopped
+  //     being true. A peer syncing changes what this screen reports about peers.
+  onPulse(async () => {
+    await refetch();
+    await refetchBodies();
+  });
   const [busy, setBusy] = createSignal<string | null>(null);
   const [failure, setFailure] = createSignal<string | null>(null);
   const [last, setLast] = createSignal<SyncDto | null>(null);

@@ -118,7 +118,7 @@ pub fn specta_builder() -> Builder {
     // ★★★ The push channel, typed from the same Rust as the commands — so a
     //   listener the UI writes for an event that does not exist will not
     //   compile.
-    .events(collect_events![dto::Committed, dto::Refused, dto::RolledUp])
+    .events(collect_events![dto::Committed, dto::Refused, dto::RolledUp, dto::Merged])
 }
 
 /// ★★★ Write `src/bindings.ts` from the Rust types.
@@ -166,7 +166,7 @@ fn export_bindings(builder: &Builder) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    use tauri::Emitter;
+    use tauri_specta::Event as _;
 
     let builder = specta_builder();
 
@@ -223,10 +223,15 @@ pub fn run() {
                 while let Ok(sustain_id) = merges.recv() {
                     let world = absorber.state::<world::World>();
                     world.absorb(&sustain_id);
-                    // The surfaces re-read on this. ★ Emitted AFTER the fold,
-                    // so anything that reacts reads the new state and not the
-                    // one that was wrong.
-                    let _ = absorber.emit("sustain:merged", &sustain_id);
+                    // ★★★ §III: the pulse is relayed AFTER the fold, so
+                    //     anything that reacts reads the new state and not the
+                    //     one that was wrong. It carries the state, so no
+                    //     surface has to ask.
+                    if let Some(pulse) =
+                        commands::merged_pulse(&world, &sustain_id, 1, None)
+                    {
+                        let _ = pulse.emit(&absorber);
+                    }
                 }
             });
 
@@ -250,7 +255,11 @@ pub fn run() {
                             match outcome {
                                 Ok(n) if n > 0 => {
                                     println!("[peer] reconnected to {peer}: {n} entrie(s) for {id}");
-                                    let _ = dialer.emit("sustain:merged", &id);
+                                    if let Some(pulse) =
+                                        commands::merged_pulse(&world, &id, n, Some(peer.clone()))
+                                    {
+                                        let _ = pulse.emit(&dialer);
+                                    }
                                 }
                                 Ok(_) => {}
                                 // ★ Asleep is not an error a person must act on.

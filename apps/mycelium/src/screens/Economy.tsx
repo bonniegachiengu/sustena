@@ -13,6 +13,8 @@
  * standing fact, not a gap waiting to be filled.
  */
 import { createResource, createSignal, For, Show } from "solid-js";
+
+import { onPulse } from "../lib/pulse";
 import {
   Boundary,
   Caption,
@@ -40,6 +42,9 @@ import { engine, fmt, type GateResult } from "../lib/engine";
 
 export default function Economy() {
   const [eco, { refetch }] = createResource(engine.economy);
+
+  // ★★★ §III: relayed change, refreshed surface. Pawa is spent by every admitted call, including one a peer relayed.
+  onPulse(refetch);
   const [busy, setBusy] = createSignal(false);
   const [verdict, setVerdict] = createSignal<GateResult | null>(null);
   const [draft, setDraft] = createSignal<Record<string, string>>({});

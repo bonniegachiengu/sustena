@@ -12,6 +12,8 @@
  * alarm, not a diagnosis.
  */
 import { createResource, createSignal, For, Show } from "solid-js";
+
+import { onPulse } from "../lib/pulse";
 import {
   Button,
   Caption,
@@ -41,6 +43,9 @@ const KINDS = ["number", "text", "bool", "any"];
 
 export default function Define() {
   const [defs, { refetch }] = createResource(engine.definitions);
+
+  // ★★★ §III: relayed change, refreshed surface. A definition can arrive from a peer as readily as it can be authored here.
+  onPulse(refetch);
 
   const [id, setId] = createSignal("garden");
   const [label, setLabel] = createSignal("Garden");

@@ -16,6 +16,8 @@
  * words the Economy panel uses: never money, never a rail, never off this host.
  */
 import { createResource, createSignal, For, Show } from "solid-js";
+
+import { onPulse } from "../lib/pulse";
 import {
   Badge,
   Button,
@@ -62,6 +64,14 @@ export function Library() {
   const [last, setLast] = createSignal<InstallDto | null>(null);
   const [paid, setPaid] = createSignal<RoyaltyDto | null>(null);
   const [orders, { refetch: refetchOrders }] = createResource(() => engine.orders());
+
+  // ★★★ §III: refresh when a change is relayed -- local or arrived by
+  //     sync -- so this surface is never showing an answer that has stopped
+  //     being true. A package arriving from a peer belongs on the shelf without a reopen.
+  onPulse(async () => {
+    await refetch();
+    await refetchOrders();
+  });
 
   const run = async (what: string, f: () => Promise<unknown>) => {
     setBusy(what);

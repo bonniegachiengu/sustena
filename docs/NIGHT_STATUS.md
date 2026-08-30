@@ -86,8 +86,50 @@ directory, or call `forget_unlock`. Nothing else changes.
 sealed under his passphrase and nothing can open it without that. He types it
 once, ticks remember, and it never asks again.
 
-### ⏳ In progress
+### ✅ §III Signal liveness — Mycelium wired, backend live-proven
 
-- §III Signal liveness across every view, both apps
+Multiparty §III: *"each element rests, fires when driven past threshold, then
+goes briefly refractory so the excitation moves outward instead of sloshing back
+into the elements that just fired."* The elements here are the surfaces.
+
+**What was already live**, and I should say so rather than claim credit: local
+commits already pushed through `Committed`/`Refused`/`RolledUp`, so six screens
+(Constellation, Composition, Profile, Orchie, Console, Simulate) re-rendered on
+a local change without asking anything.
+
+**The gap was state that ARRIVED.** A peer's write had no local cause, so
+nothing told any surface. That is the whole of "close it and reopen it".
+
+- New typed `Merged` event, through the same generated bindings, carrying the
+  folded state so a surface updates from the message rather than re-querying.
+- Relayed from the absorber and the reconnect sweep, AFTER the fold.
+- `lib/pulse.ts` implements the §III state machine for surfaces that ask the
+  engine questions instead of reading the store: `RESTING → EXCITED →
+  REFRACTORY`, with missed pulses remembered as ONE. A hundred arriving entries
+  are a hundred pulses and exactly one extra refresh.
+- Five screens that fetched once and never again are now subscribed:
+  **Network, Library, Economy, Ingest, Define**.
+
+Raw evidence, backend:
+
+```
+test peers_test::state_that_arrives_relays_a_pulse_carrying_the_folded_state ok
+test peers_test::a_sync_that_changed_nothing_relays_no_pulse               ok
+host 274 passed; 0 failed; 0 ignored     clippy 0 errors
+```
+
+The first asserts the pulse carries the state AFTER the fold and that it equals
+what the peer holds; the second is §III's refractory term at the source -- a
+sync that moved nothing relays nothing.
+
+**Honest limit on this one.** The frontend half is typechecked and wired at a
+single relay point, and `npm run build` is clean, but I have NOT watched a pixel
+change tonight. The app is Tauri-IPC only -- there is no browser adapter, so the
+"web build in a browser" route does not exist without writing a mock engine,
+which would prove the wiring and not the engine. Driving the desktop GUI needs
+computer-use, which is unavailable in this run mode. So: backend proven live,
+frontend proven by types and by construction.
+
+### ⏳ In progress
 - ingest universal parser, classify-in-place, Library, R1 clipping
 - behaviour-level audit of all 18 articles

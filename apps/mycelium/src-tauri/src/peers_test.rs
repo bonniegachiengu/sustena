@@ -809,3 +809,53 @@ fn a_merged_node_folds_the_same_state_as_its_peer_after_a_restart() {
     assert_eq!(after_a, state_a, "the restart changed nothing on A");
     assert_eq!(after_b, state_b, "nor on B");
 }
+
+// ── §III: the relayed pulse ─────────────────────────────────────────────────
+
+#[test]
+fn state_that_arrives_relays_a_pulse_carrying_the_folded_state() {
+    // ★★★ Multiparty §III. A local commit already relayed one; state that
+    //     arrived from a peer had no local cause, so nothing told any surface
+    //     it had happened -- which is the whole of the "close it and reopen
+    //     it" symptom. The pulse must carry the state AFTER the fold, or a
+    //     surface would render the one that was wrong.
+    let (a, b, id) = twin_pair("pulse");
+    a.income(&id, 300.0, "node-a");
+    b.income(&id, 700.0, "node-b");
+
+    let before = a.state(&id);
+    b.world.sync_peer(&a.address(), &id).expect("sync");
+
+    // The absorber's two steps, in the order the app runs them.
+    let announced: Vec<String> = a.merges.try_iter().collect();
+    assert_eq!(announced.len(), 1, "the listener announced the merge");
+    a.world.absorb(&announced[0]);
+
+    let pulse = crate::commands::merged_pulse(&a.world, &id, 1, Some("peer".into()))
+        .expect("a real arrival relays a pulse");
+    assert_eq!(pulse.sustain_id, id);
+    assert_eq!(pulse.entries, 1);
+    assert_eq!(
+        pulse.state,
+        a.state(&id),
+        "it carries the state AFTER the fold, not the one that was wrong"
+    );
+    assert_ne!(pulse.state, before, "and that state genuinely moved");
+    // ★ Which of the two incomes sorts last depends on the node keys, which
+    //   are random per run. The property is not a number -- it is that both
+    //   nodes agree on it.
+    assert_eq!(pulse.state, b.state(&id), "and it is the state B holds too");
+}
+
+#[test]
+fn a_sync_that_changed_nothing_relays_no_pulse() {
+    // ★★★ §III's refractory term, at the source: "the excitation moves outward
+    //     instead of sloshing back into the elements that just fired." A sync
+    //     that moved no entries is not a change, and relaying it would wake
+    //     every surface for nothing.
+    let (a, _b, id) = twin_pair("pulse-quiet");
+    assert!(
+        crate::commands::merged_pulse(&a.world, &id, 0, None).is_none(),
+        "nothing arrived, so nothing is relayed"
+    );
+}

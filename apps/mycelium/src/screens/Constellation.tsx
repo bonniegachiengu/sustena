@@ -397,12 +397,28 @@ export default function Constellation(props: { onOpen: (id: string) => void }) {
                 <StreamRow onClick={openRow(e.sustainId)} refused={e.kind === "refused"}>
                   <span
                     class={S.streamVerdict}
-                    style={{ color: e.kind === "refused" ? vars.color.danger : vars.color.teal }}
+                    style={{
+                      color:
+                        e.kind === "refused"
+                          ? vars.color.danger
+                          : e.kind === "arrived"
+                            ? vars.color.amber
+                            : vars.color.teal,
+                    }}
                   >
-                    {e.kind === "refused" ? "REFUSED" : "ADMITTED"}
+                    {e.kind === "refused"
+                      ? "REFUSED"
+                      : e.kind === "arrived"
+                        ? "ARRIVED"
+                        : "ADMITTED"}
                   </span>
                   <Fill>
-                    <Value>{e.operator}</Value>{" "}
+                    {/* ★ An arrival has no operator: nothing local caused it. */}
+                    <Value>
+                      {e.kind === "arrived"
+                        ? `${e.entries} entrie(s) from a peer`
+                        : e.operator}
+                    </Value>{" "}
                     <Meta>{world.sustains[e.sustainId]?.summary.label ?? e.sustainId}</Meta>
                     <Show when={e.kind === "admitted"}>
                       <Caption>

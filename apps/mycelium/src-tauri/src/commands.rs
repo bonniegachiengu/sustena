@@ -37,6 +37,37 @@ use std::collections::BTreeMap;
 use crate::world::{World, DEFAULT_HANDLE};
 
 /// `V`, evaluated against current state by the engine.
+/// Build the §III pulse for state that arrived from a peer.
+///
+/// ★ Returns `None` when nothing arrived: a sync that changed nothing is not a
+/// change, and relaying it would be the excitation sloshing back that §III's
+/// refractory term exists to prevent.
+pub fn merged_pulse(
+    world: &World,
+    sustain_id: &str,
+    entries: usize,
+    peer: Option<String>,
+) -> Option<crate::dto::Merged> {
+    if entries == 0 {
+        return None;
+    }
+    let (state, events) = world.with(|i| {
+        i.get(sustain_id)
+            .map(|s| (s.state.clone(), s.next_seq as u32))
+            .unwrap_or((serde_json::Value::Null, 0))
+    });
+    let liquid = state.pointer("/finances/liquid/balance").and_then(|v| v.as_f64());
+    Some(crate::dto::Merged {
+        sustain_id: sustain_id.to_string(),
+        entries: entries as u32,
+        peer,
+        constraints: readings(world, sustain_id),
+        state,
+        liquid,
+        events,
+    })
+}
+
 fn readings(world: &World, sustain_id: &str) -> Vec<ConstraintReading> {
     world
         .constraints(sustain_id)

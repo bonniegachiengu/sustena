@@ -341,6 +341,34 @@ pub struct Committed {
     pub liquid: Option<f64>,
 }
 
+/// ★★★ **State that ARRIVED, pushed — Multiparty §III.**
+///
+/// A local commit relays a pulse through [`Committed`]. State that arrives from
+/// a peer had no local cause at all, so without this it reached the store and
+/// no surface ever heard: the household changed and the screen kept showing
+/// what it had. §III is the mechanism the article already gives for this — a
+/// relayed signal, refractory behind it — and the refractory half is what stops
+/// the arriving pulse from being relayed back at the node that sent it.
+///
+/// ★★ It carries the folded state, exactly as `Committed` does, so a view
+/// updates from the message rather than by asking the engine. A merge that made
+/// every surface re-query would be a poll with extra steps.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct Merged {
+    pub sustain_id: String,
+    /// How many entries the peer gave us. ★ Zero is not emitted: a sync that
+    /// changed nothing is not a change.
+    pub entries: u32,
+    /// Who it came from, for a surface that wants to say so.
+    pub peer: Option<String>,
+    pub state: serde_json::Value,
+    pub constraints: Vec<ConstraintReading>,
+    pub liquid: Option<f64>,
+    /// Total entries in the log after the merge.
+    pub events: u32,
+}
+
 /// ★★★ **A refusal, pushed — and it carries NO STATE.**
 ///
 /// A separate type from [`Committed`] on purpose. The two answer different

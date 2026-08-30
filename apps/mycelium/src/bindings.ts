@@ -673,6 +673,76 @@ async startListening(port: number | null) : Promise<Result<number, string>> {
 }
 },
 /**
+ * Settle on a different port.
+ * 
+ * ★★★ Changing it does NOT move a running listener: the socket a peer is
+ * currently talking to keeps working, and the new port is what this node comes
+ * up on next time. Rebinding underneath a live session would drop the very
+ * peer the change is meant to serve.
+ */
+async setListenPort(port: number) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_listen_port", { port }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Give an existing peer an address, so it can be reached rather than only
+ * answered.
+ * 
+ * ★★★ **The missing half of a standing peering.** A peer that connected TO
+ * this node is recorded without an address, deliberately -- the socket it
+ * arrived on is not an address it agreed to be reached at. But then nothing
+ * can ever dial it, so a link that works in one direction stays that way
+ * forever. This is where a person supplies the address, which is the only
+ * place it can honestly come from.
+ */
+async setPeerAddress(publicKey: string, address: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_peer_address", { publicKey, address }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Come up unlocked from now on, without being asked.
+ * 
+ * ★★★ Costs what it sounds like: the cached value unseals the private key, so
+ * anyone who can read the file can act as this node. Off unless asked for,
+ * never in a build anybody else runs, and `forget_unlock` is a complete undo.
+ */
+async rememberUnlock(passphrase: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remember_unlock", { passphrase }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stop coming up unlocked. ★ Restores the passphrase gate exactly as it was.
+ */
+async forgetUnlock() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("forget_unlock") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Reach every trusted peer that has an address, now.
+ * 
+ * ★ The same sweep the app runs on a timer, offered as a button for the
+ * moment somebody does not want to wait for it.
+ */
+async reconnectPeers() : Promise<([string, string, string | null])[]> {
+    return await TAURI_INVOKE("reconnect_peers");
+},
+/**
  * Record a peer by key and address, without granting it anything.
  */
 async addPeer(publicKey: string, handle: string, address: string) : Promise<Result<null, string>> {
@@ -832,10 +902,12 @@ async placeOrder(packageId: string, on: number) : Promise<Result<OrderDto, strin
 
 export const events = __makeEvents__<{
 committed: Committed,
+merged: Merged,
 refused: Refused,
 rolledUp: RolledUp
 }>({
 committed: "committed",
+merged: "merged",
 refused: "refused",
 rolledUp: "rolled-up"
 })
@@ -1501,6 +1573,34 @@ mutations: number }
  */
 export type MeasuredPawa = { runs: number; meanPawa: number; totalPawa: number; totalCompute: number; totalStorage: number }
 /**
+ * ★★★ **State that ARRIVED, pushed — Multiparty §III.**
+ * 
+ * A local commit relays a pulse through [`Committed`]. State that arrives from
+ * a peer had no local cause at all, so without this it reached the store and
+ * no surface ever heard: the household changed and the screen kept showing
+ * what it had. §III is the mechanism the article already gives for this — a
+ * relayed signal, refractory behind it — and the refractory half is what stops
+ * the arriving pulse from being relayed back at the node that sent it.
+ * 
+ * ★★ It carries the folded state, exactly as `Committed` does, so a view
+ * updates from the message rather than by asking the engine. A merge that made
+ * every surface re-query would be a poll with extra steps.
+ */
+export type Merged = { sustainId: string; 
+/**
+ * How many entries the peer gave us. ★ Zero is not emitted: a sync that
+ * changed nothing is not a change.
+ */
+entries: number; 
+/**
+ * Who it came from, for a surface that wants to say so.
+ */
+peer: string | null; state: JsonValue; constraints: ConstraintReading[]; liquid: number | null; 
+/**
+ * Total entries in the log after the merge.
+ */
+events: number }
+/**
  * One captured message.
  * 
  * ★★★ A REJECTED message never appears here, because it never reached the
@@ -1573,6 +1673,21 @@ nodeId: string | null; handle: string | null;
  * which a `0` would have read as a port.
  */
 listening: number | null; 
+/**
+ * The address a peer on the same network can reach this node at.
+ * 
+ * ★★★ **Not `127.0.0.1`.** A loopback address is only reachable over a
+ * cable tunnel, so handing it to somebody as "add me here" is telling them
+ * something that stops being true the moment they unplug. `None` means
+ * this machine has no route out, which is a real answer rather than an
+ * error.
+ */
+reachableAt: string | null; 
+/**
+ * The port this node has settled on, whether or not it is listening now.
+ * ★ Stable across restarts by construction: it is stored, not negotiated.
+ */
+settledPort: number; 
 /**
  * ★★ A locked node cannot prove its own key, so it cannot peer at all.
  * The screen says which, rather than showing an idle network.

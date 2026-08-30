@@ -18,6 +18,8 @@
  * refusal as a state change, because there is no state on the message to show.
  */
 import { createStore, produce, reconcile } from "solid-js/store";
+
+import { relay } from "./pulse";
 import { events, type Committed, type Refused, type RollupDto } from "../bindings";
 import { engine, type ConstraintReading, type IdentityDto, type LogEntryDto, type SustainSummary, type WorldDto } from "./engine";
 
@@ -32,7 +34,11 @@ export type { Committed, ConstraintReading, LogEntryDto, Refused, RollupDto };
  */
 export type StreamEntry =
   | { kind: "admitted"; at: number; sustainId: string; operator: string; seq: number; events: string[] }
-  | { kind: "refused"; at: number; sustainId: string; operator: string; reason: string; rule: string };
+  | { kind: "refused"; at: number; sustainId: string; operator: string; reason: string; rule: string }
+  // ★ State that arrived from a peer. Its own kind because it answers a
+  //   different question from a local commit: not *what did we do* but *what
+  //   reached us*.
+  | { kind: "arrived"; at: number; sustainId: string; entries: number; peer?: string };
 
 /** How many gate-stream lines to keep. Older ones fall off the end. */
 const STREAM_CAP = 60;
@@ -255,6 +261,9 @@ export async function subscribe(): Promise<() => void> {
         ];
       }),
     );
+    // ★★★ §III: one relay for every real change, so surfaces that ask the
+    //     engine questions refresh too. Not on a refusal -- nothing changed.
+    relay();
   });
 
   // A refusal changes no state, so it touches NOTHING but the stream. There is
@@ -294,10 +303,55 @@ export async function subscribe(): Promise<() => void> {
     );
   });
 
+  /**
+   * ★★★ **State that ARRIVED — Multiparty §III.**
+   *
+   * A local commit relays a pulse through `committed`. State a peer wrote had
+   * no local cause, so without this it reached the store and no surface ever
+   * heard: the household changed and the screen went on showing what it had.
+   * That is the "close it and reopen it" symptom, and it was never a rendering
+   * bug -- nothing was telling the view anything had happened.
+   *
+   * ★★ It merges from the MESSAGE, exactly as `committed` does. A merge that
+   * made every surface re-query would be a poll wearing a push's name.
+   */
+  const stopMerged = await events.merged.listen((e) => {
+    const m = e.payload;
+    setWorld(
+      produce((s) => {
+        s.pushes += 1;
+        s.stream = [
+          {
+            kind: "arrived" as const,
+            at: Date.now(),
+            sustainId: m.sustainId,
+            entries: m.entries,
+            peer: m.peer ?? undefined,
+          },
+          ...s.stream,
+        ].slice(0, STREAM_CAP);
+
+        const entry = s.sustains[m.sustainId];
+        if (!entry) return;
+        entry.state = reconcile(m.state as object, { merge: true })(entry.state as object);
+        entry.constraints = m.constraints;
+        entry.summary = {
+          ...entry.summary,
+          liquid: m.liquid,
+          events: m.events,
+          constraints: m.constraints,
+          pockets: pocketsFromState(m.state),
+        };
+      }),
+    );
+    relay();
+  });
+
   return () => {
     stopCommitted();
     stopRefused();
     stopRolledUp();
+    stopMerged();
   };
 }
 
