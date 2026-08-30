@@ -160,6 +160,17 @@ it is a bug** — nothing silently differs.
 
 ### Divergences that CLOSED
 
+**Intake keying (ING-5)** — closed 30 Aug 2026. The core keyed a capture
+on the transaction it describes; the host still keyed on a hash of the wording,
+so the two engines disagreed about what "the same intake" means — the sharpest
+class of divergence, because it is a disagreement about identity rather than
+about a value. The host now runs the same rule, and 127 already-saved captures
+were re-keyed onto it (none lost, none merged). Two host findings came back the
+other way and are now recorded in the core's row: the order is forced (parse,
+then key), and the amount belongs in a within-source key while it must stay out
+of a cross-source one.
+
+
 ★★★ A divergence closing is worth recording too. The log exists so nothing
 silently differs, and an entry that quietly disappears is the same failure as one
 that never got written — a later reader cannot tell whether it was fixed or
