@@ -186,12 +186,30 @@ tsc clean, npm run build clean
 **v1.1.0** — tagged and pushed, `origin/main == local main`, desktop installer
 `Mycelium — Sustena_1.1.0_x64-setup.exe` (4,599,486 bytes) and the arm64 APK.
 
-**v1.1.1** — carries the Orchie liveness fix and the Library shelf. See the
-bottom of this file for its state.
+**v1.1.1** — carries the Orchie liveness fix and the Library shelf. Tagged,
+pushed, `origin/main == local main`, android `versionCode 1001001`. Staged in
+`\dev\sustena-installers` under the user profile:
+
+| file | bytes | built |
+|---|---|---|
+| `Mycelium-Sustena-1.1.1-x64-setup.exe` | 4,628,663 | 02:06 |
+| `Mycelium-Sustena-1.1.1-x64.msi` | 6,901,760 | 02:06 |
+| `Mycelium-Orchie-1.1.1-arm64-debug.apk` | 237,799,138 | 02:09 |
+
+**These are the ones to install.** An earlier 1.1.1 setup.exe timestamped 01:57
+exists in the build tree from a run I KILLED mid-flight; it was overwritten by
+this run, and nothing from that run should be trusted.
 
 `scripts/release.ps1` refused three times before letting anything through — an
-uncommitted lockfile, then the conformance failure above. The second refusal was
-the valuable one.
+uncommitted lockfile twice, and the conformance failure above. The conformance
+refusal was the valuable one: it ran a target my own `--lib` runs had skipped.
+
+**One mess worth recording so it is not repeated.** Three release runs ended up
+racing on the same target directory, because I started them in the background
+and assumed they had finished rather than checking. They corrupted nothing — all
+five version manifests agreed — but they roughly tripled the build time and left
+the stale 01:57 artifact above. Fixed by stopping all of them, reverting the
+half-applied manifests to a clean tree, and running exactly one.
 
 ## What is NOT proven
 
