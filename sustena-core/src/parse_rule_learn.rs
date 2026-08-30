@@ -197,6 +197,164 @@ pub fn synthesize_from_correction(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Correction + field shapes
+// ---------------------------------------------------------------------------
+
+/// **Synthesise a rule from a correction, using the field reader for the shape.**
+///
+/// ★★★ **Two sources of truth, and each is used for what it actually knows.**
+/// The correction knows what the message *meant* — a person confirmed the
+/// operator and the amount, and nothing infers that better than they did. The
+/// field reader ([`crate::field_shape`]) knows what the message is *shaped
+/// like* — where the balance, the reference, the date and the counterparty sit.
+/// [`synthesize_from_correction`] had only the first, so it escaped the entire
+/// message as a literal and parameterised the amount. That is conservative in
+/// the right spirit and wrong in two ways this fixes:
+///
+/// ★★★ **It leaked.** Everything the old synthesiser did not parameterise
+/// stayed in the pattern verbatim — so a rule learned from *"received Ksh5,000
+/// from JOHN KAMAU 254712345678"* carried the name and the number. A person
+/// correcting one message should not thereby write somebody's phone number into
+/// a rule that outlives the message.
+///
+/// ★★★ **And it could not fire twice.** The date and the closing balance were
+/// literal anchors, so the rule matched only a message sent on that day leaving
+/// that exact balance — which is to say, never again. A learner whose output
+/// cannot match a second message has not learned anything; it has memorised.
+///
+/// ★★ **Where the two disagree, the HUMAN wins.** If the reader thinks the
+/// amount is a different figure from the one the person confirmed, the person's
+/// is authoritative and the reader's is discarded for that field. A confirmed
+/// classification is evidence; a heuristic is a guess.
+///
+/// ★★ **The asymmetry is inherited, not re-decided.** Income may map; a spend
+/// comes back `ParsedUnmapped` with no operator, exactly as before.
+///
+/// Returns `None` for the same reason the original does: if the confirmed
+/// amount cannot be located in the raw text there is nothing to anchor on, and
+/// a rule anchored on nothing occupies precedence and matches by accident.
+pub fn synthesize_with_shapes(
+    source: &str,
+    raw_text: &str,
+    operator: &str,
+    params: &BTreeMap<String, serde_json::Value>,
+    id: &str,
+) -> Option<ParseRule> {
+    use crate::field_shape::{read, Role};
+
+    let amount = params.get("amount")?.as_f64()?;
+
+    // Which span in the raw text is the amount the person confirmed?
+    let confirmed_at = amount_texts(amount)
+        .into_iter()
+        .find_map(|t| raw_text.find(&t).map(|i| (i, i + t.len())))?;
+
+    let reading = read(raw_text);
+
+    // ★★ Every field the reader found, minus any that overlaps the confirmed
+    //    amount — the person's span wins that ground outright.
+    let mut spans: Vec<(usize, usize, &'static str, FieldKind)> = vec![(
+        confirmed_at.0,
+        confirmed_at.1,
+        "amount",
+        FieldKind::Amount,
+    )];
+    for f in &reading.fields {
+        if f.role == Role::Amount {
+            continue; // the human already supplied this one
+        }
+        let overlaps = f.at.0 < confirmed_at.1 && confirmed_at.0 < f.at.1;
+        if overlaps {
+            continue;
+        }
+        spans.push((
+            f.at.0,
+            f.at.1,
+            f.role.group(),
+            match f.role {
+                Role::Balance | Role::Fee => FieldKind::Amount,
+                _ => FieldKind::Text,
+            },
+        ));
+    }
+    spans.sort_by_key(|s| s.0);
+
+    // ★ One group per name, first occurrence.
+    let mut seen: Vec<&str> = Vec::new();
+    let mut pattern = String::new();
+    let mut extract: BTreeMap<String, FieldSpec> = BTreeMap::new();
+    let mut cursor = 0usize;
+    for (start, end, group, kind) in spans {
+        if start < cursor || seen.contains(&group) {
+            continue;
+        }
+        pattern.push_str(&shape_literal(&raw_text[cursor..start]));
+        pattern.push_str(&crate::field_shape::group_pattern(group));
+        extract.insert(
+            group.to_string(),
+            FieldSpec { kind, group: Some(group.to_string()), value: None },
+        );
+        seen.push(group);
+        cursor = end;
+    }
+    pattern.push_str(&shape_literal(&raw_text[cursor..]));
+
+    let is_income = operator == "budget.record_income";
+
+    let mut rule_params: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+    if is_income {
+        for (k, v) in params {
+            let is_the_amount = k == "amount" && v.as_f64() == Some(amount);
+            rule_params.insert(
+                k.clone(),
+                if is_the_amount { serde_json::json!("$amount") } else { v.clone() },
+            );
+        }
+    }
+
+    Some(ParseRule {
+        id: id.to_string(),
+        source: source.to_string(),
+        version: 1,
+        pattern,
+        extract,
+        status: if is_income { RuleStatus::Mapped } else { RuleStatus::ParsedUnmapped },
+        operator: if is_income { Some(operator.to_string()) } else { None },
+        params: rule_params,
+        flags: vec!["IGNORECASE".into()],
+        reason_template: if is_income {
+            None
+        } else {
+            Some(
+                "Recognised from a message you classified before — still needs a pocket decision."
+                    .into(),
+            )
+        },
+        trust: ParseRuleTrust::UserCorrected,
+        provenance: "human_correction + field shapes".into(),
+        examples: vec![raw_text.to_string()],
+    })
+}
+
+/// Literal context with elastic whitespace. ★ Same treatment the inducer uses,
+/// and for the same reason: providers reflow, and a rule bound to one sample's
+/// spacing breaks on the next message of the same shape.
+fn shape_literal(raw: &str) -> String {
+    if raw.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    if raw.starts_with(char::is_whitespace) {
+        out.push_str(r"\s+");
+    }
+    out.push_str(&raw.split_whitespace().map(regex::escape).collect::<Vec<_>>().join(r"\s+"));
+    if raw.len() > 1 && raw.ends_with(char::is_whitespace) {
+        out.push_str(r"\s+");
+    }
+    out
+}
+
 /// Why a candidate was refused.
 ///
 /// ★ Named the long way: `Refusal` is taken. Collision 44, same house rule —
@@ -482,5 +640,155 @@ mod tests {
         let a = synthesize_from_correction("kcb", UNSEEN, "budget.record_income", &p, "id");
         let b = synthesize_from_correction("kcb", UNSEEN, "budget.record_income", &p, "id");
         assert_eq!(a, b, "no clock, no randomness — the id is the caller's");
+    }
+}
+
+#[cfg(test)]
+mod shape_learning_tests {
+    use super::*;
+    use crate::parse_rule::RuleStatus;
+
+    const RECEIVED: &str = "QGH7XJ2K9L Confirmed. You have received Ksh5,000.00 from JOHN KAMAU \
+                            254712345678 on 20/7/26 at 2:15 PM. New M-PESA balance is Ksh15,000.00";
+    const PAID: &str = "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIVAS SUPERMARKET on 20/7/26 \
+                        at 4:30 PM. New M-PESA balance is Ksh12,050.00";
+
+    fn params(amount: f64) -> BTreeMap<String, serde_json::Value> {
+        let mut p = BTreeMap::new();
+        p.insert("amount".to_string(), serde_json::json!(amount));
+        p
+    }
+
+    fn compiled(rule: &ParseRule) -> regex::Regex {
+        regex::RegexBuilder::new(&rule.pattern)
+            .case_insensitive(true)
+            .build()
+            .expect("a learned pattern must compile")
+    }
+
+    #[test]
+    fn a_learned_rule_carries_none_of_the_message_it_was_taught_with() {
+        // ★★★ The defect this replaces. The original escaped the whole message,
+        //     so a rule learned from one correction carried the sender's name
+        //     and phone number for as long as the rule lived.
+        let rule = synthesize_with_shapes(
+            "mpesa", RECEIVED, "budget.record_income", &params(5000.0), "learned-1",
+        )
+        .expect("synthesised");
+        for pii in ["JOHN KAMAU", "254712345678", "5,000.00", "15,000.00", "QGH7XJ2K9L"] {
+            assert!(!rule.pattern.contains(pii), "the learned pattern leaked {pii:?}");
+        }
+    }
+
+    #[test]
+    fn the_old_synthesiser_really_did_leak_and_this_is_the_difference() {
+        // ★★ Asserted rather than claimed, so the improvement is a fact on the
+        //    record and a regression would show up here.
+        let old = synthesize_from_correction(
+            "mpesa", RECEIVED, "budget.record_income", &params(5000.0), "old",
+        )
+        .expect("synthesised");
+        assert!(old.pattern.contains("JOHN KAMAU"), "the original kept the name");
+
+        let new = synthesize_with_shapes(
+            "mpesa", RECEIVED, "budget.record_income", &params(5000.0), "new",
+        )
+        .expect("synthesised");
+        assert!(!new.pattern.contains("JOHN KAMAU"));
+    }
+
+    #[test]
+    fn a_learned_rule_matches_the_next_message_of_the_same_shape() {
+        // ★★★ The second defect. Anchoring on the date and the closing balance
+        //     meant the rule matched only a message sent that day leaving that
+        //     exact balance — never again. A learner whose output cannot fire
+        //     twice has memorised rather than learned.
+        let rule = synthesize_with_shapes(
+            "mpesa", RECEIVED, "budget.record_income", &params(5000.0), "learned",
+        )
+        .expect("synthesised");
+        let re = compiled(&rule);
+        assert!(re.is_match(RECEIVED), "it matches what taught it");
+
+        // Same shape, everything variable different.
+        let next = "AB99ZZ1234 Confirmed. You have received Ksh250.00 from AMINA HASSAN \
+                    254799887766 on 03/9/26 at 8:05 AM. New M-PESA balance is Ksh9,410.55";
+        assert!(re.is_match(next), "a learned rule must fire on the NEXT message like it");
+
+        // And the original could not.
+        let old = synthesize_from_correction(
+            "mpesa", RECEIVED, "budget.record_income", &params(5000.0), "old",
+        )
+        .expect("synthesised");
+        assert!(!compiled(&old).is_match(next), "the original could only ever match its own text");
+    }
+
+    #[test]
+    fn it_does_not_match_a_different_shape() {
+        // ★★ The literal sentence is still an anchor. Generalising the FIELDS
+        //    is not the same as generalising the message, and a rule that
+        //    matched anything would be worse than none.
+        let rule = synthesize_with_shapes(
+            "mpesa", RECEIVED, "budget.record_income", &params(5000.0), "learned",
+        )
+        .expect("synthesised");
+        assert!(!compiled(&rule).is_match(PAID), "an income rule must not match a spend");
+    }
+
+    #[test]
+    fn a_corrected_spend_never_learns_to_spend_on_its_own() {
+        // ★★★ The asymmetry, inherited and re-asserted. Correcting a spend once
+        //     must not authorise the app to file the next one unasked.
+        let rule = synthesize_with_shapes(
+            "mpesa", PAID, "budget.spend", &params(450.0), "learned-spend",
+        )
+        .expect("synthesised");
+        assert_eq!(rule.status, RuleStatus::ParsedUnmapped);
+        assert!(rule.operator.is_none());
+        assert!(rule.params.is_empty(), "no params to apply, because it will not apply");
+        assert!(rule.reason_template.as_deref().unwrap().contains("pocket decision"));
+    }
+
+    #[test]
+    fn the_human_wins_where_the_reader_disagrees() {
+        // ★★★ A confirmed classification is evidence; a heuristic is a guess.
+        //     Here the person confirms the BALANCE figure as the amount — an
+        //     odd correction, and theirs to make. The rule must anchor on what
+        //     they said, not on what the reader would have picked.
+        let rule = synthesize_with_shapes(
+            "mpesa", RECEIVED, "budget.record_income", &params(15000.0), "learned",
+        )
+        .expect("synthesised");
+        let re = compiled(&rule);
+        let caps = re.captures(RECEIVED).expect("matches");
+        assert_eq!(caps.name("amount").map(|m| m.as_str()), Some("15,000.00"));
+    }
+
+    #[test]
+    fn an_unlocatable_amount_still_refuses() {
+        // ★ Unchanged: a rule anchored on nothing occupies precedence and
+        //   matches by accident.
+        assert!(synthesize_with_shapes(
+            "mpesa", RECEIVED, "budget.record_income", &params(77.0), "x"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn it_is_marked_as_a_human_correction() {
+        let rule = synthesize_with_shapes(
+            "mpesa", RECEIVED, "budget.record_income", &params(5000.0), "learned",
+        )
+        .expect("synthesised");
+        assert_eq!(rule.trust, ParseRuleTrust::UserCorrected);
+        assert!(rule.provenance.contains("human_correction"));
+        assert_eq!(rule.examples, vec![RECEIVED.to_string()]);
+    }
+
+    #[test]
+    fn learning_is_deterministic() {
+        let a = synthesize_with_shapes("m", RECEIVED, "budget.record_income", &params(5000.0), "i");
+        let b = synthesize_with_shapes("m", RECEIVED, "budget.record_income", &params(5000.0), "i");
+        assert_eq!(a, b);
     }
 }

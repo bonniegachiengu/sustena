@@ -976,7 +976,13 @@ pub fn learn_rule(
         _ => BTreeMap::new(),
     };
     let id = format!("learned_{}_{}", m.source_id, &m.dedup_key[..12]);
-    let Some(candidate) = sustena_core::synthesize_from_correction(
+    // ★★★ Shape-aware since 31 Aug. The correction says what the message MEANT;
+    //     the field reader says what it is SHAPED like, and the rule needs both.
+    //     The previous synthesiser escaped the whole message as a literal, so a
+    //     rule learned from one correction carried the sender's name and phone
+    //     number for as long as it lived — and, anchored on that day's date and
+    //     closing balance, could never match a second message anyway.
+    let Some(candidate) = sustena_core::synthesize_with_shapes(
         &m.source_id,
         &m.raw_payload,
         &operator,

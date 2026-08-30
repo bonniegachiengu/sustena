@@ -133,6 +133,15 @@ pub mod ensemble;
 pub mod enzyme;
 pub mod error;
 pub mod event;
+pub mod field_shape;
+// ★ Collision rule, again: `Reading` belongs to the Orchie surface and `Role`
+//   to division-of-labour, so the newcomers take the longer names. `induce`
+//   and `read` stay behind the module path -- `read` is the most generic verb
+//   in the language and `field_shape::read` says which read it is.
+pub use field_shape::{
+    Direction as MoneyDirection, Field as ShapedField, Reading as FieldReading,
+    Role as FieldRole,
+};
 pub mod flow;
 pub mod ledger;
 pub mod fold;
@@ -496,7 +505,9 @@ pub use effect_capture::{
     missing_required, narrow_by_verb, required_params_satisfiable, resolve_description, Capture,
     Choice, DeclaredParams, Inference, OperatorParams,
 };
-pub use parse_rule_learn::{synthesize_from_correction, verify_candidate, LearningRefusal};
+pub use parse_rule_learn::{
+    synthesize_from_correction, synthesize_with_shapes, verify_candidate, LearningRefusal,
+};
 pub use parse_rule::{
     apply_rule, run_rules, typecheck_rule, FieldKind, FieldSpec, NoOperators, OperatorUniverse,
     ParseRule, ParseRuleTrust, RuleStatus,
