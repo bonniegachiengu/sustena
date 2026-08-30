@@ -138,7 +138,12 @@ pub fn invert(mutations: &[Mutation]) -> Result<Vec<Mutation>, InverseError> {
                     item_id: item_id.clone(),
                 })
             }
-            Mutation::ReplaceRoot { .. } => return Err(InverseError::PriorRootNotRecorded),
+            // ★ Neither records what the root held before, so neither can be
+            //   inverted. A join is additionally irreversible in principle:
+            //   knowing `a ⊔ b` does not tell you which side contributed what.
+            Mutation::ReplaceRoot { .. } | Mutation::JoinRoot { .. } => {
+                return Err(InverseError::PriorRootNotRecorded)
+            }
         });
     }
 

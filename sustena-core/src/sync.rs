@@ -471,7 +471,8 @@ fn touched(mutations: &[Mutation]) -> Vec<String> {
             Mutation::Set { path, .. } => path.clone(),
             Mutation::Append { path, .. } => path.clone(),
             Mutation::Remove { path, .. } => path.clone(),
-            Mutation::ReplaceRoot { .. } => String::new(),
+            // ★ Both write the whole document, so neither has a path.
+            Mutation::ReplaceRoot { .. } | Mutation::JoinRoot { .. } => String::new(),
         })
         .collect()
 }

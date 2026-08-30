@@ -38,9 +38,34 @@ pub enum Mutation {
         path: String,
         item_id: String,
     },
-    /// Genesis marker: discard everything and start from `value`.
-    /// By construction always the first event in a sustain's history.
+    /// Replace the whole root with `value`.
+    ///
+    /// ★★★ **A replacement, and it must stay one.** `diff` reaches for this
+    /// when a shape change removes a key, because no `Set` can express *this
+    /// key is gone*. That makes it non-monotone, and so NOT the join Multiparty
+    /// §VI requires of a merge -- which is exactly why genesis stopped using
+    /// it. See [`Mutation::JoinRoot`].
     ReplaceRoot {
+        value: Value,
+    },
+    /// Join `value` into the root — the least upper bound, Multiparty §VI.
+    ///
+    /// ★★★ **What genesis writes.** An opening state is not a replacement of
+    /// anything: it is the claim *this Sustain begins here*. Written as a
+    /// replacement it worked while a Sustain had one history and erased a
+    /// household the moment two nodes had each created it before they met --
+    /// two genesis lines in one log, the later one wiping what came before.
+    ///
+    /// §VI settles what a merge is: commutative, associative, idempotent, and
+    /// "never an overwrite of them ... the holon invariant is not a policy
+    /// sitting on top of the merge, it IS the merge." So genesis joins, and
+    /// twin genesis is `s ⊔ s = s`.
+    ///
+    /// ★★ Kept as its own variant rather than a flag on `ReplaceRoot`, because
+    /// the two genuinely differ in whether they can remove a key. Collapsing
+    /// them would mean a caller could pick the wrong semantics by forgetting
+    /// to set a boolean.
+    JoinRoot {
         value: Value,
     },
 }
@@ -52,7 +77,7 @@ impl Mutation {
             Mutation::Set { path, .. }
             | Mutation::Append { path, .. }
             | Mutation::Remove { path, .. } => Some(path),
-            Mutation::ReplaceRoot { .. } => None,
+            Mutation::ReplaceRoot { .. } | Mutation::JoinRoot { .. } => None,
         }
     }
 

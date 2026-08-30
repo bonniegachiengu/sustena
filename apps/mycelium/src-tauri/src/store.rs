@@ -126,15 +126,22 @@ impl Replayable for LoggedEvent {
 }
 
 impl LoggedEvent {
-    /// ★★ The genesis line: the opening state as one `ReplaceRoot`. Every
+    /// ★★ The genesis line: the opening state as one `JoinRoot`. Every
     /// Sustain's history starts here, so there is no "before the log" state to
     /// special-case.
+    ///
+    /// ★★★ **A join, not a replacement — Multiparty §VI.** Written as a
+    /// replacement this erased a household the moment two nodes had each
+    /// created the same Sustain before they met: two genesis lines in one log,
+    /// and the later one wiping everything folded before it. An opening state
+    /// is not a replacement of anything, and §VI leaves no room to choose --
+    /// a merge takes the least upper bound and "never erases the node".
     pub fn genesis(state: &Value) -> Self {
         LoggedEvent {
             seq: 0,
             operator: "genesis".into(),
             events: Vec::new(),
-            mutations: vec![Mutation::ReplaceRoot { value: state.clone() }],
+            mutations: vec![Mutation::JoinRoot { value: state.clone() }],
             // ★ Genesis is not an Enzyme call, so there are no params to have.
             params: None,
             origin: None,
