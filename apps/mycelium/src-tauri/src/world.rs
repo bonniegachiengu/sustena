@@ -361,6 +361,14 @@ impl World {
 
         let peering = Arc::new(Peering::at(&store_root, store.clone()));
         let arena = Arena::at(&store_root);
+        // ★★★ What ships with the app goes on the shelf here, before anyone
+        //     unlocks anything — which is also when a person most wants to see
+        //     what it can do. Bundled and unsigned; see `seed_bundled`.
+        //
+        // ★ The count is discarded rather than logged: a seed that ran is the
+        //   ordinary case, and a launch line about it would be noise on every
+        //   start after the first.
+        let _ = crate::arena::seed_bundled(&arena);
         let round = AtomicU64::new(0);
 
         Ok(World {
@@ -1545,6 +1553,15 @@ impl World {
             .arena
             .all()
             .into_iter()
+            // ★★★ **A node offers what it WROTE, not what it was shipped.**
+            //     Bundled cards are identical on every node running this
+            //     version, so offering them to a peer is offering something
+            //     they already have — and it buries the handful of things this
+            //     household actually authored under a list of things nobody
+            //     chose. A shelf a peer browses should answer *what has this
+            //     household made*, which is a different question from *what is
+            //     installed here*.
+            .filter(|p| p.origin != Origin::Bundled)
             .filter(|p| p.provenance().integrity == Integrity::Intact)
             .filter_map(|p| {
                 let value = serde_json::to_value(&p).ok()?;

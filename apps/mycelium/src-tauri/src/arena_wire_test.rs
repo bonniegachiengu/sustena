@@ -96,6 +96,15 @@ fn peered(name: &str) -> (Node, Node) {
 
 // ── the loop ────────────────────────────────────────────────────────────────
 
+/// What actually crossed the wire onto this node.
+///
+/// ★★ Not `all()`. Every node seeds the cards it ships with, so an empty shelf
+/// is not the resting state any more — and these tests are about what a PEER
+/// put here, which is exactly the non-bundled part.
+fn landed(w: &World) -> Vec<crate::arena::Package> {
+    w.arena().all().into_iter().filter(|p| p.origin != sustena_core::package::Origin::Bundled).collect()
+}
+
 #[test]
 fn a_publishes_b_pulls_installs_through_the_real_gate_and_instantiates() {
     // ★★★ The whole increment, end to end and over the encrypted session.
@@ -116,7 +125,7 @@ fn a_publishes_b_pulls_installs_through_the_real_gate_and_instantiates() {
     assert_eq!(offer.content_hash, pkg.content_hash);
     assert!(offer.signed, "A published under its own key");
     // ★★ A listing is metadata. Nothing landed by looking.
-    assert!(b.world.arena().all().is_empty(), "browsing is not fetching");
+    assert!(landed(&b.world).is_empty(), "browsing is not fetching");
 
     // ── fetch ───────────────────────────────────────────────────────────────
     let got = b.world.fetch_package(&a.address(), &offer.content_hash).expect("fetch");
@@ -245,7 +254,7 @@ fn a_package_whose_bytes_do_not_match_its_hash_is_refused_on_arrival() {
     assert!(err.contains("no package"), "{err}");
     // The honest hash is not on offer either, since the record is broken.
     assert!(b.world.fetch_package(&a.address(), &honest).is_err());
-    assert!(b.world.arena().all().is_empty(), "nothing landed");
+    assert!(landed(&b.world).is_empty(), "nothing landed");
 }
 
 #[test]
@@ -262,7 +271,7 @@ fn asking_for_one_package_and_being_sent_another_is_refused() {
         .fetch_package(&a.address(), &"ab".repeat(32))
         .expect_err("a hash A does not hold");
     assert!(err.contains("no package"), "{err}");
-    assert!(b.world.arena().all().is_empty());
+    assert!(landed(&b.world).is_empty());
 }
 
 #[test]
@@ -338,7 +347,7 @@ fn a_forged_signature_from_a_peer_is_refused_at_the_door() {
 
     let err = b.world.fetch_package(&a.address(), &hash).expect_err("forged");
     assert!(err.contains("does not verify"), "{err}");
-    assert!(b.world.arena().all().is_empty(), "nothing was stored");
+    assert!(landed(&b.world).is_empty(), "nothing was stored");
 }
 
 #[test]

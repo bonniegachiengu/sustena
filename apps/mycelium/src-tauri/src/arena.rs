@@ -353,6 +353,146 @@ fn append<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     f.sync_all().map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------------------
+// The bundled shelf
+// ---------------------------------------------------------------------------
+
+/// Put what ships with the app onto the shelf, once.
+///
+/// ★★★ **The Library read empty and it was telling the truth about the wrong
+/// question.** It is the Arena: the shelf of things somebody *published*. Nobody
+/// had, so it showed nothing — while the app shipped with three definitions and
+/// a set of curated cards a person could genuinely install. The shelf was empty
+/// of published things and the app was not empty of things.
+///
+/// ★★★ **These are `Bundled`, and that is the whole design.** [`Origin`] has
+/// carried a `Bundled` variant — *"shipped with the app"* — since the package
+/// type was written, and nothing had ever constructed one. Publishing the
+/// built-ins under the household's own key would have been the easy way to fill
+/// the screen and it would have been a **lie about authorship**: Bonnie did not
+/// write the habitat template. The Arena's entire value is that its three
+/// questions stay separate and answerable, and the first one is *who made this*.
+///
+/// ★★★ **So they are UNSIGNED, on purpose.** `Authenticity::Unsigned` is the
+/// honest answer for an artifact this node did not sign, and the provenance
+/// panel already renders it as its own fact rather than a failure. A signature
+/// from this node's key would say *this household vouches for these bytes*,
+/// which is a different claim from *these bytes shipped with the app* — and the
+/// second is the true one.
+///
+/// ★★ **It needs no unlock**, unlike [`World::publish`], and could not use one:
+/// there is no key to sign with and nothing to sign. So the shelf is populated
+/// at store-open, before anybody types a passphrase, which is also when a person
+/// most wants to see what the app can do.
+///
+/// ★★ **Idempotent by content hash.** A package's id is derived from its spec,
+/// so re-seeding an unchanged built-in produces the same id and is skipped.
+/// Editing a built-in in a later release produces a different id and a new
+/// entry — which is correct: it is a different artifact, and the old one is
+/// what an existing install is pinned to.
+///
+/// Returns how many were newly added.
+pub fn seed_bundled(arena: &Arena) -> usize {
+    let existing: std::collections::BTreeSet<String> =
+        arena.all().into_iter().map(|p| p.id).collect();
+    let mut added = 0;
+
+    for pkg in bundled_packages() {
+        if existing.contains(&pkg.id) {
+            continue;
+        }
+        // ★ A seed that cannot write is not worth failing a launch for. The
+        //   shelf is a convenience; the engine is not.
+        if arena.record(pkg).is_ok() {
+            added += 1;
+        }
+    }
+    added
+}
+
+/// The author field for something nobody here wrote.
+///
+/// ★★ Not a key, and deliberately not empty: an empty author would render as a
+/// blank where a person expects an identity, and blanks get read as bugs. This
+/// is a label that says what it is, and `Origin::Bundled` beside it is the part
+/// that carries the meaning.
+pub const BUNDLED_AUTHOR: &str = "bundled-with-sustena";
+
+/// Everything the app ships that a person could install.
+///
+/// ★★★ **Cards, and deliberately not the Σ-templates.** The three built-in
+/// templates are already installable — the Define screen instantiates them
+/// directly — so packaging them would add a second route to the same act, and
+/// two ways to do one thing is how a surface starts disagreeing with itself.
+/// They are also not cleanly expressible as an `AuthoredDefinition` without
+/// reading a `Schema` back out, and a lossy round-trip through the package form
+/// would put a *different* definition on the shelf under the same name.
+///
+/// A card is the opposite case: it maps exactly, and installing one into a
+/// Sustain is a real act with no other route.
+fn bundled_packages() -> Vec<Package> {
+    crate::orchie::widget_declarations()
+        .into_iter()
+        .filter_map(|w| {
+            // ★★ The AUTHORED form, not the core type — the same shape a real
+            //    publish carries, so a bundled card and a published one are
+            //    indistinguishable to `install` and face the identical gate.
+            let authored = crate::widgets::AuthoredWidget {
+                id: w.id.clone(),
+                render: w.render.clone(),
+                inputs: w.inputs.clone(),
+                emits: w.emits.clone(),
+                event_class: match &w.binding {
+                    sustena_core::BindingKey::Unit => None,
+                    sustena_core::BindingKey::Event(name) => Some(name.clone()),
+                },
+            };
+            let spec = serde_json::to_value(&authored).ok()?;
+            Some(bundled(
+                &w.id,
+                Kind::Widget,
+                "A curated-UI card that ships with the app.",
+                vec!["card".into(), "built-in".into()],
+                spec,
+            ))
+        })
+        .collect()
+}
+
+/// One bundled package, stamped the way an authored one is minus the signature.
+fn bundled(
+    name: &str,
+    kind: Kind,
+    description: &str,
+    tags: Vec<String>,
+    spec: Value,
+) -> Package {
+    let content_hash = content_hash(&spec);
+    Package {
+        id: format!("pkg-{}", &content_hash[..12]),
+        name: name.to_string(),
+        kind,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        description: description.to_string(),
+        tags,
+        spec,
+        author: BUNDLED_AUTHOR.to_string(),
+        author_handle: "Sustena".to_string(),
+        // ★★★ None, and it must stay None. See `seed_bundled`'s note: a
+        //     signature here would claim this node vouches for bytes it did not
+        //     write. `Authenticity::Unsigned` is the true answer.
+        signature: None,
+        content_hash,
+        origin: Origin::Bundled,
+        per_mille: 0,
+        // ★★ Zero, not a clock read. A bundled package has no publication
+        //    moment — it was in the binary before this node existed — and
+        //    stamping "now" would make the same artifact look newly published
+        //    on every fresh install.
+        published_at: 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,5 +571,111 @@ mod tests {
         let p = package(spec, Some(&hash), Some(&"11".repeat(64)), &"aa".repeat(32));
         assert_eq!(p.provenance().authenticity, Authenticity::Forged);
         assert!(!p.provenance().safe_to_install());
+    }
+}
+
+#[cfg(test)]
+mod bundled_tests {
+    use super::*;
+    use sustena_core::{Authenticity, Integrity};
+
+    /// ★ Same convention as `peers_test`: a named directory under the system
+    /// temp, cleared first, rather than a dev-dependency for one helper.
+    fn arena(name: &str) -> Arena {
+        let dir = std::env::temp_dir().join(format!("mycelium-bundled-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        Arena::at(&dir)
+    }
+
+    #[test]
+    fn the_shelf_is_not_empty_after_seeding() {
+        // The whole point: the Library read empty while the app shipped with
+        // cards a person could install.
+        let a = arena("empty");
+        assert_eq!(a.all().len(), 0, "nothing before");
+        let n = seed_bundled(&a);
+        assert!(n > 0, "the app ships at least one card");
+        assert_eq!(a.all().len(), n);
+    }
+
+    #[test]
+    fn nothing_bundled_claims_this_node_wrote_it() {
+        // ★★★ The property that matters more than the shelf being full.
+        //     Publishing built-ins under the household's key would have been
+        //     the easy way to fill the screen and a lie about authorship.
+        let a = arena("author");
+        seed_bundled(&a);
+        for p in a.all() {
+            assert_eq!(p.origin, Origin::Bundled, "{} must be Bundled", p.name);
+            assert_eq!(p.author, BUNDLED_AUTHOR, "{} must not carry a node key", p.name);
+            assert!(p.signature.is_none(), "{} must be unsigned", p.name);
+        }
+    }
+
+    #[test]
+    fn unsigned_is_reported_as_its_own_fact_and_not_as_a_failure() {
+        // ★★ Unsigned and Forged are different answers. A bundled card has
+        //    nobody vouching for it, which is true and is not tampering.
+        let a = arena("unsigned");
+        seed_bundled(&a);
+        let p = a.all().into_iter().next().expect("a card");
+        let prov = p.provenance();
+        assert_eq!(prov.authenticity, Authenticity::Unsigned);
+        assert_eq!(prov.integrity, Integrity::Intact, "the bytes are still the bytes");
+    }
+
+    #[test]
+    fn seeding_twice_adds_nothing() {
+        // ★★ Idempotent by content hash, so a launch does not grow the shelf.
+        let a = arena("twice");
+        let first = seed_bundled(&a);
+        let second = seed_bundled(&a);
+        assert!(first > 0);
+        assert_eq!(second, 0, "the second launch adds nothing");
+        assert_eq!(a.all().len(), first);
+    }
+
+    #[test]
+    fn a_bundled_card_carries_the_same_spec_shape_a_published_one_would() {
+        // ★★★ So `install` cannot tell them apart and both face the identical
+        //     gate. A bundled artifact that took a shortcut past the check
+        //     would be the one thing this shelf must not introduce.
+        let a = arena("shape");
+        seed_bundled(&a);
+        for p in a.all() {
+            assert_eq!(p.kind, Kind::Widget);
+            let decoded: Result<crate::widgets::AuthoredWidget, _> =
+                serde_json::from_value(p.spec.clone());
+            assert!(decoded.is_ok(), "{} must decode as the authored form", p.name);
+        }
+    }
+
+    #[test]
+    fn the_content_hash_is_over_the_spec_it_actually_carries() {
+        let a = arena("hash");
+        seed_bundled(&a);
+        for p in a.all() {
+            assert_eq!(p.content_hash, content_hash(&p.spec), "{}", p.name);
+        }
+    }
+
+    #[test]
+    fn a_bundled_package_has_no_publication_moment() {
+        // ★★ Zero rather than a clock read: it was in the binary before this
+        //    node existed, and "now" would make it look newly published on
+        //    every fresh install.
+        let a = arena("moment");
+        seed_bundled(&a);
+        assert!(a.all().iter().all(|p| p.published_at == 0));
+    }
+
+    #[test]
+    fn every_shipped_card_reaches_the_shelf() {
+        // ★ One package per card, not one for the set, so a household installs
+        //   the ones it wants.
+        let a = arena("every");
+        seed_bundled(&a);
+        assert_eq!(a.all().len(), crate::orchie::widget_declarations().len());
     }
 }
