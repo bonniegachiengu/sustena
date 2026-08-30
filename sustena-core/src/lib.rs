@@ -133,6 +133,7 @@ pub mod ensemble;
 pub mod enzyme;
 pub mod error;
 pub mod event;
+pub mod field_shape;
 pub mod flow;
 pub mod ledger;
 pub mod fold;
