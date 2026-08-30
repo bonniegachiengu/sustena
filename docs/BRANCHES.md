@@ -42,6 +42,52 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `feat/intake-key` — merged into `dev` 30 Aug — **ING-5, host + real data**
+
+**Off:** `dev` / gate green (python 2,346 · core 2,090 · host 256).
+
+The core keyed a capture on the transaction it describes; the host still keyed
+on a hash of the wording. **That is a disagreement about identity, not about a
+value**, which is the sharpest kind two engines can have.
+
+★★★ **The host wiring forced the order: parse, THEN key.** The first attempt
+inserted on a text key and upgraded it after parsing, and that silently broke
+the byte-identical fast path — the first row no longer held the key the second
+capture computed, so a plain retry inserted a second row. Caught by a test, not
+by inspection. The key is a property of the fact and the fact is unknown before
+a parse, so the order is structural rather than an optimisation to revisit.
+
+★★★ **`_intake_key` and `_fact_key` disagree about the amount, and both are
+right.** The intake key runs WITHIN one source, where the same parser read both
+amounts, so a reference collision — a truncated code, a reversal pair reusing a
+reference — must not swallow a separate transaction. Correlation runs ACROSS
+sources, where two parsers format amounts differently and requiring a match
+would let the double-count back in. Recorded in both docstrings rather than
+left as an apparent contradiction for somebody to trip over.
+
+★★★ **The honest limit is pinned as a test.** The intrinsic key can only key
+on a fact the parser could read, so a reformat severe enough to BREAK parsing
+is not recognised as the same intake. The failure mode is the safe one: a
+question for a person, never a second application of the money.
+
+**The migration, on Bonnie's real captures.** Backed up first
+(`backups/sustena_pre_intake_key_20260830_085451.db`), dry-run first, applied
+second. **127 before, 127 after, 127 distinct keys, zero lost, zero merged** — and
+a fingerprint over every row's id, status and raw text is byte-identical across
+the migration, so nothing but the key column moved. All 127 keys were then
+independently recomputed through the LIVE capture path and matched, which is the
+property that actually matters: a re-send of an old message is still recognised.
+
+★★★ **It reports would-be collisions rather than merging them.** Both rows
+already exist and one may already have moved money, so collapsing them would be
+the migration deciding something about somebody's money it is not entitled to
+decide. On the real data there were none.
+
+★★ **On real data the intrinsic key caught nothing**, and that is a real
+answer rather than an assumption. Zero of the 127 saved captures would have
+collided, so the row buys protection going forward and did not quietly fix a
+past double-count.
+
 ### `docs/close-the-economy-layer` — merged into `dev` 29 Aug — **MYC-5 · MYC-6 · PAWA-12 · UI-12**
 
 The last four rows, and three of them closed by **reading** rather than
