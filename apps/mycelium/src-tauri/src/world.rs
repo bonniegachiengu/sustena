@@ -1866,7 +1866,7 @@ impl World {
             //   node to validate anything. An absent role's share folds into
             //   the treasury by the declared rule, never dropped.
             validator: None,
-            proposer: None,
+
             referrer: None,
         };
         Ok(settle(

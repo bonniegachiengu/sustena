@@ -5,101 +5,152 @@
   "authored_from": "Pawa §4 (contribution), Mycelium §VI + Arena §IV (the schedule ratified 2026-08-04)",
   "replayed_by": "sustena-core/tests/conformance_royalty.rs",
   "note": "The FIRST slice in the economy layer with a transfer in it — so the hard boundary is restated structurally rather than merely inherited.",
-
   "★★★_the_hard_boundary_what_makes_an_internal_transfer_DISTINGUISHABLE_from_a_real_one": "Every prior module kept the boundary by having NO TRANSFER AT ALL. That is no longer available, so the distinction is made three ways, each structural. (1) A TRANSFER ONLY EVER MOVES JUUL BETWEEN LEDGER BALANCES — an internal accounting reallocation, never a settlement instruction to anything outside this process. (2) ΣΔ = 0: a royalty is a set of `Entry::Transfer` values, and that variant's `circulation_delta` is `0.0` BY CONSTRUCTION — ONE ENTRY CARRYING BOTH ENDS, so half a transfer is unspellable, where a `TransferOut`/`TransferIn` pair would be two records a caller could write one of. Contrast a MINT, which would raise the total and is a DIFFERENT VARIANT that does not exist yet (PAWA-7 genesis, PAWA-8 issuance). (3) ★★★ THE NO-RAIL PROPERTY STAYS: there is NO CODE PATH FROM A TRANSFER TO REAL VALUE — no cash-out, no redemption, no external counterparty, no juul→anything bridge. Juul is NOT REDEEMABLE. THAT ABSENCE IS THE DISTINCTION: an internal reallocation and a real payment differ here by the TOTAL NON-EXISTENCE of the second thing, and a test proves the absence by reading the source rather than asserting it in prose.",
-
   "★★_the_STEP_0_reconcile": {
-    "★★★_1_the_reference's_four_way_split_is_SUPERSEDED_not_a_port_target": "`PawaLedger.charge()` runs the earlier `70/20/5/5` across contributor / treasury / referrer / validator, and has ZERO CALLERS — confirmed in PAWA-2's own STEP-0, where its only other mention in the reference was a docstring. MYC-5's row says the articles now all carry the ratified schedule and that migrating the code is an explicit Track-3 migration. So this row is NOT a port of that method: the ratified five-way is built fresh, and the old one is recorded as superseded rather than quietly replaced.",
-    "★★★_2_the_ratified_schedule_confirmed_against_the_row_term_by_term": "FIVE recipients, in the row's own order — contributor / treasury / validator / proposer / referrer. TWO revenue types: a PAWA CHARGE (usage) splits 70/15/5/5/5; a LICENCE SALE (access) splits 80/10/3/2/5. Integer-floor arithmetic with THE REMAINDER ASSIGNED TO THE VALIDATOR SHARE. The schedule adds the PROPOSER share and SEPARATES THE TWO REVENUE TYPES — neither of which the earlier single four-way split could express.",
     "★★_3_why_the_arithmetic_is_INTEGRAL_and_the_ledger_is_not": "Exact conservation over floats is not achievable and claiming it would be false. So the split is computed in `u64` — where `Σ shares == amount` is a genuine theorem — and the resulting integer-valued shares enter the `f64` ledger. PAWA-2's own residual already named `f64` balances as a decision belonging with κ's calibration; this row does not pre-empt it, it confines the exactness claim to the domain where it is true.",
-    "★_4_the_cost_and_the_royalty_are_two_different_flows_and_stay_apart": "`pawa(o)` — PAWA-1's measurement, charged by PAWA-3's gate clause — is a COST: no counterparty, and it LEAVES CIRCULATION. A royalty is a TRANSFER: five counterparties, and circulation UNCHANGED. `settle` does the second only; the gate's charge is untouched by this row."
+    "★_4_the_cost_and_the_royalty_are_two_different_flows_and_stay_apart": "`pawa(o)` — PAWA-1's measurement, charged by PAWA-3's gate clause — is a COST: no counterparty, and it LEAVES CIRCULATION. A royalty is a TRANSFER: five counterparties, and circulation UNCHANGED. `settle` does the second only; the gate's charge is untouched by this row.",
+    "★★★_1_the_four_way_split_is_CANON_and_the_five_way_was_a_drift": "REVERTED 2026-08-30. Both engines ran a FIVE-way `70/15/5/5/5` (treasury cut to 15, a `proposer` share added) plus a separate licence-sale `80/10/3/2/5`. Neither is canon: the canonical split is the FOUR-way `70/20/5/5` across contributor / treasury / validator / referrer. The five-way entered the corpus on 2026-08-04 marked \"ratified\" and was propagated into the articles on 2026-08-05; the authorship of that change could not be established from any artifact (the articles are gitignored, so there is no history for them), and it was NOT the decision it was recorded as. `proposer` is REMOVED from both engines rather than deprecated -- a role with no share is not a role, and leaving the variant in place would let it drift back.",
+    "★★★_2_the_schedule_term_by_term": "FOUR recipients, in order -- contributor / treasury / validator / referrer -- splitting 70 / 20 / 5 / 5. Integer-floor arithmetic with THE REMAINDER ASSIGNED TO THE VALIDATOR SHARE, so conservation is exact by construction. An ABSENT role's share folds into the treasury and is never dropped. The `RevenueType` distinction (usage vs access) is KEPT because paying to RUN something is genuinely not paying to HAVE it and `pricing` routes on it -- but no licence-sale split has been decided, so ACCESS PROVISIONALLY MIRRORS USAGE and `access_is_provisional()` says so executably in both engines."
   },
-
   "divergence": {
     "kind": "rust-only-ratified-schedule-superseding-a-scaffolded-reference",
     "statement": "A split exists as a CONCEPT in the reference and is at parity as such. Everything about WHICH split, and about the conservation guarantee, is new.",
-
     "★★_what_is_at_parity_and_what_is_the_sharpening": {
       "at parity — the concept": "That a run of a contributed thing pays its contributor a share, with a treasury slice bridging the private economy and the public commons. `PawaLedger.charge()` expresses that, and this row did not invent it.",
-      "★★★ the sharpening — the ratified schedule": "FIVE recipients, not four (the PROPOSER share is new), and TWO revenue types rather than one — usage 70/15/5/5/5 versus access 80/10/3/2/5. The reference has a single four-way split that cannot express either.",
       "★★★ the sharpening — conservation as a THEOREM": "The reference computes `int(cost*0.70)`, `int(cost*0.20)`, `int(cost*0.05)` and gives the validator `cost - the other three` — which is conserving for its four, and is the same idea. What is new is that the guarantee is STATED, TESTED ADVERSARIALLY (primes, 1, 2, 3, 7, 65537), and extended to the case the reference has no answer for: AN ABSENT ROLE. Dropping an absent recipient's share would break conservation silently.",
-      "★★ the sharpening — the conserved transfer as a TYPE": "The reference moves value by calling `deduct` then `_write` per recipient — separate rows that could diverge. `Entry::Transfer` carries BOTH ENDS in one value, so `ΣΔ = 0` is a property of the shape rather than of the sequence of calls that produced it."
+      "★★ the sharpening — the conserved transfer as a TYPE": "The reference moves value by calling `deduct` then `_write` per recipient — separate rows that could diverge. `Entry::Transfer` carries BOTH ENDS in one value, so `ΣΔ = 0` is a property of the shape rather than of the sequence of calls that produced it.",
+      "★★★ at parity — the schedule itself": "Both engines run the same four-way 70/20/5/5 as of 2026-08-30. This row is no longer a sharpening: the reference's split was never wrong about the percentages, and the five-way that briefly replaced it in both engines has been reverted. What IS still a sharpening is conservation as a stated, adversarially-tested theorem, and the absent-role fold -- see the next entry."
     },
-
-    "★★★_the_single_host_role_absence_and_how_it_is_handled": "A single-process run genuinely has NO VALIDATOR (there is no second node to validate anything), and a contribution often has no proposer and no referrer. Dropping those shares would break conservation, so they are NOT dropped: AN ABSENT ROLE'S SHARE IS FOLDED INTO THE TREASURY, by a declared rule in `split`. The treasury is the right destination because it IS the commons — a share nobody is there to receive returns to the pool everyone draws on — and PAWA-6 makes that recipient a full Sustain `Σ_T`. ★ The redirection happens AFTER the remainder is assigned, so it is a reallocation among the same five buckets and the sum is untouched by construction; a dedicated test runs every optional role absent and asserts the total still equals the amount exactly.",
-
+    "★★★_the_single_host_role_absence_and_how_it_is_handled": "A single-process run genuinely has NO VALIDATOR (there is no second node to validate anything), and a contribution often has no referrerand no referrer. Dropping those shares would break conservation, so they are NOT dropped: AN ABSENT ROLE'S SHARE IS FOLDED INTO THE TREASURY, by a declared rule in `split`. The treasury is the right destination because it IS the commons — a share nobody is there to receive returns to the pool everyone draws on — and PAWA-6 makes that recipient a full Sustain `Σ_T`. ★ The redirection happens AFTER the remainder is assigned, so it is a reallocation among the same five buckets and the sum is untouched by construction; a dedicated test runs every optional role absent and asserts the total still equals the amount exactly.",
     "the_honest_limits": "★★ THE TREASURY IS A NAMED PRINCIPAL, NOT YET A SUSTAIN — it holds a balance like anyone else; `Σ_T` with its own viable region, reserve floor and category caps is PAWA-6, and the boundary is named rather than pre-empted. ★★ `settle` IS NOT WIRED INTO THE GATE — PAWA-3's clause charges the COST on commit; nothing yet calls `settle` from `execute_afforded`, because which contribution a run is attributable to is a question this core cannot answer alone (a `Licence` hangs on a contribution, and attributing a run to one is the Arena's registry, not the operator's). ★ THE ROYALTY BASE IS SUPPLIED BY THE CALLER — `settle` takes the amount to charge a royalty ON; deriving it from the run's own pawa is the natural wiring and is left to whoever does that wiring. ★★ A PARTIAL SETTLEMENT IS REFUSED WHOLESALE — if the payer cannot cover the full royalty, NOTHING moves, because paying the first recipients and running out would leave the split unconserved against its own schedule. ★ NO SHARE IS EVER NEGATIVE AND NO RATE IS VALIDATED AGAINST 100 % — `per_mille` above 1000 would compute a royalty larger than the amount, which the affordability check would then refuse; a declared-rate ceiling is a governance question (PAWA-9/10), not an arithmetic one. ★★ AND NOTHING HERE MINTS — the only variant that raises circulation does not exist; genesis and issuance are their own rows, deliberately."
   },
-
   "conservation_cases": [
     {
       "name": "the_split_is_exactly_conserving_for_adversarial_amounts",
       "why": "★★★ THE THEOREM. Primes and tiny values are exactly where an integer split leaks if the remainder is discarded — 1, 2, 3, 7, 11, 97, 997, 7919, 65537, 999983, under BOTH schedules. It is not discarded: it IS the validator's last juul, which is what makes `Σ shares == amount` true by construction rather than by a check bolted on afterwards.",
-      "expect": {"sum": "== amount, exactly, for every case"}
+      "expect": {
+        "sum": "== amount, exactly, for every case"
+      }
     },
     {
       "name": "the_split_conserves_with_every_optional_role_absent",
-      "why": "★★★ The single-host case, and the one the reference has no answer for. With no validator, no proposer and no referrer, every one of those shares folds into the TREASURY rather than being dropped — and the total still equals the amount exactly. Dropping a share would break conservation silently, which is the one thing this module must not do.",
-      "expect": {"sum": "== amount", "recipients": ["contributor", "treasury"]}
+      "why": "★★★ The single-host case, and the one the reference has no answer for. With no validator and no referrer, every one of those shares folds into the TREASURY rather than being dropped — and the total still equals the amount exactly. Dropping a share would break conservation silently, which is the one thing this module must not do.",
+      "expect": {
+        "sum": "== amount",
+        "recipients": [
+          "contributor",
+          "treasury"
+        ]
+      }
     },
     {
       "name": "the_remainder_lands_on_the_validator_share",
       "why": "★★ The construction, made visible on a worked case: 7 juul under the usage schedule floors to 4/1/0/0/0 = 5, so the remainder is 2 and the validator receives its nominal share plus that 2. The leftover is not an error term — it is where the last share comes from.",
-      "expect": {"validator": "nominal + remainder", "sum": 7}
+      "expect": {
+        "validator": "nominal + remainder",
+        "sum": 7
+      }
     },
     {
       "name": "settling_leaves_total_circulation_unchanged",
       "why": "★★★ THE DISTINCTION FROM A MINT, asserted. A royalty reallocates and creates nothing: `Entry::Transfer::circulation_delta` is `0.0` by construction, so the total before and after a settlement is identical — and the independent `rebuild()` fold agrees, so it is not an artefact of how the total is computed.",
-      "expect": {"circulation": "unchanged", "rebuild_sum": "== circulation"}
+      "expect": {
+        "circulation": "unchanged",
+        "rebuild_sum": "== circulation"
+      }
     }
   ],
-
   "schedule_cases": [
     {
-      "name": "usage_and_access_are_different_schedules",
-      "why": "★★ TWO REVENUE TYPES, NOT ONE — and they are genuinely different: paying to RUN something is not paying to HAVE it. Asserted term by term against the ratified figures, including the contributor's 70 % versus 80 % and the proposer's 5 % versus 2 %.",
-      "expect": {"usage": [70, 15, 5, 5, 5], "access": [80, 10, 3, 2, 5]}
+      "name": "the_schedule_is_the_four_way_seventy_twenty_five_five",
+      "why": "★★★ The canonical split. Treasury takes 20, NOT 15 -- the five-way variant that cut it to fund a proposer is not canon and is removed. Asserted term by term: contributor 700, treasury 200, validator 50, referrer 50 on 1000.",
+      "expect": {
+        "usage": [
+          70,
+          20,
+          5,
+          5
+        ]
+      }
     },
     {
-      "name": "the_schedule_has_five_recipients_and_the_proposer_is_one_of_them",
-      "why": "★ The proposer share is precisely what the superseded four-way could not express, so its presence is what makes the schedule the ratified one rather than the old one with different numbers.",
-      "expect": {"roles": ["contributor", "treasury", "validator", "proposer", "referrer"]}
+      "name": "the_access_schedule_is_provisional_and_mirrors_usage",
+      "why": "★★★ Nobody has decided what a LICENCE SALE should split. The revenue-type distinction is kept -- paying to RUN something is genuinely not paying to HAVE it, and `pricing` routes on it -- but the figures MIRROR USAGE rather than being invented. The case is a tripwire: filling in a real access schedule breaks it, which is the point. A placeholder that could be quietly promoted to a decision is worse than no placeholder.",
+      "expect": {
+        "access_is_provisional": true,
+        "access": [
+          70,
+          20,
+          5,
+          5
+        ]
+      }
+    },
+    {
+      "name": "the_schedule_has_four_recipients_and_no_proposer_among_them",
+      "why": "★★★ A role with no share is not a role. `RoyaltyRole` has FOUR variants, so a proposer share is UNSPELLABLE rather than merely unset -- which is what stops it drifting back in. Removed rather than deprecated for exactly that reason.",
+      "expect": {
+        "roles": [
+          "contributor",
+          "treasury",
+          "validator",
+          "referrer"
+        ]
+      }
     }
   ],
-
   "licence_cases": [
     {
       "name": "a_free_licence_transfers_nothing",
       "why": "★★ `Free` means free of ROYALTY, never free of the work it causes — the run still pays its own pawa cost through PAWA-3's gate clause, which this row does not touch. The ledger is asserted BYTE-IDENTICAL after settling a free licence: no transfer, no entry.",
-      "expect": {"settlement": "NoRoyalty", "transferred": 0, "ledger": "byte-identical"}
+      "expect": {
+        "settlement": "NoRoyalty",
+        "transferred": 0,
+        "ledger": "byte-identical"
+      }
     },
     {
-      "name": "a_royalty_licence_settles_across_the_five",
-      "why": "★ The happy path with real figures: a 10 % royalty on 1000 is 100 juul, of which the contributor receives 70 and the treasury 15 under the usage schedule, and the payer's balance falls by exactly the 100 that the recipients gained.",
-      "expect": {"total": 100, "contributor": 70, "treasury": 15, "payer": "-100"}
+      "name": "a_royalty_licence_settles_across_the_four",
+      "why": "★ The happy path with real figures: a 10 % royalty on 1000 is 100 juul, of which the contributor receives 70 and the treasury 20 under the usage schedule, and the payer's balance falls by exactly the 100 that the recipients gained.",
+      "expect": {
+        "total": 100,
+        "contributor": 70,
+        "treasury": 15,
+        "payer": "-100"
+      }
     },
     {
       "name": "an_unaffordable_royalty_moves_nothing_at_all",
       "why": "★ Refused WHOLESALE, not partially. Paying the first recipients and running out would leave the split unconserved against its own schedule, so affordability is checked before anything moves and the ledger is asserted unchanged.",
-      "expect": {"settlement": "Insufficient", "ledger": "byte-identical"}
+      "expect": {
+        "settlement": "Insufficient",
+        "ledger": "byte-identical"
+      }
     }
   ],
-
   "boundary_cases": [
     {
       "name": "there_is_no_path_from_juul_to_real_value",
       "why": "★★★ THE PROOF OF THE DISTINCTION, and it is an absence rather than a claim — so it is checked by reading the source, the way the egress slice proved its own no-payment-rail boundary. `royalty.rs`, `juul.rs` and `pawa.rs` are scanned for cash-out, redemption and payment-rail vocabulary and must contain none of it. ★ Scanned over PRODUCTION CODE ONLY: the test half is split off and comment lines are stripped, because documenting the boundary (*juul is not redeemable*) is not a breach of it.",
-      "expect": {"forbidden_vocabulary": "absent from all three modules"}
+      "expect": {
+        "forbidden_vocabulary": "absent from all three modules"
+      }
     },
     {
       "name": "a_transfer_only_ever_moves_between_two_ledger_balances",
       "why": "★★ Both ends are principals in THIS ledger and the entry carries them together, so half a transfer is unspellable. The sender falls by exactly what the receiver gains, and the total is untouched.",
-      "expect": {"from": "-30", "to": "+30", "circulation": "unchanged"}
+      "expect": {
+        "from": "-30",
+        "to": "+30",
+        "circulation": "unchanged"
+      }
     },
     {
       "name": "a_transfer_nobody_can_afford_is_refused_and_a_self_transfer_is_not_a_movement",
       "why": "★ Two refusals with one shape. An unaffordable transfer leaves the ledger untouched, and a self-transfer is refused because it is not a movement — recording one would put a meaningless entry in an append-only log that something later has to fold.",
-      "expect": {"ledger": "byte-identical after both"}
+      "expect": {
+        "ledger": "byte-identical after both"
+      }
     }
   ]
 }

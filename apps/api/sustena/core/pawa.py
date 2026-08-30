@@ -13,12 +13,14 @@ Web3 Phase 3 mapping:
   get_balance()  → balanceOf(address)
   charge()       → chargeRoyalty() Solidity function
 
-Royalty split on every component call:
-  Pawa charge (usage):  70 / 15 / 5 / 5 / 5
-  Licence sale (access): 80 / 10 / 3 / 2 / 5
-  across contributor / treasury / validator / proposer / referrer
-  5%  → referrer (if any)
-  5%  → validator
+Royalty split on every component call -- FOUR-way, 70 / 20 / 5 / 5 across
+contributor / treasury / validator / referrer:
+  70% → contributor
+  20% → treasury (plus any absent role's share)
+   5% → validator (plus the remainder, so the split conserves exactly)
+   5% → referrer (if any)
+There is no proposer share. Both revenue types currently split the same;
+see PawaLedger._SCHEDULES.
 
 All Phase 1 ledger entries use the same structure as the blockchain will —
 making Phase 3 a bulk transaction issuance from the SQLite log, not a schema change.
@@ -131,24 +133,38 @@ class PawaLedger:
 
     # ── Component charging (royalty split) ────────────────────────────────────
 
-    # The ratified two-revenue-type schedule (2026-08-04), as
-    # (contributor, treasury, validator, proposer, referrer) in per cent.
+    # The canonical split, as (contributor, treasury, validator, referrer) in
+    # per cent. FOUR-way: 70 / 20 / 5 / 5.
     #
-    # ★★★ The earlier four-way 70/20/5/5 was not merely the wrong numbers — the
-    #     SIGNATURE could not hold the right ones. It had no proposer parameter,
-    #     so the ratified split was not expressible here at all, and a caller
-    #     wiring it up would have inherited a schedule that silently dropped a
-    #     role. Adding the parameter is the substance of this fix; changing the
-    #     percentages is the easy half.
+    # ★★★ There is NO proposer share. A five-way variant carrying one
+    #     (70/15/5/5/5, with the treasury cut to 15) reached both engines and
+    #     is not canon. It is removed rather than deprecated — a role with no
+    #     share is not a role, and leaving the parameter in place would let it
+    #     drift back.
     #
-    # ★★★ Paying to RUN something is not paying to HAVE it, and one schedule
-    #     could not tell them apart. `revenue` is required rather than defaulted
-    #     for that reason: a caller that has not decided which of the two
-    #     happened has not decided what it is settling.
+    # ★★★ The ACCESS row is PROVISIONAL and mirrors usage. The canonical split
+    #     is stated for a *pawa charge*; nobody has decided what a *licence
+    #     sale* should split. Rather than invent a second schedule, or delete a
+    #     distinction that is real — paying to RUN something is genuinely not
+    #     paying to HAVE it — the two revenue types are kept and currently
+    #     return the same figures. `revenue` stays required for that reason: a
+    #     caller that has not decided which of the two happened has not decided
+    #     what it is settling, and that stays true whether or not the money
+    #     currently differs. See `access_is_provisional()`.
     _SCHEDULES = {
-        "usage":  (70, 15, 5, 5, 5),
-        "access": (80, 10, 3, 2, 5),
+        "usage":  (70, 20, 5, 5),
+        "access": (70, 20, 5, 5),
     }
+
+    @classmethod
+    def access_is_provisional(cls) -> bool:
+        """Is the access row a decision, or a placeholder?
+
+        ★★★ A method rather than a comment, so the open question is executable
+        and a test breaks the moment somebody quietly fills it in. Mirrors
+        `sustena_core::royalty::RevenueType::access_is_provisional`.
+        """
+        return cls._SCHEDULES["access"] == cls._SCHEDULES["usage"]
 
     async def charge(
         self,
@@ -158,14 +174,15 @@ class PawaLedger:
         contributor_id: str,
         revenue: str,
         referrer_id: str | None = None,
-        proposer_id: str | None = None,
         validator_id: str | None = None,
     ) -> bool:
         """
         Charge a component call or a licence sale and distribute royalties.
 
         `revenue` is "usage" (a pawa charge — someone ran it) or "access"
-        (a licence sale — someone bought it). See `_SCHEDULES`.
+        (a licence sale — someone bought it). Both currently split the same
+        four-way 70 / 20 / 5 / 5; see `_SCHEDULES` for why the distinction is
+        kept anyway.
 
         ★★★ Integer-floor arithmetic with the remainder assigned to the
         validator share, so the split is EXACTLY conserving by construction.
@@ -204,18 +221,17 @@ class PawaLedger:
         )
 
         # Distribute royalties on the ratified schedule.
-        c_pct, t_pct, v_pct, p_pct, r_pct = self._SCHEDULES[revenue]
+        c_pct, t_pct, v_pct, r_pct = self._SCHEDULES[revenue]
         contributor_share = pawa_cost * c_pct // 100
         treasury_share    = pawa_cost * t_pct // 100
         validator_share   = pawa_cost * v_pct // 100
-        proposer_share    = pawa_cost * p_pct // 100
         referrer_share    = pawa_cost * r_pct // 100
 
         # ★★★ The remainder is not discarded — it IS the validator's last unit.
         #     This is the line that makes conservation a theorem rather than a
         #     hope, and it mirrors sustena-core's `royalty::split` exactly.
         assigned = (contributor_share + treasury_share + validator_share
-                    + proposer_share + referrer_share)
+                    + referrer_share)
         validator_share += pawa_cost - assigned
 
         await self.credit(contributor_id, None, contributor_share,
@@ -225,7 +241,6 @@ class PawaLedger:
         to_treasury = treasury_share
         for share, who, label in (
             (validator_share, validator_id, "validator"),
-            (proposer_share, proposer_id, "proposer"),
             (referrer_share, referrer_id, "referrer"),
         ):
             if who:

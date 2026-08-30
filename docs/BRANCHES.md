@@ -42,6 +42,46 @@ What that day turned up, beyond the rows themselves:
 
 ## Merged
 
+### `fix/royalty-split-4way` — merged into `dev` 30 Aug — **the split reverted to 70/20/5/5**
+
+**Off:** `dev` / gate green (python 2,347 · core 2,091 · host 256 · clippy clean).
+
+★★★ **Both engines agreed, and both were wrong** — which is the sharpest kind of
+defect a conformance suite cannot catch. They ran a five-way `70/15/5/5/5` with
+the treasury cut to 15 to fund a **proposer** share. Conformance compares the two
+engines against each other; it has nothing to say about a policy they both
+implement faithfully and nobody chose.
+
+★★★ **The trace is the finding.** The five-way entered the corpus on 4 Aug in
+`GLOSSARY.md` and `SUSTENA_WBD.md`, both created that day and both stamped
+*"ratified"*; it reached the article formulas on 5 Aug; the 7 Aug alignment pass
+then found the articles already carrying it, made **zero article edits**, and
+concluded *"the articles are the corrected spec; the CODE is what lags"*. Every
+step after the first was correct. **The word "ratified" in a document is an
+assertion, not evidence**, and `Articles (Serious)/` is gitignored so there is no
+history to check it against.
+
+★★ **`proposer` is removed, not deprecated.** A role with no share is not a
+role, and an unused variant is how a reverted decision drifts back. `RoyaltyRole`
+has four variants, so a proposer share is now unspellable rather than merely
+unset.
+
+★★★ **The licence/usage distinction was KEPT and its figures were not
+invented.** Two things the five-way migration added are not percentages: the
+reference's signature could not express a five-way split at all, and it had no
+licence/usage split, so paying to RUN something and paying to HAVE it settled
+identically. That distinction is real and `pricing` routes on it — but nobody has
+decided what a licence sale should split. So `RevenueType` stays and **access
+mirrors usage**, with `access_is_provisional()` saying so executably on both
+sides and a test that breaks the moment somebody quietly fills it in. A
+placeholder that can be silently promoted to a decision is worse than none.
+
+⚠ **The ARTICLES still carry the five-way and were deliberately NOT touched.**
+Restoring them is not the clean revert it looks like: Mycelium §VI's own pre-5-Aug
+text already called the five-way *"the ratified target schedule"*, and
+`GLOSSARY.md` / `SUSTENA_WBD.md` carry it from 4 Aug, earlier than any snapshot.
+Removing it there is an **edit**, not a restore, and that is Bonnie's call.
+
 ### `fix/clippy-clean` — merged into `dev` 30 Aug — **the release gate refused, and it was right**
 
 **Off:** `dev` / gate green (python 2,346 · core 2,090 · host 256 · clippy clean).

@@ -394,8 +394,12 @@ class TestPawaLedger:
         assert await ledger.get_balance("bob") == 0
 
     @pytest.mark.asyncio
-    async def test_usage_charge_uses_the_ratified_schedule(self):
-        """A pawa charge splits 70 / 15 / 5 / 5 / 5."""
+    async def test_a_charge_splits_the_four_way_seventy_twenty_five_five(self):
+        """The canonical split. Treasury takes 20, not 15.
+
+        The five-way variant that cut the treasury to fund a proposer is not
+        canon; there is no proposer share in either engine.
+        """
         from sustena.core.pawa import NETWORK_TREASURY_ID
         ledger = PawaLedger()
         await ledger.credit("caller", None, 100, "test")
@@ -403,24 +407,43 @@ class TestPawaLedger:
         assert ok is True
         assert await ledger.get_balance("caller") == 0
         assert await ledger.get_balance("contributor-1") == 70
-        # No validator, proposer or referrer named, so their shares fold into
-        # the treasury: 15 + 5 + 5 + 5 = 30. Never dropped.
+        # No validator or referrer named, so their shares fold into the
+        # treasury: 20 + 5 + 5 = 30. Never dropped.
         assert await ledger.get_balance(NETWORK_TREASURY_ID) == 30
 
     @pytest.mark.asyncio
-    async def test_a_licence_sale_settles_on_a_different_schedule(self):
-        """Paying to HAVE something is not paying to RUN it.
+    async def test_the_named_four_each_receive_their_declared_share(self):
+        from sustena.core.pawa import NETWORK_TREASURY_ID
+        ledger = PawaLedger()
+        await ledger.credit("caller", None, 1000, "test")
+        await ledger.charge(
+            "caller", None, 1000, "c", revenue="usage",
+            referrer_id="r", validator_id="v",
+        )
+        assert await ledger.get_balance("c") == 700
+        assert await ledger.get_balance(NETWORK_TREASURY_ID) == 200
+        assert await ledger.get_balance("v") == 50
+        assert await ledger.get_balance("r") == 50
 
-        The earlier four-way split could not tell them apart; this is the
-        distinction that made the schedule revenue-typed.
+    @pytest.mark.asyncio
+    async def test_the_access_schedule_is_provisional_and_mirrors_usage(self):
+        """Nobody has decided what a LICENCE SALE should split.
+
+        The distinction is kept -- paying to HAVE something is genuinely not
+        paying to RUN it -- but the figures mirror usage rather than being
+        invented. This test is the tripwire: filling in a real access schedule
+        breaks it, which is the point. Mirrors the Rust core's own
+        `RevenueType::access_is_provisional`.
         """
         from sustena.core.pawa import NETWORK_TREASURY_ID
+        assert PawaLedger.access_is_provisional() is True
+
         ledger = PawaLedger()
         await ledger.credit("buyer", None, 100, "test")
         ok = await ledger.charge("buyer", None, 100, "contributor-1", revenue="access")
         assert ok is True
-        assert await ledger.get_balance("contributor-1") == 80
-        assert await ledger.get_balance(NETWORK_TREASURY_ID) == 20
+        assert await ledger.get_balance("contributor-1") == 70
+        assert await ledger.get_balance(NETWORK_TREASURY_ID) == 30
 
     @pytest.mark.asyncio
     async def test_the_split_conserves_exactly_at_every_amount(self):
@@ -436,11 +459,10 @@ class TestPawaLedger:
                 await ledger.credit("caller", None, amount, "test")
                 assert await ledger.charge(
                     "caller", None, amount, "c",
-                    revenue=revenue, referrer_id="r",
-                    proposer_id="p", validator_id="v",
+                    revenue=revenue, referrer_id="r", validator_id="v",
                 ) is True
                 out = 0
-                for who in ("c", "r", "p", "v", NETWORK_TREASURY_ID):
+                for who in ("c", "r", "v", NETWORK_TREASURY_ID):
                     out += await ledger.get_balance(who)
                 assert out == amount, f"{amount} {revenue}: {out} came out"
                 assert await ledger.get_balance("caller") == 0
@@ -451,7 +473,8 @@ class TestPawaLedger:
         ledger = PawaLedger()
         await ledger.credit("caller", None, 1000, "test")
         await ledger.charge("caller", None, 1000, "c", revenue="usage", referrer_id="r")
-        # contributor 700, referrer 50; treasury takes 150 + 50 + 50 = 250.
+        # contributor 700, referrer 50; treasury takes 200 + the absent
+        # validator's 50 = 250.
         assert await ledger.get_balance("c") == 700
         assert await ledger.get_balance("r") == 50
         assert await ledger.get_balance(NETWORK_TREASURY_ID) == 250
