@@ -238,6 +238,21 @@ pub struct Peering {
     /// network holding the same lock every operator call needs; a snapshot is
     /// re-pushed whenever the registry changes instead.
     specs: Mutex<BTreeMap<String, SharedSpec>>,
+    /// Where the listener announces that a merge landed.
+    ///
+    /// ★★★ **The responder had no way to say it had received anything.** The
+    /// initiator re-folds at the end of `sync_peer`; the node being synced TO
+    /// merged entries into its store and left its in-memory state folded from
+    /// the sequence it had before, which is not stale so much as wrong -- an
+    /// arriving entry can belong EARLIER in causal order than lines already
+    /// there. Caught by two nodes that had each created the same Sustain: the
+    /// receiver's log grew and its balance did not move.
+    ///
+    /// ★★ A SENDER, not a handle back into the world, for the same reason
+    /// `specs` is a snapshot: a listener thread that re-folded inline would be
+    /// holding the lock every operator call needs, on the network's schedule.
+    /// It posts an id and returns; somebody else does the work.
+    merged: Mutex<Option<std::sync::mpsc::Sender<String>>>,
     /// ★★★ **The listener's identity, and the reason locking stops peering.**
     /// A session reads this per-connection rather than capturing a key at
     /// spawn time, so `lock()` genuinely takes the node off the network: a
@@ -261,6 +276,7 @@ impl Peering {
             listening: Mutex::new(None),
             identity: Mutex::new(None),
             specs: Mutex::new(BTreeMap::new()),
+            merged: Mutex::new(None),
             offers: Mutex::new(Vec::new()),
             acceptors: Arc::new(Acceptors::at(root)),
             bodies: Mutex::new(BTreeMap::new()),
@@ -298,6 +314,21 @@ impl Peering {
     }
 
     /// Tell the peering how to describe the Sustains it may be asked for.
+    /// Hand the peering somewhere to announce merges. ★ Taken once, at
+    /// startup; a second call replaces it, which is what a re-open wants.
+    pub fn announce_merges_to(&self, tx: std::sync::mpsc::Sender<String>) {
+        *self.merged.lock().expect("merged lock") = Some(tx);
+    }
+
+    /// Say that entries landed for this Sustain. ★ Best effort on purpose: if
+    /// nothing is listening the sync still succeeded, and a send failure must
+    /// never fail a merge that already happened.
+    fn note_merged(&self, sustain_id: &str) {
+        if let Some(tx) = self.merged.lock().expect("merged lock").as_ref() {
+            let _ = tx.send(sustain_id.to_string());
+        }
+    }
+
     pub fn set_specs(&self, specs: BTreeMap<String, SharedSpec>) {
         *self.specs.lock().expect("specs lock") = specs;
     }
@@ -562,6 +593,11 @@ impl Peering {
             .store
             .read_replica(sustain_id, me)
             .map_err(|e| WireError::Io(e.to_string()))?;
+        if !written.is_empty() {
+            // ★★★ The whole point of the channel: this node just changed, and
+            //     until something re-folds it, it does not know.
+            self.note_merged(sustain_id);
+        }
         eprintln!("[peer] {} gave {} new entrie(s) for {sustain_id}", peer.handle(), written.len());
         session.send(
             stream,

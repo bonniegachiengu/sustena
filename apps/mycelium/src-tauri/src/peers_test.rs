@@ -29,6 +29,9 @@ struct Node {
     world: World,
     port: u16,
     home: PathBuf,
+    /// What a peer has merged INTO this node. ★ The responder has no other way
+    /// to learn it changed -- see `Peering::merged`.
+    merges: std::sync::mpsc::Receiver<String>,
 }
 
 impl Node {
@@ -45,8 +48,20 @@ impl Node {
         let store = Store::at(&home).expect("store");
         let world = World::open(store).expect("world");
         world.enrol(DEFAULT_HANDLE, PASS).expect("enrol");
+        let merges = world.merges();
         let port = world.listen(Some(0)).expect("listen");
-        Node { world, port, home }
+        Node { world, port, home, merges }
+    }
+
+    /// Re-fold whatever a peer wrote into this node. ★ In the app an absorber
+    /// thread does this the moment the listener announces it; a test drains it
+    /// by hand so the assertion is about the mechanism and not about timing.
+    fn absorb(&self) -> usize {
+        let ids: Vec<String> = self.merges.try_iter().collect();
+        for id in &ids {
+            self.world.absorb(id);
+        }
+        ids.len()
     }
 
     fn key(&self) -> String {
@@ -62,6 +77,15 @@ impl Node {
             .with(|i| i.get(id).map(|s| s.state.clone()))
             .and_then(|s| s.pointer("/finances/liquid/balance").and_then(Value::as_f64))
             .unwrap_or(f64::NAN)
+    }
+
+    /// How many lines the on-disk log actually holds. ★ Deliberately reads
+    /// the FILE and not the in-memory view: the question is whether anything
+    /// was persisted, which is what the devices disagreed about.
+    fn log_len(&self, id: &str) -> usize {
+        std::fs::read_to_string(self.home.join("events").join(format!("{id}.jsonl")))
+            .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count())
+            .unwrap_or(0)
     }
 
     fn state(&self, id: &str) -> Value {
@@ -126,7 +150,36 @@ fn a_change_on_one_node_reaches_the_other() {
     assert_eq!(report.outcome.sent, 0, "B had nothing A lacked");
 
     assert_eq!(b.balance(&id), 500.0);
-    assert_eq!(a.state(&id), b.state(&id), "byte for byte");
+    // ★★★ A is the RESPONDER, and until it re-folds it is not merely stale:
+    //     it is folded from a sequence that no longer describes its own log.
+    assert_eq!(a.absorb(), 1, "the listener announced exactly one merged Sustain");
+    assert_eq!(a.state(&id), b.state(&id), "byte for byte, once the receiver re-folds");
+}
+
+#[test]
+fn a_second_sync_after_both_hold_each_others_entries_still_pushes() {
+    // ★★★ The device sequence, exactly: sync once (each now holds some of the
+    //     other's entries), write again on the phone side, sync again. The
+    //     second push is the one that moved nothing on real hardware.
+    let (a, b, id) = twin_pair("twins-again");
+    a.income(&id, 300.0, "laptop-side");
+    b.income(&id, 700.0, "phone-side");
+
+    let first = b.world.sync_peer(&a.address(), &id).expect("first sync");
+    eprintln!("FIRST  received={} sent={}", first.outcome.received, first.outcome.sent);
+
+    b.income(&id, 55.0, "phone-again");
+    let before_a = a.log_len(&id);
+    let second = b.world.sync_peer(&a.address(), &id).expect("second sync");
+    eprintln!(
+        "SECOND received={} sent={}  a_log {} -> {}",
+        second.outcome.received,
+        second.outcome.sent,
+        before_a,
+        a.log_len(&id)
+    );
+    assert_eq!(second.outcome.sent, 1, "the one new entry must be pushed");
+    assert_eq!(a.log_len(&id), before_a + 1, "and must land on disk");
 }
 
 #[test]
@@ -412,4 +465,111 @@ fn a_merge_that_leaves_the_household_outside_its_rules_says_so() {
     );
     println!("[merge] {}", report.merge.describe());
     assert!(report.merge.entries >= 4);
+}
+
+// ── the case the devices hit, and the tests never did ───────────────────────
+
+/// Both nodes created the same Sustain **independently**, before they had ever
+/// met. Two unrelated genesis events, one id.
+///
+/// ★★★ Every other test in this file has ONE node instantiate and the other
+///     receive, so this shape had never run. It is not exotic: it is what
+///     happens when a person installs the app on their laptop and their phone
+///     and sets up the same household on each, which is exactly what happened.
+///
+/// ★★★ **What it exposes, and why it is `#[ignore]` rather than deleted.** The
+///     entries cross and land on disk -- that part works. What does not is the
+///     fold: the receiver ends up holding TWO genesis events for one id, and
+///     the state it folds is still its own. A genesis is not an ordinary
+///     entry; it asserts a beginning, and two of them are a contradiction the
+///     fold has no rule for. Merging two independent histories of the same
+///     Sustain needs a decision -- adopt one lineage, or make genesis
+///     idempotent -- and inventing that at speed would be worse than recording
+///     it precisely.
+fn twin_pair(name: &str) -> (Node, Node, String) {
+    let root = scratch(name);
+    let a = Node::start(&root, "alice");
+    let b = Node::start(&root, "bob");
+    let id = "homestead".to_string();
+
+    // The difference from `shared_pair`: BOTH instantiate.
+    for n in [&a, &b] {
+        n.world
+            .instantiate_owned(&id, "Home", TemplateId::Habitat, None, None, Some(DEFAULT_HANDLE))
+            .expect("instantiate");
+    }
+    for (me, them) in [(&a, &b), (&b, &a)] {
+        me.world
+            .peering()
+            .edit(|book| {
+                book.seen(&them.key(), "peer", Some(them.address()));
+                book.set_standing(&them.key(), Standing::Trusted);
+                book.share(&them.key(), &id)
+            })
+            .expect("book")
+            .expect("share");
+    }
+    (a, b, id)
+}
+
+#[test]
+#[ignore = "OPEN BUG: two independent histories of one Sustain id do not converge             -- see the note above. Kept as the reproduction, not deleted."]
+fn two_nodes_that_each_created_the_same_sustain_still_converge() {
+    let (a, b, id) = twin_pair("twins");
+    a.income(&id, 300.0, "laptop-side");
+    b.income(&id, 700.0, "phone-side");
+
+    let before_a = a.log_len(&id);
+    let report = b.world.sync_peer(&a.address(), &id).expect("sync");
+    eprintln!("received={} sent={}", report.outcome.received, report.outcome.sent);
+
+    assert!(report.outcome.sent > 0, "B had history A lacked and must have pushed it");
+    assert!(
+        a.log_len(&id) > before_a,
+        "A's log must actually grow: it was {} and is {}",
+        before_a,
+        a.log_len(&id)
+    );
+    assert_eq!(a.state(&id), b.state(&id), "byte for byte");
+}
+
+#[test]
+fn a_log_written_before_stamping_existed_still_receives_a_push() {
+    // ★★★ The last difference between the passing tests and the two real
+    //     devices: both of their logs contain lines written before entries
+    //     carried an origin or a lamport. `entry_of` reads those as belonging
+    //     to whoever is doing the reading, which is right for a single-node
+    //     history and is the one interpretation two nodes can disagree about.
+    let (a, b, id) = twin_pair("twins-legacy");
+    a.income(&id, 300.0, "laptop-side");
+    b.income(&id, 700.0, "phone-side");
+
+    // Strip A's log back to what an older build would have written.
+    let path = a.home.join("events").join(format!("{id}.jsonl"));
+    let legacy: String = std::fs::read_to_string(&path)
+        .expect("read")
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            let mut v: serde_json::Value = serde_json::from_str(l).expect("line");
+            let o = v.as_object_mut().expect("object");
+            o.remove("origin");
+            o.remove("lamport");
+            o.remove("clock");
+            format!("{}
+", serde_json::to_string(&v).expect("re-encode"))
+        })
+        .collect();
+    std::fs::write(&path, legacy).expect("write");
+
+    let before_a = a.log_len(&id);
+    let report = b.world.sync_peer(&a.address(), &id).expect("sync");
+    eprintln!("LEGACY received={} sent={}", report.outcome.received, report.outcome.sent);
+    assert!(report.outcome.sent > 0, "B still has history A lacks");
+    assert!(
+        a.log_len(&id) > before_a,
+        "and it must land: A was {} and is {}",
+        before_a,
+        a.log_len(&id)
+    );
 }

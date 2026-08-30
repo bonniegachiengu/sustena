@@ -1912,6 +1912,26 @@ impl World {
     }
 
     /// Start accepting peers. `None` port asks the OS for a free one.
+    /// Take the stream of Sustains a peer has just merged into this node.
+    ///
+    /// ★★ Called once at startup by whoever can act on it. Re-folding is
+    /// deliberately NOT done on the listener thread -- see `Peering::merged`
+    /// -- so this hands back a receiver and lets an absorber own the work.
+    pub fn merges(&self) -> std::sync::mpsc::Receiver<String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.peering.announce_merges_to(tx);
+        rx
+    }
+
+    /// Re-fold a Sustain a peer just wrote into. ★ Swallows the reconciliation
+    /// rather than returning it: nobody asked for this fold, so there is no
+    /// caller to hand a verdict to. `reload` remains the answering version.
+    pub fn absorb(&self, sustain_id: &str) {
+        if let Err(e) = self.reload(sustain_id) {
+            eprintln!("[peer] could not re-fold {sustain_id} after a peer merge: {e}");
+        }
+    }
+
     pub fn listen(&self, port: Option<u16>) -> Result<u16, String> {
         if !self.is_unlocked() {
             return Err("this node is locked, so it cannot prove its own key".into());
