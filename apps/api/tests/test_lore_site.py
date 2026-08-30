@@ -99,13 +99,41 @@ class TestDrafts:
         assert first.kicker == "CELL"
         assert first.module == "Sustain"
 
+    def test_all_eighteen_are_published_in_the_canon_order(self):
+        # ★★ The canon is 18 pairs (see the articles INDEX). The blog publishes
+        #    the inspiration half of each, in that order. A gap here means an
+        #    essay silently stopped shipping.
+        essays = load_all()
+        assert [e.number for e in essays] == list(range(1, 19))
+        assert [e.module for e in essays] == [
+            "Sustain", "Operator", "Constraint", "Events and Time", "DSL",
+            "Editing", "Ingest", "Immune", "Monitor", "Controller", "Tenet",
+            "Operative", "Curated UI", "Multiparty", "Mycelium", "Arena",
+            "Pawa", "Capstone",
+        ]
+
+    def test_no_essay_still_points_at_an_unpublished_paper(self):
+        # ★★ Each draft ended with a "Next: ..." pointer naming technical papers
+        #    that are not public and source files a reader cannot open. A public
+        #    essay must not send anyone somewhere that does not exist.
+        for e in load_all():
+            body = e.body.html
+            assert "3b1b" not in body.lower()
+            assert "formal execution" not in body.lower()
+            assert ".py" not in body
+
     def test_the_published_draft_carries_nothing_private(self, tmp_path):
         # ★★★ The editing discipline, asserted rather than trusted to a
         #     one-time read. These drafts are public the moment they build.
         import re
 
+        # ★ Brand names match as substrings. The household names need word
+        #   boundaries, or `polycephalum` -- a real slime mould in essay 14 --
+        #   trips the guard on "epha" and the suite cries wolf.
         banned = re.compile(
-            r"vyyb|gachiengu|bonnie|mkulima|colosso|biashara|\b\d{9,}\b", re.I
+            r"vyyb|gachiengu|mkulima|colosso|biashara|\b\d{9,}\b"
+            r"|\b(bonnie|frankie|kui|cira|epha)\b",
+            re.I,
         )
         for e in load_all():
             page = essay_page(e)
