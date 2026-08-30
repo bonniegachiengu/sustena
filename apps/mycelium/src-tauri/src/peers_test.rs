@@ -150,10 +150,9 @@ fn a_change_on_one_node_reaches_the_other() {
     assert_eq!(report.outcome.sent, 0, "B had nothing A lacked");
 
     assert_eq!(b.balance(&id), 500.0);
-    // ★★★ A is the RESPONDER, and until it re-folds it is not merely stale:
-    //     it is folded from a sequence that no longer describes its own log.
-    assert_eq!(a.absorb(), 1, "the listener announced exactly one merged Sustain");
-    assert_eq!(a.state(&id), b.state(&id), "byte for byte, once the receiver re-folds");
+    // ★ A sent and received nothing here, so it has nothing to re-fold.
+    assert_eq!(a.absorb(), 0, "A was the source, not a receiver");
+    assert_eq!(a.state(&id), b.state(&id), "byte for byte");
 }
 
 #[test]
@@ -530,7 +529,11 @@ fn two_nodes_that_each_created_the_same_sustain_still_converge() {
         before_a,
         a.log_len(&id)
     );
-    assert_eq!(a.state(&id), b.state(&id), "byte for byte");
+
+    // ★★★ A is the RESPONDER, and until it re-folds it is not merely stale:
+    //     it is folded from a sequence that no longer describes its own log.
+    assert_eq!(a.absorb(), 1, "the listener announced exactly one merged Sustain");
+    assert_eq!(a.state(&id), b.state(&id), "byte for byte, once the receiver re-folds");
 }
 
 #[test]
