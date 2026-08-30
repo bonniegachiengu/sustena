@@ -50,3 +50,7 @@ alembic/__pycache__/
 .coverage
 htmlcov/
 coverage.xml
+
+# Runtime log from the lore keepalive watchdog
+lore-keepalive.log
+lore-service.log
