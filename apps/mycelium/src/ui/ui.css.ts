@@ -121,13 +121,20 @@ export const card = style({
   minHeight: 0,
   display: "flex",
   flexDirection: "column",
-  "@media": {
-    // ★ A card is a flex item in the stacked column below `md`, and flex items
-    //   shrink by default. Measured at 375px, a card whose content needed
-    //   114px was being rendered at 22 and the rest of it drawn over the next
-    //   card. A card is never shorter than what is in it.
-    [bp.md]: { flexShrink: 0 },
-  },
+  // ★★★ **A card is never shorter than what is in it — at ANY width.**
+  //
+  //     This was scoped to below `md`, on the reasoning that only the stacked
+  //     column made a card a shrinkable flex item. It does not: `column` is a
+  //     flex column at every width, and flex items shrink by default there
+  //     too. On the desktop Network screen an expanded peer was compressed
+  //     until its "shared with this peer" chips were clipped and the card
+  //     below drew over them -- the same 114px-rendered-at-22 bug measured at
+  //     375px, one breakpoint up and unnoticed because it needs a tall card to
+  //     show at all.
+  //
+  // ★ Safe because the COLUMN is what scrolls. Cards taking their natural
+  //   height is exactly what gives it something to scroll.
+  flexShrink: 0,
 });
 
 export const cardHead = style({
