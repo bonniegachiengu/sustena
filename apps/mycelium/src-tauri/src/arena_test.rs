@@ -55,6 +55,15 @@ fn broken_garden() -> AuthoredDefinition {
 
 // ── publish ─────────────────────────────────────────────────────────────────
 
+/// Packages this node actually published.
+///
+/// ★★ The shelf is not empty at rest: the app seeds the cards it ships with
+/// as `Origin::Bundled`. A publish test is about what was AUTHORED here, so it
+/// filters rather than counting a total that includes things it did not write.
+fn authored(world: &World) -> Vec<crate::arena::Package> {
+    world.arena().all().into_iter().filter(|p| p.origin == sustena_core::package::Origin::Authored).collect()
+}
+
 #[test]
 fn a_published_package_is_stamped_hashed_and_signed() {
     let (world, _home) = node("publish");
@@ -85,7 +94,13 @@ fn a_published_package_is_stamped_hashed_and_signed() {
     assert!(prov.safe_to_install());
 
     // And it is on disk, readable back.
-    assert_eq!(world.arena().all().len(), 1);
+    //
+    // ★★ Counted by ORIGIN rather than as a total. The shelf also carries the
+    //    cards that ship with the app (`seed_bundled`), so a bare length would
+    //    be asserting something this test is not about — and would break again
+    //    the next time the app ships one more card. What it means is *exactly
+    //    one AUTHORED package exists*, which is the claim.
+    assert_eq!(authored(&world).len(), 1);
     assert_eq!(world.arena().get(&pkg.id).expect("stored").content_hash, pkg.content_hash);
 }
 
@@ -115,7 +130,7 @@ fn a_package_that_does_not_typecheck_is_refused_at_publish_not_stored() {
     };
     assert_eq!(*rule, "well_typed");
     assert!(errors[0].contains("rainfall"), "the gate's own words: {errors:?}");
-    assert!(world.arena().all().is_empty(), "and nothing was stored");
+    assert!(authored(&world).is_empty(), "and nothing was stored");
 }
 
 #[test]
@@ -237,11 +252,24 @@ fn a_tampered_package_is_refused_before_the_gate_is_even_asked() {
 
     // Edit the stored line by hand, exactly as someone with a text editor
     // would, leaving the claimed hash behind.
+    // The file is JSONL and the shelf also holds the cards the app ships
+    // with, so the published line is edited in place and the rest is left
+    // alone. Reading the whole file as one value was only ever right while
+    // the shelf happened to hold exactly one thing.
     let path = home.join("packages.jsonl");
     let text = std::fs::read_to_string(&path).expect("read");
-    let mut record: Value = serde_json::from_str(text.trim()).expect("parse");
-    record["spec"]["openingState"]["moisture"] = json!(99.0);
-    std::fs::write(&path, format!("{record}\n")).expect("write");
+    let edited: Vec<String> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|line| {
+            let mut record: Value = serde_json::from_str(line).expect("parse");
+            if record["id"] == json!(pkg.id.clone()) {
+                record["spec"]["openingState"]["moisture"] = json!(99.0);
+            }
+            record.to_string()
+        })
+        .collect();
+    std::fs::write(&path, format!("{}\n", edited.join("\n"))).expect("write");
 
     let reopened = World::open(Store::at(&home).expect("store")).expect("reopen");
     reopened.unlock(PASS).expect("unlock");
@@ -339,7 +367,7 @@ fn a_widget_reading_a_dimension_the_view_does_not_have_is_refused() {
     };
     assert_eq!(*rule, "widget_well_typed");
     assert!(!errors.is_empty());
-    assert!(world.arena().all().is_empty(), "not stored either");
+    assert!(authored(&world).is_empty(), "not stored either");
 }
 
 #[test]
@@ -384,7 +412,7 @@ fn a_strategy_publishes_and_says_it_cannot_run_here() {
     assert!(matches!(verdict, InstallVerdict::NotHere { .. }), "{verdict:?}");
     // ★★ It IS stored: a registry that could only carry what this node happens
     //    to run would be a much smaller thing.
-    assert_eq!(world.arena().all().len(), 1);
+    assert_eq!(authored(&world).len(), 1);
 
     let out = world.install(&pkg.id, None).expect("install");
     assert!(matches!(out.verdict, InstallVerdict::NotHere { .. }));
