@@ -160,6 +160,39 @@ it is a bug** — nothing silently differs.
 
 ### Divergences that CLOSED
 
+**Royalty split (PAWA-5 / MYC-5)** — reverted 30 Aug 2026, and it is the
+one entry here that closed by going BACKWARDS. Both engines ran a five-way
+`70/15/5/5/5` with the treasury cut to 15 to fund a **proposer** share, plus a
+separate licence-sale `80/10/3/2/5`. Neither is canon. The canonical split is the
+four-way **`70/20/5/5`** across contributor / treasury / validator / referrer,
+and both engines now run it.
+
+★★★ **This is the sharpest kind of divergence there is, and no vector could have
+caught it** — the two engines AGREED. They agreed on a policy that had entered
+the corpus on 2026-08-04 marked "ratified", propagated into three articles on
+2026-08-05, and was then implemented in good faith by a build reading the
+documents as canon. Conformance compares engines against each other; it cannot
+tell you the thing they both implement was never decided.
+
+★★ **The authorship could not be established from any artifact.**
+`Articles (Serious)/` is gitignored, so there is no history for it. The word
+"ratified" in a document is an assertion, not evidence.
+
+★★ **`proposer` was REMOVED rather than deprecated**, in both engines: a role with
+no share is not a role, and leaving the variant in place would let it drift back.
+The `RevenueType` usage/access distinction was KEPT — paying to run something is
+genuinely not paying to have it, and `pricing` routes on it — but no licence-sale
+split has been decided, so **access provisionally mirrors usage** and
+`access_is_provisional()` says so executably on both sides.
+
+⚠ **The ARTICLES still carry the five-way.** Mycelium §VI, Arena §IX and the Pawa
+Additions block are now out of step with both engines, and restoring them is not
+a clean revert: Mycelium's own pre-5-Aug text already called the five-way "the
+ratified target schedule", and `GLOSSARY.md` / `SUSTENA_WBD.md` carry it from
+2026-08-04, earlier than any snapshot. Recorded here rather than fixed, pending a
+decision on how far the restoration reaches.
+
+
 **Intake keying (ING-5)** — closed 30 Aug 2026. The core keyed a capture
 on the transaction it describes; the host still keyed on a hash of the wording,
 so the two engines disagreed about what "the same intake" means — the sharpest

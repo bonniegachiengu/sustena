@@ -39,11 +39,8 @@ fn load() -> Value {
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 
-fn all_five() -> Recipients {
-    Recipients::new("ada", "treasury")
-        .with_validator("val")
-        .with_proposer("pro")
-        .with_referrer("ref")
+fn all_four() -> Recipients {
+    Recipients::new("ada", "treasury").with_validator("val").with_referrer("ref")
 }
 
 fn funded(payer: &str, juul: f64) -> JuulLedger {
@@ -60,7 +57,7 @@ fn share_of(shares: &[Share], role: RoyaltyRole) -> u64 {
 fn the_split_is_exactly_conserving_for_adversarial_amounts() {
     // ★★★ Primes and tiny values are where an integer split leaks if the
     // remainder is discarded. It is not: it IS the validator's last juul.
-    let to = all_five();
+    let to = all_four();
     for amount in
         [0u64, 1, 2, 3, 7, 11, 13, 17, 19, 23, 97, 101, 997, 1_009, 7_919, 65_537, 999_983]
     {
@@ -88,16 +85,15 @@ fn the_split_conserves_with_every_optional_role_absent() {
 
 #[test]
 fn the_remainder_lands_on_the_validator_share() {
-    // 7 usage: floors are 4/1/0/0/0 = 5, so the remainder is 2.
-    let (c, t, v, p, r) = RevenueType::Usage.schedule();
+    // 7 usage: floors are 4/1/0/0 = 5, so the remainder is 2.
+    let (c, t, v, r) = RevenueType::Usage.schedule();
     let amount = 7u64;
     let nominal = amount * v / 100;
-    let floors =
-        amount * c / 100 + amount * t / 100 + nominal + amount * p / 100 + amount * r / 100;
+    let floors = amount * c / 100 + amount * t / 100 + nominal + amount * r / 100;
     let remainder = amount - floors;
     assert_eq!(remainder, 2, "the leftover the floors did not distribute");
 
-    let shares = split(amount, RevenueType::Usage, &all_five());
+    let shares = split(amount, RevenueType::Usage, &all_four());
     assert_eq!(
         share_of(&shares, RoyaltyRole::Validator),
         nominal + remainder,
@@ -113,7 +109,7 @@ fn settling_leaves_total_circulation_unchanged() {
     let mut l = funded("user", 1_000.0);
     let before = l.total_in_circulation();
     let licence = Licence::Royalty { per_mille: 250, payee: "ada".into() };
-    settle(&mut l, "user", &licence, 800, RevenueType::Access, &all_five());
+    settle(&mut l, "user", &licence, 800, RevenueType::Access, &all_four());
     assert_eq!(l.total_in_circulation(), before, "reallocated, not created");
     assert_eq!(l.rebuild().values().sum::<f64>(), before, "and the independent fold agrees");
 }
@@ -121,32 +117,41 @@ fn settling_leaves_total_circulation_unchanged() {
 // ── the ratified schedule ────────────────────────────────────────────────────
 
 #[test]
-fn usage_and_access_are_different_schedules() {
-    assert_eq!(RevenueType::Usage.schedule(), (70, 15, 5, 5, 5));
-    assert_eq!(RevenueType::Access.schedule(), (80, 10, 3, 2, 5));
+fn the_schedule_is_the_four_way_seventy_twenty_five_five() {
+    // ★★★ The canonical split. Treasury takes 20, not 15 — the five-way
+    //     variant that cut it to fund a proposer is not canon.
+    assert_eq!(RevenueType::Usage.schedule(), (70, 20, 5, 5));
 
-    let to = all_five();
-    let usage = split(1_000, RevenueType::Usage, &to);
-    let access = split(1_000, RevenueType::Access, &to);
+    let usage = split(1_000, RevenueType::Usage, &all_four());
     assert_eq!(share_of(&usage, RoyaltyRole::Contributor), 700);
-    assert_eq!(share_of(&access, RoyaltyRole::Contributor), 800);
-    assert_eq!(share_of(&usage, RoyaltyRole::Treasury), 150);
-    assert_eq!(share_of(&access, RoyaltyRole::Treasury), 100);
-    assert_eq!(share_of(&usage, RoyaltyRole::Proposer), 50);
-    assert_eq!(share_of(&access, RoyaltyRole::Proposer), 20);
+    assert_eq!(share_of(&usage, RoyaltyRole::Treasury), 200);
+    assert_eq!(share_of(&usage, RoyaltyRole::Validator), 50);
+    assert_eq!(share_of(&usage, RoyaltyRole::Referrer), 50);
 }
 
 #[test]
-fn the_schedule_has_five_recipients_and_the_proposer_is_one_of_them() {
-    // ★ The proposer share is what the superseded four-way could not express.
+fn the_access_schedule_is_provisional_and_mirrors_usage() {
+    // ★★★ Nobody has decided what a LICENCE SALE should split. The type stays
+    //     — paying to run something is genuinely not paying to have it, and
+    //     `pricing` routes on the difference — but the figures mirror usage
+    //     rather than being invented. This test is the tripwire: filling in a
+    //     real access schedule breaks it, which is the point.
+    assert!(RevenueType::access_is_provisional());
+    assert_eq!(RevenueType::Access.schedule(), RevenueType::Usage.schedule());
+}
+
+#[test]
+fn the_schedule_has_four_recipients_and_no_proposer_among_them() {
+    // ★★★ A role with no share is not a role. `RoyaltyRole` has four variants,
+    //     so a proposer share is unspellable rather than merely unset — which
+    //     is what stops it drifting back in.
     let roles: BTreeSet<RoyaltyRole> =
-        split(1_000, RevenueType::Usage, &all_five()).iter().map(|s| s.role).collect();
-    assert_eq!(roles.len(), 5);
+        split(1_000, RevenueType::Usage, &all_four()).iter().map(|s| s.role).collect();
+    assert_eq!(roles.len(), 4);
     for r in [
         RoyaltyRole::Contributor,
         RoyaltyRole::Treasury,
         RoyaltyRole::Validator,
-        RoyaltyRole::Proposer,
         RoyaltyRole::Referrer,
     ] {
         assert!(roles.contains(&r), "{} missing", r.name());
@@ -159,22 +164,22 @@ fn the_schedule_has_five_recipients_and_the_proposer_is_one_of_them() {
 fn a_free_licence_transfers_nothing() {
     let mut l = funded("user", 1_000.0);
     let before = l.clone();
-    let out = settle(&mut l, "user", &Licence::Free, 500, RevenueType::Usage, &all_five());
+    let out = settle(&mut l, "user", &Licence::Free, 500, RevenueType::Usage, &all_four());
     assert_eq!(out, Settlement::NoRoyalty);
     assert_eq!(out.transferred(), 0);
     assert_eq!(l, before, "free means free of ROYALTY — the ledger is untouched");
 }
 
 #[test]
-fn a_royalty_licence_settles_across_the_five() {
+fn a_royalty_licence_settles_across_the_four() {
     let mut l = funded("user", 1_000.0);
     let licence = Licence::Royalty { per_mille: 100, payee: "ada".into() };
-    let out = settle(&mut l, "user", &licence, 1_000, RevenueType::Usage, &all_five());
+    let out = settle(&mut l, "user", &licence, 1_000, RevenueType::Usage, &all_four());
     assert!(out.settled());
     assert_eq!(out.transferred(), 100, "10 % of 1000");
     assert_eq!(l.balance_of("ada"), 70.0);
-    assert_eq!(l.balance_of("treasury"), 15.0);
-    assert_eq!(l.balance_of("user"), 900.0, "the payer fell by exactly what the five gained");
+    assert_eq!(l.balance_of("treasury"), 20.0, "20 %, not the five-way's 15");
+    assert_eq!(l.balance_of("user"), 900.0, "the payer fell by exactly what the four gained");
 }
 
 #[test]
@@ -184,7 +189,7 @@ fn an_unaffordable_royalty_moves_nothing_at_all() {
     let mut l = funded("user", 5.0);
     let before = l.clone();
     let licence = Licence::Royalty { per_mille: 1_000, payee: "ada".into() };
-    let out = settle(&mut l, "user", &licence, 500, RevenueType::Usage, &all_five());
+    let out = settle(&mut l, "user", &licence, 500, RevenueType::Usage, &all_four());
     assert!(matches!(out, Settlement::Insufficient { required: 500, .. }));
     assert_eq!(l, before);
 }
@@ -271,22 +276,27 @@ fn the_recorded_divergence_keeps_its_counterweight() {
 
     let step0 = &doc["★★_the_STEP_0_reconcile"];
     for key in [
-        "★★★_1_the_reference's_four_way_split_is_SUPERSEDED_not_a_port_target",
-        "★★★_2_the_ratified_schedule_confirmed_against_the_row_term_by_term",
+        "★★★_1_the_four_way_split_is_CANON_and_the_five_way_was_a_drift",
+        "★★★_2_the_schedule_term_by_term",
         "★★_3_why_the_arithmetic_is_INTEGRAL_and_the_ledger_is_not",
         "★_4_the_cost_and_the_royalty_are_two_different_flows_and_stay_apart",
     ] {
         assert!(step0[key].as_str().is_some_and(|s| s.len() > 80), "missing reconcile: {key}");
     }
-    let sched = step0["★★★_2_the_ratified_schedule_confirmed_against_the_row_term_by_term"]
+    let sched = step0["★★★_2_the_schedule_term_by_term"].as_str().unwrap();
+    assert!(sched.contains("70 / 20 / 5 / 5"), "the canonical four-way");
+    assert!(sched.contains("REMAINDER ASSIGNED TO THE VALIDATOR SHARE"));
+    assert!(sched.contains("PROVISIONALLY MIRRORS USAGE"), "the open licence question stays named");
+
+    // ★★★ The revert stays on the record. A divergence that quietly
+    //     disappears is the same failure as one never written down, and this
+    //     one is a POLICY reversal — the strongest case for keeping the trail.
+    let reverted = step0["★★★_1_the_four_way_split_is_CANON_and_the_five_way_was_a_drift"]
         .as_str()
         .unwrap();
-    assert!(sched.contains("70/15/5/5/5") && sched.contains("80/10/3/2/5"));
-    assert!(sched.contains("REMAINDER ASSIGNED TO THE VALIDATOR SHARE"));
-    assert!(step0["★★★_1_the_reference's_four_way_split_is_SUPERSEDED_not_a_port_target"]
-        .as_str()
-        .unwrap()
-        .contains("ZERO CALLERS"));
+    assert!(reverted.contains("REVERTED 2026-08-30"));
+    assert!(reverted.contains("NOT the decision it was recorded as"));
+    assert!(reverted.contains("REMOVED from both engines rather than deprecated"));
 
     let split_note = d["★★_what_is_at_parity_and_what_is_the_sharpening"].as_object().unwrap();
     assert_eq!(split_note.len(), 4, "parity and sharpenings, itemised");
@@ -318,5 +328,5 @@ fn the_recorded_divergence_keeps_its_counterweight() {
             assert!(seen.insert(c["name"].as_str().unwrap().to_string()), "duplicate case name");
         }
     }
-    assert_eq!(seen.len(), 12, "every declared case must be present");
+    assert_eq!(seen.len(), 13, "every declared case must be present");
 }

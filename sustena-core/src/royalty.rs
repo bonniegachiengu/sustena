@@ -1,9 +1,9 @@
-//! Contribution as a programmable flow — the ratified two-revenue-type royalty
-//! schedule (PAWA-5 + MYC-5; Pawa §4, Mycelium §VI, Arena §IV).
+//! Contribution as a programmable flow — the four-way royalty schedule
+//! (PAWA-5 + MYC-5; Pawa §4, Mycelium §VI, Arena §IV).
 //!
 //! A contribution declares a [`Licence`]. Running something licensed
-//! `Royalty` charges the user its cost **and** splits a royalty across five
-//! recipients, per the schedule ratified 2026-08-04.
+//! `Royalty` charges the user its cost **and** splits a royalty across four
+//! recipients.
 //!
 //! ## ★★★ The hard boundary, and what makes an internal transfer distinguishable
 //!
@@ -27,21 +27,38 @@
 //!    the second thing, and a test greps these modules for the vocabulary to
 //!    prove the absence rather than assert it.
 //!
-//! ## ★★ The ratified schedule — two revenue types, not one
+//! ## ★★★ The schedule — `70 / 20 / 5 / 5`, four-way
 //!
 //! | recipient   | usage (a pawa charge) | access (a licence sale) |
 //! |-------------|----------------------:|------------------------:|
-//! | contributor |                  70 % |                    80 % |
-//! | treasury    |                  15 % |                    10 % |
-//! | validator   |                   5 % |                     3 % |
-//! | proposer    |                   5 % |                     2 % |
+//! | contributor |                  70 % |                    70 % |
+//! | treasury    |                  20 % |                    20 % |
+//! | validator   |                   5 % |                     5 % |
 //! | referrer    |                   5 % |                     5 % |
 //!
-//! This **supersedes** the earlier four-way `70/20/5/5`, which could express
-//! neither the **proposer** share nor the difference between the two revenue
-//! types. Read the contributor's 70 % as what it is economically: **the price
-//! the commons pays for variation** — selection can only act on variation that
-//! exists.
+//! Read the contributor's 70 % as what it is economically: **the price the
+//! commons pays for variation** — selection can only act on variation that
+//! exists. The treasury's 20 % is the commons funding itself, and in the
+//! single-host case it is larger still, because an absent role's share folds
+//! into it rather than being dropped.
+//!
+//! ## ★★★ Two things this module deliberately does NOT decide
+//!
+//! **1. There is no `proposer` share.** A five-way variant carrying one
+//! (`70/15/5/5/5`, with the treasury cut to 15) reached both engines and is
+//! **not canon**. It is removed here rather than deprecated: a role with no
+//! share is not a role, and leaving the variant in place would let it drift
+//! back.
+//!
+//! **2. The ACCESS column above is PROVISIONAL and mirrors usage.** The
+//! canonical split is stated for a *pawa charge*; nobody has decided what a
+//! *licence sale* should split. Rather than invent a second schedule, or
+//! delete a distinction that is real — paying to **run** something is
+//! genuinely not paying to **have** it, and [`crate::pricing`] depends on
+//! telling them apart — [`RevenueType`] is kept and both arms return the same
+//! figures. So the type stays honest about the difference and is currently
+//! inert about the money, and a decision is one line.
+//! See [`RevenueType::access_is_provisional`].
 //!
 //! ## ★★★ Conservation is a THEOREM, not a check bolted on
 //!
@@ -96,38 +113,49 @@ impl Licence {
     }
 }
 
-/// Which of the two ratified schedules applies.
+/// Which occasion a royalty is being settled for.
 ///
-/// ★★ **Two revenue types, not one.** The earlier four-way split could not tell
-/// them apart, and they are genuinely different: paying to *run* something is
-/// not paying to *have* it.
+/// ★★ **The two are genuinely different** — paying to *run* something is not
+/// paying to *have* it — and [`crate::pricing`] routes on the distinction. They
+/// currently split **identically**; see [`RevenueType::access_is_provisional`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RevenueType {
-    /// A pawa charge — someone ran it. `70 / 15 / 5 / 5 / 5`.
+    /// A pawa charge — someone ran it. `70 / 20 / 5 / 5`.
     Usage,
-    /// A licence sale — someone bought access. `80 / 10 / 3 / 2 / 5`.
+    /// A licence sale — someone bought access. Provisionally the same.
     Access,
 }
 
 impl RevenueType {
-    /// `(contributor, treasury, validator, proposer, referrer)`, in per cent.
+    /// `(contributor, treasury, validator, referrer)`, in per cent.
     ///
     /// ★ Validator's figure is the **nominal** one; the actual validator share
     /// also absorbs the remainder, which is what makes the split exact.
-    pub fn schedule(&self) -> (u64, u64, u64, u64, u64) {
+    pub fn schedule(&self) -> (u64, u64, u64, u64) {
         match self {
-            RevenueType::Usage => (70, 15, 5, 5, 5),
-            RevenueType::Access => (80, 10, 3, 2, 5),
+            RevenueType::Usage => (70, 20, 5, 5),
+            // ★★★ Provisional: mirrors usage, because no licence-sale split
+            //     has been decided. Inventing one would be policy this module
+            //     has no authority to set.
+            RevenueType::Access => (70, 20, 5, 5),
         }
+    }
+
+    /// ★★★ Is the access arm a decision, or a placeholder?
+    ///
+    /// A function rather than a comment, so the open question is executable and
+    /// a test breaks the moment somebody quietly fills it in.
+    pub fn access_is_provisional() -> bool {
+        RevenueType::Access.schedule() == RevenueType::Usage.schedule()
     }
 }
 
 /// Who a royalty is split across.
 ///
-/// ★★ `contributor` and `treasury` are **required**; the other three are
+/// ★★ `contributor` and `treasury` are **required**; the other two are
 /// `Option`, because a single-host run genuinely has no validator (there is no
-/// second node to validate anything) and a contribution often has no proposer
-/// or referrer. ★★★ **An absent role's share is folded into the treasury**, by
+/// second node to validate anything) and a contribution often has no
+/// referrer. ★★★ **An absent role's share is folded into the treasury**, by
 /// the declared rule in [`split`] — it is **never dropped**, because dropping a
 /// share would break conservation, which is the one thing this module must not
 /// do. The treasury is the right destination because it *is* the commons: a
@@ -140,7 +168,6 @@ pub struct Recipients {
     /// region; the boundary is named rather than pre-empted.
     pub treasury: String,
     pub validator: Option<String>,
-    pub proposer: Option<String>,
     pub referrer: Option<String>,
 }
 
@@ -150,18 +177,12 @@ impl Recipients {
             contributor: contributor.to_string(),
             treasury: treasury.to_string(),
             validator: None,
-            proposer: None,
             referrer: None,
         }
     }
 
     pub fn with_validator(mut self, id: &str) -> Recipients {
         self.validator = Some(id.to_string());
-        self
-    }
-
-    pub fn with_proposer(mut self, id: &str) -> Recipients {
-        self.proposer = Some(id.to_string());
         self
     }
 
@@ -179,7 +200,7 @@ pub struct Share {
     pub amount: u64,
 }
 
-/// The five roles the schedule names.
+/// The four roles the schedule names.
 ///
 /// ★ Named `RoyaltyRole`, not `Role` — [`crate::division::Role`] is a
 /// division-of-labour role (who does what in a Sustain), a genuinely different
@@ -190,7 +211,6 @@ pub enum RoyaltyRole {
     Contributor,
     Treasury,
     Validator,
-    Proposer,
     Referrer,
 }
 
@@ -200,7 +220,6 @@ impl RoyaltyRole {
             RoyaltyRole::Contributor => "contributor",
             RoyaltyRole::Treasury => "treasury",
             RoyaltyRole::Validator => "validator",
-            RoyaltyRole::Proposer => "proposer",
             RoyaltyRole::Referrer => "referrer",
         }
     }
@@ -208,27 +227,26 @@ impl RoyaltyRole {
 
 /// ★★★ Split `amount` per the ratified schedule — **exactly conserving**.
 ///
-/// Integer floors for the five nominal shares, then **the remainder is added to
+/// Integer floors for the four nominal shares, then **the remainder is added to
 /// the validator share**, so `Σ shares == amount` for *every* amount with no
 /// rounding step that could leak. Then any share whose role has no recipient is
-/// **folded into the treasury**, which is a reallocation among the same five
+/// **folded into the treasury**, which is a reallocation among the same four
 /// buckets and therefore leaves the sum untouched.
 ///
 /// The returned shares are **merged by recipient**, so a treasury that absorbed
 /// two absent roles appears once with the combined figure rather than three
 /// times.
 pub fn split(amount: u64, revenue: RevenueType, to: &Recipients) -> Vec<Share> {
-    let (c, t, v, p, r) = revenue.schedule();
+    let (c, t, v, r) = revenue.schedule();
 
     let contributor = amount * c / 100;
     let treasury = amount * t / 100;
     let mut validator = amount * v / 100;
-    let proposer = amount * p / 100;
     let referrer = amount * r / 100;
 
     // ★★★ The remainder is not discarded — it IS the validator's last juul.
     // This is the line that makes conservation a theorem.
-    let remainder = amount - (contributor + treasury + validator + proposer + referrer);
+    let remainder = amount - (contributor + treasury + validator + referrer);
     validator += remainder;
 
     // ★★ An absent role's share folds into the treasury. Never dropped.
@@ -238,7 +256,6 @@ pub fn split(amount: u64, revenue: RevenueType, to: &Recipients) -> Vec<Share> {
     ];
     for (share, role, who) in [
         (validator, RoyaltyRole::Validator, to.validator.as_deref()),
-        (proposer, RoyaltyRole::Proposer, to.proposer.as_deref()),
         (referrer, RoyaltyRole::Referrer, to.referrer.as_deref()),
     ] {
         match who {
@@ -372,10 +389,7 @@ mod tests {
     }
 
     fn recipients_all() -> Recipients {
-        Recipients::new("ada", "treasury")
-            .with_validator("val")
-            .with_proposer("pro")
-            .with_referrer("ref")
+        Recipients::new("ada", "treasury").with_validator("val").with_referrer("ref")
     }
 
     fn funded(payer: &str, juul: f64) -> JuulLedger {
@@ -412,13 +426,11 @@ mod tests {
 
     #[test]
     fn the_remainder_lands_on_the_validator_share() {
-        // 7 usage: floors are 4/1/0/0/0 = 5, so the remainder is 2.
-        let (c, t, v, p, r) = RevenueType::Usage.schedule();
+        // 7 usage: floors are 4/1/0/0 = 5, so the remainder is 2.
+        let (c, t, v, r) = RevenueType::Usage.schedule();
         let amount = 7u64;
         let nominal = amount * v / 100;
-        let floors = amount * c / 100 + amount * t / 100 + nominal
-            + amount * p / 100
-            + amount * r / 100;
+        let floors = amount * c / 100 + amount * t / 100 + nominal + amount * r / 100;
         let remainder = amount - floors;
         assert_eq!(remainder, 2, "the leftover the floors did not distribute");
 
@@ -431,32 +443,54 @@ mod tests {
     // ── the two revenue types ───────────────────────────────────────────────
 
     #[test]
-    fn usage_and_access_are_different_schedules() {
-        assert_eq!(RevenueType::Usage.schedule(), (70, 15, 5, 5, 5));
-        assert_eq!(RevenueType::Access.schedule(), (80, 10, 3, 2, 5));
+    fn the_schedule_is_the_four_way_seventy_twenty_five_five() {
+        // ★★★ The canonical split. Treasury takes 20, not 15 — the five-way
+        //     variant that cut it to fund a proposer is not canon.
+        assert_eq!(RevenueType::Usage.schedule(), (70, 20, 5, 5));
 
         let to = recipients_all();
         let by_role = |shares: Vec<Share>, role: RoyaltyRole| {
             shares.iter().find(|s| s.role == role).map(|s| s.amount).unwrap_or(0)
         };
-        assert_eq!(by_role(split(1_000, RevenueType::Usage, &to), RoyaltyRole::Contributor), 700);
-        assert_eq!(by_role(split(1_000, RevenueType::Access, &to), RoyaltyRole::Contributor), 800);
-        assert_eq!(by_role(split(1_000, RevenueType::Usage, &to), RoyaltyRole::Proposer), 50);
-        assert_eq!(by_role(split(1_000, RevenueType::Access, &to), RoyaltyRole::Proposer), 20);
+        let usage = || split(1_000, RevenueType::Usage, &to);
+        assert_eq!(by_role(usage(), RoyaltyRole::Contributor), 700);
+        assert_eq!(by_role(usage(), RoyaltyRole::Treasury), 200);
+        assert_eq!(by_role(usage(), RoyaltyRole::Validator), 50);
+        assert_eq!(by_role(usage(), RoyaltyRole::Referrer), 50);
     }
 
     #[test]
-    fn the_schedule_has_five_recipients_and_the_proposer_is_one_of_them() {
-        // ★ The proposer share is what the superseded four-way could not express.
+    fn the_access_schedule_is_provisional_and_says_so() {
+        // ★★★ Nobody has decided what a LICENCE SALE should split. The type
+        //     stays, because paying to run something is genuinely not paying
+        //     to have it and `pricing` routes on the difference — but the
+        //     figures mirror usage rather than being invented here.
+        //
+        //     This test is the tripwire: filling in a real access schedule
+        //     breaks it, which is the point. A placeholder that could be
+        //     quietly promoted to a decision is worse than no placeholder.
+        assert!(RevenueType::access_is_provisional());
+        assert_eq!(RevenueType::Access.schedule(), RevenueType::Usage.schedule());
+    }
+
+    #[test]
+    fn the_schedule_has_four_recipients_and_no_proposer_among_them() {
+        // ★★★ A role with no share is not a role. `RoyaltyRole` has four
+        //     variants, so a proposer share is unspellable rather than merely
+        //     unset — which is what stops it drifting back.
         let roles: Vec<RoyaltyRole> = split(1_000, RevenueType::Usage, &recipients_all())
             .iter()
             .map(|s| s.role)
             .collect();
-        for r in
-            [RoyaltyRole::Contributor, RoyaltyRole::Treasury, RoyaltyRole::Validator, RoyaltyRole::Proposer, RoyaltyRole::Referrer]
-        {
+        for r in [
+            RoyaltyRole::Contributor,
+            RoyaltyRole::Treasury,
+            RoyaltyRole::Validator,
+            RoyaltyRole::Referrer,
+        ] {
             assert!(roles.contains(&r), "{} missing", r.name());
         }
+        assert_eq!(roles.len(), 4);
     }
 
     // ── Free vs Royalty ─────────────────────────────────────────────────────
@@ -480,7 +514,7 @@ mod tests {
         assert!(out.settled());
         assert_eq!(out.transferred(), 100, "10 % of 1000");
         assert_eq!(l.balance_of("ada"), 70.0);
-        assert_eq!(l.balance_of("treasury"), 15.0);
+        assert_eq!(l.balance_of("treasury"), 20.0);
         assert_eq!(l.balance_of("user"), 900.0);
     }
 
