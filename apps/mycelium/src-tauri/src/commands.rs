@@ -2204,6 +2204,40 @@ pub fn get_network(world: State<'_, World>) -> NetworkDto {
     }
 }
 
+/// Give an existing peer an address, so it can be reached rather than only
+/// answered.
+///
+/// ★★★ **The missing half of a standing peering.** A peer that connected TO
+/// this node is recorded without an address, deliberately -- the socket it
+/// arrived on is not an address it agreed to be reached at. But then nothing
+/// can ever dial it, so a link that works in one direction stays that way
+/// forever. This is where a person supplies the address, which is the only
+/// place it can honestly come from.
+#[tauri::command]
+#[specta::specta]
+pub fn set_peer_address(
+    world: State<'_, World>,
+    public_key: String,
+    address: String,
+) -> Result<(), String> {
+    let address = address.trim().to_string();
+    if address.is_empty() {
+        return Err("an address is host:port, and this is empty".into());
+    }
+    if !address.contains(':') {
+        return Err(format!("{address} has no port -- an address is host:port"));
+    }
+    let handle = world
+        .peering()
+        .book()
+        .all()
+        .into_iter()
+        .find(|p| p.public_key == public_key)
+        .map(|p| p.handle.clone())
+        .ok_or_else(|| "no peer with that key".to_string())?;
+    world.peering().edit(|b| b.seen(&public_key, &handle, Some(address)))
+}
+
 /// Settle on a different port.
 ///
 /// ★★★ Changing it does NOT move a running listener: the socket a peer is
