@@ -72,7 +72,7 @@ fn main() {
 }
 
 fn pct(a: usize, b: usize) -> usize {
-    if b == 0 { 0 } else { a * 100 / b }
+    (a * 100).checked_div(b).unwrap_or(0)
 }
 
 fn name(r: Role) -> &'static str {

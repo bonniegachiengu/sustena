@@ -2827,7 +2827,24 @@ export function Classify(props: {
             <Show when={v().verdict === "admitted" && props.messageId}>
               <Show
                 when={!learned()}
-                fallback={<p class={O.caption}>learned · this shape is recognised from now on</p>}
+                fallback={
+                  /* ★★★ Say what was actually learned, and say the asymmetry
+                     out loud. Since the learner became shape-aware a rule
+                     generalises over the amount, the name, the date and the
+                     balance — so "recognised from now on" was true but vague,
+                     and a person deciding whether to press this deserves to
+                     know it will fire on the NEXT message like this one and
+                     not only on a repeat of this exact text. And that a spend
+                     still asks, because that is the promise they are relying
+                     on when they press it. */
+                  <p class={O.caption}>
+                    learned · the next message shaped like this one is recognised, whatever the
+                    amount, the name or the date
+                    {v().operator === "budget.record_income"
+                      ? " — and income like this files itself"
+                      : " — you will still be asked which pocket"}
+                  </p>
+                }
               >
                 <Show when={confirmed()}>
                   {(p) => (

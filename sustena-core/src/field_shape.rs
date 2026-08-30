@@ -629,6 +629,22 @@ fn literal(raw: &str) -> String {
     out
 }
 
+/// The regex group for a field name, so the correction learner emits the same
+/// groups the inducer does. ★ One vocabulary, two producers — otherwise a
+/// learned rule and an induced one would bind different names for the same
+/// field and the operator layer would need to know which made it.
+pub fn group_pattern(group: &str) -> String {
+    let inner = match group {
+        "amount" | "balance_after" | "fee" => r"[0-9][0-9,]*(?:\.[0-9]{1,2})?",
+        "ref" => r"[A-Z0-9]{8,16}",
+        "date" => r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}",
+        "time" => r"\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AP]\.?M\.?)?",
+        "account" => r"[0-9*]{6,20}",
+        _ => r"[A-Za-z0-9&'.\- ]{2,40}?",
+    };
+    format!("(?P<{group}>{inner})")
+}
+
 fn group_for(role: Role) -> String {
     let inner = match role {
         Role::Amount | Role::Balance | Role::Fee => r"[0-9][0-9,]*(?:\.[0-9]{1,2})?",
