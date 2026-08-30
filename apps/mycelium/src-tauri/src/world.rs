@@ -164,6 +164,10 @@ pub struct World {
     pub operators: Registry,
     inner: Mutex<Inner>,
     store: Store,
+    /// Where this node listens, and whether it does so on its own. ★ Read once
+    /// at open; a peering is a standing relationship, so this is settings and
+    /// not session state.
+    net: Mutex<crate::network::NetworkSettings>,
     /// ★★ The economy, live. Every committed call is metered against it and
     /// charged to it, and the serving seam issues for the work done.
     economy: Mutex<Economy>,
@@ -326,6 +330,7 @@ impl World {
             arena,
             round,
             inner: Mutex::new(Inner { sustains, order, selected }),
+            net: Mutex::new(crate::network::NetworkSettings::load(&store_root)),
             store,
             economy: Mutex::new(Economy::open(DEFAULT_HANDLE)),
             meter: Mutex::new(Meter::new()),
@@ -1151,6 +1156,7 @@ impl World {
                 eprintln!("[mycelium] {handle} claimed ownership of {id} (seeded before ownership was declared)");
             }
         }
+        self.start_listening_if_configured();
         Ok(handle)
     }
 
@@ -1160,7 +1166,31 @@ impl World {
         let handle = u.handle().to_string();
         self.peering.set_identity(Some(u.clone()));
         *self.identity.lock().expect("identity lock") = Some(u);
+        // ★ A node that has just been minted is unlocked, so it listens for the
+        //   same reason an unlocked one does.
+        self.start_listening_if_configured();
         Ok(handle)
+    }
+
+    /// Bring the listener up, if this node is configured to do that on its own.
+    ///
+    /// ★★★ Called from both `unlock` and `enrol` because those are the two ways
+    /// a node comes to hold its own key, and holding the key is the only
+    /// precondition: peering signs a challenge with it, so a locked node has
+    /// nothing to answer a handshake with. Tying it to the identity rather than
+    /// to a button is what makes "start listening" stop being a thing a person
+    /// does.
+    ///
+    /// ★ Best effort, and loud. A busy port must not stop somebody reaching
+    /// their own household.
+    fn start_listening_if_configured(&self) {
+        if !self.network().auto_listen {
+            return;
+        }
+        match self.listen_standing() {
+            Ok(port) => eprintln!("[mycelium] listening for peers on {port}"),
+            Err(e) => eprintln!("[mycelium] not listening: {e}"),
+        }
     }
 
     /// Drop the private key. ★ Not a UI state — the key genuinely leaves memory,
@@ -1930,6 +1960,74 @@ impl World {
         if let Err(e) = self.reload(sustain_id) {
             eprintln!("[peer] could not re-fold {sustain_id} after a peer merge: {e}");
         }
+    }
+
+    // ── standing peering ─────────────────────────────────────
+    //
+    // ★★★ A peering is a RELATIONSHIP, not a session. Everything in this block
+    //     exists so that two devices introduced once find each other again
+    //     after a restart, with nobody pressing anything.
+
+    /// The stored network settings.
+    pub fn network(&self) -> crate::network::NetworkSettings {
+        self.net.lock().expect("net lock").clone()
+    }
+
+    /// Change them, and write them down.
+    ///
+    /// ★ Saved before it is applied: a setting that took effect but was not
+    /// persisted is the drift this module exists to stop.
+    pub fn set_network(&self, settings: crate::network::NetworkSettings) -> Result<(), String> {
+        settings.save(self.store.root()).map_err(|e| e.to_string())?;
+        *self.net.lock().expect("net lock") = settings;
+        Ok(())
+    }
+
+    /// Listen on the port this node has decided on.
+    ///
+    /// ★★★ **It does not fall back to another port.** Binding something else
+    /// because the usual one was busy is exactly the behaviour that made two
+    /// introduced devices unable to find each other, so a taken port is an
+    /// error with a name rather than a quiet reassignment.
+    pub fn listen_standing(&self) -> Result<u16, String> {
+        let port = self.network().listen_port;
+        self.listen(Some(port)).map_err(|e| {
+            format!(
+                "could not listen on {port}, the port this node has settled on: {e}.                  Free it, or choose another port on purpose."
+            )
+        })
+    }
+
+    /// The address a peer on the same network can reach this node at.
+    ///
+    /// ★ `None` when this machine has no route out — a real answer, not an
+    /// error: there is no address to hand anybody.
+    pub fn reachable_address(&self) -> Option<String> {
+        crate::network::reachable_address(self.network().listen_port)
+    }
+
+    /// Sync every Sustain shared with every trusted peer that has an address.
+    ///
+    /// ★★ Returns what happened per peer rather than a bare count, including
+    /// the failures: a peer that is simply asleep is the normal case and must
+    /// read as such, not as an error the person has to act on.
+    pub fn reconnect_all(&self) -> Vec<(String, String, Result<usize, String>)> {
+        let targets: Vec<(String, String, Vec<String>)> = self
+            .peering
+            .book()
+            .trusted_with_addresses()
+            .into_iter()
+            .collect();
+        let mut out = Vec::new();
+        for (key, address, shared) in targets {
+            for id in shared {
+                let result = self
+                    .sync_peer(&address, &id)
+                    .map(|r| r.outcome.received + r.outcome.sent);
+                out.push((key.clone(), id, result));
+            }
+        }
+        out
     }
 
     pub fn listen(&self, port: Option<u16>) -> Result<u16, String> {

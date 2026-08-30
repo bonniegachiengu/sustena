@@ -2190,6 +2190,8 @@ pub fn get_network(world: State<'_, World>) -> NetworkDto {
         node_id: world.node_id(),
         handle: world.principal(),
         listening: world.peering().port(),
+        reachable_at: world.reachable_address(),
+        settled_port: world.network().listen_port,
         unlocked: world.is_unlocked(),
         peers: book.all().into_iter().map(peer_dto).collect(),
         protocol: crate::wire::PROTOCOL,
@@ -2200,6 +2202,38 @@ pub fn get_network(world: State<'_, World>) -> NetworkDto {
             .to_string(),
         shareable,
     }
+}
+
+/// Settle on a different port.
+///
+/// ★★★ Changing it does NOT move a running listener: the socket a peer is
+/// currently talking to keeps working, and the new port is what this node comes
+/// up on next time. Rebinding underneath a live session would drop the very
+/// peer the change is meant to serve.
+#[tauri::command]
+#[specta::specta]
+pub fn set_listen_port(world: State<'_, World>, port: u16) -> Result<u16, String> {
+    if port < 1024 {
+        return Err(format!("{port} is a privileged port; choose one above 1023"));
+    }
+    let mut settings = world.network();
+    settings.listen_port = port;
+    world.set_network(settings)?;
+    Ok(port)
+}
+
+/// Reach every trusted peer that has an address, now.
+///
+/// ★ The same sweep the app runs on a timer, offered as a button for the
+/// moment somebody does not want to wait for it.
+#[tauri::command]
+#[specta::specta]
+pub fn reconnect_peers(world: State<'_, World>) -> Vec<(String, String, Option<String>)> {
+    world
+        .reconnect_all()
+        .into_iter()
+        .map(|(peer, sustain, outcome)| (peer, sustain, outcome.err()))
+        .collect()
 }
 
 /// Start accepting peers. ★ A locked node refuses, because it has nothing to

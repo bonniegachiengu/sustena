@@ -180,6 +180,27 @@ impl Book {
     }
 
     /// Every Sustain this node would give this peer. Never the registry.
+    /// Every trusted peer that has an address, with what it may have.
+    ///
+    /// ★★★ The three conjuncts of *can this reconnect on its own*: trusted, and
+    /// reachable, and actually sharing something. A peer missing any one of
+    /// them is not a failure to report — it is a relationship that was never
+    /// finished, and sweeping it every two minutes would be noise.
+    ///
+    /// ★★ Note what this does NOT do: it never invents an address. A peer that
+    /// only ever connected TO us has none, and guessing one from the socket it
+    /// arrived on would be recording something the person never agreed to.
+    pub fn trusted_with_addresses(&self) -> Vec<(String, String, Vec<String>)> {
+        self.peers
+            .iter()
+            .filter(|(_, p)| p.standing == Standing::Trusted && !p.shares.is_empty())
+            .filter_map(|(key, p)| {
+                let address = p.address.clone()?;
+                Some((key.clone(), address, p.shares.iter().cloned().collect()))
+            })
+            .collect()
+    }
+
     pub fn shared_with(&self, key: &str) -> Vec<String> {
         self.peers
             .get(key)

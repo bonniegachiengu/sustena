@@ -19,6 +19,7 @@ pub mod definitions;
 pub mod economy;
 pub mod identity;
 pub mod ingest;
+pub mod network;
 pub mod orchie;
 pub mod peers;
 pub mod quorum;
@@ -93,6 +94,8 @@ pub fn specta_builder() -> Builder {
         commands::resolve_proposal,
         commands::get_network,
         commands::start_listening,
+        commands::set_listen_port,
+        commands::reconnect_peers,
         commands::add_peer,
         commands::set_peer_standing,
         commands::share_sustain,
@@ -160,6 +163,8 @@ fn export_bindings(builder: &Builder) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri::Emitter;
+
     let builder = specta_builder();
 
     // ★ Desktop only — see `export_bindings`. On a device this wrote to a
@@ -192,7 +197,65 @@ pub fn run() {
                 world.with(|i| i.order().len()),
                 if seeded { " · seeded" } else { " · loaded from log" }
             );
+            // ★★★ The receiver is taken BEFORE the world is handed over, so
+            //     no merge can land in the gap between opening and listening.
+            let merges = world.merges();
             app.manage(world);
+
+            // ── the absorber ────────────────────────────────────────────────
+            //
+            // ★★★ A peer writing into this node is the one change nothing local
+            //     initiated, so it is the one change no surface would otherwise
+            //     hear about. This thread re-folds what arrived and says so.
+            //
+            // ★★ It BLOCKS on the channel rather than polling. There is no
+            //    interval to tune and no idle wakeups: the listener posts an
+            //    id, this wakes, and between merges it costs nothing.
+            let absorber = app.handle().clone();
+            std::thread::spawn(move || {
+                while let Ok(sustain_id) = merges.recv() {
+                    let world = absorber.state::<world::World>();
+                    world.absorb(&sustain_id);
+                    // The surfaces re-read on this. ★ Emitted AFTER the fold,
+                    // so anything that reacts reads the new state and not the
+                    // one that was wrong.
+                    let _ = absorber.emit("sustain:merged", &sustain_id);
+                }
+            });
+
+            // ── reconnecting ────────────────────────────────────────────────
+            //
+            // ★★★ Introduced once, reachable thereafter. A peer that was asleep
+            //     when this node woke is the normal case, so this sweeps rather
+            //     than trying once and giving up.
+            //
+            // ★★ It waits before the first sweep on purpose: the identity is
+            //    still locked at startup, and a locked node cannot peer. The
+            //    sweep simply finds nothing until somebody unlocks, and then
+            //    finds everything.
+            let dialer = app.handle().clone();
+            std::thread::spawn(move || loop {
+                let every = {
+                    let world = dialer.state::<world::World>();
+                    let settings = world.network();
+                    if settings.auto_reconnect && world.is_unlocked() {
+                        for (peer, id, outcome) in world.reconnect_all() {
+                            match outcome {
+                                Ok(n) if n > 0 => {
+                                    println!("[peer] reconnected to {peer}: {n} entrie(s) for {id}");
+                                    let _ = dialer.emit("sustain:merged", &id);
+                                }
+                                Ok(_) => {}
+                                // ★ Asleep is not an error a person must act on.
+                                Err(e) => eprintln!("[peer] {peer} unreachable for {id}: {e}"),
+                            }
+                        }
+                    }
+                    settings.reconnect_every_secs.max(15)
+                };
+                std::thread::sleep(std::time::Duration::from_secs(every));
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())

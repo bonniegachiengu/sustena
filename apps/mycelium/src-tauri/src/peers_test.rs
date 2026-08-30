@@ -576,3 +576,143 @@ fn a_log_written_before_stamping_existed_still_receives_a_push() {
         a.log_len(&id)
     );
 }
+
+// ── a peering that outlives the session ─────────────────────────────────────
+//
+// ★★★ The three promises: the port is the same tomorrow, the listener comes up
+//     by itself, and a peer introduced once is reached again without being
+//     re-introduced. Together they are the difference between a demo and a
+//     link.
+
+
+/// Open a world on a directory, with a chosen standing port.
+fn standing(home: &std::path::Path, port: u16, enrol: bool) -> World {
+    std::fs::create_dir_all(home).expect("home");
+    let store = Store::at(home).expect("store");
+    let world = World::open(store).expect("world");
+    let mut net = world.network();
+    net.listen_port = port;
+    // Sweeping is the app's thread, not this test's.
+    net.auto_reconnect = false;
+    world.set_network(net).expect("settings");
+    if enrol {
+        world.enrol(DEFAULT_HANDLE, PASS).expect("enrol");
+    }
+    world
+}
+
+#[test]
+fn the_listener_comes_up_with_nobody_pressing_anything() {
+    // ★★★ Holding the key is the ONLY precondition -- peering signs a
+    //     challenge with it -- so coming to hold it is the right trigger, and
+    //     "start listening" stops being a thing a person does.
+    let home = scratch("standing-unlock").join("node");
+    let world = standing(&home, 39771, true);
+    assert_eq!(
+        world.peering().port(),
+        Some(39771),
+        "enrolling brought the listener up on the settled port"
+    );
+}
+
+#[test]
+fn a_second_launch_settles_on_the_same_port_it_wrote_down() {
+    // ★★★ THE bug. The old bind asked for port 0, so every launch got a
+    //     different number and two introduced devices could not find each
+    //     other an hour later. What makes it stable is that the port is
+    //     WRITTEN DOWN, so this is the assertion that matters: a new World
+    //     over the same directory reads the same answer, having been told
+    //     nothing.
+    //
+    // ★★ It cannot also assert the second bind, and the reason is worth
+    //    recording: a listener thread outlives the World that started it --
+    //    there is no way to stop listening short of ending the process. In the
+    //    app that is exactly right (a restart IS a new process); in one test
+    //    binary the first socket is still held. `lock()` clears the identity so
+    //    a locked node refuses every handshake, but the port stays bound.
+    //    Making lock close the socket is a real improvement and its own change.
+    let home = scratch("standing-restart").join("node");
+    let first = standing(&home, 39772, true);
+    assert_eq!(first.peering().port(), Some(39772));
+    assert_eq!(first.network().listen_port, 39772);
+    drop(first);
+
+    let second = standing(&home, 39772, false);
+    assert_eq!(
+        second.network().listen_port,
+        39772,
+        "the same port, unasked, on the next launch"
+    );
+}
+
+#[test]
+fn a_busy_port_is_named_rather_than_quietly_swapped() {
+    // ★★★ Binding something else because the usual port was taken IS the
+    //     original bug. A taken port must be an error with a name.
+    let root = scratch("standing-busy");
+    let holder = standing(&root.join("holder"), 39773, true);
+    assert_eq!(holder.peering().port(), Some(39773));
+
+    let second = standing(&root.join("second"), 39773, true);
+    let err = second.listen_standing().expect_err("the port is taken");
+    assert!(err.contains("39773"), "it says which port: {err}");
+    assert!(err.contains("settled on"), "and why it matters: {err}");
+}
+
+#[test]
+fn a_peer_introduced_once_is_reached_again_without_being_re_introduced() {
+    // ★★★ The whole point. Nobody re-enters a key, an address or a port.
+    let root = scratch("standing-reconnect");
+    let a = standing(&root.join("alice"), 39774, true);
+    let b = standing(&root.join("bob"), 39775, true);
+    let id = "shared-habitat".to_string();
+    a.instantiate_owned(&id, "Shared", TemplateId::Habitat, None, None, Some(DEFAULT_HANDLE))
+        .expect("instantiate");
+
+    let a_key = a.node_id().expect("key");
+    let b_key = b.node_id().expect("key");
+    for (me, them, addr) in
+        [(&a, &b_key, "127.0.0.1:39775"), (&b, &a_key, "127.0.0.1:39774")]
+    {
+        me.peering()
+            .edit(|book| {
+                book.seen(them, "peer", Some(addr.to_string()));
+                book.set_standing(them, Standing::Trusted);
+                book.share(them, &id)
+            })
+            .expect("book")
+            .expect("share");
+    }
+
+    // The sweep the app runs on a timer, called directly.
+    let report = b.reconnect_all();
+    assert!(!report.is_empty(), "there was a trusted, addressed, sharing peer to reach");
+    assert!(
+        report.iter().any(|(_, sustain, outcome)| sustain == &id && outcome.is_ok()),
+        "and it was reached: {report:?}"
+    );
+    assert!(
+        b.with(|i| i.get(&id).is_some()),
+        "B now holds the Sustain it was never told about by hand"
+    );
+}
+
+#[test]
+fn a_peer_that_only_ever_dialled_in_is_not_swept() {
+    // ★★ It has no address, because this node never agreed to one. Inventing
+    //    it from the socket a connection arrived on would be recording
+    //    something nobody chose.
+    let home = scratch("standing-noaddr").join("node");
+    let world = standing(&home, 39776, true);
+    world
+        .peering()
+        .edit(|book| {
+            book.seen("ff00", "dialled-in", None);
+            book.set_standing("ff00", Standing::Trusted);
+            book.share("ff00", "whatever")
+        })
+        .expect("book")
+        .expect("share");
+
+    assert!(world.reconnect_all().is_empty(), "nothing to dial, and that is correct");
+}

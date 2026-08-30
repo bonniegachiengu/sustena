@@ -1321,6 +1321,17 @@ pub struct NetworkDto {
     /// The port this node accepts peers on. `None` means **not listening**,
     /// which a `0` would have read as a port.
     pub listening: Option<u16>,
+    /// The address a peer on the same network can reach this node at.
+    ///
+    /// ★★★ **Not `127.0.0.1`.** A loopback address is only reachable over a
+    /// cable tunnel, so handing it to somebody as "add me here" is telling them
+    /// something that stops being true the moment they unplug. `None` means
+    /// this machine has no route out, which is a real answer rather than an
+    /// error.
+    pub reachable_at: Option<String>,
+    /// The port this node has settled on, whether or not it is listening now.
+    /// ★ Stable across restarts by construction: it is stored, not negotiated.
+    pub settled_port: u16,
     /// ★★ A locked node cannot prove its own key, so it cannot peer at all.
     /// The screen says which, rather than showing an idle network.
     pub unlocked: bool,
