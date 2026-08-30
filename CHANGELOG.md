@@ -9,6 +9,15 @@ move: a **minor** bump (0.1 → 0.2) is where new capability lands and where
 something may change how it behaves, and a **patch** bump (0.2.0 → 0.2.1) is a
 fix that does not add anything.
 
+## v1.1.1 - 2026-08-31
+
+- docs: rewrite the night status complete and current
+- docs(audit): fill the 18 rows with what was actually checked
+- chore(core): refresh the lockfile
+- fix(orchie): Orchie was not subscribed to the pulse at all
+- docs: the night's status and the behaviour audit
+- feat(arena): seed the shelf with what ships, as Bundled and unsigned
+
 ## v1.1.0 - 2026-08-31
 
 - fix(fold): genesis joins, ReplaceRoot still replaces — two jobs, two mutations
