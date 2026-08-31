@@ -127,6 +127,20 @@ pub trait Replayable {
 // The replica
 // ---------------------------------------------------------------------------
 
+/// A checkable summary of what a replica holds.
+///
+/// ★★ Deliberately small and payload-free: it crosses the wire between nodes
+/// that need not trust each other, so it carries the *identity* of what is
+/// held and nothing about its contents.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Holdings {
+    /// How many entries. Not a checksum — the thing that makes an incoherent
+    /// claim readable by a person.
+    pub count: u64,
+    /// SHA-256 over the sorted `(node, counter)` pairs.
+    pub digest: String,
+}
+
 /// A node's copy of one Sustain's log.
 ///
 /// ★★★ The join is a **union**, and that is the whole CRDT. Nothing here is
@@ -210,6 +224,38 @@ impl<T: Clone + PartialEq + Serialize> Replica<T> {
             }
         }
         clock
+    }
+
+    /// What this replica **actually holds**, as something a peer can check.
+    ///
+    /// ★★★ **Why a frontier is not enough.** A frontier is a claim about the
+    /// highest counter seen per node, and two replicas can agree on it while
+    /// holding different sets of entries — gaps are legitimate, so
+    /// `max counter` says nothing about what sits below it. That gap is not
+    /// theoretical: a real device sync returned a frontier its own log could
+    /// not justify, and because `missing_from` had nothing to send, the round
+    /// reported `sent = 0`. **A lie and a healthy idempotent sync produced the
+    /// same bytes on the wire**, which is what made it cost a day to not solve.
+    ///
+    /// ★★ The digest closes over the sorted `(node, counter)` pairs — the
+    /// identity of every entry held, and nothing about payloads. `entries` is a
+    /// `BTreeMap`, so that order is the map's own and needs no sorting step;
+    /// two replicas holding the same set therefore hash the same on any
+    /// machine.
+    ///
+    /// ★ `count` rides along because it is what makes a bad claim *legible*.
+    /// Digests only ever say "different". A peer asserting a frontier that
+    /// reaches 283 while holding 2 entries names itself.
+    pub fn holdings(&self) -> Holdings {
+        use sha2::{Digest as _, Sha256};
+        let mut hasher = Sha256::new();
+        for (node, counter) in self.entries.keys() {
+            hasher.update(node.as_bytes());
+            hasher.update(b":");
+            hasher.update(counter.to_be_bytes());
+            hasher.update(b";");
+        }
+        Holdings { count: self.entries.len() as u64, digest: format!("{:x}", hasher.finalize()) }
     }
 
     /// Everything this replica holds that a peer at `theirs` does not.
@@ -813,5 +859,62 @@ mod tests {
         let out = reconcile(&r, None, Some(&rules)).expect("folds");
         assert_eq!(out.admissible, Some(true));
         assert!(out.violated.is_empty());
+    }
+
+    // ── holdings ────────────────────────────────────────────────────────
+    //
+    // ★★★ A frontier is a claim about the highest counter per node. Two
+    //     replicas can agree on it while holding different entries, because
+    //     gaps below the maximum are legitimate. These are the tests for the
+    //     summary that closes that gap.
+
+    #[test]
+    fn the_same_entries_hash_the_same_whatever_order_they_arrived_in() {
+        // ★★★ The property the whole check rests on. Two nodes reach the same
+        //     set by different routes -- one merged, one wrote -- and if the
+        //     digest depended on arrival order they would accuse each other
+        //     of divergence forever.
+        let a = replica(vec![
+            entry("alice", 1, 1, set("x", Value::from(1))),
+            entry("bob", 1, 2, set("y", Value::from(2))),
+            entry("alice", 2, 3, set("z", Value::from(3))),
+        ]);
+        let b = replica(vec![
+            entry("alice", 2, 3, set("z", Value::from(3))),
+            entry("alice", 1, 1, set("x", Value::from(1))),
+            entry("bob", 1, 2, set("y", Value::from(2))),
+        ]);
+        assert_eq!(a.holdings(), b.holdings());
+        assert_eq!(a.holdings().count, 3);
+    }
+
+    #[test]
+    fn a_gap_below_the_frontier_changes_the_holdings_but_not_the_frontier() {
+        // ★★★ Exactly the shape the device trace had: same frontier, fewer
+        //     entries. The frontier cannot tell these apart, which is why it
+        //     was believed. The digest can.
+        let full = replica(vec![
+            entry("alice", 1, 1, set("x", Value::from(1))),
+            entry("alice", 2, 2, set("y", Value::from(2))),
+            entry("alice", 3, 3, set("z", Value::from(3))),
+        ]);
+        let gappy = replica(vec![
+            entry("alice", 1, 1, set("x", Value::from(1))),
+            entry("alice", 3, 3, set("z", Value::from(3))),
+        ]);
+        assert_eq!(full.frontier(), gappy.frontier(), "the frontier cannot see the gap");
+        assert_ne!(full.holdings(), gappy.holdings(), "the holdings can");
+        assert_eq!(full.holdings().count, 3);
+        assert_eq!(gappy.holdings().count, 2);
+    }
+
+    #[test]
+    fn an_empty_replica_has_holdings_rather_than_nothing() {
+        // ★ A node with no entries still makes a checkable claim. Treating
+        //   empty as "no answer" would exempt exactly the node most likely to
+        //   be wrong about what it holds.
+        let h = Replica::<Line>::new().holdings();
+        assert_eq!(h.count, 0);
+        assert_eq!(h.digest.len(), 64);
     }
 }
