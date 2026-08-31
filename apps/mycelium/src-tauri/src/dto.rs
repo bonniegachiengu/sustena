@@ -836,6 +836,13 @@ pub struct IdentityDto {
     /// The KDF actually in force, named rather than assumed.
     pub kdf: Option<String>,
     pub iterations: Option<u32>,
+    /// Whether this node comes up unlocked without being asked.
+    ///
+    /// ★★★ Surfaced because its ABSENCE caused a real failure: an app
+    /// restarted for an update came back locked, a locked node cannot peer,
+    /// and the household stopped syncing with nobody able to tell why. A
+    /// setting that only exists in the engine is a setting nobody can use.
+    pub unlock_remembered: bool,
 }
 
 // ── ingest ──────────────────────────────────────────────────

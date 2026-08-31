@@ -139,6 +139,22 @@ export const engine = {
   identity: (): Promise<IdentityDto> => commands.getIdentity(),
   unlock: async (passphrase: string): Promise<IdentityDto> =>
     unwrap(await commands.unlockIdentity(passphrase)),
+
+  /**
+   * Come up unlocked from now on, without being asked.
+   *
+   * ★★★ It caches the DERIVED key, not the passphrase, so a passphrase reused
+   * elsewhere is not put at risk -- and only after the passphrase has actually
+   * opened the identity, so a wrong one can never be written down as if it
+   * were right. `forgetUnlock` deletes it and the gate is exactly as it was.
+   */
+  rememberUnlock: async (passphrase: string): Promise<void> => {
+    unwrap(await commands.rememberUnlock(passphrase));
+  },
+
+  forgetUnlock: async (): Promise<void> => {
+    unwrap(await commands.forgetUnlock());
+  },
   enrol: async (handle: string, passphrase: string): Promise<IdentityDto> =>
     unwrap(await commands.enrolIdentity(handle, passphrase)),
   lockIdentity: (): Promise<IdentityDto> => commands.lockIdentity(),

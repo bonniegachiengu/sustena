@@ -1459,7 +1459,16 @@ publicKey: string | null;
 /**
  * The KDF actually in force, named rather than assumed.
  */
-kdf: string | null; iterations: number | null }
+kdf: string | null; iterations: number | null; 
+/**
+ * Whether this node comes up unlocked without being asked.
+ * 
+ * ★★★ Surfaced because its ABSENCE caused a real failure: an app
+ * restarted for an update came back locked, a locked node cannot peer,
+ * and the household stopped syncing with nobody able to tell why. A
+ * setting that only exists in the engine is a setting nobody can use.
+ */
+unlockRemembered: boolean }
 /**
  * One inference pass, on the wire.
  */

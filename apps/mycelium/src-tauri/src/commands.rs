@@ -783,6 +783,7 @@ pub fn get_identity(world: State<'_, World>) -> IdentityDto {
         public_key: world.public_key(),
         kdf: file.as_ref().map(|f| f.kdf.clone()),
         iterations: file.as_ref().map(|f| f.iterations),
+        unlock_remembered: world.unlock_is_remembered(),
     }
 }
 
