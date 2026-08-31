@@ -222,3 +222,97 @@ half-applied manifests to a clean tree, and running exactly one.
 - **The two real devices converging** is still the open item. The engine bugs
   that blocked it are fixed and proven between two processes; the last mile is
   his passphrase, once.
+
+---
+
+# 31 Aug 03:00–03:40 — the push bug, with real devices
+
+## 2 — Did his data converge? NO. And the laptop's balance is not real.
+
+The laptop's Homestead log, in full, from the running app's own store:
+
+```
+seq 0 | genesis                  | origin self
+seq 1 | system.backfill_declared | origin self
+```
+
+Two events. Every habitat identical. Nothing written since 29 Aug 10:05. **None
+of the phone's 285 events crossed.**
+
+Folding a COPY of that store gives the truth the screen does not:
+
+```
+lapcopy  log=2  balance=0.0
+{"finances":{"liquid":{"balance":0.0},"pockets":{"food":{...0.0}},...}}
+```
+
+**The laptop folds to 0.00.** Its UI showed `516,699.48` — a number its own log
+cannot back. That is its own bug and the most dangerous one on this page,
+because it makes an unconverged node look converged.
+
+`RECEIVED 0 / SENT 0` was NOT idempotence. Computed from both real logs:
+
+```
+laptop frontier: {f86df2ca: 2}
+phone  frontier: {d6502ecd: 283, f86df2ca: 2}
+phone SHOULD send: 283 entries (all d6502ecd-origin)
+```
+
+**Sustains 8 vs 7:** the registry holds 7. There is an orphan `garden-1.jsonl`
+event log, present as a log and absent from `sustains.json` — the likely eighth
+in the UI count.
+
+## 1 — The push bug: what is now RULED OUT, at byte level
+
+**It is not the transport.** A proxy between the two devices, framing on the
+wire's own length prefix:
+
+```
+--- session from 127.0.0.1:2455 ---
+phone->laptop  frame 281      laptop->phone  frame 281   (handshake)
+phone->laptop  frame 159      laptop->phone  frame 159
+phone->laptop  frame 469      laptop->phone  frame 641
+phone->laptop  frame 503      laptop->phone  frame 503
+--- session ended ---
+```
+
+Largest frame **641 bytes**. A Give carrying 283 entries is ~150 kB. So the
+phone genuinely computed nothing to send; nothing was dropped in flight.
+
+**It is not the algorithm, and not his data.** I implanted his REAL logs and
+REAL registries into two scratch nodes, origins remapped onto their keys:
+
+```
+[B] before: balance 516699.48 log 285
+[B] sync 1: received 0 sent 283  -> balance 516699.48
+[B] sync 2: received 0 sent 0    (idempotent: true)
+[B] rebuild_state == get_state: true
+[peer] gave 283 new entrie(s); [A] merged and re-folded: balance 516699.48
+```
+
+**Node A — the laptop's shape — received all 283 and folded to his real
+household.** With his own data, the code converges.
+
+**A misconfiguration I introduced and then found.** My `adb reverse tcp:9777`
+squatted the port the phone's app wants, so it showed "not listening" — v1.1.1
+refusing to silently pick another port, correctly. When I freed 9777 the app
+took it, and the phone's stored peer address `127.0.0.1:9777` then pointed **at
+itself**: a self-sync returns 0/0 with no error, which is exactly what
+03:09:16 shows. That explains the LATER syncs. It does not explain 03:06:52,
+when the reverse was still in place and the laptop's `peers.json` was rewritten
+at 03:07:16 — proof of real contact.
+
+**So the remaining unknown is narrow:** with `theirs = {laptop: 2}`, the phone's
+`missing_from` returned empty in the app while returning 283 in a harness fed
+the same bytes. Every other explanation is eliminated.
+
+## 3 — Desktop liveness: cause found
+
+The laptop was the RESPONDER. The pulse fires from the absorber (only when
+`accept_give` actually wrote entries — here zero, correctly) and from the
+reconnect sweep (the initiator path). But the inbound connection DID change the
+laptop: `serve` calls `book.seen(...)` and rewrote `peers.json` at 03:07:16.
+**Nothing relays a pulse for a peer-book change**, so the Network screen had no
+reason to re-render and kept saying "never synced".
+
+§III's relay is wired for state, not for peering. That is my omission.
