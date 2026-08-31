@@ -672,3 +672,71 @@ desktop binary predated it.
 Still off USB and off the LAN. The install is armed against the exact path the
 release wrote at 14:41, so when it returns it gets **v1.1.2**, not the 03:36
 build it is on now. Nothing else is waiting on me.
+
+---
+
+# 31 Aug, 15:10 — house in order; the phone step, ready to fire
+
+## Stale versions: gone
+
+22 artefacts, 2.78 GB. Exactly one version of each now exists on the machine:
+
+```
+sustena-installers/
+  Mycelium-Sustena-1.1.2-x64.msi
+  Mycelium-Sustena-1.1.2-x64-setup.exe
+  Mycelium-Orchie-1.1.2-arm64-debug.apk
+```
+
+Removed: every 0.3.1 / 0.3.2 / 1.0.0 / 1.1.0 / 1.1.1 installer, the
+`Orchie-realtime-classify-TEST` APK, three old `builds/Sustena-Android-dev-*`
+APKs, the stale `target/debug` binaries, and a stray `two_nodes.exe` that had
+been sitting **inside his install folder** — a dev harness has no business in
+the directory his shortcut opens.
+
+## The desktop, by hash
+
+```
+SOURCE-BUILT  794f0231a099b25d…  target/release/mycelium.exe
+DEPLOYED      794f0231a099b25d…  %LOCALAPPDATA%\Mycelium — Sustena\mycelium.exe
+EQUAL: True     both 16,228,864 bytes, 14:45:03
+```
+
+Header renders **`v1.1.2 · 7fd417c`**. The one commit between that stamp and
+HEAD is docs-only.
+
+## Why "grep the deployed bundle" cannot be the proof
+
+Tauri v2 embeds the frontend **inside** the exe, compressed — his install folder
+has no `dist/` at all. The control that settles it: `"no server, no network"`,
+text he is reading on his own lock screen, **does not appear in the binary
+either**. A string-grep there returns "absent" for a correct build, so it can
+neither confirm nor refute a deploy. Chain of custody is what is available: the
+embedded bundle `index-0Fo14grF.js` contains `stay unlocked`, `read from here`
+and `constellation`, and the exe carrying it hash-matches what was built.
+
+## A candidate for the staleness, offered as a candidate
+
+`%LOCALAPPDATA%\online.vyybandasky.sustena.mycelium\EBWebView` — a WebView2
+cache last written 12:49, which survives an exe swap and can serve the old UI
+out of a new binary. Cleared `Cache`, `Code Cache`, `GPUCache` only; his
+household lives in **Roaming** and was not touched.
+
+His reports also predate the 14:45 copy, so "had not relaunched yet" fits the
+evidence equally well. I cannot separate the two from here and am not pretending
+otherwise.
+
+## The phone
+
+Deliberately disconnected. The armed installer waited 90 minutes and stood down
+rather than spin. Nothing is lost — the APK is built and staged. When it is back
+on USB, one line does it:
+
+```powershell
+& "$env:USERPROFILE\Android\sdk\platform-tools\adb.exe" install -r `
+  "C:\Users\DELL\dev\sustena-installers\Mycelium-Orchie-1.1.2-arm64-debug.apk"
+```
+
+`-r` keeps his data: identity, household, peer book. The push-bug investigation
+resumes when the device is back; it needs the live phone and nothing else is
+blocked on it.
