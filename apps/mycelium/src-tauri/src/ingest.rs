@@ -432,11 +432,43 @@ pub struct Reported {
     pub at: i64,
 }
 
-/// The running balance a message states, if it states one.
-fn reported_balance_of(m: &IngestedMessage) -> Option<f64> {
-    m.parsed_fields.get("balance_after").and_then(|v| {
+/// The running balance a message states, and **which account it belongs to**.
+///
+/// ★★★ **One sender is not one account.** Pochi la Biashara and M-Shwari arrive
+/// from the SAME M-Pesa sender as the main wallet, so keying a reported balance
+/// by `source_id` collapses three different pots into one and shows whichever
+/// text landed last. The rules already separate them — they carry an
+/// `instrument` — so the account is read from the message rather than guessed
+/// from the sender.
+///
+/// ★★ **`loan_balance` is deliberately not a balance here.** KCB's loan texts
+/// state what is OWED, and a household that saw its debt reported as money it
+/// holds would be looking at the most dangerous wrong number this app could
+/// print. Absent from the list on purpose, not by omission.
+///
+/// ★ Order matters: an instrument's own field is read before `balance_after`,
+/// because `mpesa_pochi_received` states the **business** balance in
+/// `balance_after` — so the field name alone would attribute it to the wrong
+/// pot, and the instrument is what settles it.
+fn reported_account_of(m: &IngestedMessage) -> Option<(String, f64)> {
+    let number = |v: &serde_json::Value| {
         v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
-    })
+    };
+    let balance = ["pochi_balance", "mshwari_balance", "actual_balance", "balance_after"]
+        .iter()
+        .find_map(|f| m.parsed_fields.get(*f).and_then(number))?;
+
+    // The pot this message is about: its own instrument, or the sender's main
+    // wallet when it names none.
+    let account = m
+        .parsed_fields
+        .get("instrument")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| m.source_id.clone());
+
+    Some((account, balance))
 }
 
 /// A declared capture source.
@@ -1061,10 +1093,11 @@ impl Ingested {
             if m.sustain_id != sustain_id {
                 continue;
             }
-            let (Some(at), Some(balance)) = (m.sent_at_ms, reported_balance_of(&m)) else {
+            let (Some(at), Some((account, balance))) = (m.sent_at_ms, reported_account_of(&m))
+            else {
                 continue;
             };
-            let e = out.entry(m.source_id.clone()).or_insert(Reported { balance, at });
+            let e = out.entry(account).or_insert(Reported { balance, at });
             if at > e.at {
                 *e = Reported { balance, at };
             }
@@ -4251,5 +4284,110 @@ mod intake_window_tests {
             1,
             "the record it already had is untouched"
         );
+    }
+}
+
+#[cfg(test)]
+mod per_account_balance_tests {
+    //! One sender is not one account: M-Pesa, Pochi and M-Shwari all arrive
+    //! from the same sender and are three different pots.
+    use super::*;
+
+    fn msg(source: &str, fields: &[(&str, serde_json::Value)]) -> IngestedMessage {
+        let mut m = IngestedMessage {
+            id: "x".into(),
+            sustain_id: "h".into(),
+            source_id: source.into(),
+            raw_payload: String::new(),
+            dedup_key: "k".into(),
+            status: "parsed_unmapped".into(),
+            parser_name: "p".into(),
+            reason: String::new(),
+            parsed_fields: Default::default(),
+            external_ref: None,
+            operator: None,
+            params: Default::default(),
+            applied: false,
+            gate_reason: None,
+            resolved: false,
+            netted_with: None,
+            same_event_as: None,
+            reclaimed: false,
+            deferred_at: None,
+            filed: Vec::new(),
+            ignored: false,
+            sent_at_ms: None,
+            event_at_ms: None,
+            seq: 1,
+        };
+        for (k, v) in fields {
+            m.parsed_fields.insert((*k).into(), v.clone());
+        }
+        m
+    }
+
+    #[test]
+    fn the_main_wallet_is_keyed_by_its_sender() {
+        let m = msg("mpesa", &[("balance_after", serde_json::json!(12154.47))]);
+        assert_eq!(reported_account_of(&m), Some(("mpesa".into(), 12154.47)));
+    }
+
+    #[test]
+    fn pochi_and_mshwari_are_their_own_pots_not_the_wallet() {
+        // ★★★ The whole point. Both arrive from the M-Pesa sender; keying by
+        //     sender would collapse three balances into whichever text landed
+        //     last, and the household would be shown one number for three pots.
+        let pochi = msg(
+            "mpesa",
+            &[("instrument", serde_json::json!("pochi")), ("pochi_balance", serde_json::json!(3400.0))],
+        );
+        assert_eq!(reported_account_of(&pochi), Some(("pochi".into(), 3400.0)));
+
+        let mshwari = msg(
+            "mpesa",
+            &[("instrument", serde_json::json!("mshwari")), ("mshwari_balance", serde_json::json!(20000.0))],
+        );
+        assert_eq!(reported_account_of(&mshwari), Some(("mshwari".into(), 20000.0)));
+    }
+
+    #[test]
+    fn a_pochi_receipt_states_the_business_balance_in_balance_after() {
+        // ★★★ The trap. `mpesa_pochi_received` puts the BUSINESS balance in
+        //     `balance_after`, so reading the field name alone would file it as
+        //     the main wallet. The instrument is what settles it.
+        let m = msg(
+            "mpesa",
+            &[("instrument", serde_json::json!("pochi")), ("balance_after", serde_json::json!(880.0))],
+        );
+        assert_eq!(reported_account_of(&m), Some(("pochi".into(), 880.0)));
+    }
+
+    #[test]
+    fn a_loan_balance_is_never_reported_as_money_held() {
+        // ★★★ The most dangerous wrong number this app could print. KCB's loan
+        //     texts state what is OWED; showing that as a balance would tell a
+        //     household it has money it does not have.
+        let m = msg("kcb", &[("loan_balance", serde_json::json!(5000.0))]);
+        assert_eq!(reported_account_of(&m), None, "debt is not a balance");
+    }
+
+    #[test]
+    fn a_message_stating_no_balance_reports_none() {
+        assert_eq!(reported_account_of(&msg("mpesa", &[])), None);
+    }
+
+    #[test]
+    fn a_comma_formatted_balance_is_read_as_a_number() {
+        // ★ Real texts write "Ksh12,154.47"; the field arrives as a string.
+        let m = msg("kcb", &[("actual_balance", serde_json::json!("59,055.00"))]);
+        assert_eq!(reported_account_of(&m), Some(("kcb".into(), 59_055.00)));
+    }
+
+    #[test]
+    fn fuliza_states_no_balance_so_it_contributes_no_account() {
+        // ★ It carries an instrument but no balance field -- an instrument
+        //   alone must not conjure a pot with an unknown figure in it.
+        let m = msg("mpesa", &[("instrument", serde_json::json!("fuliza"))]);
+        assert_eq!(reported_account_of(&m), None);
     }
 }

@@ -1443,9 +1443,8 @@ fn accounts_of(
     state: &Value,
     reported: &std::collections::BTreeMap<String, crate::ingest::Reported>,
 ) -> Vec<AccountDto> {
-    state
-        .pointer("/finances/accounts")
-        .and_then(Value::as_object)
+    let declared = state.pointer("/finances/accounts").and_then(Value::as_object);
+    let mut out: Vec<AccountDto> = declared
         .map(|m| {
             m.iter()
                 .map(|(id, a)| {
@@ -1461,7 +1460,48 @@ fn accounts_of(
                 })
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    // ★★★ **A pot the bank told us about still shows, even if nobody declared
+    //     it.** Pochi and M-Shwari arrive without anyone setting them up, and
+    //     iterating only the declared accounts meant a balance we had been
+    //     told, in writing, was dropped on the floor for want of a row to put
+    //     it in. Money the household holds is not conditional on having been
+    //     configured.
+    //
+    // ★★ `balance` is 0.0 and `drift` is None rather than a computed
+    //    difference: we have the bank's word and no arithmetic of our own to
+    //    compare it against, and inventing a drift of exactly the balance would
+    //    read as an error the household could act on. Nothing is claimed here
+    //    beyond what was reported.
+    for (id, r) in reported {
+        if declared.is_some_and(|m| m.contains_key(id)) {
+            continue;
+        }
+        out.push(AccountDto {
+            id: id.clone(),
+            label: account_label(id),
+            balance: 0.0,
+            reported: Some(r.balance),
+            drift: None,
+        });
+    }
+    out
+}
+
+/// A readable name for a pot nobody named.
+///
+/// ★ The known instruments spelled as a person would say them; anything else
+/// keeps its own id rather than being prettified into something the household
+/// would not recognise.
+fn account_label(id: &str) -> String {
+    match id {
+        "mpesa" => "M-Pesa".to_string(),
+        "kcb" => "KCB".to_string(),
+        "pochi" => "Pochi la Biashara".to_string(),
+        "mshwari" => "M-Shwari".to_string(),
+        other => other.to_string(),
+    }
 }
 
 /// Money the household holds that no account claims.
