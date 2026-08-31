@@ -12,6 +12,7 @@
  * fidelity. A disabled item told a person nothing.
  */
 import { registerNav } from "./lib/nav";
+import { onPulse } from "./lib/pulse";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
 import { createResource as createStampResource } from "solid-js";
@@ -104,6 +105,17 @@ export default function App() {
   const [panel, setPanel] = createSignal<Panel>("constellation");
   /** The build actually running — see `engine.buildStamp`. */
   const [stamp] = createStampResource(() => engine.buildStamp());
+
+  // ★★★ **§III, for every view at once.** Monitor, Composition,
+  //     Constellation, Simulate and the belt do not own resources — they
+  //     read the shared `live` store. So the thing that was deaf to a change
+  //     a peer wrote was never those screens; it was the store behind them,
+  //     and one subscription here makes all of them live at once.
+  //
+  // ★★ Loop-free by inspection: `refreshWorld` re-reads and merges, it never
+  //    relays. Only a local commit and an arrived merge relay, which is the
+  //    §III excitation this is the refractory response to.
+  onPulse(refreshWorld);
   /**
    * ★★★ One app, two faces. Mycelium is the cockpit; Orchie is the phone-first
    * curated surface. Same engine, same gate, same unlocked identity — a

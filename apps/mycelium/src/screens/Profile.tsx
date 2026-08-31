@@ -16,6 +16,8 @@
  * eventually disagree with the thing that actually decides.
  */
 import { createResource, For, Show } from "solid-js";
+
+import { onPulse } from "../lib/pulse";
 import {
   Badge,
   Button,
@@ -46,10 +48,14 @@ const tierName = (t: number | null | undefined) =>
   t === null || t === undefined ? "—" : (TIER[t] ?? `tier ${t}`);
 
 export default function Profile() {
-  const [access] = createResource(
+  const [access, { refetch: refetchAccess }] = createResource(
     () => world.selected,
     (id) => engine.access(id),
   );
+
+  // ★ §III: what a principal may do here follows the peer book, and that
+  //   changes when a peer is trusted or a share is withdrawn elsewhere.
+  onPulse(refetchAccess);
 
   const totalEvents = () =>
     world.order.reduce((n, k) => n + (world.sustains[k]?.summary.events ?? 0), 0);

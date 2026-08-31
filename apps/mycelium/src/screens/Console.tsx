@@ -16,6 +16,8 @@
  * cockpit shows one.
  */
 import { createEffect, createResource, createSignal, For, Show } from "solid-js";
+
+import { onPulse } from "../lib/pulse";
 import {
   Badge,
   Button,
@@ -76,6 +78,10 @@ export default function Console() {
     () => world.selected,
     (id) => engine.operators(id),
   );
+
+  // ★ §III: the operator set is not fixed — installing a package adds to it,
+  //   and a package can arrive from a peer. Refractory-limited like the rest.
+  onPulse(refetchOps);
 
   const [chosen, setChosen] = createSignal<string | null>(null);
   const [paramsText, setParamsText] = createSignal("{}");
