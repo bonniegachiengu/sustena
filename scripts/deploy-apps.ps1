@@ -84,7 +84,10 @@ if (-not $PhoneOnly) {
             Where-Object { $_.BaseName -like '*Mycelium*' } |
             ForEach-Object { $targets += $shell.CreateShortcut($_.FullName).TargetPath }
     }
-    $targets = $targets | Where-Object { $_ } | Sort-Object -Unique
+    # * @() is load-bearing: with ONE result the pipeline returns a bare
+    #   string, and $targets[0] then indexes its first CHARACTER. Caught by
+    #   running it -- the script reported the install path as "C".
+    $targets = @($targets | Where-Object { $_ } | Sort-Object -Unique)
     if ($targets.Count -eq 0) { Die "no Mycelium shortcut found. Cannot tell where he launches from, and will not guess." }
     if ($targets.Count -gt 1) {
         # ** More than one install is exactly the ambiguity that caused this.
