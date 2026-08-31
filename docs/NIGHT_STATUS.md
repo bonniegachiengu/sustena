@@ -740,3 +740,49 @@ on USB, one line does it:
 `-r` keeps his data: identity, household, peer book. The push-bug investigation
 resumes when the device is back; it needs the live phone and nothing else is
 blocked on it.
+
+---
+
+# 31 Aug, 16:20 — the delivery, hardened (fix/deploy-hardening)
+
+Three failures from today are now impossible to repeat silently, because the
+script asserts against each one.
+
+**1. The WebView cache clears on every deploy.** The likely reason a
+hash-correct exe still opened as the old app: Tauri hands the frontend to
+WebView2, whose cache outlives the exe, so a new binary can serve the previous
+UI. Only `Cache`, `Code Cache`, `GPUCache` under **Local**; his household is in
+**Roaming** and is never touched. Proved by planting three stale caches and
+watching the run delete all three — a branch that had not executed on the first
+run, because I had already cleared them by hand, and I would rather test it than
+assume it.
+
+**2. Self-verify reads back what ARRIVED.**
+
+```
+source   267B3F86B15BA6BA...
+deployed 267B3F86B15BA6BA...
+hash match: the bytes at his launch path are the bytes just built
+header will render: v1.1.2 · e959127
+```
+
+It also asserts the build hash is *inside* the deployed binary. That check is
+sound where grepping for UI text is not — Tauri embeds the frontend compressed,
+and it discriminates:
+
+| probe | result |
+|---|---|
+| `e959127` (built from) | FOUND |
+| `7fd417c` (previous build) | absent |
+| `deadbee` (never existed) | absent |
+
+**3. An absent phone is a no-op.** His phone is off USB most of the time. A
+deploy that goes red for the ordinary case teaches a person to ignore red, which
+is how a real failure gets waved through.
+
+Also fixed: the script was promising `v1.1.2 | hash` while the app renders
+`v1.1.2 · hash`, which would have sent him looking for text no app prints.
+
+**Process:** this landed on `fix/deploy-hardening` -> `dev` -> `main`. The six
+preceding commits went straight onto `main`, which `DEVELOPMENT.md` does not
+allow; that was mine and it is corrected here.
