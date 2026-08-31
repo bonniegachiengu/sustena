@@ -586,10 +586,21 @@ export default function Orchie(props: { onFace?: () => void }) {
    * change — and taking the target once, so it cannot re-fire on an unrelated
    * launch later.
    */
+  /** The message a notification tap was about, until the queue shows it. */
+  const [tapped, setTapped] = createSignal<string | null>(null);
+
   const answerTap = async () => {
     try {
       const pending = await engine.smsPendingClassify();
-      if (pending) await drain();
+      if (pending) {
+        await drain();
+        // ★★★ The tap said WHICH message. Draining and then showing whatever
+        //     was oldest threw that away, so a notification about the text
+        //     that just arrived opened the queue at something from days ago.
+        //     The raw text is the handle -- an id would not survive the
+        //     unlock in between, which is why the plugin hands back text.
+        setTapped(pending);
+      }
     } catch {
       // Not an Android build. There is no tap to answer.
     }
@@ -738,7 +749,12 @@ export default function Orchie(props: { onFace?: () => void }) {
                   the card whenever anything refetched and throw away answers
                   given halfway through. The id changes exactly when the
                   subject does, which is exactly when a new card is right. */}
-              <QueueCard feed={f()} onChanged={() => void refetch()} />
+              <QueueCard
+                feed={f()}
+                openRaw={tapped()}
+                onOpened={() => setTapped(null)}
+                onChanged={() => void refetch()}
+              />
 
               {/* ═══ the calm read ═══════════════════════════════════════ */}
               <Summary feed={f()} />
@@ -983,7 +999,13 @@ function DeviceCard(props: { device: DeviceDto }) {
  * render: showing them all is the flood the attention budget exists to
  * prevent, and it froze the app once already.
  */
-function QueueCard(props: { feed: FeedDto; onChanged: () => void }) {
+function QueueCard(props: {
+  feed: FeedDto;
+  onChanged: () => void;
+  /** Raw text of a message a notification tap was about, if this was a tap. */
+  openRaw?: string | null;
+  onOpened?: () => void;
+}) {
   const queue = () => props.feed.queue;
   // ★★ The index is held here and only reset when the queue's own identity
   //    changes, so a background refetch does not throw away where he is.
@@ -995,6 +1017,24 @@ function QueueCard(props: { feed: FeedDto; onChanged: () => void }) {
     return Math.min(Math.max(0, i), max);
   };
   const current = () => queue()[idx()];
+
+  // ★★★ Open on the message the notification was about.
+  //
+  // ★★ Matched on raw text, because that is the handle that survives the
+  //    unlock between the tap and the queue arriving. Cleared once honoured
+  //    so a later refetch cannot drag him back to it while he is working.
+  //
+  // ★ A tap for a message that is NOT in the queue leaves the card where it
+  //   was rather than jumping somewhere arbitrary -- it was already filed, or
+  //   the sweep has not reached it, and both are better answered by the queue
+  //   he can see than by a guess.
+  createEffect(() => {
+    const raw = props.openRaw;
+    if (!raw) return;
+    const i = queue().findIndex((c) => c.raw === raw);
+    if (i >= 0) setAt(i);
+    props.onOpened?.();
+  });
   const [busy, setBusy] = createSignal(false);
 
   const back = () => setAt(Math.max(0, idx() - 1));
