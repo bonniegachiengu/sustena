@@ -153,7 +153,12 @@ fn main() {
                 second.outcome.received == 0 && second.outcome.sent == 0
             );
 
-            let reported = world.with(|i| i.get(ID).map(|s| s.state.clone())).unwrap();
+            // ★ Was `.unwrap()`, which panicked after a sync that had
+            //   already succeeded and read exactly like a failed sync.
+            let Some(reported) = world.with(|i| i.get(ID).map(|s| s.state.clone())) else {
+                println!("[B] no Sustain called {ID} here -- the log may have landed with nothing registered to read it");
+                return;
+            };
             let refolded = world.reload(ID).expect("re-fold").state;
             println!("[B] rebuild_state == get_state: {}", reported == refolded);
         }
@@ -169,6 +174,22 @@ fn main() {
             let (real_lap, real_ph) = (args[8].clone(), args[9].clone());
             let a = open(&ra, pa);
             let b = open(&rb, pb);
+
+            // ★★★ Register the household BEFORE implanting its log. Without
+            //     this the events land on disk and nothing knows the Sustain
+            //     exists, so both nodes report `balance=null` after a sync
+            //     that in fact worked perfectly. It cost me an hour of
+            //     reading a transport that was never broken.
+            for w in [&a, &b] {
+                let _ = w.instantiate_owned(
+                    ID,
+                    "Homestead",
+                    TemplateId::Habitat,
+                    None,
+                    None,
+                    Some(DEFAULT_HANDLE),
+                );
+            }
             let (ka, kb) = (a.node_id().unwrap(), b.node_id().unwrap());
 
             for (root, src, id) in [(&ra, &lap_log, "A"), (&rb, &ph_log, "B")] {
