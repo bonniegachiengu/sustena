@@ -1004,6 +1004,20 @@ pub fn learn_rule(
     sustena_core::verify_candidate(&candidate, &m.raw_payload, &existing, &world.operators)
         .map_err(|e| e.to_string())?;
     world.ingest().add_rule(&candidate).map_err(|e| e.to_string())?;
+
+    // ★★★ The rest of the shape, now. Teaching a format and leaving the ten
+    //     messages already sitting in that format unreadable is the difference
+    //     between a queue that ends and one that only stops growing.
+    //
+    // ★★ Readability only -- `reparse_unparsed` never files anything. Best
+    //    effort: the rule is already saved and correct, and failing the teach
+    //    because a re-read stumbled would throw away the thing that worked.
+    let rules = world.rules_for(&m.source_id).unwrap_or_default();
+    match world.ingest().reparse_unparsed(&m.sustain_id, &rules) {
+        Ok(n) if n > 0 => trace!("learned {}: {n} stored message(s) became readable", candidate.id),
+        Ok(_) => {}
+        Err(e) => trace!("learned {}, but re-reading the backlog failed: {e}", candidate.id),
+    }
     Ok(candidate.id)
 }
 

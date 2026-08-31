@@ -759,7 +759,8 @@ export default function Orchie(props: { onFace?: () => void }) {
                     <h2 class={O.cardTitle}>a shape worth teaching</h2>
                     <p class={O.caption}>
                       {sh.count} messages look like this one and nothing reads them yet. Teach it
-                      once and the next message shaped like it is read automatically.
+                      once and all {sh.count} become readable — you still confirm each before
+                      anything is filed.
                     </p>
                     <p class={O.raw}>{sh.example}</p>
                   </div>

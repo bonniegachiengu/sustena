@@ -1587,6 +1587,55 @@ impl Ingested {
         append_line(&self.rules_path(), rule)
     }
 
+    /// Read the messages nothing could read, now that a rule exists for them.
+    ///
+    /// ★★★ **It improves READABILITY and never moves money.** A fresh capture
+    /// that maps to income applies itself, and that is right for a text that
+    /// just arrived. Doing the same to a backlog is not the same act: these
+    /// messages have been sitting for days, some may already have been recorded
+    /// by hand, and applying eleven of them because one rule was taught could
+    /// double-count a household's month in a single tap. So a re-parsed message
+    /// is only ever left `parsed_unmapped` -- readable, with its operator and
+    /// amount filled in, and still requiring the person to confirm.
+    ///
+    /// ★★ That keeps the money-safety asymmetry pointing the same way it
+    /// always has: the engine may read without asking, and may not spend
+    /// without asking.
+    ///
+    /// ★ Untouched: anything ignored, resolved, or already parsed. Re-reading
+    /// a message somebody already dealt with would undo their answer.
+    ///
+    /// Returns how many became readable.
+    pub fn reparse_unparsed(
+        &self,
+        sustain_id: &str,
+        rules: &[ParseRule],
+    ) -> StoreResult<usize> {
+        let mut changed = 0usize;
+        for m in self.current()? {
+            if m.sustain_id != sustain_id || m.status != "unparsed" || m.ignored || m.resolved {
+                continue;
+            }
+            let t = parse_message(&m.raw_payload, Some(&m.source_id), rules);
+            // Still unreadable, or a secret: leave it exactly as it was.
+            if t.operator().is_none() && t.parsed_fields().is_empty() {
+                continue;
+            }
+            let mut next = m.clone();
+            // ★★★ Never "mapped" here -- see above. Readable, not filed.
+            next.status = "parsed_unmapped".to_string();
+            next.parser_name = t.parser_name().to_string();
+            next.reason = t.reason().to_string();
+            next.parsed_fields = t.parsed_fields();
+            next.external_ref = t.external_ref().map(str::to_string);
+            next.operator = t.operator().map(str::to_string);
+            next.params = t.operator_params();
+            self.append_message(&next)?;
+            changed += 1;
+        }
+        Ok(changed)
+    }
+
     /// The rules in force: the latest version of each id.
     pub fn effective_rules(&self) -> StoreResult<Vec<ParseRule>> {
         let mut by_id: BTreeMap<String, ParseRule> = BTreeMap::new();
@@ -4484,5 +4533,105 @@ mod queue_cap_tests {
         let got = window(all, 3);
         assert!(got.contains(&"m51".to_string()) && got.contains(&"m50".to_string()));
         assert_eq!(got.len(), 3, "the window is still respected");
+    }
+}
+
+#[cfg(test)]
+mod reparse_tests {
+    //! Teaching a format makes the messages already in that format readable --
+    //! and never files them.
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("mycelium-reparse-{name}"));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).expect("scratch");
+        p
+    }
+
+    /// A rule that reads a shape the shipped set does not.
+    fn house_rule() -> ParseRule {
+        serde_json::from_value(serde_json::json!({
+            "id": "learned_test_shape",
+            "source": "mpesa",
+            "version": 1,
+            "pattern": r"CHAMA dues Ksh\s*(?P<amount>[\d,]+(?:\.\d{1,2})?) received",
+            "extract": {
+                "amount": { "type": "amount", "group": "amount", "value": null },
+                "direction": { "type": "literal", "group": null, "value": "received" }
+            },
+            "status": "parsed_unmapped",
+            "operator": null,
+            "params": {},
+            "reason_template": "a chama contribution"
+        }))
+        .expect("a well-formed rule")
+    }
+
+    fn capture_unreadable(ing: &Ingested, raw: &str) -> String {
+        match ing.capture_at("h", "mpesa", raw, &[], Some(1_788_000_000_000)).expect("capture") {
+            Capture::Stored(m) => {
+                assert_eq!(m.status, "unparsed", "the shipped rules must not read this");
+                m.id
+            }
+            other => panic!("expected a stored message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_messages_already_in_that_shape_become_readable() {
+        // ★★★ The promise the shape card makes. Three sitting unreadable; one
+        //     rule; all three readable, without three separate corrections.
+        let ing = Ingested::at(scratch("siblings")).expect("ingest");
+        let a = capture_unreadable(&ing, "CHAMA dues Ksh 500.00 received today");
+        let b = capture_unreadable(&ing, "CHAMA dues Ksh 1,200.00 received today");
+        let c = capture_unreadable(&ing, "CHAMA dues Ksh 80.00 received today");
+
+        let n = ing.reparse_unparsed("h", &[house_rule()]).expect("reparse");
+        assert_eq!(n, 3, "every sibling was re-read");
+
+        let now = ing.current().expect("current");
+        for id in [&a, &b, &c] {
+            let m = now.iter().rev().find(|m| &m.id == id).expect("the message");
+            assert_eq!(m.status, "parsed_unmapped", "readable");
+            assert!(m.parsed_fields.contains_key("amount"), "with its amount read");
+        }
+    }
+
+    #[test]
+    fn a_reparse_never_files_anything() {
+        // ★★★ The safety property, and the reason this is not just "re-run
+        //     capture". These have been sitting for days and some may already
+        //     have been recorded by hand; applying them because one rule was
+        //     taught could double-count a household's month in a single tap.
+        let ing = Ingested::at(scratch("never-files")).expect("ingest");
+        capture_unreadable(&ing, "CHAMA dues Ksh 500.00 received today");
+
+        ing.reparse_unparsed("h", &[house_rule()]).expect("reparse");
+
+        let m = ing.current().expect("current").pop().expect("the message");
+        assert!(!m.applied, "nothing was filed");
+        assert_ne!(m.status, "mapped", "and it was not marked as if it had been");
+        assert!(m.needs_attention(), "it still asks the person");
+    }
+
+    #[test]
+    fn a_message_somebody_already_answered_is_left_alone() {
+        // ★★ Re-reading a message he has dealt with would undo his answer.
+        let ing = Ingested::at(scratch("resolved")).expect("ingest");
+        let id = capture_unreadable(&ing, "CHAMA dues Ksh 500.00 received today");
+        assert!(ing.resolve(&id).expect("resolve"));
+
+        assert_eq!(ing.reparse_unparsed("h", &[house_rule()]).expect("reparse"), 0);
+        let m = ing.current().expect("current").into_iter().rev().find(|m| m.id == id).expect("m");
+        assert!(m.resolved, "his answer stands");
+    }
+
+    #[test]
+    fn a_message_no_rule_reads_is_untouched() {
+        // ★ A rule that does not match must change nothing at all.
+        let ing = Ingested::at(scratch("no-match")).expect("ingest");
+        capture_unreadable(&ing, "Some notice that matches nothing at all");
+        assert_eq!(ing.reparse_unparsed("h", &[house_rule()]).expect("reparse"), 0);
     }
 }
