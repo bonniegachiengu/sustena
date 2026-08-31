@@ -2309,6 +2309,26 @@ impl World {
             .collect()
     }
 
+    /// Refuse to hand out a figure the log cannot back.
+    ///
+    /// ★★★ The gate the feed runs before it composes anything. It is a
+    /// method rather than a check inlined at the call site so the guarantee
+    /// can be **tested**: an invariant nothing exercises is a comment.
+    ///
+    /// ★★ It refuses rather than repairs. Re-folding here would make the
+    /// numbers agree and report nothing, hiding the very bug worth finding.
+    pub fn refuse_if_unbacked(&self, sustain_id: &str, label: &str) -> Result<(), String> {
+        match self.fold_divergence(sustain_id) {
+            None => Ok(()),
+            Some((shown, folded)) => {
+                eprintln!(
+                    "[fold] {sustain_id}: shown {shown} but its log folds to {folded}"
+                );
+                Err(format!("{label} cannot be shown: the state in memory does not match the fold of its own log, so every figure here would be unbacked. Nothing is lost -- reopen to re-fold from the log."))
+            }
+        }
+    }
+
     /// Re-fold one Sustain from disk in causal order, and adopt the result.
     ///
     /// ★★ Returns the [`Reconciliation`] rather than swallowing it, because

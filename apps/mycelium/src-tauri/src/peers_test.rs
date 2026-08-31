@@ -943,3 +943,31 @@ fn a_state_written_behind_the_logs_back_is_caught() {
     assert_ne!(drift.1.pointer("/finances/liquid/balance"), Some(&serde_json::json!(516_699.48)));
     assert_eq!(a.world.fold_divergences(), vec![id], "and named");
 }
+
+#[test]
+fn a_screen_is_refused_the_figures_when_the_log_does_not_back_them() {
+    // ★★★ The gate the feed runs, exercised directly. Catching the drift is
+    //     only half of it -- what matters to a person is that the unbacked
+    //     number never reaches the screen. This is the half that says so.
+    //
+    // ★★ It must REFUSE, not repair. If this ever starts passing because
+    //    the gate re-folded, the bug that wrote the bad state goes unseen.
+    let (a, _b, id) = twin_pair("unbacked-refused");
+    a.income(&id, 300.0, "real");
+    assert!(a.world.refuse_if_unbacked(&id, "Homestead").is_ok(), "an honest household shows");
+
+    a.world.with_mut_for_test(&id, |state| {
+        *state = serde_json::json!({"finances": {"liquid": {"balance": 516_699.48}}});
+    });
+
+    let refusal = a
+        .world
+        .refuse_if_unbacked(&id, "Homestead")
+        .expect_err("a fabricated balance must never reach a screen");
+    assert!(refusal.contains("Homestead"), "names the household: {refusal}");
+    assert!(refusal.contains("unbacked"), "says why: {refusal}");
+    assert!(!refusal.contains("516"), "and does not repeat the lie back: {refusal}");
+
+    // ★ Still diverging afterwards: the gate reported, it did not tidy up.
+    assert!(a.world.fold_divergence(&id).is_some(), "refusing must not repair");
+}

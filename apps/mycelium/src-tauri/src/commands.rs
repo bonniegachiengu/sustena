@@ -1080,6 +1080,22 @@ pub fn get_feed(
         return Err(format!("no Sustain called '{sustain_id}'"));
     };
 
+    // *** THE ANTI-FAKING GATE, on the one path that hands figures to a
+    //     screen. Every balance a surface renders is read off the in-memory
+    //     state, which is honest only while that state IS the fold of the
+    //     log. When they drift, a money app shows a number its own ledger
+    //     cannot back -- it looks solvent when it is not.
+    //
+    // ** It REFUSES rather than degrades. A person shown an error knows
+    //    something is wrong; a person shown a wrong number does not. For
+    //    money that asymmetry decides it.
+    //
+    // *  The check is a re-fold, so it cannot be fooled by whatever wrote
+    //    the bad state. `fold_divergence` is deliberately non-mutating: a
+    //    guard that repaired the drift would report nothing and teach us
+    //    nothing.
+    world.refuse_if_unbacked(&sustain_id, &label)?;
+
     let queued: Vec<_> = world
         .ingest()
         .current()
