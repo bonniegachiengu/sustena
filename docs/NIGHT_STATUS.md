@@ -430,3 +430,55 @@ frontend builds.
 The push bug waits on Bonnie unlocking the phone once. Neither app was touched.
 Fold-backed state is as recorded above: laptop Homestead 2 events folding to
 0.0, phone 285, **not converged**.
+
+---
+
+# 31 Aug 10:45–11:00 — the push bug, instrumented on the real devices
+
+Both apps unlocked, both reachable, tunnels up. The instrumented build wrote the
+numbers.
+
+```
+sustain        = homestead
+mine_entries   = 285
+mine_frontier  = { d6502ecd…: 283,  f86df2ca…: 2 }
+theirs         = { d6502ecd…: 283,  f86df2ca…: 2 }
+received = 0     sent = 0
+laptop Homestead on disk = 2 events   (both LEGACY, mtime 29 Aug)
+```
+
+**`theirs` is byte-identical to the phone's own frontier.** That is the bug in
+one line: `missing_from(theirs)` sends entries whose counter exceeds
+`theirs.get(node)`, and `theirs` already claims `d6502ecd: 283` -- the phone's
+own 283 entries -- so nothing qualifies and `sent = 0` is the CORRECT answer to
+a false question. **The push computation was never wrong. It is being told a
+lie about what the other side holds**, and my earlier "the push is broken"
+reports were measuring the wrong end.
+
+## What I ruled out, each with a reading
+
+| hypothesis | test | result |
+|---|---|---|
+| transport dropping the payload | proxy framing on the wire's length prefix | largest frame **641 B**; 283 entries would be ~150 kB — nothing was dropped |
+| the algorithm | his real logs + registries in two scratch nodes | **sends 283**, node A folds to 516,699.48 |
+| loopback via the adb tunnel | re-pointed to the laptop's **LAN** address `192.168.1.66:9777`, no adb, no localhost | **identical result** |
+| the laptop never answering | `peers.json` mtime on the laptop | **10:57:04**, seconds after the sync — it served it |
+
+So: the laptop IS the responder, over a path where loopback is impossible, and
+it returns a frontier containing `d6502ecd: 283`. Its own log holds two LEGACY
+entries, which `entry_of` attributes to the reading node, so
+`read_replica("homestead", f86df2…).frontier()` can only be `{f86df2…: 2}`.
+`answer_want` sends exactly that — I re-read it.
+
+**The laptop is reporting a frontier its own on-disk log cannot justify.** That
+is the open question, and it is now narrow: everything between the two devices
+is accounted for except what the laptop computes for its own replica.
+
+## The one thing that would settle it
+
+Instrument the LAPTOP's `answer_want` to record the replica it read and the
+frontier it sent. That costs a restart, and a restart relocks it — the toggle
+that would prevent this only exists in a build not yet installed there.
+
+**Nothing was written to his household.** Both apps remain unlocked. Fold-backed
+state unchanged: laptop 2 events folding to 0.0, phone 285, **not converged**.
