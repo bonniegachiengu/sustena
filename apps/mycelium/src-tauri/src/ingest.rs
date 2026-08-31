@@ -1444,7 +1444,18 @@ impl Ingested {
 
         let mut waiting: Vec<IngestedMessage> =
             all.into_iter().filter(|m| m.needs_attention()).collect();
-        waiting.sort_by_key(|m| (m.deferred_at.is_none(), m.deferred_at, Reverse(m.seq)));
+        // ★★★ **What has NOT been seen comes first.** This read
+        //     `is_none()`, which is `false` for a deferred message and
+        //     therefore sorted every postponed message AHEAD of everything
+        //     fresh. Pressing "later" defers, so working the queue steadily
+        //     built a wall in front of it -- and with the window capped, a
+        //     just-captured text could fall outside it entirely and look to
+        //     a household exactly like a capture that never arrived.
+        //
+        // ★★ Deferring means *not now*, not *first next time*. Fresh
+        //    newest-first, then the postponed ones oldest-deferral-first, so
+        //    a thing set aside still comes back rather than sinking.
+        waiting.sort_by_key(|m| (m.deferred_at.is_some(), m.deferred_at, Reverse(m.seq)));
 
         let mut out = processed;
         out.extend(waiting.into_iter().take(limit));
@@ -4389,5 +4400,76 @@ mod per_account_balance_tests {
         //   alone must not conjure a pot with an unknown figure in it.
         let m = msg("mpesa", &[("instrument", serde_json::json!("fuliza"))]);
         assert_eq!(reported_account_of(&m), None);
+    }
+}
+
+#[cfg(test)]
+mod queue_order_tests {
+    //! A just-captured message must be reachable, not buried behind everything
+    //! the household chose to postpone.
+    use super::*;
+
+    fn waiting(seq: u64, deferred: Option<u64>) -> IngestedMessage {
+        IngestedMessage {
+            id: format!("m{seq}"),
+            sustain_id: "h".into(),
+            source_id: "mpesa".into(),
+            raw_payload: format!("text {seq}"),
+            dedup_key: format!("k{seq}"),
+            // needs_attention() requires one of these two.
+            status: "parsed_unmapped".into(),
+            parser_name: "p".into(),
+            reason: String::new(),
+            parsed_fields: Default::default(),
+            external_ref: None,
+            operator: None,
+            params: Default::default(),
+            applied: false,
+            gate_reason: None,
+            resolved: false,
+            netted_with: None,
+            same_event_as: None,
+            reclaimed: false,
+            deferred_at: deferred,
+            filed: Vec::new(),
+            ignored: false,
+            sent_at_ms: None,
+            event_at_ms: None,
+            seq,
+        }
+    }
+
+    /// The ordering `navigable` applies to what is waiting.
+    fn order(mut v: Vec<IngestedMessage>) -> Vec<String> {
+        v.sort_by_key(|m| (m.deferred_at.is_some(), m.deferred_at, Reverse(m.seq)));
+        v.into_iter().map(|m| m.id).collect()
+    }
+
+    #[test]
+    fn a_fresh_capture_comes_before_everything_postponed() {
+        // ★★★ The bug, in one line. Pressing "later" defers, so working the
+        //     queue built a wall of postponed messages in front of it -- and a
+        //     just-arrived text landing behind them looks exactly like a
+        //     capture that never happened.
+        let got = order(vec![
+            waiting(1, Some(1_000)),
+            waiting(2, Some(2_000)),
+            waiting(99, None), // the one that just arrived
+        ]);
+        assert_eq!(got.first().map(String::as_str), Some("m99"), "the new one is reachable");
+    }
+
+    #[test]
+    fn fresh_messages_run_newest_first() {
+        assert_eq!(order(vec![waiting(1, None), waiting(3, None), waiting(2, None)]),
+                   vec!["m3", "m2", "m1"]);
+    }
+
+    #[test]
+    fn a_postponed_message_still_comes_back_oldest_first() {
+        // ★★ "Later" means not now, not never. The one set aside longest is
+        //    the one asked about first once the fresh ones are dealt with.
+        let got = order(vec![waiting(5, Some(9_000)), waiting(6, Some(1_000)), waiting(7, None)]);
+        assert_eq!(got, vec!["m7", "m6", "m5"]);
     }
 }
