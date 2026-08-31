@@ -631,3 +631,44 @@ this is the refractory response to.
 pixel change. Driving the GUI is not available to me in this run mode, and I
 reported a window as "up at the lock screen" once from a process existing. I do
 not intend to repeat that.
+
+---
+
+# 31 Aug, 14:45 — v1.1.2 released, and his laptop is running it
+
+## Verified from his side, not from `target/release`
+
+```
+C:\Users\DELL\AppData\Local\Mycelium — Sustena\mycelium.exe
+  written 2026-08-31 14:45:03    FileVersion 1.1.2
+  carries: build stamp "7fd417c", remember_unlock, set_intake_start
+```
+
+The header will read **v1.1.2 | 7fd417c**. If it reads anything else the app is
+stale, which is the entire point of putting it there.
+
+| | |
+|---|---|
+| tag | `v1.1.2`, pushed |
+| `origin/main` | `7fd417c`, equal to local |
+| MSI / NSIS / APK | staged in `sustena-installers` |
+
+## The release refused once, and it was right to
+
+The first attempt built everything and then refused at its commit step: a
+**stale** `.git/index.lock` from 14:09, with no git process alive to own it. It
+left the version bump uncommitted rather than tagging something it could not
+record.
+
+I could have finished it by hand. I did not — the whole point of
+`release.ps1` is that a version is never hand-edited. I reverted the bump,
+committed the real work, and re-ran the one command. The artefacts and the tag
+now describe the same tree, which the first attempt's would not have: it had
+swept my then-uncommitted liveness work into the Android bundle while the
+desktop binary predated it.
+
+## The phone
+
+Still off USB and off the LAN. The install is armed against the exact path the
+release wrote at 14:41, so when it returns it gets **v1.1.2**, not the 03:36
+build it is on now. Nothing else is waiting on me.
