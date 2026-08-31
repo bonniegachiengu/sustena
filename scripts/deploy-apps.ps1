@@ -1,5 +1,5 @@
 <#
-    deploy-apps.ps1 — ship the CURRENT code to the apps Bonnie actually opens.
+    deploy-apps.ps1 -- ship the CURRENT code to the apps Bonnie actually opens.
 
     WHY THIS EXISTS
     ---------------
@@ -56,14 +56,14 @@ $dirty   = [bool](git -C $repo status --porcelain --untracked-files=no)
 if ($dirty -and -not $AllowDirty) {
     Die "the working tree has uncommitted changes. A deploy ships a commit, so the stamp on screen means something. Commit, or pass -AllowDirty."
 }
-$expected = "v$version · $hash"
+$expected = "v$version | $hash"
 Ok "version $version   hash $hash"
 Ok "the apps will show: $expected"
 
 # ---------------------------------------------------------------------------
 # 1. WHERE does Bonnie's launcher actually point?
 #
-# ★★★ Resolved, never assumed. The install went to the right place all along
+# *** Resolved, never assumed. The install went to the right place all along
 #     on one occasion and to a redirected copy on another, and the only way to
 #     tell them apart is to ask the shortcut he clicks.
 # ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ if (-not $PhoneOnly) {
     $targets = $targets | Where-Object { $_ } | Sort-Object -Unique
     if ($targets.Count -eq 0) { Die "no Mycelium shortcut found. Cannot tell where he launches from, and will not guess." }
     if ($targets.Count -gt 1) {
-        # ★★ More than one install is exactly the ambiguity that caused this.
+        # ** More than one install is exactly the ambiguity that caused this.
         #    Reported rather than silently picking one.
         Write-Host "    shortcuts point at MORE THAN ONE exe:" -ForegroundColor Yellow
         $targets | ForEach-Object { Write-Host "      $_" -ForegroundColor Yellow }
@@ -103,7 +103,7 @@ if (-not $PhoneOnly) {
 # ---------------------------------------------------------------------------
 # 2. Build the frontend FIRST, then the binary that embeds it.
 #
-# ★★★ Order is load-bearing. A binary built before the frontend embeds the
+# *** Order is load-bearing. A binary built before the frontend embeds the
 #     PREVIOUS UI, which looks exactly like a successful deploy.
 # ---------------------------------------------------------------------------
 Say 'Building the frontend'
@@ -143,7 +143,7 @@ if (-not $PhoneOnly) {
     $after = Get-Item $installedExe
     Ok "after:  $($after.VersionInfo.FileVersion)  $($after.LastWriteTime)"
 
-    # ★★★ VERIFY, from the INSTALLED artefact and not from what we built.
+    # *** VERIFY, from the INSTALLED artefact and not from what we built.
     if ($after.Length -ne (Get-Item $built).Length) {
         Die "the installed exe differs in size from the one just built. The copy did not land where it was read back from."
     }
@@ -198,4 +198,4 @@ if (-not $DesktopOnly) {
 
 Say 'Deployed'
 Ok "both apps should now show:  $expected"
-Note "If a header shows anything else, the app is stale — that is the whole point of the stamp."
+Note "If a header shows anything else, the app is stale -- that is the whole point of the stamp."
