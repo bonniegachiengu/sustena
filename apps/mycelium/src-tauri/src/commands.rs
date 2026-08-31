@@ -3188,4 +3188,64 @@ mod feed_surface_tests {
     fn nothing_waiting_offers_nothing() {
         assert!(oldest_waiting(&[]).is_none());
     }
+
+    // ── which source a text is filed under ──────────────────────────────────
+    //
+    // ★★★ This is the source-strict rule, and it had no test. `parse_message`
+    //     restricts itself to one source's parser set, so a text filed under
+    //     the wrong source is not merely mislabelled -- it is handed to the
+    //     wrong grammar and comes back unparsed, or worse, parsed as something
+    //     it is not. The decision is made HERE, from the sender alone.
+
+    #[test]
+    fn a_text_is_filed_by_who_sent_it() {
+        assert_eq!(source_of("MPESA"), Some("mpesa"));
+        assert_eq!(source_of("KCB"), Some("kcb"));
+    }
+
+    #[test]
+    fn case_and_decoration_in_the_sender_id_do_not_change_the_source() {
+        // ★ Carriers are not consistent, and a missed match would file a real
+        //   message under nothing at all.
+        assert_eq!(source_of("mpesa"), Some("mpesa"));
+        assert_eq!(source_of("MPesa"), Some("mpesa"));
+        assert_eq!(source_of("KCB-BANK"), Some("kcb"));
+        assert_eq!(source_of("SAFARICOM-MPESA"), Some("mpesa"));
+    }
+
+    #[test]
+    fn a_kcb_message_that_talks_about_mpesa_is_still_kcb() {
+        // ★★★ The whole reason KCB is checked first. Several real KCB texts
+        //     say "M-PESA" in their own wording -- the paybill deposits and the
+        //     wallet transfers especially -- and reading the BODY to decide
+        //     would file them all under Safaricom's grammar. Bonnie confirmed
+        //     against his own handset that those arrive from the KCB sender.
+        //
+        //     This asserts the tie-break, not the wording: a sender carrying
+        //     both substrings resolves to the bank.
+        assert_eq!(source_of("KCB-MPESA"), Some("kcb"));
+        assert_eq!(source_of("MPESA-KCB"), Some("kcb"));
+    }
+
+    #[test]
+    fn an_unknown_sender_is_filed_nowhere() {
+        // ★★ `sweep` counts a `None` as skipped rather than guessing a source.
+        //    Guessing would put a stranger's text through a money parser.
+        assert_eq!(source_of("+254712345678"), None);
+        assert_eq!(source_of("EQUITY"), None);
+        assert_eq!(source_of("SAFARICOM"), None);
+        assert_eq!(source_of(""), None);
+    }
+
+    #[test]
+    fn the_body_of_a_message_never_reaches_this_decision() {
+        // ★ A body-shaped string is not a sender. Passing one in must not
+        //   suddenly resolve a source -- if this ever returns Some, something
+        //   upstream has started handing bodies to the classifier.
+        let body = "Ksh1,500.00 sent to NAIVAS on 1/8/26. New M-PESA balance is Ksh12,154.47";
+        // It contains "M-PESA" with a hyphen, which is not the substring
+        // matched, so the honest answer is None either way -- the point of the
+        // assertion is that a body must never be the input.
+        assert_eq!(source_of(body), None);
+    }
 }
