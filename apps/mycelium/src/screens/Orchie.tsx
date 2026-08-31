@@ -1036,6 +1036,10 @@ function QueueCard(props: {
   //     at something unrelated with no explanation. That reads as the app
   //     losing his message. It did not lose it; there was nothing to ask.
   const [tapMissed, setTapMissed] = createSignal(false);
+  // ★★★ A tap has to LAND somewhere. Routing to the right card is useless if
+  //     the card is below the fold -- the screen still reads as the ordinary
+  //     landing view, which is what was reported.
+  let cardEl: HTMLDivElement | undefined;
   createEffect(() => {
     const raw = props.openRaw;
     if (!raw) return;
@@ -1046,6 +1050,8 @@ function QueueCard(props: {
     } else {
       setTapMissed(true);
     }
+    // Bring it to him rather than leaving him to find it.
+    queueMicrotask(() => cardEl?.scrollIntoView({ behavior: "smooth", block: "start" }));
     props.onOpened?.();
   });
   const [busy, setBusy] = createSignal(false);
@@ -1090,7 +1096,7 @@ function QueueCard(props: {
 
   return (
     <Show when={queue().length > 0}>
-      <div class={O.cardPrimary}>
+      <div class={O.cardPrimary} ref={cardEl}>
         {/* ★★★ Answering a tap that had nothing to open. Silence here
             read as the app having lost his message. */}
         <Show when={tapMissed()}>
