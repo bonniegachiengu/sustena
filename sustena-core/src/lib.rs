@@ -113,6 +113,7 @@ pub mod clocks;
 pub mod commons;
 pub mod compose;
 pub mod consensus;
+pub mod corpus;
 pub mod crdt;
 pub mod controller;
 pub mod council;
