@@ -617,28 +617,6 @@ impl Peering {
             .filter_map(|e| serde_json::to_value(e).ok())
             .collect();
         let frontier = replica.frontier();
-        // ★ TEMPORARY INSTRUMENTATION. The initiator receives a frontier this
-        //   node's own two-entry log cannot justify, and reading the code has
-        //   not explained it. This records exactly what was read and what is
-        //   about to be sent.
-        {
-            let note = format!(
-                "sustain={sustain_id}
-me={me}
-replica_entries={}
-replica_frontier={:?}
-heard_have={:?}
-entries_out={}
-frontier_out={:?}
-",
-                replica.len(),
-                replica.frontier(),
-                have,
-                entries.len(),
-                frontier,
-            );
-            let _ = std::fs::write(self.path.with_file_name("answer_want_debug.txt"), note);
-        }
         session.send(
             stream,
             &Frame::Give {
@@ -766,26 +744,6 @@ frontier_out={:?}
             .filter_map(|e| serde_json::to_value(e).ok())
             .collect();
         let sent = outgoing.len();
-        // ★ TEMPORARY INSTRUMENTATION. The push computed zero on two real
-        //   devices while the same logs sent 283 in a harness, and no amount of
-        //   reading settled why. Written to a FILE because Rust's stderr does
-        //   not reach logcat in this build.
-        {
-            let note = format!(
-                "sustain={sustain_id}
-mine_entries={}
-mine_frontier={:?}
-theirs={:?}
-received={received}
-sent={sent}
-",
-                mine.len(),
-                mine.frontier(),
-                theirs,
-            );
-            let path = self.path.with_file_name("sync_debug.txt");
-            let _ = std::fs::write(path, note);
-        }
         session
             .send(
                 &mut stream,
