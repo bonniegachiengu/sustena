@@ -43,8 +43,9 @@ $repo = Split-Path -Parent $PSScriptRoot
 #   on the system PATH. A deploy script that assumed otherwise failed at the
 #   build step having already rebuilt the frontend -- which is the confusing
 #   half-done state this file exists to avoid.
-if (-not $env:CARGO_HOME)  { $env:CARGO_HOME  = "$env:USERPROFILE\Rust\cargo" }
-if (-not $env:RUSTUP_HOME) { $env:RUSTUP_HOME = "$env:USERPROFILE\Rustustup" }
+if (-not $env:CARGO_HOME)  { $env:CARGO_HOME  = Join-Path $env:USERPROFILE 'Rust\cargo' }
+if (-not $env:RUSTUP_HOME) { $env:RUSTUP_HOME = Join-Path $env:USERPROFILE 'Rust\rustup' }
+ustup" }
 $cargoBin = Join-Path $env:CARGO_HOME 'bin'
 if (Test-Path $cargoBin) { $env:PATH = "$cargoBin;$env:PATH" }
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
