@@ -79,6 +79,10 @@ pub struct Peer {
     /// the reason that no node can check another's clock.
     #[serde(default)]
     pub last_synced: Option<u64>,
+    /// When this peer last reached US. ★ Serde-defaulted so an existing
+    /// peers.json written before this field loads unchanged.
+    #[serde(default)]
+    pub last_contact: Option<u64>,
     /// The last thing that went wrong, kept until something goes right.
     #[serde(default)]
     pub last_error: Option<String>,
@@ -129,6 +133,7 @@ impl Book {
                         address,
                         standing: Standing::Pending,
                         shares: BTreeSet::new(),
+                        last_contact: None,
                         last_synced: None,
                         last_error: None,
                     },
@@ -207,6 +212,16 @@ impl Book {
             .filter(|p| p.standing == Standing::Trusted)
             .map(|p| p.shares.iter().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// Somebody reached us. ★★ Distinct from `note_sync`, which the INITIATOR
+    /// stamps: a node that was synced INTO has genuinely not "synced with"
+    /// anyone, and saying so was true but useless. What a person is asking is
+    /// whether the link is alive, and this answers that.
+    pub fn note_contact(&mut self, key: &str, at: u64) {
+        if let Some(p) = self.peers.get_mut(key) {
+            p.last_contact = Some(at);
+        }
     }
 
     pub fn note_sync(&mut self, key: &str, at: u64) {
@@ -344,6 +359,15 @@ impl Peering {
     /// Say that entries landed for this Sustain. ★ Best effort on purpose: if
     /// nothing is listening the sync still succeeded, and a send failure must
     /// never fail a merge that already happened.
+    /// Say the peer book changed. ★ Carried on the same channel as a merge,
+    /// with an EMPTY id: there is no Sustain to re-fold, only a surface to
+    /// refresh. One channel, because the absorber is the one thing listening.
+    fn note_book_changed(&self) {
+        if let Some(tx) = self.merged.lock().expect("merged lock").as_ref() {
+            let _ = tx.send(String::new());
+        }
+    }
+
     fn note_merged(&self, sustain_id: &str) {
         if let Some(tx) = self.merged.lock().expect("merged lock").as_ref() {
             let _ = tx.send(sustain_id.to_string());
@@ -390,6 +414,13 @@ impl Peering {
         let mut book = self.book.lock().expect("book lock");
         let out = f(&mut book);
         self.save(&book)?;
+        // ★★★ **Peering changes are changes — Multiparty §III.** The relay was
+        //     wired for STATE only, so an inbound connection (which calls
+        //     `seen` from `serve`) rewrote the peer book and told no surface.
+        //     A desktop watching a peer sync would go on saying "never synced"
+        //     until somebody reopened it -- observed on two real devices, and
+        //     the reason this exists.
+        self.note_book_changed();
         Ok(out)
     }
 
@@ -445,6 +476,16 @@ impl Peering {
         let peer = session.peer().clone();
         // ★★ Authenticated. Recorded, and still not trusted.
         let _ = self.edit(|b| b.seen(peer.public_key(), peer.handle(), None));
+        // ★★ Contact, recorded on the RESPONDER. `last_synced` is stamped by
+        //    the initiator only, so a node that was synced INTO showed "never
+        //    synced" after a completed session -- true of that field and
+        //    misleading about what happened. This records that somebody
+        //    reached us, which is the thing a person is actually asking.
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = self.edit(|b| b.note_contact(peer.public_key(), at));
 
         loop {
             let frame = match session.recv(stream) {
@@ -702,6 +743,26 @@ impl Peering {
             .filter_map(|e| serde_json::to_value(e).ok())
             .collect();
         let sent = outgoing.len();
+        // ★ TEMPORARY INSTRUMENTATION. The push computed zero on two real
+        //   devices while the same logs sent 283 in a harness, and no amount of
+        //   reading settled why. Written to a FILE because Rust's stderr does
+        //   not reach logcat in this build.
+        {
+            let note = format!(
+                "sustain={sustain_id}
+mine_entries={}
+mine_frontier={:?}
+theirs={:?}
+received={received}
+sent={sent}
+",
+                mine.len(),
+                mine.frontier(),
+                theirs,
+            );
+            let path = self.path.with_file_name("sync_debug.txt");
+            let _ = std::fs::write(path, note);
+        }
         session
             .send(
                 &mut stream,

@@ -180,8 +180,7 @@ fn main() {
                     }
                     let remapped = line.replace(&real_lap, &ka).replace(&real_ph, &kb);
                     out.push_str(&remapped);
-                    out.push_str("
-");
+                    out.push('\n');
                 }
                 let dir = std::path::PathBuf::from(root).join("events");
                 std::fs::create_dir_all(&dir).expect("events dir");

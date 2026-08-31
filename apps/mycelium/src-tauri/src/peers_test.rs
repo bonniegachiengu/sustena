@@ -57,11 +57,21 @@ impl Node {
     /// thread does this the moment the listener announces it; a test drains it
     /// by hand so the assertion is about the mechanism and not about timing.
     fn absorb(&self) -> usize {
-        let ids: Vec<String> = self.merges.try_iter().collect();
+        // ★ An EMPTY id is a peer-book change, not a merge: there is no Sustain
+        //   to re-fold, only a surface to refresh. Counted separately so a test
+        //   asserting "one Sustain merged" still means that.
+        let ids: Vec<String> =
+            self.merges.try_iter().filter(|id| !id.is_empty()).collect();
         for id in &ids {
             self.world.absorb(id);
         }
         ids.len()
+    }
+
+    /// How many peer-book changes were relayed. ★ The §III signal a surface
+    /// showing peer status rides.
+    fn book_pulses(&self) -> usize {
+        self.merges.try_iter().filter(|id| id.is_empty()).count()
     }
 
     fn key(&self) -> String {
@@ -827,7 +837,9 @@ fn state_that_arrives_relays_a_pulse_carrying_the_folded_state() {
     b.world.sync_peer(&a.address(), &id).expect("sync");
 
     // The absorber's two steps, in the order the app runs them.
-    let announced: Vec<String> = a.merges.try_iter().collect();
+    // ★ Book-change pulses share the channel; a merge is the one with an id.
+    let announced: Vec<String> =
+        a.merges.try_iter().filter(|id| !id.is_empty()).collect();
     assert_eq!(announced.len(), 1, "the listener announced the merge");
     a.world.absorb(&announced[0]);
 
@@ -848,6 +860,20 @@ fn state_that_arrives_relays_a_pulse_carrying_the_folded_state() {
 }
 
 #[test]
+fn an_inbound_connection_relays_a_pulse_even_when_no_state_arrives() {
+    // ★★★ The desktop symptom, as a test. A peer that reaches this node
+    //     changes its BOOK (`serve` calls `seen`, and now records contact),
+    //     and that is a change a surface showing peer status must hear about.
+    //     Before this, the relay was wired for state only: the laptop's
+    //     Network screen went on saying "never synced" after a completed
+    //     inbound session until somebody reopened it.
+    let (a, b, id) = twin_pair("book-pulse");
+    let _ = a.book_pulses(); // drain setup noise
+    b.world.sync_peer(&a.address(), &id).expect("sync");
+    assert!(a.book_pulses() > 0, "the responder relayed a peer-book change");
+}
+
+#[test]
 fn a_sync_that_changed_nothing_relays_no_pulse() {
     // ★★★ §III's refractory term, at the source: "the excitation moves outward
     //     instead of sloshing back into the elements that just fired." A sync
@@ -858,4 +884,62 @@ fn a_sync_that_changed_nothing_relays_no_pulse() {
         crate::commands::merged_pulse(&a.world, &id, 0, None).is_none(),
         "nothing arrived, so nothing is relayed"
     );
+}
+
+// ── the anti-faking invariant ───────────────────────────────────────────────
+
+#[test]
+fn what_a_screen_would_show_always_matches_the_log() {
+    // ★★★ **A money app must never render a number its own ledger cannot
+    //     back.** Every figure a surface shows -- balance, pocket, total -- is
+    //     read off the in-memory state, so this is the whole guarantee: the
+    //     in-memory state IS the fold of the log, at every point where state
+    //     can change.
+    //
+    // ★★ Not hypothetical. A real laptop displayed 516,699.48 while its own
+    //    Homestead folded to 0.00, because `World::open` folded in file order
+    //    while `reload` folded causally. That path is fixed; this test is the
+    //    guard that does not care HOW a future drift happens.
+    let (a, b, id) = twin_pair("no-faking");
+
+    // 1. after a local commit
+    a.income(&id, 300.0, "local");
+    assert_eq!(a.world.fold_divergences(), Vec::<String>::new(), "after a local commit");
+
+    // 2. after being synced INTO (a is the responder, and re-folds)
+    b.income(&id, 700.0, "peer-side");
+    b.world.sync_peer(&a.address(), &id).expect("sync");
+    a.absorb();
+    assert_eq!(a.world.fold_divergences(), Vec::<String>::new(), "after a peer wrote into it");
+    assert_eq!(b.world.fold_divergences(), Vec::<String>::new(), "and on the initiator");
+
+    // 3. after a restart, which is where the real divergence lived
+    let reopened = World::open(Store::at(&a.home).expect("store")).expect("world");
+    assert_eq!(reopened.fold_divergences(), Vec::<String>::new(), "after a restart");
+
+    // 4. and the number a screen would print is the folded one
+    let shown = reopened
+        .with(|i| i.get(&id).and_then(|s| s.state.pointer("/finances/liquid/balance").cloned()));
+    let folded = reopened.reload(&id).expect("re-fold").state.pointer("/finances/liquid/balance").cloned();
+    assert_eq!(shown, folded, "the rendered balance IS the folded balance");
+}
+
+#[test]
+fn a_state_written_behind_the_logs_back_is_caught() {
+    // ★★★ The test that makes the invariant real rather than decorative: force
+    //     a divergence the way a bug would -- state changed without the log
+    //     changing -- and the check must SEE it. A guard that only ever passes
+    //     is not a guard.
+    let (a, _b, id) = twin_pair("faking-caught");
+    a.income(&id, 300.0, "real");
+    assert!(a.world.fold_divergence(&id).is_none(), "honest to begin with");
+
+    a.world.with_mut_for_test(&id, |state| {
+        *state = serde_json::json!({"finances": {"liquid": {"balance": 516_699.48}}});
+    });
+
+    let drift = a.world.fold_divergence(&id).expect("a fabricated balance must be caught");
+    assert_eq!(drift.0.pointer("/finances/liquid/balance"), Some(&serde_json::json!(516_699.48)));
+    assert_ne!(drift.1.pointer("/finances/liquid/balance"), Some(&serde_json::json!(516_699.48)));
+    assert_eq!(a.world.fold_divergences(), vec![id], "and named");
 }

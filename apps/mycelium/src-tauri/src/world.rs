@@ -2249,6 +2249,61 @@ impl World {
         Ok(SyncReport { outcome, merge })
     }
 
+    /// Write state directly, WITHOUT touching the log. Tests only.
+    ///
+    /// ★★★ Exists so the anti-faking invariant can be shown to actually catch
+    /// something. There is deliberately no non-test caller: this is the exact
+    /// move the invariant exists to forbid.
+    #[cfg(test)]
+    pub fn with_mut_for_test(&self, sustain_id: &str, f: impl FnOnce(&mut Value)) {
+        let mut inner = self.inner.lock().expect("world lock");
+        if let Some(su) = inner.sustains.get_mut(sustain_id) {
+            f(&mut su.state);
+        }
+    }
+
+    /// **Does what a screen would show still match the log?**
+    ///
+    /// ★★★ **The anti-faking invariant.** Every figure a surface renders --
+    /// every balance, every pocket, every total -- is read off the in-memory
+    /// state. That is fine only while the in-memory state IS the fold of the
+    /// log. When the two drift, a money app shows a number its own ledger
+    /// cannot back, which is the worst failure this system can have: it looks
+    /// converged, or solvent, when it is neither.
+    ///
+    /// It has happened. `World::open` folded in file order while `reload`
+    /// folded causally, so a merged node rendered a state its log did not
+    /// support. Fixing that one path is not enough -- ANY future path that
+    /// writes state without re-folding reintroduces it. So this is the check
+    /// that does not care how the drift happened.
+    ///
+    /// ★★ Non-mutating on purpose: `reload` would make the two equal and
+    /// report nothing, which is the opposite of an invariant.
+    ///
+    /// Returns `None` when they agree, `Some((shown, folded))` when they do
+    /// not.
+    pub fn fold_divergence(&self, sustain_id: &str) -> Option<(Value, Value)> {
+        let node = self.node_id()?;
+        let shown = self.with(|i| i.get(sustain_id).map(|s| s.state.clone()))?;
+        let folded = self.store.load_replicated(sustain_id, &node, None).ok()?.0.state;
+        if shown == folded {
+            None
+        } else {
+            Some((shown, folded))
+        }
+    }
+
+    /// Every Sustain whose rendered state has drifted from its log.
+    ///
+    /// ★ For a startup check and for tests: a household is only honest if this
+    /// is empty.
+    pub fn fold_divergences(&self) -> Vec<String> {
+        self.with(|i| i.order().to_vec())
+            .into_iter()
+            .filter(|id| self.fold_divergence(id).is_some())
+            .collect()
+    }
+
     /// Re-fold one Sustain from disk in causal order, and adopt the result.
     ///
     /// ★★ Returns the [`Reconciliation`] rather than swallowing it, because
