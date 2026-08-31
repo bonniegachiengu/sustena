@@ -1028,11 +1028,24 @@ function QueueCard(props: {
   //   was rather than jumping somewhere arbitrary -- it was already filed, or
   //   the sweep has not reached it, and both are better answered by the queue
   //   he can see than by a guess.
+  // ★★★ **A tap that lands on nothing must SAY so.** The notification is
+  //     posted by the receiver before anything is parsed, so it fires for
+  //     every financial text -- including one that needs no decision at all.
+  //     An M-Pesa receipt maps to income and files itself, so it never
+  //     becomes a queue item, and tapping its notification opened the queue
+  //     at something unrelated with no explanation. That reads as the app
+  //     losing his message. It did not lose it; there was nothing to ask.
+  const [tapMissed, setTapMissed] = createSignal(false);
   createEffect(() => {
     const raw = props.openRaw;
     if (!raw) return;
     const i = queue().findIndex((c) => c.raw === raw);
-    if (i >= 0) setAt(i);
+    if (i >= 0) {
+      setAt(i);
+      setTapMissed(false);
+    } else {
+      setTapMissed(true);
+    }
     props.onOpened?.();
   });
   const [busy, setBusy] = createSignal(false);
@@ -1078,6 +1091,14 @@ function QueueCard(props: {
   return (
     <Show when={queue().length > 0}>
       <div class={O.cardPrimary}>
+        {/* ★★★ Answering a tap that had nothing to open. Silence here
+            read as the app having lost his message. */}
+        <Show when={tapMissed()}>
+          <p class={O.caption}>
+            that message is not waiting on you — it either filed itself or was already
+            answered. Nothing was lost; there was nothing to ask.
+          </p>
+        </Show>
         <div class={O.row}>
           {/* ★★ Back is plain navigation and never changes anything. */}
           <button
