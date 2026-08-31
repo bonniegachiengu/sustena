@@ -786,3 +786,48 @@ Also fixed: the script was promising `v1.1.2 | hash` while the app renders
 **Process:** this landed on `fix/deploy-hardening` -> `dev` -> `main`. The six
 preceding commits went straight onto `main`, which `DEVELOPMENT.md` does not
 allow; that was mine and it is corrected here.
+
+---
+
+# 31 Aug, 16:50 — Orchie's version line, and the stamp that was lying
+
+Bonnie asked that the version show in Orchie too. It already does — same
+mechanism, live JSX in the header beside the brand:
+
+```tsx
+<span class={O.brand}>ORCHIE</span>
+<span class={O.headerMeta}>{buildStamp() ?? ""}</span>
+```
+
+Both faces call one command, so they cannot drift:
+
+```rust
+format!("v{} · {}", env!("CARGO_PKG_VERSION"), env!("SUSTENA_BUILD_HASH"))
+```
+
+## But checking it found the stamp itself was stale — and had shipped
+
+`build.rs` watched `.git/HEAD`. That file holds the text `ref: refs/heads/main`.
+**Committing on the same branch never touches it** — git rewrites
+`.git/refs/heads/<branch>` instead. So the build script re-ran on a branch
+*switch* and nothing else, and cargo served a cached hash.
+
+Cargo's own record of what it emitted:
+
+```
+target/aarch64-linux-android/debug/build/mycelium-.../output
+  cargo:rustc-env=SUSTENA_BUILD_HASH=b441fa4
+```
+
+`b441fa4` is a commit from hours before the v1.1.2 release, and it is really in
+the shipped library — grep of `libmycelium_lib.so` finds `b441fa4`, and finds
+neither `7fd417c` (the release) nor any later commit. **Orchie's header would
+have rendered a stale commit as current.** The desktop escaped only because the
+day involved enough branch switching to keep invalidating it: luck, not design.
+
+Verified the grep is meaningful before trusting it — five Rust string literals
+known to be in the app were all found in that same `.so`, so absence there is
+real absence, not a compression artefact. That check exists because I had
+already drawn a wrong conclusion from a binary grep once today.
+
+Fixed: it now watches the ref HEAD actually points at, plus `packed-refs`.
