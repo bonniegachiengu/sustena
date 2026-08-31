@@ -488,6 +488,7 @@ export default function Orchie(props: { onFace?: () => void }) {
    * single time.
    */
   const sustain = () => world.selected;
+  const [buildStamp] = createResource(() => engine.buildStamp());
   const [feed, { refetch }] = createResource(sustain, (id) => engine.feed(id, null));
 
   /**
@@ -656,6 +657,9 @@ export default function Orchie(props: { onFace?: () => void }) {
       <div class={O.column}>
         <div class={O.header}>
           <span class={O.brand}>ORCHIE</span>
+          {/* ★★★ The REAL build. Same reason as the cockpit's: a stale app that
+              looks current is how a night's work went unnoticed. */}
+          <span class={O.headerMeta}>{buildStamp() ?? ""}</span>
           <span class={O.headerMeta}>{shown()?.label ?? ""}</span>
           {/* ★★ The cockpit, which is where Ingest lives -- the source picker
               and the paste field for a real M-Pesa or KCB message. Reachable

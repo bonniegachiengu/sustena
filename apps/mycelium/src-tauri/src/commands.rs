@@ -2320,6 +2320,18 @@ pub fn set_intake_start(world: State<'_, World>, start_at: Option<f64>) -> Resul
     world.ingested().set_window(window).map_err(|e| e.to_string())
 }
 
+/// What build is actually running.
+///
+/// ★★★ Version from the crate (which the VERSION file drives) and hash from
+/// git at COMPILE time. Neither can be edited into agreement with a stale
+/// binary, which is the point: the string is a property of the binary rather
+/// than a claim about it.
+#[tauri::command]
+#[specta::specta]
+pub fn build_stamp() -> String {
+    format!("v{} · {}", env!("CARGO_PKG_VERSION"), env!("SUSTENA_BUILD_HASH"))
+}
+
 /// Settle on a different port.
 ///
 /// ★★★ Changing it does NOT move a running listener: the socket a peer is

@@ -708,6 +708,17 @@ async setPeerAddress(publicKey: string, address: string) : Promise<Result<null, 
 }
 },
 /**
+ * What build is actually running.
+ * 
+ * ★★★ Version from the crate (which the VERSION file drives) and hash from
+ * git at COMPILE time. Neither can be edited into agreement with a stale
+ * binary, which is the point: the string is a property of the binary rather
+ * than a claim about it.
+ */
+async buildStamp() : Promise<string> {
+    return await TAURI_INVOKE("build_stamp");
+},
+/**
  * Where this household's record begins, in unix seconds. `None` = everything.
  */
 async getIntakeStart() : Promise<number | null> {

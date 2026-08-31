@@ -616,12 +616,35 @@ impl Peering {
             .into_iter()
             .filter_map(|e| serde_json::to_value(e).ok())
             .collect();
+        let frontier = replica.frontier();
+        // ★ TEMPORARY INSTRUMENTATION. The initiator receives a frontier this
+        //   node's own two-entry log cannot justify, and reading the code has
+        //   not explained it. This records exactly what was read and what is
+        //   about to be sent.
+        {
+            let note = format!(
+                "sustain={sustain_id}
+me={me}
+replica_entries={}
+replica_frontier={:?}
+heard_have={:?}
+entries_out={}
+frontier_out={:?}
+",
+                replica.len(),
+                replica.frontier(),
+                have,
+                entries.len(),
+                frontier,
+            );
+            let _ = std::fs::write(self.path.with_file_name("answer_want_debug.txt"), note);
+        }
         session.send(
             stream,
             &Frame::Give {
                 sustain_id: sustain_id.to_string(),
                 entries,
-                frontier: replica.frontier(),
+                frontier,
                 spec: self.spec_of(sustain_id),
             },
         )

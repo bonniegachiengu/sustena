@@ -189,6 +189,17 @@ export const engine = {
     unwrap(await commands.setIntakeStart(startAt));
   },
 
+  /**
+   * What build is actually running — version plus git hash, both stamped at
+   * COMPILE time.
+   *
+   * ★★★ Rendered in the header of both faces. A whole night's work once sat in
+   * git while the app on screen was from yesterday and nobody could tell by
+   * looking; a hardcoded version would have lied with confidence. This one
+   * cannot: it is a property of the binary.
+   */
+  buildStamp: async (): Promise<string> => await commands.buildStamp(),
+
   smsPermission: async (): Promise<string> => unwrap(await commands.smsPermissionState()),
   smsRequestPermission: async (): Promise<string> => unwrap(await commands.smsRequestPermission()),
   /**
