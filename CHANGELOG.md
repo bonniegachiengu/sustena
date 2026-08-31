@@ -9,6 +9,33 @@ move: a **minor** bump (0.1 → 0.2) is where new capability lands and where
 something may change how it behaves, and a **patch** bump (0.2.0 → 0.2.1) is a
 fix that does not add anything.
 
+## v1.1.2 - 2026-08-31
+
+The app says which build it is, refuses figures its log cannot back, and one command ships it.
+
+- docs(night): the corrected proof, and ┬ºIII coverage per view
+- fix(harness): register the household before implanting its log
+- fix(live): the store behind the silent views, not the views
+- docs(audit): row 14 is now LIVE on his own household log
+- chore(peers): remove the sync instrumentation, its question answered
+- feat(fold): refuse to show a household figures its own log cannot back
+- docs(night): close the frontier question, and correct a misattributed reading
+- fix(deploy): native stderr is output, not failure
+- fix(deploy): state staleness over content, and skip the desktop build in -PhoneOnly
+- fix(deploy): repair the script after a bad in-place edit
+- fix(deploy): build the rust home paths with Join-Path
+- fix(deploy): find cargo where this machine actually keeps it
+- fix(deploy): force array semantics when resolving the shortcut
+- fix(deploy): write the deploy script as ASCII
+- feat(build): the app says which build it is, and one command ships it
+- docs: the push bug, instrumented ΓÇö theirs equals mine
+- feat(ingest): where the record begins ΓÇö an intake boundary in time
+- fix(lock): surface 'stay unlocked' ΓÇö its absence relocked a live node
+- docs: I cost the phone its unlock, and the push bug is blocked on that
+- fix: a screen may not show a number the log cannot back, and peering is a change
+- docs: the push bug at byte level, and the balance the log cannot back
+- docs: record what v1.1.1 actually shipped
+
 ## v1.1.1 - 2026-08-31
 
 - docs: rewrite the night status complete and current
