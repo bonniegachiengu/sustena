@@ -120,3 +120,35 @@ the specific screen now looks right.
   blocked it are fixed and proven between two processes; the last mile needs his
   passphrase once.
 - **Every screen-level claim.** See the limit at the top.
+
+---
+
+## 31 Aug, afternoon — row 14 upgraded, on his own data
+
+Row 14 said LIVE on twin scratch households. It is now LIVE on **his real
+laptop log** as one of the two sides:
+
+```
+before   A = his real Homestead log, 2 entries      B = peer, 285 entries
+dial 1   A -> 287 entries ON DISK
+dial 2   received=0  sent=0   mine_frontier == theirs      <- idempotent
+fold     A 555955.56   B 555955.56                          <- identical
+```
+
+Two OS processes, real sockets. So §VI's join, `missing_from`, `merge_entries`
+and persistence are all exercised by a household that actually exists, not a
+fixture — and the second pass is idempotent, which is the §VI law rather than a
+nicety.
+
+**A correction to the record.** The earlier note that "the laptop reports a
+frontier its own log cannot justify" was a *harness* reading I attributed to his
+machine. His store settles it: `homestead.jsonl` last written 29 Aug, and the
+phone's node key present only in `peers.json`. No merge has ever run on the real
+pair — there was no anomalous frontier, there was no sync.
+
+### Row 9 and 13, one step better
+
+`get_feed` now runs a fold gate before it composes anything, so the answer to
+*"can a screen show a number the log does not support?"* is no by construction
+rather than by care. Still SURFACE UNVERIFIED for the pixels; the refusal itself
+is TEST (`a_screen_is_refused_the_figures_when_the_log_does_not_back_them`).
