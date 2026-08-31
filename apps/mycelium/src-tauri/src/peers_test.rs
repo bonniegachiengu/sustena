@@ -971,3 +971,97 @@ fn a_screen_is_refused_the_figures_when_the_log_does_not_back_them() {
     // ★ Still diverging afterwards: the gate reported, it did not tidy up.
     assert!(a.world.fold_divergence(&id).is_some(), "refusing must not repair");
 }
+
+// ── the convergence claim ───────────────────────────────────────────────────
+//
+// ★★★ A round that moves nothing CLAIMS both sides agree. Believing that claim
+//     unchecked is the whole bug: on real devices `received = 0, sent = 0` came
+//     back from a peer whose log could not justify its own frontier, and the
+//     reading was byte-identical to a healthy idempotent sync.
+
+use sustena_core::Holdings;
+
+fn held(count: u64, digest: &str) -> Holdings {
+    Holdings { count, digest: format!("{digest:0<64}") }
+}
+
+#[test]
+fn a_peer_claiming_convergence_it_cannot_have_is_refused_and_named() {
+    // ★★★ The real shape, in the real numbers: 285 against 2, same frontier.
+    let ours = held(285, "aaaa");
+    let theirs = held(2, "bbbb");
+    let why = crate::peers::convergence_refusal("bg.myc", 0, 0, &ours, Some(&theirs))
+        .expect("an impossible claim of convergence must be refused");
+
+    // It must name the side that cannot be telling the truth, not just differ.
+    assert!(why.contains("bg.myc"), "names the peer: {why}");
+    assert!(why.contains("2"), "says what they hold: {why}");
+    assert!(why.contains("285"), "says what we hold: {why}");
+    assert!(why.contains("refusing"), "is a refusal, not a note: {why}");
+}
+
+#[test]
+fn honest_idempotence_is_left_alone() {
+    // ★★ The case that must stay silent. Nothing moved because there was
+    //    nothing to move, and both sides hold the same entries.
+    let ours = held(285, "aaaa");
+    let theirs = held(285, "aaaa");
+    assert!(crate::peers::convergence_refusal("bg.myc", 0, 0, &ours, Some(&theirs)).is_none());
+}
+
+#[test]
+fn a_peer_that_makes_no_claim_still_syncs() {
+    // ★★★ Mixed versions. An un-updated phone sends no holdings at all, so
+    //     there is nothing to check and the sync must proceed exactly as it did
+    //     before this existed. Refusing here would break his phone the moment
+    //     the laptop updated first -- which is the ordinary order of events.
+    let ours = held(285, "aaaa");
+    assert!(crate::peers::convergence_refusal("bg.myc", 0, 0, &ours, None).is_none());
+}
+
+#[test]
+fn a_round_that_moved_entries_is_not_a_convergence_claim() {
+    // ★ Mid-flight is not a claim. Comparing while entries are still crossing
+    //   would refuse ordinary progress -- they are SUPPOSED to differ there.
+    let ours = held(285, "aaaa");
+    let theirs = held(2, "bbbb");
+    assert!(crate::peers::convergence_refusal("bg.myc", 283, 0, &ours, Some(&theirs)).is_none());
+    assert!(crate::peers::convergence_refusal("bg.myc", 0, 283, &ours, Some(&theirs)).is_none());
+}
+
+#[test]
+fn an_older_peers_reply_still_decodes() {
+    // ★★★ The compatibility guarantee, at the only place it can actually
+    //     break: the wire. A peer on the older shape sends a Give with no
+    //     `holdings` field. If that failed to decode, an updated laptop and an
+    //     un-updated phone would stop syncing altogether -- which is worse than
+    //     the bug this is fixing.
+    let old = serde_json::json!({
+        "kind": "give",
+        "sustain_id": "homestead",
+        "entries": [],
+        "frontier": { "counters": { "abc": 2 } },
+    });
+    let frame: crate::wire::Frame = serde_json::from_value(old).expect("an older Give must decode");
+    match frame {
+        crate::wire::Frame::Give { holdings, .. } => {
+            assert!(holdings.is_none(), "absent means absent, not a default digest");
+        }
+        other => panic!("expected a Give, got {other:?}"),
+    }
+}
+
+#[test]
+fn two_real_nodes_converge_and_the_second_pass_is_accepted() {
+    // ★★ End to end over a real socket: the check must not fire on the honest
+    //    case. A guard that refuses healthy syncs is worse than no guard.
+    let (a, b, id) = twin_pair("digest-idempotent");
+    a.income(&id, 300.0, "real");
+
+    let first = b.world.sync_peer(&a.address(), &id).expect("first sync");
+    assert!(first.outcome.received > 0 || first.outcome.sent > 0, "something crossed");
+
+    let second = b.world.sync_peer(&a.address(), &id).expect("the second pass must be accepted");
+    assert_eq!(second.outcome.received, 0);
+    assert_eq!(second.outcome.sent, 0);
+}

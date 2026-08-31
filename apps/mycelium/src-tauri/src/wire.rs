@@ -78,7 +78,7 @@ use serde_json::Value;
 use sha2::Sha256;
 use x25519_dalek::{EphemeralSecret, PublicKey};
 use sustena_core::consensus::{Accepted, Promise, ProposalNumber};
-use sustena_core::VectorClock;
+use sustena_core::{Holdings, VectorClock};
 
 use crate::identity::{verify, Unlocked};
 
@@ -137,6 +137,21 @@ pub enum Frame {
         /// the receiver already has it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         spec: Option<SharedSpec>,
+        /// ★★★ **What the sender actually holds**, so the frontier above can be
+        /// checked rather than believed. Two replicas can agree on a frontier
+        /// while holding different entries — gaps are legitimate — and when
+        /// that happened on real devices the round reported `sent = 0`, which
+        /// is exactly what a healthy idempotent sync reports. A lie and a
+        /// success were the same bytes.
+        ///
+        /// ★★ **`Option`, and that is the whole compatibility story.** A peer
+        /// on the older shape sends no such field, serde reads `None`, and the
+        /// check simply does not engage — it needs both sides. Bumping
+        /// `PROTOCOL` would have done the opposite of what is wanted here: the
+        /// handshake compares versions for **equality**, so a bump refuses an
+        /// un-updated phone outright instead of syncing with it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        holdings: Option<Holdings>,
     },
     /// *Which Sustains would you share with me?*
     Catalogue,
@@ -875,6 +890,7 @@ mod tests {
             entries: vec![serde_json::json!({ "amount": 41_500, "note": SECRET_POCKET })],
             frontier: VectorClock::new().at("alice", 7),
             spec: None,
+            holdings: None,
         }
     }
 
