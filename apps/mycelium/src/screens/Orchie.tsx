@@ -758,8 +758,8 @@ export default function Orchie(props: { onFace?: () => void }) {
                   <div class={O.card}>
                     <h2 class={O.cardTitle}>a shape worth teaching</h2>
                     <p class={O.caption}>
-                      {sh.count} messages look like this one and nothing reads them yet. Classify
-                      one and the rest follow.
+                      {sh.count} messages look like this one and nothing reads them yet. Teach it
+                      once and the next message shaped like it is read automatically.
                     </p>
                     <p class={O.raw}>{sh.example}</p>
                   </div>
