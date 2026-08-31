@@ -831,3 +831,65 @@ real absence, not a compression artefact. That check exists because I had
 already drawn a wrong conclusion from a binary grep once today.
 
 Fixed: it now watches the ref HEAD actually points at, plus `packed-refs`.
+
+---
+
+# 31 Aug, 18:10 — the SMS reader: already ported, now actually tested
+
+## The premise was out of date, and that is the headline
+
+The brief said the Rust/Tauri Orchie has no on-device SMS reading and capture is
+manual-paste only. **It is already there**, in
+`crates/tauri-plugin-sms-capture`, and it is in the shipped APK:
+
+| piece | where |
+|---|---|
+| `SmsReceiver` | manifest-registered on `SMS_RECEIVED`, guarded `BROADCAST_SMS` |
+| `SmsSenderFilter` | applied in `onReceive` before anything is stored |
+| `SmsSecretFilter` | applied next, also before anything is stored |
+| `SmsQueueStore` + `ClassifyNotifier` | queue, and the notification |
+| `READ_SMS` / `RECEIVE_SMS` / `POST_NOTIFICATIONS` | declared by the plugin, merged into the app |
+| into ingest | `sms_drain_queue` -> `sweep()` -> `world.capture_at(...)` |
+
+I did not rebuild what exists. Porting it again would have been inventing work.
+
+## What was genuinely missing: any test of the parts that must never be wrong
+
+Three pure functions decide what leaves the handset and how it is filed, and
+none had a test.
+
+* **`SmsSenderFilter`** — whose messages this app reads at all. A regression
+  does not corrupt a number on a screen; it reads someone's private texts. The
+  negative cases outnumber the positive ones on purpose, and it fails **closed**
+  on null/empty.
+* **`SmsSecretFilter`** — two failure directions, not symmetric. Missing a
+  secret leaks a live credential off the phone; over-matching silently swallows
+  a real payment and the household never learns the money moved. Both halves
+  tested, the false-positive half against real transaction wording.
+* **`source_of`** — the source-strict rule. `parse_message` restricts itself to
+  one source's grammar, so a text filed wrongly is handed to the wrong parser.
+  Several real KCB messages say M-PESA in their own body, which is exactly why
+  the **sender** decides and the wording never does.
+
+```
+20 JVM tests (junit, no device)   0 failed
+297 Rust host tests               0 failed
+```
+
+The JUnit run was checked against its own XML rather than the green build line —
+a passing build with zero tests is a false pass.
+
+## Verified now, on this machine
+
+Freshly built APK, staged: all three permissions present, `SmsReceiver`
+registered with `BROADCAST_SMS` on the `SMS_RECEIVED` action, all five classes
+in `classes.dex`, and the build stamp `91750d9` in the native library.
+
+## Deferred to the device, explicitly
+
+**Not claimed to work on-device.** A real text arriving -> receiver firing while
+the app is closed -> filters -> queue -> notification -> unlock -> drain ->
+transducer needs his handset, which is off USB. Built and static-verified;
+**device test pending his phone**. One install and one real SMS closes it.
+
+Nothing was sent to any number. `whatsapp_*` and the tunnel untouched.
