@@ -564,3 +564,70 @@ clocks instead of content, and native stderr being treated as failure.
 The phone is off USB **and** off the LAN (`ping 192.168.1.64` fails). I did not
 write a guessed address into his real peer book; the phone's actual address gets
 captured when it returns. Nothing was written to his household.
+
+---
+
+# 31 Aug, 14:20 — the proof, on a harness that no longer lies
+
+The earlier run reported `balance=null` on both sides and then panicked, which
+read exactly like a broken sync. It was not. `implant` dropped a log into a root
+without ever **registering** the household, so nothing knew the Sustain existed
+to read it — and an `unwrap()` on that absence panicked *after* a sync that had
+already worked. Both fixed; the harness now tells the truth.
+
+Re-run from scratch, his real Homestead log as one side:
+
+```
+BEFORE  A = 2 entries (his real laptop log)   B = 286 entries (peer)
+[B] sync 1: received 2  sent 286   -> log 288
+[B] sync 2: received 0  sent 0     -> log 288   (idempotent: true)
+[B] rebuild_state == get_state: true
+
+after reopening both from disk:
+  A  log=288  balance=555955.56
+  B  log=288  balance=555955.56
+```
+
+Two OS processes, real sockets, and the numbers read back **after a restart**,
+so this is durability and not a live cache. Both nodes carried their own genesis
+into the merge and neither erased the other — §VI's join, on a real household's
+log rather than a fixture.
+
+**What this closes.** Transport, `missing_from`, `merge_entries`, persistence,
+causal fold and idempotence are all proven on his data. What remains is not a
+bug: his phone is off USB and off the LAN, so his actual 285 entries have not
+had a route to cross. The moment it returns, the armed install fires and both
+sides will hold the standing-peering build.
+
+---
+
+# 31 Aug, 14:40 — §III liveness, per view, both faces
+
+Bonnie's worry was that the fix landed on the cockpit and not on Orchie. The
+audit says something more useful than yes or no: **six of fifteen views were
+live, and the nine that were not had nothing to do with the screens.**
+
+Monitor, Composition, Constellation and Simulate own no resources — they read
+the shared `live` store. So the thing that was deaf to a change a peer wrote was
+never those screens; it was the store behind them. One subscription in the shell
+makes all four live at once, which is why the fix is three lines rather than
+nine files.
+
+| view | §III |
+|---|---|
+| App (shell, belt, selector) | subscribes directly |
+| Orchie | subscribes directly (3 sites) |
+| Ingest, Economy, Network, Library, Define | subscribe directly |
+| Console | **added** — a package can add operators, and packages arrive from peers |
+| Profile | **added** — access follows the peer book, which changes elsewhere |
+| Monitor, Composition, Constellation, Simulate | via the shell's store subscription |
+| Lock, Panels | no live data — a lock screen and a set of authored absences |
+
+Loop-free by inspection: `refreshWorld` re-reads and merges, it never relays.
+Only a local commit and an arrived merge relay, which is the §III excitation
+this is the refractory response to.
+
+**Still SURFACE UNVERIFIED**, and I will keep saying so: I have not watched a
+pixel change. Driving the GUI is not available to me in this run mode, and I
+reported a window as "up at the lock screen" once from a process existing. I do
+not intend to repeat that.
