@@ -1599,10 +1599,24 @@ function AccountsCard(props: { feed: FeedDto; onChanged: () => void }) {
         <For each={accounts()}>
           {(a) => (
             <>
+              {/* ★★★ **A pot we have no arithmetic for shows the BANK's
+                  figure, not zero.** Pochi and M-Shwari arrive without anyone
+                  declaring them, so there is nothing of ours to compare — and
+                  rendering `balance` there would print "0" for an account the
+                  bank told us, in writing, holds thousands. Showing their
+                  number and saying whose it is beats showing a confident lie. */}
               <div class={O.row}>
                 <span class={O.figureLabel}>{a.label}</span>
-                <span class={O.caption}>{fmt(a.balance)}</span>
+                <span class={O.caption}>
+                  {a.drift === null && a.reported !== null ? fmt(a.reported) : fmt(a.balance)}
+                </span>
               </div>
+              <Show when={a.drift === null && a.reported !== null}>
+                <p class={O.caption}>
+                  as {a.label} itself last said. Nothing here has been sorted into
+                  pockets yet, so this is their figure rather than ours.
+                </p>
+              </Show>
               {/* ★★★ The bank's own word, next to ours. Reported, never
                   corrected: a difference is a real thing to look into, and
                   quietly moving our figure to match would erase whatever
