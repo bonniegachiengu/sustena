@@ -1017,6 +1017,11 @@ function QueueCard(props: {
     return Math.min(Math.max(0, i), max);
   };
   const current = () => queue()[idx()];
+  /** How many still need an answer -- the filed ones are walkable, not work. */
+  const waitingCount = () => queue().filter((c) => c.status !== "processed").length;
+  /** Where he is among those, 1-based. */
+  const waitingPos = () =>
+    queue().slice(0, idx() + 1).filter((c) => c.status !== "processed").length;
 
   // ★★★ Open on the message the notification was about.
   //
@@ -1116,8 +1121,18 @@ function QueueCard(props: {
             ‹ back
           </button>
           <span class={O.spacer} />
+          {/* ★★★ Count what NEEDS him, not what he can walk to. The
+              queue deliberately keeps the last 15 he has already filed so he
+              can change his mind -- but counting those in made a queue of 60
+              waiting read as "1 of 75", which looks like a backlog growing
+              rather than one being worked. Same list, honest number. */}
           <span class={O.caption}>
-            {idx() + 1} of {queue().length}
+            <Show
+              when={current()?.status !== "processed"}
+              fallback={<>already filed · {waitingCount()} still waiting</>}
+            >
+              {waitingPos()} of {waitingCount()}
+            </Show>
             <Show when={label()}> · {label()}</Show>
           </span>
           <span class={O.spacer} />
