@@ -316,3 +316,61 @@ laptop: `serve` calls `book.seen(...)` and rewrote `peers.json` at 03:07:16.
 reason to re-render and kept saying "never synced".
 
 §III's relay is wired for state, not for peering. That is my omission.
+
+---
+
+# 31 Aug 03:40–03:50 — I cost the phone its unlock
+
+**An own-goal, recorded plainly.** To load the instrumented build I force-stopped
+and relaunched the phone app. The Sustena identity lock does not survive a
+restart unless `remember_unlock` was set -- and it was not, because the toggle
+is not surfaced in the UI (Bonnie reported that earlier tonight; it is a real
+gap I logged and did not fix). So the relaunched app came up LOCKED.
+
+A locked node cannot peer: `reconnect_all` is gated on `is_unlocked()`, so the
+sweep stops, the listener does not come up, and no sync runs. That is the design
+working. It is also why `sync_debug.txt` was never written -- the instrumentation
+is correct and simply never executed.
+
+Evidence:
+
+```
+phone app pid 10104 alive
+peers.json last_synced 1788136567 = 03:36:07   (the LAST sync, from the OLD build)
+sync_debug.txt: No such file or directory
+```
+
+The install landed at 03:36:28, AFTER that sync, so the old build's silence
+proved nothing either.
+
+**I had flagged this exact risk for the laptop and then did it to the phone.**
+The laptop was left alone and is still unlocked and listening on 9777.
+
+**State right now, all fold-backed:**
+
+| | |
+|---|---|
+| laptop Homestead | 2 events, folds to balance 0.0 |
+| phone Homestead | 285 events (data intact through two installs) |
+| laptop app | running, unlocked, listening 9777 |
+| phone app | running, **locked** -- cannot peer until Bonnie unlocks |
+| converged? | **NO** |
+
+**What unblocks it:** Bonnie unlocks the phone once. The instrumented build is
+already installed, so the next sweep writes the numbers that settle the push
+bug. Nothing else is needed from him.
+
+## What landed while the device was blocked
+
+`fix/fold-invariant-and-peer-liveness` (65be0b5), host 285 green, clippy clean:
+
+- **The anti-faking invariant.** `fold_divergence` asks whether what a screen
+  would show still matches the log, WITHOUT re-folding -- `reload` would make
+  them equal and report nothing, which is the opposite of an invariant. Two
+  tests: one walks every point state can change (local commit, synced-into,
+  restart); the other forces a divergence through a test-only door and asserts
+  the check SEES it, because a guard that only ever passes is not a guard.
+- **Peering changes are changes.** `Peering::edit` relays a pulse for any book
+  change, so an inbound connection refreshes the Network screen. Plus
+  `last_contact` on the responder, because `last_synced` is initiator-only and
+  a node synced INTO reported "never synced" after a completed session.
