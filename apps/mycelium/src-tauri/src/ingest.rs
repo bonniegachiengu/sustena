@@ -240,6 +240,16 @@ pub struct MatchedTransfer {
     pub from_account: String,
     pub to_account: String,
     pub amount: f64,
+    /// ★★★ An income already filed for the arriving leg, to be taken back off
+    /// the books before this transfer credits the same account.
+    ///
+    /// Every text saying money arrived reads the same whether it came from an
+    /// employer or from his own other account, so the arriving leg files itself
+    /// as income long before the leaving leg is read. Booking the transfer on
+    /// top of that would count the money twice -- once as earnings that never
+    /// happened, once as the move it really was.
+    #[serde(default)]
+    pub undo_income: Option<String>,
 }
 
 /// What a transfer pass found, and what it would not guess at.
@@ -1048,9 +1058,48 @@ impl Ingested {
                         from_account: out.source_id.clone(),
                         to_account: inn.source_id.clone(),
                         amount,
+                        // Both legs are still open, so nothing has been filed.
+                        undo_income: None,
                     });
                 }
-                0 if applied_partner > 0 => report.blocked_by_applied_income += 1,
+                0 if applied_partner > 0 => {
+                    // ★★★ The arriving leg already filed itself as income. That
+                    //     is not a reason to do nothing -- doing nothing IS the
+                    //     overstatement, and it sits on his totals until
+                    //     somebody notices. There is an inverse now, so the
+                    //     move can be booked properly: take the income back
+                    //     off, then record the transfer.
+                    //
+                    // ★★ ONLY on a shared reference, never on amount alone.
+                    //    This path UNDOES something already on the books, so
+                    //    it may act only on proof that the two texts are one
+                    //    event. A wrong join here would delete a real income.
+                    let filed = out.reference().and_then(|r| {
+                        all_mine
+                            .iter()
+                            .filter(|m| m.id != out.id && m.applied && m.netted_with.is_none())
+                            .filter(|m| m.operator.as_deref() == Some("budget.record_income"))
+                            .filter(|m| m.source_id != out.source_id)
+                            .find(|m| m.reference() == Some(r))
+                    });
+                    match filed {
+                        Some(inn) => {
+                            taken.insert(out.id.clone());
+                            taken.insert(inn.id.clone());
+                            report.matched.push(MatchedTransfer {
+                                out_leg: out.id.clone(),
+                                in_leg: inn.id.clone(),
+                                from_account: out.source_id.clone(),
+                                to_account: inn.source_id.clone(),
+                                amount,
+                                undo_income: Some(inn.id.clone()),
+                            });
+                        }
+                        // Amount-only resemblance to something already filed:
+                        // still reported, still not acted on.
+                        None => report.blocked_by_applied_income += 1,
+                    }
+                }
                 0 => report.unpaired += 1,
                 _ => report.ambiguous += 1,
             }
@@ -3098,12 +3147,13 @@ mod transfer_tests {
         // halves are in hand the income is already on the books, which is
         // precisely the overstated income this mechanism exists to prevent.
         //
-        // It cannot be undone yet: there is no inverse of budget.record_income,
-        // and building one needs each applied income to carry the id of the
-        // message that caused it so the right entry comes back out. Until then
-        // this reports the situation instead of returning a bare zero, because
-        // "no transfers found" and "found one and cannot act on it" are
-        // different answers.
+        // ★★ These two texts quote DIFFERENT references, so they are joinable
+        //    only on amount -- and amount alone may not undo something already
+        //    on the books. An inverse exists now, but using it here would risk
+        //    deleting a real income on a resemblance. So this stays reported
+        //    rather than acted on, which is the safe direction: "found one and
+        //    cannot act on it" is a different answer from "no transfers found".
+        //    The shared-reference case IS acted on -- see the test below.
         let (ing, rules) = store("blocked");
         knows_his_own(&ing);
         ing.capture("h", "mpesa", &paid_to_account(OWN_ACCT, "2,000.00"), &rules).expect("out");
@@ -4633,5 +4683,126 @@ mod reparse_tests {
         let ing = Ingested::at(scratch("no-match")).expect("ingest");
         capture_unreadable(&ing, "Some notice that matches nothing at all");
         assert_eq!(ing.reparse_unparsed("h", &[house_rule()]).expect("reparse"), 0);
+    }
+}
+
+#[cfg(test)]
+mod paired_transfer_undo_tests {
+    //! A transfer must net to zero however the two texts arrive.
+    //!
+    //! ★★★ The arriving leg files itself as income the moment it is captured --
+    //! every text saying money arrived reads the same whether it came from an
+    //! employer or from his own other account. If the leaving leg is read
+    //! afterwards, the income is already on the books, and booking the transfer
+    //! on top of it counts the money twice.
+    use super::*;
+
+    const REF: &str = "UHQB94FQ88";
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let p = std::env::temp_dir().join(format!("mycelium-pairundo-{name}"));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).expect("scratch");
+        let ing = Ingested::at(p).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    fn his_numbers(ing: &Ingested) {
+        ing.set_own_identifiers(&OwnIdentifiers { mpesa: vec!["254700000143".into()], kcb: vec!["112233".into()] })
+            .expect("identifiers");
+    }
+
+    /// Money leaving M-Pesa for his own KCB account, quoting the shared ref.
+    fn out_leg() -> String {
+        format!(
+            "{REF} Confirmed. Ksh2,000.00 sent to KCB BANK for account 112233 on 2/8/26 \
+             at 9:00 AM. New M-PESA balance is Ksh12,050.00"
+        )
+    }
+
+    /// KCB's own words for that same money arriving, quoting the SAME ref.
+    fn in_leg() -> String {
+        format!(
+            "Ksh2,000.00 sent to KCB account PLACEHOLDER NAME 112233 has been received \
+             on 01/08/2026. M-PESA Ref {REF}"
+        )
+    }
+
+    #[test]
+    fn a_filed_income_is_named_for_undoing_when_the_refs_agree() {
+        // ★★★ The order that used to overstate him: the arriving leg lands and
+        //     files itself, the leaving leg is read later. The pair must still
+        //     become one move, with the income named so it comes back off.
+        let (ing, rules) = store("undo");
+        his_numbers(&ing);
+
+        let inn = ing.capture("h", "kcb", &in_leg(), &rules).expect("in");
+        let in_id = match inn {
+            Capture::Stored(m) => m.id,
+            other => panic!("expected a stored message, got {other:?}"),
+        };
+        // It really did apply itself on the way in.
+        ing.record_outcome(&in_id, true, None).expect("applied");
+
+        ing.capture("h", "mpesa", &out_leg(), &rules).expect("out");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert_eq!(r.matched.len(), 1, "the pair is one move: {r:?}");
+        assert_eq!(
+            r.matched[0].undo_income.as_deref(),
+            Some(in_id.as_str()),
+            "and the income already filed is named so it can come back off",
+        );
+        assert_eq!(r.blocked_by_applied_income, 0, "it is no longer merely reported");
+    }
+
+    #[test]
+    fn the_order_does_not_change_the_answer() {
+        // ★★★ Leaving leg first this time. The arriving leg still maps and
+        //     files itself the instant it is captured -- which makes the undo
+        //     the NORMAL path here, not an edge case -- so the answer must be
+        //     the same move with the same income named, either way round. A
+        //     total that depends on which text arrived first is not a total.
+        let (ing, rules) = store("order");
+        his_numbers(&ing);
+        ing.capture("h", "mpesa", &out_leg(), &rules).expect("out");
+        let inn = ing.capture("h", "kcb", &in_leg(), &rules).expect("in");
+        let in_id = match inn {
+            Capture::Stored(m) => m.id,
+            other => panic!("expected a stored message, got {other:?}"),
+        };
+        ing.record_outcome(&in_id, true, None).expect("applied");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert_eq!(r.matched.len(), 1, "one move either way round: {r:?}");
+        assert_eq!(r.matched[0].undo_income.as_deref(), Some(in_id.as_str()));
+    }
+
+    #[test]
+    fn an_amount_lookalike_that_was_filed_is_not_undone() {
+        // ★★★ The dangerous direction, refused. Undoing an income deletes
+        //     something real, so it may act only on a shared reference -- never
+        //     on two texts that merely happen to agree about a number.
+        let (ing, rules) = store("lookalike");
+        his_numbers(&ing);
+
+        let inn = ing
+            .capture(
+                "h",
+                "kcb",
+                "Ksh2,000.00 sent to KCB account PLACEHOLDER NAME 112233 has been received \
+                 on 01/08/2026. M-PESA Ref ZZZZ99ZZZZ",
+                &rules,
+            )
+            .expect("in");
+        if let Capture::Stored(m) = inn {
+            ing.record_outcome(&m.id, true, None).expect("applied");
+        }
+        ing.capture("h", "mpesa", &out_leg(), &rules).expect("out");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert!(r.matched.is_empty(), "a resemblance is not proof");
+        assert_eq!(r.blocked_by_applied_income, 1, "reported, and left alone");
     }
 }

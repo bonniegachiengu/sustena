@@ -1724,6 +1724,25 @@ pub fn apply_transfers(
     }
 
     for t in &found.matched {
+        // ★★★ The income comes off BEFORE the transfer credits the same
+        //     account, and if it will not come off the transfer does not run.
+        //     Half of this is worse than none of it: a transfer booked on top
+        //     of an income that never happened overstates him twice over,
+        //     where doing neither leaves an honest duplicate he can see.
+        //     Identical discipline to the single-text self-move path above.
+        if let Some(income_id) = &t.undo_income {
+            let mut undo = Map::new();
+            undo.insert("entry_id".into(), Value::String(income_id.clone()));
+            undo.insert("account".into(), Value::String(t.to_account.clone()));
+            match world.call(&sustain_id, "budget.unrecord_income", &undo) {
+                Ok(Some((x, _))) if x.committed() => {}
+                _ => {
+                    out.refused += 1;
+                    continue;
+                }
+            }
+        }
+
         let mut params = Map::new();
         params.insert("from_account".into(), Value::String(t.from_account.clone()));
         params.insert("to_account".into(), Value::String(t.to_account.clone()));
