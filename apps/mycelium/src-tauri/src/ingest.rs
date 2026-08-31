@@ -4458,7 +4458,7 @@ mod queue_cap_tests {
         // ★★★ The reported failure. Enough postponed messages to fill the
         //     window, then one that just arrived -- which must still be there.
         let mut all: Vec<IngestedMessage> =
-            (1..=5).map(|i| waiting(i, Some(i as u64 * 100))).collect();
+            (1..=5).map(|i| waiting(i, Some(i * 100))).collect();
         all.push(waiting(99, None));
 
         let got = window(all, 5);
@@ -4477,7 +4477,7 @@ mod queue_cap_tests {
     fn the_postponed_group_is_what_yields_when_space_runs_out() {
         // ★ A thing set aside has already been seen; a thing that just arrived
         //   has not. So the trimming falls on the group he has looked at.
-        let mut all: Vec<IngestedMessage> = (1..=4).map(|i| waiting(i, Some(i as u64))).collect();
+        let mut all: Vec<IngestedMessage> = (1..=4).map(|i| waiting(i, Some(i))).collect();
         all.push(waiting(50, None));
         all.push(waiting(51, None));
 
