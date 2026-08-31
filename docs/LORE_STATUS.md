@@ -2,7 +2,12 @@
 
 **All 18 essays are published and live.** Verified by fetching every URL below
 over the public internet and confirming the right essay came back, not merely a
-200. Last verified: 30 Aug 2026, 23:29 EAT.
+200. Last verified: **31 Aug 2026** (re-checked after running overnight — all 18
+still 200, watchdog log clean, nothing uncommitted).
+
+**Essay 1 is with Bonnie for voice approval.** Until he rules on it, treat the
+other seventeen as provisional: the originals are snapshotted, so re-running
+them in an adjusted register costs nothing but the time.
 
 **Live at:** <https://lore.vyybandasky.online/>
 
@@ -55,13 +60,43 @@ done
 
 **`lore.sustena.vyybandasky.online` fails TLS, and I cannot fix it from here.**
 
-Everything on our side is configured and correct: the CNAME resolves to
-Cloudflare, and the tunnel routes that hostname to the site exactly as it routes
-the working one. What fails is the certificate. Cloudflare's Universal SSL
-covers `*.vyybandasky.online` — one label deep. `lore.sustena.` is **two**
-labels deep, and a wildcard does not cross a dot, so the handshake is rejected
-before any request is made. That is why it returns nothing at all rather than an
-error page.
+Everything on our side is configured and correct, and it is worth being precise
+that this is proven rather than assumed. Three checks:
+
+- The DNS name resolves to Cloudflare, proxied, same as the working one.
+- The tunnel routes `lore.sustena.vyybandasky.online` to the site — same target
+  as the name that works.
+- The origin serves all 18 essays **under that exact `Host` header**:
+  `curl -H "Host: lore.sustena.vyybandasky.online" http://127.0.0.1:9100/`
+  returns 200 with every essay listed.
+
+So the site is ready and waiting for that name. What fails is the certificate,
+one hop earlier:
+
+```
+$ openssl s_client -connect lore.sustena.vyybandasky.online:443 \
+                   -servername lore.sustena.vyybandasky.online
+ssl3_read_bytes:tls alert handshake failure:SSL alert number 40
+no peer certificate available
+```
+
+Cloudflare has no certificate to present for that name at all. The one it serves
+on the working host says why:
+
+```
+X509v3 Subject Alternative Name:
+    DNS:vyybandasky.online, DNS:*.vyybandasky.online
+```
+
+`*.vyybandasky.online` matches `lore.` — one label. It does not match
+`lore.sustena.`, because a wildcard does not cross a dot. The handshake is
+refused before any request is made, which is why the name returns nothing at all
+rather than an error page.
+
+I could not fix this from here even in principle: there is no Cloudflare API
+token on this machine (the files in `.cloudflared` are tunnel secrets, not API
+credentials), and ACM is a paid add-on — turning it on spends your money, which
+is yours to decide, not mine.
 
 Fixing it is a zone-level setting in the Cloudflare dashboard, which needs your
 login:
