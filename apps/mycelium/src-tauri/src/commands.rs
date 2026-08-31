@@ -1299,6 +1299,30 @@ pub fn get_feed(
         cards,
         queue_head,
         queue,
+        // ★★★ What the inbox repeats that nothing reads yet. Only the
+        //     unrecognised ones: a shape the transducer already handles needs
+        //     no teaching, and offering it would be asking for work already
+        //     done.
+        shapes: {
+            let corpus: Vec<(String, String)> = world
+                .ingest()
+                .current()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|m| m.sustain_id == sustain_id && m.status == "unparsed" && !m.ignored)
+                .map(|m| (m.id, m.raw_payload))
+                .collect();
+            sustena_core::corpus::cluster(corpus.iter().map(|(i, r)| (i.as_str(), r.as_str())))
+                .into_iter()
+                .take(3)
+                .map(|c| crate::dto::ShapeOfferDto {
+                    message_id: c.members.first().cloned().unwrap_or_default(),
+                    count: c.count() as u32,
+                    example: c.example,
+                })
+                .collect()
+        },
+
         queue_start,
         quiet,
         budget: view.budget as u32,

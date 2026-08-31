@@ -1345,7 +1345,8 @@ export type ExclusionDto = { sustainId: string; label: string; isHousehold: bool
 /**
  * The whole curated view.
  */
-export type FeedDto = { sustainId: string; label: string; cards: CardDto[]; 
+export type ShapeOfferDto = { example: string; messageId: string; count: number }
+export type FeedDto = { sustainId: string; label: string; cards: CardDto[]; shapes: ShapeOfferDto[]; 
 /**
  * ★★★ The queue he can walk, in the order he should meet it.
  * 

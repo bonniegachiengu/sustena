@@ -749,6 +749,22 @@ export default function Orchie(props: { onFace?: () => void }) {
                   the card whenever anything refetched and throw away answers
                   given halfway through. The id changes exactly when the
                   subject does, which is exactly when a new card is right. */}
+              {/* ★★★ Shapes the inbox repeats that nothing reads yet.
+                  Teaching one teaches every message like it, which is the
+                  difference between answering a queue and ending it. It never
+                  says what they MEAN -- only that they look alike. */}
+              <For each={f().shapes}>
+                {(sh) => (
+                  <div class={O.card}>
+                    <h2 class={O.cardTitle}>a shape worth teaching</h2>
+                    <p class={O.caption}>
+                      {sh.count} messages look like this one and nothing reads them yet. Classify
+                      one and the rest follow.
+                    </p>
+                    <p class={O.raw}>{sh.example}</p>
+                  </div>
+                )}
+              </For>
               <QueueCard
                 feed={f()}
                 openRaw={tapped()}

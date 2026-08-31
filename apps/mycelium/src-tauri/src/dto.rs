@@ -1022,6 +1022,18 @@ pub struct AttentionDto {
     pub message_id: Option<String>,
 }
 
+/// A recurring shape nothing recognises, and what teaching it would buy.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ShapeOfferDto {
+    /// A real message from the cluster, so a person can read what they teach.
+    pub example: String,
+    /// The id of that message, so teaching it is the ordinary classify flow.
+    pub message_id: String,
+    /// How many messages share this shape, including the example.
+    pub count: u32,
+}
+
 /// The whole curated view.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -1035,6 +1047,14 @@ pub struct FeedDto {
     /// waiting, with anything he deferred at the head of that. ONE card renders
     /// at a time; this is the list it steps through, not a list to display.
     pub queue: Vec<CaptureContextDto>,
+    /// ★★★ Shapes this inbox repeats that nothing recognises yet. Teaching
+    /// ONE of them teaches every message that shares it -- which is the whole
+    /// leverage, and why the count is carried: it is what the answer is worth.
+    ///
+    /// ★★ Never a guess at meaning. A cluster says "these look alike", never
+    /// "these are spends".
+    pub shapes: Vec<ShapeOfferDto>,
+
     /// Where in `queue` the first unanswered message sits, so the card opens
     /// on work rather than on history.
     pub queue_start: u32,
