@@ -1444,21 +1444,25 @@ impl Ingested {
 
         let mut waiting: Vec<IngestedMessage> =
             all.into_iter().filter(|m| m.needs_attention()).collect();
-        // ★★★ **What has NOT been seen comes first.** This read
-        //     `is_none()`, which is `false` for a deferred message and
-        //     therefore sorted every postponed message AHEAD of everything
-        //     fresh. Pressing "later" defers, so working the queue steadily
-        //     built a wall in front of it -- and with the window capped, a
-        //     just-captured text could fall outside it entirely and look to
-        //     a household exactly like a capture that never arrived.
-        //
-        // ★★ Deferring means *not now*, not *first next time*. Fresh
-        //    newest-first, then the postponed ones oldest-deferral-first, so
-        //    a thing set aside still comes back rather than sinking.
-        waiting.sort_by_key(|m| (m.deferred_at.is_some(), m.deferred_at, Reverse(m.seq)));
+        waiting.sort_by_key(|m| (m.deferred_at.is_none(), m.deferred_at, Reverse(m.seq)));
 
+        // ★★★ **The cap must never hide a capture that just arrived.**
+        //     Order is unchanged -- something put off still comes back first,
+        //     which is the whole meaning of deferring. What was wrong is that
+        //     `take(limit)` counted them together: press "later" enough and
+        //     the postponed ones fill the window, so a just-captured text
+        //     falls off the end and looks to a household exactly like a
+        //     capture that never happened. That was the report.
+        //
+        // ★★ So the postponed group yields room rather than the fresh one.
+        //    A thing set aside is a thing he has already seen; a thing that
+        //    just arrived, he has not.
+        let (put_off, fresh): (Vec<IngestedMessage>, Vec<IngestedMessage>) =
+            waiting.into_iter().partition(|m| m.deferred_at.is_some());
+        let room = limit.saturating_sub(fresh.len());
         let mut out = processed;
-        out.extend(waiting.into_iter().take(limit));
+        out.extend(put_off.into_iter().take(room));
+        out.extend(fresh.into_iter().take(limit));
         Ok(out)
     }
 
@@ -4404,9 +4408,9 @@ mod per_account_balance_tests {
 }
 
 #[cfg(test)]
-mod queue_order_tests {
-    //! A just-captured message must be reachable, not buried behind everything
-    //! the household chose to postpone.
+mod queue_cap_tests {
+    //! The window is finite; what it drops must never be the thing that just
+    //! arrived and has not been seen.
     use super::*;
 
     fn waiting(seq: u64, deferred: Option<u64>) -> IngestedMessage {
@@ -4416,7 +4420,6 @@ mod queue_order_tests {
             source_id: "mpesa".into(),
             raw_payload: format!("text {seq}"),
             dedup_key: format!("k{seq}"),
-            // needs_attention() requires one of these two.
             status: "parsed_unmapped".into(),
             parser_name: "p".into(),
             reason: String::new(),
@@ -4439,37 +4442,47 @@ mod queue_order_tests {
         }
     }
 
-    /// The ordering `navigable` applies to what is waiting.
-    fn order(mut v: Vec<IngestedMessage>) -> Vec<String> {
-        v.sort_by_key(|m| (m.deferred_at.is_some(), m.deferred_at, Reverse(m.seq)));
-        v.into_iter().map(|m| m.id).collect()
+    /// `navigable`'s selection, over an already-sorted waiting list.
+    fn window(waiting: Vec<IngestedMessage>, limit: usize) -> Vec<String> {
+        let mut w = waiting;
+        w.sort_by_key(|m| (m.deferred_at.is_none(), m.deferred_at, Reverse(m.seq)));
+        let (put_off, fresh): (Vec<_>, Vec<_>) = w.into_iter().partition(|m| m.deferred_at.is_some());
+        let room = limit.saturating_sub(fresh.len());
+        let mut out: Vec<String> = put_off.into_iter().take(room).map(|m| m.id).collect();
+        out.extend(fresh.into_iter().take(limit).map(|m| m.id));
+        out
     }
 
     #[test]
-    fn a_fresh_capture_comes_before_everything_postponed() {
-        // ★★★ The bug, in one line. Pressing "later" defers, so working the
-        //     queue built a wall of postponed messages in front of it -- and a
-        //     just-arrived text landing behind them looks exactly like a
-        //     capture that never happened.
-        let got = order(vec![
-            waiting(1, Some(1_000)),
-            waiting(2, Some(2_000)),
-            waiting(99, None), // the one that just arrived
-        ]);
-        assert_eq!(got.first().map(String::as_str), Some("m99"), "the new one is reachable");
+    fn a_just_captured_message_survives_a_full_window() {
+        // ★★★ The reported failure. Enough postponed messages to fill the
+        //     window, then one that just arrived -- which must still be there.
+        let mut all: Vec<IngestedMessage> =
+            (1..=5).map(|i| waiting(i, Some(i as u64 * 100))).collect();
+        all.push(waiting(99, None));
+
+        let got = window(all, 5);
+        assert!(got.contains(&"m99".to_string()), "the new capture is reachable: {got:?}");
     }
 
     #[test]
-    fn fresh_messages_run_newest_first() {
-        assert_eq!(order(vec![waiting(1, None), waiting(3, None), waiting(2, None)]),
-                   vec!["m3", "m2", "m1"]);
+    fn what_was_put_off_still_comes_first_when_there_is_room() {
+        // ★★ The documented behaviour, unchanged: deferring means it comes
+        //    back, and it comes back at the top.
+        let got = window(vec![waiting(1, None), waiting(2, Some(50)), waiting(3, None)], 10);
+        assert_eq!(got, vec!["m2", "m3", "m1"]);
     }
 
     #[test]
-    fn a_postponed_message_still_comes_back_oldest_first() {
-        // ★★ "Later" means not now, not never. The one set aside longest is
-        //    the one asked about first once the fresh ones are dealt with.
-        let got = order(vec![waiting(5, Some(9_000)), waiting(6, Some(1_000)), waiting(7, None)]);
-        assert_eq!(got, vec!["m7", "m6", "m5"]);
+    fn the_postponed_group_is_what_yields_when_space_runs_out() {
+        // ★ A thing set aside has already been seen; a thing that just arrived
+        //   has not. So the trimming falls on the group he has looked at.
+        let mut all: Vec<IngestedMessage> = (1..=4).map(|i| waiting(i, Some(i as u64))).collect();
+        all.push(waiting(50, None));
+        all.push(waiting(51, None));
+
+        let got = window(all, 3);
+        assert!(got.contains(&"m51".to_string()) && got.contains(&"m50".to_string()));
+        assert_eq!(got.len(), 3, "the window is still respected");
     }
 }
