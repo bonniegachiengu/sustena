@@ -123,26 +123,44 @@ if (-not $PhoneOnly) {
 #     PREVIOUS UI, which looks exactly like a successful deploy.
 # ---------------------------------------------------------------------------
 Say 'Building the frontend'
+# * The bundle's CONTENT is what gets embedded, not its timestamp. Recorded
+#   before the build so a no-op rebuild is not mistaken for a stale binary.
+$distAssets = Join-Path $web 'dist\assets'
+$bundleBefore = $null
+if (Test-Path $distAssets) {
+    $b = Get-ChildItem $distAssets -Filter 'index-*.js' | Select-Object -First 1
+    if ($b) { $bundleBefore = (Get-FileHash $b.FullName -Algorithm SHA256).Hash }
+}
 Push-Location $web
 try {
     npm run build
     if ($LASTEXITCODE -ne 0) { Die "frontend build failed ($LASTEXITCODE). Nothing installed." }
 } finally { Pop-Location }
 $bundle = Get-ChildItem (Join-Path $web 'dist\assets') -Filter 'index-*.js' | Select-Object -First 1
+$bundleAfter = (Get-FileHash $bundle.FullName -Algorithm SHA256).Hash
+$uiChanged = ($bundleBefore -ne $bundleAfter)
 Ok "bundle $($bundle.Name)  $($bundle.LastWriteTime)"
+Note $(if ($uiChanged) { 'the UI changed, so the binary must be rebuilt after it' } else { 'the UI is byte-identical to the last build' })
 
-Say 'Building the desktop binary'
-Push-Location $tauri
-try {
-    cargo build --release
-    if ($LASTEXITCODE -ne 0) { Die "cargo build failed ($LASTEXITCODE). Nothing installed." }
-} finally { Pop-Location }
 $built = Join-Path $tauri 'target\release\mycelium.exe'
-if (-not (Test-Path $built)) { Die "cargo reported success but produced no mycelium.exe." }
-if ((Get-Item $built).LastWriteTime -lt $bundle.LastWriteTime) {
-    Die "the binary is OLDER than the frontend bundle, so it embeds the previous UI. This is the silent failure this check exists for."
+if (-not $PhoneOnly) {
+    Say 'Building the desktop binary'
+    Push-Location $tauri
+    try {
+        cargo build --release
+        if ($LASTEXITCODE -ne 0) { Die "cargo build failed ($LASTEXITCODE). Nothing installed." }
+    } finally { Pop-Location }
+    if (-not (Test-Path $built)) { Die "cargo reported success but produced no mycelium.exe." }
+
+    # *** The staleness rule, stated over CONTENT rather than clocks.
+    #     cargo does not relink when nothing changed, so a binary older than a
+    #     rebuilt-but-identical bundle is fine -- it already embeds those exact
+    #     bytes. Only a bundle whose CONTENT moved can leave a binary stale.
+    if ($uiChanged -and (Get-Item $built).LastWriteTime -lt $bundle.LastWriteTime) {
+        Die "the UI changed but the binary is older than it, so it embeds the previous UI. This is the silent failure this check exists for."
+    }
+    Ok "binary $((Get-Item $built).LastWriteTime)"
 }
-Ok "binary $((Get-Item $built).LastWriteTime), newer than the bundle"
 
 # ---------------------------------------------------------------------------
 # 3. Install to the resolved path.
