@@ -893,3 +893,52 @@ transducer needs his handset, which is off USB. Built and static-verified;
 **device test pending his phone**. One install and one real SMS closes it.
 
 Nothing was sent to any number. `whatsapp_*` and the tunnel untouched.
+
+---
+
+# 31 Aug, 18:40 — the real-device sync trace, recovered from his phone
+
+His phone came back on USB. Sitting in its app data was `sync_debug.txt`, the
+instrumentation I removed from the code hours ago — the real-device reading I
+could not obtain while the handset was away.
+
+```
+sustain=homestead
+mine_entries=285
+mine_frontier = { d6502ecd…: 283, f86df2ca…: 2 }
+theirs        = { d6502ecd…: 283, f86df2ca…: 2 }
+received=0
+sent=0
+```
+
+Written **2026-08-31 11:05**. The phone's peer book agrees: it dialled the
+laptop at `192.168.1.66:9777`, trusted, sharing `homestead`, `last_synced`
+1788163506.
+
+## This contradicts my own retraction, and the retraction was the wrong call
+
+Earlier today I wrote that the frontier "his laptop's log cannot justify" had
+come from a harness node and not his machine, and corrected the record on that
+basis. **This trace is from his real phone**, and it shows the responder
+returning `d6502ecd: 283` — a claim to hold all 283 of the phone's entries.
+
+The laptop's store has never held them: `homestead.jsonl` last written 29 Aug,
+two clockless legacy events, and the phone's node key present only in
+`peers.json`. So the original observation was real. I over-corrected: having
+reproduced the *signature* in the harness, I concluded the device reading must
+also have been the harness. That did not follow, and I should have said the
+device evidence was unavailable rather than reclassified it.
+
+## What it narrows the question to
+
+`answer_want` sends `replica.frontier()`, and `read_replica` reads from disk. A
+disk holding two unstamped entries cannot produce `d6502ecd: 283`. So one of
+these is true, and the trace does not distinguish them:
+
+* something other than the real desktop app answered on `192.168.1.66:9777` at
+  11:05, or
+* the responder's replica was not the one on disk — which would also explain a
+  screen showing a balance the log does not support.
+
+Not chased here; the phone is needed and the device work is being sequenced
+separately. The trace is recorded so it survives the handset going away again.
