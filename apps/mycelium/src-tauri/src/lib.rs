@@ -96,6 +96,8 @@ pub fn specta_builder() -> Builder {
         commands::start_listening,
         commands::set_listen_port,
         commands::set_peer_address,
+        commands::get_intake_start,
+        commands::set_intake_start,
         commands::remember_unlock,
         commands::forget_unlock,
         commands::reconnect_peers,

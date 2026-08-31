@@ -374,3 +374,59 @@ bug. Nothing else is needed from him.
   change, so an inbound connection refreshes the Network screen. Plus
   `last_contact` on the responder, because `last_synced` is initiator-only and
   a node synced INTO reported "never synced" after a completed session.
+
+---
+
+# 31 Aug 04:00–04:40 — device-free work while the push bug is parked
+
+## Stay-unlocked, surfaced — `967ebee`
+
+The toggle existed in the engine and nowhere a person could reach it, which is
+what caused the relock own-goal. Now on the LOCK screen on BOTH faces: that is
+the one moment somebody is already thinking about the passphrase, and a setting
+in preferences is one nobody finds. Applied only AFTER the passphrase genuinely
+opened the identity; unticking calls `forget_unlock`, so it is a two-way
+control. The caption carries the trade in the label itself.
+
+## Where the record begins — the intake cutoff
+
+Canon: the Ingest paper makes τ total over what crosses the boundary. This
+decides what crosses, so it sits IN FRONT of τ rather than filtering after it.
+A message older than the start is not classified-and-skipped, it is **not
+admitted**: nothing stored, nothing queued, and the classify queue does not open
+with two and a half thousand decisions nobody asked for.
+
+Applied at three depths, strongest first:
+
+1. **The Android content query.** `startAtMs` is an INCLUSIVE floor on the SMS
+   query itself, so an old text is never read off the phone at all.
+2. **`capture_at`**, ahead of even the secret gate — not admitting is strictly
+   less than refusing, and costs a parse we do not need.
+3. **`IntakeWindow`** in core: the pure decision, with `Admission::Before`
+   carrying both timestamps so a surface can say by how much rather than "no".
+
+Decisions worth naming:
+
+- **Open by default.** Somebody who never touches it loses nothing.
+- **An undated message is ADMITTED.** Refusing needs certainty, admitting only
+  needs doubt; losing a real payment to a missing field is far worse than one
+  more question in the queue.
+- **The start itself is included.** An exclusive edge would silently drop the
+  message a person set the cutoff to catch.
+- **`before_start` is counted separately from `refused`.** A person who set a
+  date has not refused two thousand messages -- they never asked for them.
+- **Moving it never deletes anything.** A boundary that retroactively erased a
+  household's record would be worse than the backlog it avoided. Tested.
+
+12 tests (6 core, 6 host). One picker component serving both faces -- on the
+phone it sits on the card that reads the texts, on the cockpit beside the
+sources, because "what do we listen to" and "from when" are the same question.
+
+Gate: core **2144** green, host **291** green, clippy clean on both, tsc clean,
+frontend builds.
+
+## Still parked, unchanged
+
+The push bug waits on Bonnie unlocking the phone once. Neither app was touched.
+Fold-backed state is as recorded above: laptop Homestead 2 events folding to
+0.0, phone 285, **not converged**.

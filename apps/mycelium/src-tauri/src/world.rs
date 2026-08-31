@@ -1166,6 +1166,11 @@ impl World {
 
     // ── identity ─────────────────────────────────────────
 
+    /// The capture store — the intake boundary and the queue behind it.
+    pub fn ingested(&self) -> &Ingested {
+        &self.ingest
+    }
+
     pub fn identity_store(&self) -> &IdentityStore {
         &self.identities
     }

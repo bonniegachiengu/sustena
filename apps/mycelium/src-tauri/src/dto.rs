@@ -926,6 +926,17 @@ pub enum CaptureResult {
     /// there was nothing to store.
     #[serde(rename_all = "camelCase")]
     Rejected { reason: String },
+    /// Older than where this household's record begins.
+    ///
+    /// ★★★ Like `Rejected`, no message field: nothing was stored. Unlike
+    /// `Rejected`, nothing was refused either -- it never crossed the
+    /// boundary. The two numbers let a surface say by how much rather than
+    /// just "no".
+    #[serde(rename_all = "camelCase")]
+    /// ★ `f64` rather than `i64` because specta forbids BigInt in the
+    /// generated bindings, and unix seconds are exact in a double well past
+    /// any date this will run in.
+    BeforeStart { at: f64, start: f64 },
     #[serde(rename_all = "camelCase")]
     Duplicate { message: MessageDto },
     #[serde(rename_all = "camelCase")]

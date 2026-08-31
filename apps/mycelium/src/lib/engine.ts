@@ -171,6 +171,24 @@ export const engine = {
     unwrap(await commands.captureMessage(sustainId, sourceId, raw)),
   // ── reading M-Pesa and KCB texts off the phone ───────────────────────────
   /** "granted" | "denied" | "prompt" | "prompt-with-rationale" */
+  /**
+   * Where this household's record begins, in unix SECONDS, or null for
+   * everything.
+   *
+   * ★★★ The intake boundary. A message older than this is not captured at all
+   * -- on Android it is not even read off the phone -- so starting Sustena
+   * today does not open the classify queue with years of texts.
+   */
+  intakeStart: async (): Promise<number | null> => await commands.getIntakeStart(),
+
+  /**
+   * Move where the record begins. ★ Only affects what is captured from now on;
+   * it never deletes anything already stored.
+   */
+  setIntakeStart: async (startAt: number | null): Promise<void> => {
+    unwrap(await commands.setIntakeStart(startAt));
+  },
+
   smsPermission: async (): Promise<string> => unwrap(await commands.smsPermissionState()),
   smsRequestPermission: async (): Promise<string> => unwrap(await commands.smsRequestPermission()),
   /**

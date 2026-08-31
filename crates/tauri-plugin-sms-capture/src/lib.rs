@@ -105,6 +105,15 @@ pub struct ReadInboxArgs {
     /// Only messages newer than this. The caller's high-water mark, so a repeat
     /// read walks what arrived since rather than the whole inbox again.
     pub since_ms: i64,
+    /// Where the household's record begins, INCLUSIVE, in unix milliseconds.
+    ///
+    /// ★★★ The intake boundary, and it is applied at the content query on the
+    /// device: a message older than this is never read off the phone at all.
+    /// Not read, not returned, not captured, not queued -- the backlog does not
+    /// enter and then get filtered, it never enters.
+    ///
+    /// 0 means no start, which is open.
+    pub start_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

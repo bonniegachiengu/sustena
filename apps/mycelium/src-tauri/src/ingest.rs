@@ -476,6 +476,13 @@ pub struct Source {
 pub enum Capture {
     /// ★★★ Refused before anything was written.
     Rejected { reason: String },
+    /// Older than where this household's record begins.
+    ///
+    /// ★★★ NOT stored, not queued, not counted as a rejection: it never
+    /// crossed the boundary at all. A phone carries years of texts, and
+    /// starting Sustena on Tuesday does not mean the household began when the
+    /// handset did.
+    BeforeStart { at: i64, start: i64 },
     /// Already captured; the first outcome, unchanged.
     Duplicate(Box<IngestedMessage>),
     Stored(Box<IngestedMessage>),
@@ -633,6 +640,37 @@ impl Ingested {
     ///
     /// ★★★ The secret check happens before the first write, and a rejection
     /// returns without touching the disk.
+    /// Where this household's record begins.
+    ///
+    /// ★ Read from disk each time rather than cached: it changes from a
+    /// surface, and a capture running on the cached old value would admit
+    /// exactly the backlog the person just excluded.
+    pub fn window(&self) -> sustena_core::intake_window::IntakeWindow {
+        std::fs::read_to_string(self.window_path())
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
+    }
+
+    /// Move where the record begins. ★ Atomically, like every other setting
+    /// here: a half-written cutoff would read as open and re-admit the backlog.
+    pub fn set_window(
+        &self,
+        window: sustena_core::intake_window::IntakeWindow,
+    ) -> StoreResult<()> {
+        let path = self.window_path();
+        let tmp = path.with_extension("json.tmp");
+        let text = serde_json::to_string_pretty(&window)
+            .map_err(|e| StoreError::Io(e.to_string()))?;
+        std::fs::write(&tmp, text).map_err(|e| StoreError::Io(e.to_string()))?;
+        std::fs::rename(&tmp, &path).map_err(|e| StoreError::Io(e.to_string()))?;
+        Ok(())
+    }
+
+    fn window_path(&self) -> PathBuf {
+        self.root.join("intake_window.json")
+    }
+
     pub fn capture(
         &self,
         sustain_id: &str,
@@ -652,6 +690,22 @@ impl Ingested {
         extra_rules: &[ParseRule],
         sent_at_ms: Option<i64>,
     ) -> StoreResult<Capture> {
+        // ★★★ **The intake boundary, in time — before τ runs at all.**
+        //
+        //     The Ingest paper makes τ total over what crosses the boundary.
+        //     This decides what crosses. A message from before the household
+        //     existed is not classified-and-skipped, it is not admitted: no
+        //     record, no queue entry, and a classify queue that does not open
+        //     with two thousand decisions nobody asked for.
+        //
+        // ★ Deliberately ahead of the secret gate too. Not admitting is
+        //   strictly less than refusing, and costs a parse we do not need.
+        let window = self.window();
+        let admission = window.admission(sent_at_ms.map(|ms| ms / 1000));
+        if let sustena_core::intake_window::Admission::Before { at, start } = admission {
+            return Ok(Capture::BeforeStart { at, start });
+        }
+
         let t = parse_message(raw, Some(source_id), extra_rules);
 
         // ★★★ THE LINE. `storable()` is the engine's own answer, and this runs
@@ -1618,6 +1672,11 @@ impl std::fmt::Debug for Capture {
         match self {
             // ★ A rejection's reason is safe; its text was never held.
             Self::Rejected { reason } => f.debug_struct("Rejected").field("reason", reason).finish(),
+            Self::BeforeStart { at, start } => f
+                .debug_struct("BeforeStart")
+                .field("at", at)
+                .field("start", start)
+                .finish(),
             Self::Duplicate(m) => f.debug_struct("Duplicate").field("id", &m.id).finish(),
             Self::Stored(m) => {
                 f.debug_struct("Stored").field("id", &m.id).field("status", &m.status).finish()
@@ -4086,5 +4145,111 @@ mod liveness_tests {
         let source = &ing.sources().expect("sources")[0];
         assert_eq!(source.captures, 1);
         assert!(source.last_seen_seq.is_some(), "it spoke, whatever it said");
+    }
+}
+
+#[cfg(test)]
+mod intake_window_tests {
+    use super::*;
+    use sustena_core::intake_window::IntakeWindow;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("mycelium-window-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    const START_MS: i64 = 1_788_000_000_000;
+    const MSG: &str = "QGH7XJ2K9L Confirmed. You have received Ksh500.00 from A B \
+                       on 20/7/26 at 2:15 PM. New M-PESA balance is Ksh1,500.00";
+
+    #[test]
+    fn with_no_start_the_backlog_is_captured_as_before() {
+        // ★★★ Open by default. Somebody who never touches this setting must
+        //     lose nothing, so the old behaviour has to be the default one.
+        let i = Ingested::at(scratch("open")).expect("store");
+        assert!(i.window().is_open());
+        let out = i.capture_at("h", "mpesa", MSG, &[], Some(1_000)).expect("capture");
+        assert!(matches!(out, Capture::Stored(_)), "got {out:?}");
+    }
+
+    #[test]
+    fn a_message_from_before_the_start_is_never_stored() {
+        // ★★★ The whole feature: starting today must not drag in years of
+        //     texts. NOT stored, not queued, not counted as a refusal.
+        let i = Ingested::at(scratch("before")).expect("store");
+        i.set_window(IntakeWindow::starting_at(START_MS / 1000)).expect("set");
+
+        let out = i
+            .capture_at("h", "mpesa", MSG, &[], Some(START_MS - 86_400_000))
+            .expect("capture");
+        match out {
+            Capture::BeforeStart { at, start } => assert_eq!(start - at, 86_400),
+            other => panic!("expected BeforeStart, got {other:?}"),
+        }
+        assert!(i.messages().expect("messages").is_empty(), "nothing was written");
+    }
+
+    #[test]
+    fn a_message_at_or_after_the_start_is_captured() {
+        let i = Ingested::at(scratch("after")).expect("store");
+        i.set_window(IntakeWindow::starting_at(START_MS / 1000)).expect("set");
+
+        let at_start = i.capture_at("h", "mpesa", MSG, &[], Some(START_MS)).expect("capture");
+        assert!(matches!(at_start, Capture::Stored(_)), "the start itself: {at_start:?}");
+
+        let later = "QGH7XJ4P2Q Confirmed. You have received Ksh900.00 from C D \
+                     on 21/7/26 at 9:00 AM. New M-PESA balance is Ksh2,400.00";
+        let after = i
+            .capture_at("h", "mpesa", later, &[], Some(START_MS + 3_600_000))
+            .expect("capture");
+        assert!(matches!(after, Capture::Stored(_)), "after: {after:?}");
+        assert_eq!(i.messages().expect("messages").len(), 2);
+    }
+
+    #[test]
+    fn an_undated_message_is_admitted_rather_than_lost() {
+        // ★★★ Refusing needs certainty; admitting only needs doubt. Losing a
+        //     real payment to a missing timestamp would be far worse than one
+        //     extra question in the queue.
+        let i = Ingested::at(scratch("undated")).expect("store");
+        i.set_window(IntakeWindow::starting_at(START_MS / 1000)).expect("set");
+        let out = i.capture_at("h", "mpesa", MSG, &[], None).expect("capture");
+        assert!(matches!(out, Capture::Stored(_)), "got {out:?}");
+    }
+
+    #[test]
+    fn the_start_survives_a_restart() {
+        // ★★★ A cutoff that forgot itself on restart would re-open the backlog
+        //     the person had just closed -- and they would have no way to know.
+        let dir = scratch("persist");
+        {
+            let i = Ingested::at(&dir).expect("store");
+            i.set_window(IntakeWindow::starting_at(START_MS / 1000)).expect("set");
+        }
+        let again = Ingested::at(&dir).expect("reopen");
+        assert_eq!(again.window().start_at, Some(START_MS / 1000));
+        let out = again
+            .capture_at("h", "mpesa", MSG, &[], Some(START_MS - 1_000))
+            .expect("capture");
+        assert!(matches!(out, Capture::BeforeStart { .. }), "still excluded: {out:?}");
+    }
+
+    #[test]
+    fn moving_the_start_never_deletes_what_was_already_captured() {
+        // ★★★ A boundary that retroactively erased a household's record would
+        //     be far worse than the backlog it was set to avoid. It governs
+        //     what is admitted FROM NOW ON, and nothing else.
+        let i = Ingested::at(scratch("no-retro")).expect("store");
+        i.capture_at("h", "mpesa", MSG, &[], Some(START_MS - 86_400_000)).expect("capture");
+        assert_eq!(i.messages().expect("messages").len(), 1);
+
+        i.set_window(IntakeWindow::starting_at(START_MS / 1000)).expect("set");
+        assert_eq!(
+            i.messages().expect("messages").len(),
+            1,
+            "the record it already had is untouched"
+        );
     }
 }
