@@ -226,27 +226,57 @@ fn eval_operand(
 /// divergence [`crate::predicate::parse_state_path`] exists to prevent on the
 /// grammar side.
 pub fn resolve_path(root: &Value, segments: &[PathSegment]) -> Option<Value> {
-    let mut node = root.clone();
+    resolve(root, segments).map(std::borrow::Cow::into_owned)
+}
+
+/// The walk itself, by reference.
+///
+/// ★★★ **It used to clone the whole state document to read one field.** The
+/// first line was `let mut node = root.clone()`, then every `Name` and `Index`
+/// segment cloned again, and a wildcard cloned every item before recursing —
+/// so reading `finances.liquid.balance` deep-copied the entire household,
+/// pockets, inventory and all. Nothing was wrong with the answers; the cost was
+/// invisible because it was spelled `.clone()` in six ordinary-looking places.
+///
+/// ★★ **And it is paid twice per operand.** `eval_node` resolves against the
+/// quantifier `scope` first and falls back to `global_root`, which is a second
+/// full copy for every unshadowed name — and this whole path runs per rule, per
+/// evaluation, on every §III pulse now that a surface refreshes from a relayed
+/// change.
+///
+/// ★ `Cow` because a wildcard genuinely has to build something new: it maps the
+/// remaining segments over each item, and that array exists nowhere in the
+/// document. Everything else is a borrow, and the single clone happens at the
+/// boundary in [`resolve_path`], on the value actually landed on rather than on
+/// everything walked through to reach it.
+fn resolve<'a>(
+    node: &'a Value,
+    segments: &[PathSegment],
+) -> Option<std::borrow::Cow<'a, Value>> {
+    use std::borrow::Cow;
+    let mut cur = node;
     for (i, seg) in segments.iter().enumerate() {
         match seg {
-            PathSegment::Name(k) => node = node.as_object()?.get(k)?.clone(),
-            PathSegment::Index(idx) => node = node.as_array()?.get(*idx)?.clone(),
+            PathSegment::Name(k) => cur = cur.as_object()?.get(k)?,
+            PathSegment::Index(idx) => cur = cur.as_array()?.get(*idx)?,
             PathSegment::Wildcard => {
-                let items: Vec<Value> = match &node {
-                    Value::Object(m) => m.values().cloned().collect(),
-                    Value::Array(a) => a.clone(),
-                    _ => return Some(Value::Array(vec![])),
-                };
                 let rest = &segments[i + 1..];
-                let mapped: Vec<Value> = items
-                    .iter()
-                    .map(|item| resolve_path(item, rest).unwrap_or(Value::Null))
-                    .collect();
-                return Some(Value::Array(mapped));
+                let map_item = |item: &Value| {
+                    resolve(item, rest).map(Cow::into_owned).unwrap_or(Value::Null)
+                };
+                let mapped: Vec<Value> = match cur {
+                    Value::Object(m) => m.values().map(map_item).collect(),
+                    Value::Array(a) => a.iter().map(map_item).collect(),
+                    // ★ A wildcard over something that is not a container is an
+                    //   empty list, not an absence — unchanged, and the
+                    //   difference matters to COUNT.
+                    _ => return Some(Cow::Owned(Value::Array(vec![]))),
+                };
+                return Some(Cow::Owned(Value::Array(mapped)));
             }
         }
     }
-    Some(node)
+    Some(Cow::Borrowed(cur))
 }
 
 /// Python-compatible equality: numbers compare by value across int/float, and
@@ -340,4 +370,103 @@ fn py_list(items: &[Value]) -> String {
         "[{}]",
         items.iter().map(py_repr).collect::<Vec<_>>().join(", ")
     )
+}
+
+#[cfg(test)]
+mod resolve_path_tests {
+    //! CON-9 — the walk resolves by reference; the answers are unchanged.
+    use super::*;
+    use crate::predicate::parse_state_path;
+    use serde_json::json;
+
+    fn at(state: &Value, path: &str) -> Option<Value> {
+        resolve_path(state, &parse_state_path(path).expect("a valid path"))
+    }
+
+    fn household() -> Value {
+        json!({
+            "finances": {
+                "liquid": { "balance": 1200.0 },
+                "pockets": {
+                    "food":  { "allocated": 5000.0, "spent": 2930.0 },
+                    "rent":  { "allocated": 17000.0, "spent": 17000.0 },
+                    "wifi":  { "allocated": 2500.0, "spent": 2500.0 }
+                }
+            },
+            "roster": [ { "name": "Cira" }, { "name": "Epha" } ]
+        })
+    }
+
+    #[test]
+    fn a_named_path_lands_on_the_value_itself() {
+        assert_eq!(at(&household(), "finances.liquid.balance"), Some(json!(1200.0)));
+    }
+
+    #[test]
+    fn an_index_lands_on_the_element() {
+        assert_eq!(at(&household(), "roster[0].name"), Some(json!("Cira")));
+    }
+
+    #[test]
+    fn a_wildcard_over_an_object_maps_every_member() {
+        // ★★ Objects iterate in the map's own order; the SET is what a rule and
+        //    roll-up ρ both read, so this asserts membership rather than order.
+        let got = at(&household(), "finances.pockets[*].allocated").expect("resolves");
+        let mut values: Vec<f64> = got.as_array().expect("an array").iter().filter_map(Value::as_f64).collect();
+        values.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+        assert_eq!(values, vec![2500.0, 5000.0, 17000.0]);
+    }
+
+    #[test]
+    fn a_wildcard_over_an_array_maps_every_element() {
+        assert_eq!(at(&household(), "roster[*].name"), Some(json!(["Cira", "Epha"])));
+    }
+
+    #[test]
+    fn a_wildcard_over_something_that_is_not_a_container_is_an_empty_list() {
+        // ★★★ Empty is not absent, and the difference is load-bearing: COUNT of
+        //     an empty list is 0, where a `None` would make the rule unreadable.
+        assert_eq!(at(&household(), "finances.liquid.balance[*]"), Some(json!([])));
+    }
+
+    #[test]
+    fn a_missing_field_resolves_to_nothing() {
+        // ★ `None`, not `Null` -- the caller decides what an absent dimension
+        //   means, and flattening the two here would take that decision away.
+        assert_eq!(at(&household(), "finances.savings.balance"), None);
+        assert_eq!(at(&household(), "roster[9].name"), None);
+    }
+
+    #[test]
+    fn a_member_missing_the_mapped_field_becomes_null_rather_than_vanishing() {
+        // ★★ Position is preserved: a household with a pocket that has no
+        //    `spent` still reports three pockets, one of them unknown. Dropping
+        //    it would silently change what COUNT and AVG mean.
+        let state = json!({ "pockets": { "a": { "x": 1 }, "b": { "y": 2 } } });
+        let got = at(&state, "pockets[*].x").expect("resolves");
+        let arr = got.as_array().expect("an array");
+        assert_eq!(arr.len(), 2, "both members are represented");
+        assert!(arr.contains(&json!(1)) && arr.contains(&Value::Null));
+    }
+
+    #[test]
+    fn the_document_is_read_not_consumed_and_a_big_one_reads_the_same() {
+        // ★★★ The case the old walk paid for: it cloned the WHOLE document to
+        //     read one field, so cost scaled with the household rather than the
+        //     path. This asserts the answer is unchanged on a large document
+        //     and that `root` is still intact afterwards -- a by-reference walk
+        //     must borrow, never disturb.
+        let mut big = household();
+        let pockets = big["finances"]["pockets"].as_object_mut().expect("pockets");
+        for i in 0..500 {
+            pockets.insert(format!("p{i}"), json!({ "allocated": i as f64, "spent": 0.0 }));
+        }
+        let before = big.clone();
+
+        assert_eq!(at(&big, "finances.liquid.balance"), Some(json!(1200.0)));
+        let all = at(&big, "finances.pockets[*].allocated").expect("resolves");
+        assert_eq!(all.as_array().expect("an array").len(), 503);
+
+        assert_eq!(big, before, "resolving must not disturb the document it read");
+    }
 }
