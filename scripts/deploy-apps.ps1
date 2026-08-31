@@ -271,13 +271,18 @@ if (-not $DesktopOnly) {
     #     failure gets waved through. The desktop half above still stands on
     #     its own, and this says plainly that it did.
     if (-not $devices) {
-        Note 'no device on adb -- skipping the phone, which is fine.'
-        Note 'the desktop deploy above is complete and verified on its own.'
+        Note 'no device on adb -- the APK will still be BUILT and staged.'
+        Note 'only the install waits for the phone; the desktop deploy stands on its own.'
         $phoneSkipped = $true
     }
 }
-if (-not $DesktopOnly -and -not $phoneSkipped) {
-    Say 'Building and installing the phone app'
+if (-not $DesktopOnly) {
+    # *** The BUILD does not need hardware; only the install does. Gating the
+    #     build on an attached phone meant the staged APK could never be
+    #     refreshed while his phone was away -- so it would sit carrying an old
+    #     build stamp, waiting to install something stale the moment he
+    #     plugged in. Staging an artefact is not the same act as delivering it.
+    Say 'Building the phone app'
 
     # *** These are native commands that write progress to stderr. In
     #     PowerShell 5.1 that becomes a NativeCommandError and, under
@@ -306,15 +311,32 @@ if (-not $DesktopOnly -and -not $phoneSkipped) {
 
     $apk = Join-Path $tauri 'gen\android\app\build\outputs\apk\arm64\debug\app-arm64-debug.apk'
     if (-not (Test-Path $apk)) { Die "gradle reported success but produced no APK." }
-    # -r keeps his data: identity, household, peer book.
-    & $adb install -r $apk | Out-Null
-    if ($LASTEXITCODE -ne 0) { Die "adb install failed ($LASTEXITCODE)." }
     $ErrorActionPreference = $priorEap
-    $installedVersion = (& $adb shell dumpsys package online.vyybandasky.sustena.mycelium |
-        Select-String 'versionName=' | Select-Object -First 1) -replace '.*versionName=',''
-    Ok "phone now on $($installedVersion.Trim())"
-    if ($installedVersion.Trim() -ne $version) {
-        Die "the phone reports $($installedVersion.Trim()) but VERSION is $version."
+
+    # *** The APK carries the SAME stamp assertion the desktop gets. The build
+    #     hash reaches the native library as a plain Rust string, so it is
+    #     genuinely findable there -- confirmed by control, since other Rust
+    #     literals from the app are findable in that .so too. An APK that
+    #     cannot render the commit it claims is a stale app waiting to install.
+    $so2 = Join-Path $jni 'libmycelium_lib.so'
+    $soBytes = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($so2))
+    if (-not $soBytes.Contains($hash)) {
+        Die "the built Android library does not contain the build hash '$hash', so Orchie would render a commit it was not built from. This exact bug shipped once: build.rs watched .git/HEAD, which does not change when you commit on the same branch."
+    }
+    Ok "APK staged, and its header will render: $expected"
+
+    if ($phoneSkipped) {
+        Note "not installed -- no device. The APK is ready at $apk"
+    } else {
+        # -r keeps his data: identity, household, peer book.
+        & $adb install -r $apk | Out-Null
+        if ($LASTEXITCODE -ne 0) { Die "adb install failed ($LASTEXITCODE)." }
+        $installedVersion = (& $adb shell dumpsys package online.vyybandasky.sustena.mycelium |
+            Select-String 'versionName=' | Select-Object -First 1) -replace '.*versionName=',''
+        Ok "phone now on $($installedVersion.Trim())"
+        if ($installedVersion.Trim() -ne $version) {
+            Die "the phone reports $($installedVersion.Trim()) but VERSION is $version."
+        }
     }
 }
 
