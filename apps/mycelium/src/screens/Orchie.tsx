@@ -2895,12 +2895,29 @@ export function Classify(props: {
               >
                 <Show when={confirmed()}>
                   {(p) => (
-                    <button
-                      class={`${O.action.secondary} ${O.actionWide}`}
-                      onClick={() => void remember(v().operator, p())}
-                    >
-                      remember this format
-                    </button>
+                    <>
+                      {/* ★★★ The offer was silent about what it buys. A button
+                          reading "remember this format" tells you what it does
+                          and not why you would want it, so the one control that
+                          makes the app get better at reading his bank sat there
+                          unexplained. Said plainly, before the press.
+
+                          ★★ Still `secondary`, not amber: amber means *the one
+                          thing to do next*, and this is genuinely optional —
+                          promoting it would compete with finishing the message
+                          and make the queue harder to work, which is the
+                          opposite of prominent. */}
+                      <p class={O.caption}>
+                        teach this shape once and the next message like it is read without
+                        asking — whatever the amount, the name or the date.
+                      </p>
+                      <button
+                        class={`${O.action.secondary} ${O.actionWide}`}
+                        onClick={() => void remember(v().operator, p())}
+                      >
+                        remember this format
+                      </button>
+                    </>
                   )}
                 </Show>
               </Show>
