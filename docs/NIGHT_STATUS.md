@@ -482,3 +482,85 @@ that would prevent this only exists in a build not yet installed there.
 
 **Nothing was written to his household.** Both apps remain unlocked. Fold-backed
 state unchanged: laptop 2 events folding to 0.0, phone 285, **not converged**.
+
+---
+
+# 31 Aug, 13:40 — the open question, closed; and a correction I owe
+
+## The correction first
+
+The section above says *"the laptop is reporting a frontier its own on-disk log
+cannot justify."* **That reading did not come from the real laptop.** It came
+from a scratch node in the harness, and I attributed it to his machine. The
+evidence that settles it is on his disk:
+
+```
+events/homestead.jsonl   last written  2026-08-29 10:05:49
+grep -rl d6502ecd <store>  ->  peers.json ONLY
+```
+
+His Homestead log has not been touched in two days, and the phone's node key
+appears **only** in the trust record, never in an event. No peer entry has ever
+been written to that store. So there was never a mysterious frontier on the real
+pair — there was never a merge at all.
+
+## What the instrumentation actually says, now that it has run
+
+Driven with **his real 2-line laptop log** on one side and a real-shaped 285-line
+peer log on the other, in two OS processes over a socket:
+
+```
+before   A(his real log) = 2 lines      B(peer) = 285 lines
+dial 1   A -> 287 lines on disk
+dial 2   received=0  sent=0             <- idempotent, as §VI requires
+         mine_frontier == theirs == {A:2, B:285}
+fold     A balance=555955.56   B balance=555955.56   (identical)
+```
+
+**`mine_frontier == theirs` with `sent=0` is not the bug. It is what a second,
+correctly idempotent sync looks like.** I had been reading the signature of
+success as the signature of failure.
+
+So: transport, push, `missing_from`, `merge_entries` and persistence all work,
+proven with his own log as one of the two sides.
+
+## Then why has nothing crossed?
+
+Because the first sync never happened on the real pair, and the reason is
+mundane: `peers.json` records the phone with **`"address": null`**, so the
+laptop cannot dial it, and the phone's own build (03:36 APK) predates the
+standing-peering work that would have it dial the laptop unprompted.
+
+## The unbacked balance
+
+| check | result |
+|---|---|
+| `516699` anywhere in the laptop store | **not present in any file** |
+| laptop Homestead fold | `balance 0.0` |
+| laptop log last written | 2026-08-29, before any of this |
+
+The laptop's store cannot produce that number and never held it. I cannot
+inspect the phone right now to confirm the screen it came from, so I am not
+claiming where it came from — only that **the laptop's store is not it**. The
+`fold_divergence` invariant stays regardless: a number on screen that the log
+does not support must be impossible to display, not merely unlikely.
+
+## Delivery — fixed and verified from his side
+
+| | |
+|---|---|
+| path his shortcut opens | `%LOCALAPPDATA%\Mycelium — Sustena\mycelium.exe` |
+| before | stale |
+| after | **1.1.1, written 13:23:27**, carries `remember_unlock`, `forget_unlock`, `intake_start`, build hash `406d6b8` |
+| phone APK | **built 13:35**; install armed, fires the moment the device returns |
+
+`scripts/deploy-apps.ps1` is the permanent mechanism. Running it found four real
+faults in itself, all now fixed: a mangled Rust home path, a run that refused
+over a step `-PhoneOnly` should not have taken, a staleness rule stated over
+clocks instead of content, and native stderr being treated as failure.
+
+## Blocked on one physical thing
+
+The phone is off USB **and** off the LAN (`ping 192.168.1.64` fails). I did not
+write a guessed address into his real peer book; the phone's actual address gets
+captured when it returns. Nothing was written to his household.
