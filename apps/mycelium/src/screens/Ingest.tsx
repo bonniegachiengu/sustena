@@ -17,6 +17,8 @@
  */
 import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 
+import { IntakeStart } from "../components/IntakeStart";
+
 import { onPulse } from "../lib/pulse";
 import {
   Badge,
@@ -207,6 +209,14 @@ export default function Ingest() {
               </Note>
             )}
           </Show>
+        </Card>
+
+        {/* ★★★ Where the record begins. Placed beside the sources, because
+            "what do we listen to" and "from when" are the same question asked
+            twice, and splitting them across screens is how a person ends up
+            with a boundary they cannot find. */}
+        <Card title="where the record begins">
+          <IntakeStart face="cockpit" onChanged={() => void refetch()} />
         </Card>
 
         <Card title="sources">

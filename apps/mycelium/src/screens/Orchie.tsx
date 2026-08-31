@@ -52,6 +52,8 @@ import {
   untrack,
 } from "solid-js";
 
+import { IntakeStart } from "../components/IntakeStart";
+
 import { onPulse } from "../lib/pulse";
 import {
   engine,
@@ -156,6 +158,7 @@ function waiting(feed: FeedDto): number {
 function blank(): SmsSweep {
   return {
     read: 0, applied: 0, needsYou: 0, duplicates: 0, unparsed: 0, refused: 0,
+    beforeStart: 0,
     skippedOtherSenders: 0, skippedSecrets: 0, failed: 0, firstFailure: null,
     hasMore: false, nextOffset: 0, remaining: 0, nettedPairs: 0,
   };
@@ -372,6 +375,12 @@ function SmsCard(props: { sustainId: string; onSwept: () => void }) {
       <div class={O.card}>
         <p class={O.cardTitle}>your M-Pesa and KCB texts</p>
 
+        {/* ★★★ Where the record begins, on the card that reads the texts --
+            the one place a person is already thinking about their inbox. Put
+            anywhere else, it is a setting nobody finds until the queue is
+            already two thousand deep. */}
+        <IntakeStart face="orchie" onChanged={() => props.onSwept()} />
+
         <Show when={perm() === "granted"}>
           <p class={O.caption}>
             Orchie reads M-Pesa and KCB texts only. Money in is filed on its own.
@@ -479,6 +488,7 @@ export default function Orchie(props: { onFace?: () => void }) {
    * single time.
    */
   const sustain = () => world.selected;
+  const [buildStamp] = createResource(() => engine.buildStamp());
   const [feed, { refetch }] = createResource(sustain, (id) => engine.feed(id, null));
 
   /**
@@ -647,6 +657,9 @@ export default function Orchie(props: { onFace?: () => void }) {
       <div class={O.column}>
         <div class={O.header}>
           <span class={O.brand}>ORCHIE</span>
+          {/* ★★★ The REAL build. Same reason as the cockpit's: a stale app that
+              looks current is how a night's work went unnoticed. */}
+          <span class={O.headerMeta}>{buildStamp() ?? ""}</span>
           <span class={O.headerMeta}>{shown()?.label ?? ""}</span>
           {/* ★★ The cockpit, which is where Ingest lives -- the source picker
               and the paste field for a real M-Pesa or KCB message. Reachable

@@ -783,6 +783,7 @@ pub fn get_identity(world: State<'_, World>) -> IdentityDto {
         public_key: world.public_key(),
         kdf: file.as_ref().map(|f| f.kdf.clone()),
         iterations: file.as_ref().map(|f| f.iterations),
+        unlock_remembered: world.unlock_is_remembered(),
     }
 }
 
@@ -913,6 +914,10 @@ pub fn capture_message(
         Capture::Rejected { reason } => {
             trace!("  -> REJECTED (nothing stored)");
             CaptureResult::Rejected { reason }
+        }
+        Capture::BeforeStart { at, start } => {
+            trace!("  -> before this household's record begins (nothing stored)");
+            CaptureResult::BeforeStart { at: at as f64, start: start as f64 }
         }
         Capture::Duplicate(m) => {
             trace!("  -> duplicate of {}", m.id);
@@ -1074,6 +1079,22 @@ pub fn get_feed(
     else {
         return Err(format!("no Sustain called '{sustain_id}'"));
     };
+
+    // *** THE ANTI-FAKING GATE, on the one path that hands figures to a
+    //     screen. Every balance a surface renders is read off the in-memory
+    //     state, which is honest only while that state IS the fold of the
+    //     log. When they drift, a money app shows a number its own ledger
+    //     cannot back -- it looks solvent when it is not.
+    //
+    // ** It REFUSES rather than degrades. A person shown an error knows
+    //    something is wrong; a person shown a wrong number does not. For
+    //    money that asymmetry decides it.
+    //
+    // *  The check is a re-fold, so it cannot be fooled by whatever wrote
+    //    the bad state. `fold_divergence` is deliberately non-mutating: a
+    //    guard that repaired the drift would report nothing and teach us
+    //    nothing.
+    world.refuse_if_unbacked(&sustain_id, &label)?;
 
     let queued: Vec<_> = world
         .ingest()
@@ -2293,6 +2314,40 @@ pub fn forget_unlock(world: State<'_, World>) -> Result<(), String> {
     world.forget_unlock()
 }
 
+/// Where this household's record begins, in unix seconds. `None` = everything.
+#[tauri::command]
+#[specta::specta]
+pub fn get_intake_start(world: State<'_, World>) -> Option<f64> {
+    world.ingested().window().start_at.map(|v| v as f64)
+}
+
+/// Move where the record begins.
+///
+/// ★★★ Only affects what is captured FROM NOW ON. It never deletes anything
+/// already stored -- a boundary that retroactively erased a household's record
+/// would be a far worse thing than the backlog it was set to avoid.
+#[tauri::command]
+#[specta::specta]
+pub fn set_intake_start(world: State<'_, World>, start_at: Option<f64>) -> Result<(), String> {
+    let window = match start_at {
+        Some(at) => sustena_core::intake_window::IntakeWindow::starting_at(at as i64),
+        None => sustena_core::intake_window::IntakeWindow::open(),
+    };
+    world.ingested().set_window(window).map_err(|e| e.to_string())
+}
+
+/// What build is actually running.
+///
+/// ★★★ Version from the crate (which the VERSION file drives) and hash from
+/// git at COMPILE time. Neither can be edited into agreement with a stale
+/// binary, which is the point: the string is a property of the binary rather
+/// than a claim about it.
+#[tauri::command]
+#[specta::specta]
+pub fn build_stamp() -> String {
+    format!("v{} · {}", env!("CARGO_PKG_VERSION"), env!("SUSTENA_BUILD_HASH"))
+}
+
 /// Settle on a different port.
 ///
 /// ★★★ Changing it does NOT move a running listener: the socket a peer is
@@ -2798,6 +2853,13 @@ pub struct SmsSweep {
     pub unparsed: u32,
     /// Carried a one-time code. Nothing about them was stored.
     pub refused: u32,
+    /// Older than where this household's record begins.
+    ///
+    /// ★★★ Its own number, never folded into `refused`. A person who set a
+    /// start date has not "refused" two thousand messages -- they never asked
+    /// for them, and calling that a refusal would misdescribe their own
+    /// decision back at them.
+    pub before_start: u32,
     /// Read on the phone and dropped there: not from M-Pesa or KCB.
     pub skipped_other_senders: u32,
     /// Dropped on the phone as a one-time code, before reaching this side.
@@ -2864,6 +2926,10 @@ fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
         out.read += 1;
         match world.capture_at(sustain_id, source, &m.body, Some(m.timestamp_ms)) {
             Ok(Capture::Rejected { .. }) => out.refused += 1,
+            // ★ Counted on its own. Folding these into "refused" would report
+            //   a household as having declined two thousand messages it simply
+            //   never asked for.
+            Ok(Capture::BeforeStart { .. }) => out.before_start += 1,
             Ok(Capture::Duplicate(_)) => out.duplicates += 1,
             Ok(Capture::Stored(stored)) => match stored.status.as_str() {
                 "mapped" => out.applied += 1,
@@ -2961,9 +3027,15 @@ pub fn sms_import_page(
     // is the newest message a completed read saw; a repeat starts there.
     let since_ms = world.ingest().read_mark(&sustain_id, ANY_SOURCE).unwrap_or(0);
 
+    // ★★★ The household's start, pushed down to the device query. A message
+    //     older than this is never read off the phone -- the strongest place
+    //     to apply the boundary, because the backlog does not enter and then
+    //     get filtered, it never enters.
+    let start_at_ms = world.ingested().window().start_at.map(|s| s * 1000).unwrap_or(0);
+
     let batch = app
         .sms_capture()
-        .read_inbox(ReadInboxArgs { since_days, offset, limit, since_ms })
+        .read_inbox(ReadInboxArgs { since_days, offset, limit, since_ms, start_at_ms })
         .map_err(|e| e.to_string())?;
     trace!("sms page @{offset} since {since_ms}: {} offered", batch.messages.len());
 

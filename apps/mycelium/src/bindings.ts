@@ -708,6 +708,38 @@ async setPeerAddress(publicKey: string, address: string) : Promise<Result<null, 
 }
 },
 /**
+ * What build is actually running.
+ * 
+ * ★★★ Version from the crate (which the VERSION file drives) and hash from
+ * git at COMPILE time. Neither can be edited into agreement with a stale
+ * binary, which is the point: the string is a property of the binary rather
+ * than a claim about it.
+ */
+async buildStamp() : Promise<string> {
+    return await TAURI_INVOKE("build_stamp");
+},
+/**
+ * Where this household's record begins, in unix seconds. `None` = everything.
+ */
+async getIntakeStart() : Promise<number | null> {
+    return await TAURI_INVOKE("get_intake_start");
+},
+/**
+ * Move where the record begins.
+ * 
+ * ★★★ Only affects what is captured FROM NOW ON. It never deletes anything
+ * already stored -- a boundary that retroactively erased a household's record
+ * would be a far worse thing than the backlog it was set to avoid.
+ */
+async setIntakeStart(startAt: number | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_intake_start", { startAt }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Come up unlocked from now on, without being asked.
  * 
  * ★★★ Costs what it sounds like: the cached value unseals the private key, so
@@ -1090,7 +1122,19 @@ export type CaptureResult =
  * ★★★ No message field at all: there is nothing to render, because
  * there was nothing to store.
  */
-{ kind: "rejected"; reason: string } | { kind: "duplicate"; message: MessageDto } | { kind: "stored"; message: MessageDto }
+{ kind: "rejected"; reason: string } | 
+/**
+ * Older than where this household's record begins.
+ * 
+ * ★★★ Like `Rejected`, no message field: nothing was stored. Unlike
+ * `Rejected`, nothing was refused either -- it never crossed the
+ * boundary. The two numbers let a surface say by how much rather than
+ * just "no".
+ * ★ `f64` rather than `i64` because specta forbids BigInt in the
+ * generated bindings, and unix seconds are exact in a double well past
+ * any date this will run in.
+ */
+{ kind: "beforeStart"; at: number; start: number } | { kind: "duplicate"; message: MessageDto } | { kind: "stored"; message: MessageDto }
 /**
  * One card the knapsack selected, with everything a person needs to ask
  * **"why am I seeing this?"** and get a true answer.
@@ -1459,7 +1503,16 @@ publicKey: string | null;
 /**
  * The KDF actually in force, named rather than assumed.
  */
-kdf: string | null; iterations: number | null }
+kdf: string | null; iterations: number | null; 
+/**
+ * Whether this node comes up unlocked without being asked.
+ * 
+ * ★★★ Surfaced because its ABSENCE caused a real failure: an app
+ * restarted for an update came back locked, a locked node cannot peer,
+ * and the household stopped syncing with nobody able to tell why. A
+ * setting that only exists in the engine is a setting nobody can use.
+ */
+unlockRemembered: boolean }
 /**
  * One inference pass, on the wire.
  */
@@ -2056,6 +2109,15 @@ unparsed: number;
  * Carried a one-time code. Nothing about them was stored.
  */
 refused: number; 
+/**
+ * Older than where this household's record begins.
+ * 
+ * ★★★ Its own number, never folded into `refused`. A person who set a
+ * start date has not "refused" two thousand messages -- they never asked
+ * for them, and calling that a refusal would misdescribe their own
+ * decision back at them.
+ */
+beforeStart: number; 
 /**
  * Read on the phone and dropped there: not from M-Pesa or KCB.
  */

@@ -58,6 +58,15 @@ export default function Lock(props: {
   const [confirm, setConfirm] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [failure, setFailure] = createSignal<string | null>(null);
+  /**
+   * ★★★ **Stay unlocked on this device.**
+   *
+   * Its ABSENCE caused a real failure: an app restarted for an update came
+   * back locked, a locked node cannot peer, and a household stopped syncing
+   * with nobody able to tell why. Pre-ticked from what the engine already
+   * knows, so the box reflects the machine rather than guessing.
+   */
+  const [remember, setRemember] = createSignal(props.identity.unlockRemembered);
 
   const enrolling = () => !props.identity.enrolled;
 
@@ -72,6 +81,18 @@ export default function Lock(props: {
       const id = enrolling()
         ? await engine.enrol(handle(), pass())
         : await engine.unlock(pass());
+      // ★★ After it has genuinely opened the identity, never before: a wrong
+      //    passphrase must not be written down as if it were right. Failing
+      //    here does NOT fail the unlock -- the person is in either way.
+      try {
+        if (remember()) {
+          await engine.rememberUnlock(pass());
+        } else if (props.identity.unlockRemembered) {
+          await engine.forgetUnlock();
+        }
+      } catch (e) {
+        console.warn("could not change the remembered unlock", e);
+      }
       setPass("");
       setConfirm("");
       props.onUnlocked(id);
@@ -155,6 +176,27 @@ export default function Lock(props: {
               />
             </Show>
 
+
+            {/* ★★★ The toggle whose absence relocked a node mid-update. Placed
+                on the LOCK screen because this is the one moment a person is
+                already thinking about the passphrase -- a setting buried
+                elsewhere is one nobody finds. The caption says what it costs,
+                because "stay unlocked" is a real trade and a person deciding
+                it deserves the actual terms. */}
+            <label class={O.remember}>
+              <input
+                type="checkbox"
+                checked={remember()}
+                onChange={(e) => setRemember(e.currentTarget.checked)}
+              />
+              <span>
+                stay unlocked on this device
+                <em>
+                  it opens without asking, and keeps syncing after a restart ·
+                  anyone who can read this device can act as you
+                </em>
+              </span>
+            </label>
             <button
               class={`${O.action.primary} ${O.actionWide}`}
               onClick={() => void go()}
@@ -240,6 +282,23 @@ export default function Lock(props: {
           </Show>
 
           <Note gap="lg">
+            {/* ★★ The same choice on the cockpit, in the cockpit's own
+                register. One toggle, two faces -- a node that stays unlocked
+                on the phone and relocks on the laptop is exactly the
+                half-configured state that stops a household syncing. */}
+            <label class={S.remember}>
+              <input
+                type="checkbox"
+                checked={remember()}
+                onChange={(e) => setRemember(e.currentTarget.checked)}
+              />
+              <span>
+                stay unlocked on this machine — it opens without asking and
+                keeps peering after a restart. Anyone who can read this disk can
+                then act as you.
+              </span>
+            </label>
+
             <Cluster>
               <Button onClick={go} disabled={busy() || pass().length === 0}>
                 {busy()

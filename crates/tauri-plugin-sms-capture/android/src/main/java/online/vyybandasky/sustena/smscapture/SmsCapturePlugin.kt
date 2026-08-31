@@ -15,6 +15,21 @@ import org.json.JSONArray
 
 @InvokeArg
 class ReadInboxArgs {
+    /**
+     * Where this household's record begins, inclusive, as unix milliseconds.
+     *
+     * ★★★ The intake boundary, applied at the CONTENT QUERY. A message older
+     * than this is never read off the phone at all -- not read, not returned,
+     * not captured, not queued. That is the strongest form of the boundary
+     * available: the backlog is not filtered after the fact, it never enters.
+     *
+     * ★★ Inclusive, unlike `sinceMs`. "From this moment" includes this moment,
+     * and an exclusive edge would silently drop the very message a person set
+     * the cutoff to catch.
+     *
+     * 0 means no start, which is open -- the behaviour before this existed.
+     */
+    var startAtMs: Long = 0
     /** 0 or less means the whole inbox. */
     var sinceDays: Int = 0
     /** How many matching messages to skip before collecting. */
@@ -98,6 +113,12 @@ class SmsCapturePlugin(private val activity: Activity) : Plugin(activity) {
         if (args.sinceMs > floorMs) {
             // Strictly newer, so the last message read is not offered again.
             floorMs = args.sinceMs + 1
+        }
+        // ★★★ The household's start, and it is INCLUSIVE. Applied last because
+        //     it is the boundary rather than a convenience: a person who says
+        //     "begin here" must not have an older floor quietly widened back.
+        if (args.startAtMs > 0 && args.startAtMs > floorMs) {
+            floorMs = args.startAtMs
         }
         var selection: String? = null
         var selectionArgs: Array<String>? = null

@@ -316,3 +316,251 @@ laptop: `serve` calls `book.seen(...)` and rewrote `peers.json` at 03:07:16.
 reason to re-render and kept saying "never synced".
 
 §III's relay is wired for state, not for peering. That is my omission.
+
+---
+
+# 31 Aug 03:40–03:50 — I cost the phone its unlock
+
+**An own-goal, recorded plainly.** To load the instrumented build I force-stopped
+and relaunched the phone app. The Sustena identity lock does not survive a
+restart unless `remember_unlock` was set -- and it was not, because the toggle
+is not surfaced in the UI (Bonnie reported that earlier tonight; it is a real
+gap I logged and did not fix). So the relaunched app came up LOCKED.
+
+A locked node cannot peer: `reconnect_all` is gated on `is_unlocked()`, so the
+sweep stops, the listener does not come up, and no sync runs. That is the design
+working. It is also why `sync_debug.txt` was never written -- the instrumentation
+is correct and simply never executed.
+
+Evidence:
+
+```
+phone app pid 10104 alive
+peers.json last_synced 1788136567 = 03:36:07   (the LAST sync, from the OLD build)
+sync_debug.txt: No such file or directory
+```
+
+The install landed at 03:36:28, AFTER that sync, so the old build's silence
+proved nothing either.
+
+**I had flagged this exact risk for the laptop and then did it to the phone.**
+The laptop was left alone and is still unlocked and listening on 9777.
+
+**State right now, all fold-backed:**
+
+| | |
+|---|---|
+| laptop Homestead | 2 events, folds to balance 0.0 |
+| phone Homestead | 285 events (data intact through two installs) |
+| laptop app | running, unlocked, listening 9777 |
+| phone app | running, **locked** -- cannot peer until Bonnie unlocks |
+| converged? | **NO** |
+
+**What unblocks it:** Bonnie unlocks the phone once. The instrumented build is
+already installed, so the next sweep writes the numbers that settle the push
+bug. Nothing else is needed from him.
+
+## What landed while the device was blocked
+
+`fix/fold-invariant-and-peer-liveness` (65be0b5), host 285 green, clippy clean:
+
+- **The anti-faking invariant.** `fold_divergence` asks whether what a screen
+  would show still matches the log, WITHOUT re-folding -- `reload` would make
+  them equal and report nothing, which is the opposite of an invariant. Two
+  tests: one walks every point state can change (local commit, synced-into,
+  restart); the other forces a divergence through a test-only door and asserts
+  the check SEES it, because a guard that only ever passes is not a guard.
+- **Peering changes are changes.** `Peering::edit` relays a pulse for any book
+  change, so an inbound connection refreshes the Network screen. Plus
+  `last_contact` on the responder, because `last_synced` is initiator-only and
+  a node synced INTO reported "never synced" after a completed session.
+
+---
+
+# 31 Aug 04:00–04:40 — device-free work while the push bug is parked
+
+## Stay-unlocked, surfaced — `967ebee`
+
+The toggle existed in the engine and nowhere a person could reach it, which is
+what caused the relock own-goal. Now on the LOCK screen on BOTH faces: that is
+the one moment somebody is already thinking about the passphrase, and a setting
+in preferences is one nobody finds. Applied only AFTER the passphrase genuinely
+opened the identity; unticking calls `forget_unlock`, so it is a two-way
+control. The caption carries the trade in the label itself.
+
+## Where the record begins — the intake cutoff
+
+Canon: the Ingest paper makes τ total over what crosses the boundary. This
+decides what crosses, so it sits IN FRONT of τ rather than filtering after it.
+A message older than the start is not classified-and-skipped, it is **not
+admitted**: nothing stored, nothing queued, and the classify queue does not open
+with two and a half thousand decisions nobody asked for.
+
+Applied at three depths, strongest first:
+
+1. **The Android content query.** `startAtMs` is an INCLUSIVE floor on the SMS
+   query itself, so an old text is never read off the phone at all.
+2. **`capture_at`**, ahead of even the secret gate — not admitting is strictly
+   less than refusing, and costs a parse we do not need.
+3. **`IntakeWindow`** in core: the pure decision, with `Admission::Before`
+   carrying both timestamps so a surface can say by how much rather than "no".
+
+Decisions worth naming:
+
+- **Open by default.** Somebody who never touches it loses nothing.
+- **An undated message is ADMITTED.** Refusing needs certainty, admitting only
+  needs doubt; losing a real payment to a missing field is far worse than one
+  more question in the queue.
+- **The start itself is included.** An exclusive edge would silently drop the
+  message a person set the cutoff to catch.
+- **`before_start` is counted separately from `refused`.** A person who set a
+  date has not refused two thousand messages -- they never asked for them.
+- **Moving it never deletes anything.** A boundary that retroactively erased a
+  household's record would be worse than the backlog it avoided. Tested.
+
+12 tests (6 core, 6 host). One picker component serving both faces -- on the
+phone it sits on the card that reads the texts, on the cockpit beside the
+sources, because "what do we listen to" and "from when" are the same question.
+
+Gate: core **2144** green, host **291** green, clippy clean on both, tsc clean,
+frontend builds.
+
+## Still parked, unchanged
+
+The push bug waits on Bonnie unlocking the phone once. Neither app was touched.
+Fold-backed state is as recorded above: laptop Homestead 2 events folding to
+0.0, phone 285, **not converged**.
+
+---
+
+# 31 Aug 10:45–11:00 — the push bug, instrumented on the real devices
+
+Both apps unlocked, both reachable, tunnels up. The instrumented build wrote the
+numbers.
+
+```
+sustain        = homestead
+mine_entries   = 285
+mine_frontier  = { d6502ecd…: 283,  f86df2ca…: 2 }
+theirs         = { d6502ecd…: 283,  f86df2ca…: 2 }
+received = 0     sent = 0
+laptop Homestead on disk = 2 events   (both LEGACY, mtime 29 Aug)
+```
+
+**`theirs` is byte-identical to the phone's own frontier.** That is the bug in
+one line: `missing_from(theirs)` sends entries whose counter exceeds
+`theirs.get(node)`, and `theirs` already claims `d6502ecd: 283` -- the phone's
+own 283 entries -- so nothing qualifies and `sent = 0` is the CORRECT answer to
+a false question. **The push computation was never wrong. It is being told a
+lie about what the other side holds**, and my earlier "the push is broken"
+reports were measuring the wrong end.
+
+## What I ruled out, each with a reading
+
+| hypothesis | test | result |
+|---|---|---|
+| transport dropping the payload | proxy framing on the wire's length prefix | largest frame **641 B**; 283 entries would be ~150 kB — nothing was dropped |
+| the algorithm | his real logs + registries in two scratch nodes | **sends 283**, node A folds to 516,699.48 |
+| loopback via the adb tunnel | re-pointed to the laptop's **LAN** address `192.168.1.66:9777`, no adb, no localhost | **identical result** |
+| the laptop never answering | `peers.json` mtime on the laptop | **10:57:04**, seconds after the sync — it served it |
+
+So: the laptop IS the responder, over a path where loopback is impossible, and
+it returns a frontier containing `d6502ecd: 283`. Its own log holds two LEGACY
+entries, which `entry_of` attributes to the reading node, so
+`read_replica("homestead", f86df2…).frontier()` can only be `{f86df2…: 2}`.
+`answer_want` sends exactly that — I re-read it.
+
+**The laptop is reporting a frontier its own on-disk log cannot justify.** That
+is the open question, and it is now narrow: everything between the two devices
+is accounted for except what the laptop computes for its own replica.
+
+## The one thing that would settle it
+
+Instrument the LAPTOP's `answer_want` to record the replica it read and the
+frontier it sent. That costs a restart, and a restart relocks it — the toggle
+that would prevent this only exists in a build not yet installed there.
+
+**Nothing was written to his household.** Both apps remain unlocked. Fold-backed
+state unchanged: laptop 2 events folding to 0.0, phone 285, **not converged**.
+
+---
+
+# 31 Aug, 13:40 — the open question, closed; and a correction I owe
+
+## The correction first
+
+The section above says *"the laptop is reporting a frontier its own on-disk log
+cannot justify."* **That reading did not come from the real laptop.** It came
+from a scratch node in the harness, and I attributed it to his machine. The
+evidence that settles it is on his disk:
+
+```
+events/homestead.jsonl   last written  2026-08-29 10:05:49
+grep -rl d6502ecd <store>  ->  peers.json ONLY
+```
+
+His Homestead log has not been touched in two days, and the phone's node key
+appears **only** in the trust record, never in an event. No peer entry has ever
+been written to that store. So there was never a mysterious frontier on the real
+pair — there was never a merge at all.
+
+## What the instrumentation actually says, now that it has run
+
+Driven with **his real 2-line laptop log** on one side and a real-shaped 285-line
+peer log on the other, in two OS processes over a socket:
+
+```
+before   A(his real log) = 2 lines      B(peer) = 285 lines
+dial 1   A -> 287 lines on disk
+dial 2   received=0  sent=0             <- idempotent, as §VI requires
+         mine_frontier == theirs == {A:2, B:285}
+fold     A balance=555955.56   B balance=555955.56   (identical)
+```
+
+**`mine_frontier == theirs` with `sent=0` is not the bug. It is what a second,
+correctly idempotent sync looks like.** I had been reading the signature of
+success as the signature of failure.
+
+So: transport, push, `missing_from`, `merge_entries` and persistence all work,
+proven with his own log as one of the two sides.
+
+## Then why has nothing crossed?
+
+Because the first sync never happened on the real pair, and the reason is
+mundane: `peers.json` records the phone with **`"address": null`**, so the
+laptop cannot dial it, and the phone's own build (03:36 APK) predates the
+standing-peering work that would have it dial the laptop unprompted.
+
+## The unbacked balance
+
+| check | result |
+|---|---|
+| `516699` anywhere in the laptop store | **not present in any file** |
+| laptop Homestead fold | `balance 0.0` |
+| laptop log last written | 2026-08-29, before any of this |
+
+The laptop's store cannot produce that number and never held it. I cannot
+inspect the phone right now to confirm the screen it came from, so I am not
+claiming where it came from — only that **the laptop's store is not it**. The
+`fold_divergence` invariant stays regardless: a number on screen that the log
+does not support must be impossible to display, not merely unlikely.
+
+## Delivery — fixed and verified from his side
+
+| | |
+|---|---|
+| path his shortcut opens | `%LOCALAPPDATA%\Mycelium — Sustena\mycelium.exe` |
+| before | stale |
+| after | **1.1.1, written 13:23:27**, carries `remember_unlock`, `forget_unlock`, `intake_start`, build hash `406d6b8` |
+| phone APK | **built 13:35**; install armed, fires the moment the device returns |
+
+`scripts/deploy-apps.ps1` is the permanent mechanism. Running it found four real
+faults in itself, all now fixed: a mangled Rust home path, a run that refused
+over a step `-PhoneOnly` should not have taken, a staleness rule stated over
+clocks instead of content, and native stderr being treated as failure.
+
+## Blocked on one physical thing
+
+The phone is off USB **and** off the LAN (`ping 192.168.1.64` fails). I did not
+write a guessed address into his real peer book; the phone's actual address gets
+captured when it returns. Nothing was written to his household.

@@ -13,6 +13,8 @@
  */
 import { registerNav } from "./lib/nav";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+
+import { createResource as createStampResource } from "solid-js";
 import * as L from "./ui/layout.css";
 import * as S from "./ui/ui.css";
 import { Badge, Caption, Empty, ErrorState, NoteRow } from "./ui";
@@ -100,6 +102,8 @@ function isTouchFirst(): boolean {
 
 export default function App() {
   const [panel, setPanel] = createSignal<Panel>("constellation");
+  /** The build actually running — see `engine.buildStamp`. */
+  const [stamp] = createStampResource(() => engine.buildStamp());
   /**
    * ★★★ One app, two faces. Mycelium is the cockpit; Orchie is the phone-first
    * curated surface. Same engine, same gate, same unlocked identity — a
@@ -236,7 +240,10 @@ export default function App() {
     <div class={L.frame}>
       <header class={L.topbar}>
         <span class={S.brand}>MYCELIUM</span>
-        <span class={`${S.caption} ${L.hideNarrow}`}>v1</span>
+        {/* ★★★ The REAL build, not a hardcoded string. A stale app is now
+            obvious at a glance, which is the one thing missing the night a
+            whole build failed to reach the machine it was written for. */}
+        <span class={`${S.caption} ${L.hideNarrow}`}>{stamp() ?? "…"}</span>
 
         <select
           class={`${S.select} ${L.topbarSelect}`}

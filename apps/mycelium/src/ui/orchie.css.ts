@@ -682,3 +682,28 @@ export const stepDot = styleVariants({
   done: [{ width: "18px", height: "3px", borderRadius: "2px" }, { background: vars.color.amber }],
   todo: [{ width: "18px", height: "3px", borderRadius: "2px" }, { background: vars.color.border }],
 });
+
+/** The stay-unlocked toggle. ★ The caption is deliberately part of the label:
+ *  a person agreeing to this is agreeing to a real trade, and the trade has to
+ *  be readable at the moment of agreeing rather than in a help page. */
+export const remember = style({
+  display: "flex",
+  alignItems: "flex-start",
+  gap: "10px",
+  padding: "10px 2px 2px",
+  cursor: "pointer",
+  fontSize: "13px",
+  lineHeight: 1.45,
+  color: vars.color.textMuted,
+});
+
+globalStyle(`${remember} em`, {
+  display: "block",
+  fontStyle: "normal",
+  marginTop: "3px",
+  fontSize: "11.5px",
+  lineHeight: 1.45,
+  color: vars.color.textDim,
+});
+
+globalStyle(`${remember} input`, { marginTop: "2px", flexShrink: 0 });
