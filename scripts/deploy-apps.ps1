@@ -198,11 +198,17 @@ if (-not $DesktopOnly) {
     $devices = & $adb devices | Select-String -Pattern '\tdevice$'
     if (-not $devices) { Die "no phone on adb. Connect it and retry, or pass -DesktopOnly." }
 
+    # *** These are native commands that write progress to stderr. In
+    #     PowerShell 5.1 that becomes a NativeCommandError and, under
+    #     ErrorActionPreference=Stop, kills the run over ordinary output.
+    #     Exit codes are checked explicitly instead, which is the real signal.
+    $priorEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     Push-Location $web
     try {
         # The symlink step needs Developer Mode; the cross-compile above it
         # succeeds, so we copy the artefact ourselves and run Gradle directly.
-        npx tauri android build --apk --target aarch64 --debug 2>&1 | Out-Null
+        & npx tauri android build --apk --target aarch64 --debug | Out-Null
     } finally { Pop-Location }
 
     $so = Join-Path $tauri 'target\aarch64-linux-android\debug\libmycelium_lib.so'
@@ -222,6 +228,7 @@ if (-not $DesktopOnly) {
     # -r keeps his data: identity, household, peer book.
     & $adb install -r $apk | Out-Null
     if ($LASTEXITCODE -ne 0) { Die "adb install failed ($LASTEXITCODE)." }
+    $ErrorActionPreference = $priorEap
     $installedVersion = (& $adb shell dumpsys package online.vyybandasky.sustena.mycelium |
         Select-String 'versionName=' | Select-Object -First 1) -replace '.*versionName=',''
     Ok "phone now on $($installedVersion.Trim())"
