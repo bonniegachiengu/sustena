@@ -725,3 +725,87 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod transfer_pair_tests {
+    //! Two texts, one movement of his own money.
+    //!
+    //! ★★★ **The join key is the M-PESA ref both sides carry.** Amount and time
+    //! alone coincide -- two payments of the same size in the same minute are
+    //! ordinary -- but a shared reference is the banks agreeing they are talking
+    //! about one event. The KCB side's OWN reference is a different code
+    //! entirely, so a rule that captured the leading token would produce two
+    //! unrelated messages that never join.
+    //!
+    //! ★ Real shapes from his handset, with the name replaced and the account
+    //! number redacted. The structure and the ref-sharing are what is under
+    //! test, and both survive the substitution.
+    use super::*;
+
+    // KCB -> M-Pesa, KES 1,500, shared ref UHQB94FQ88.
+    const P1_MPESA: &str = "UHQB94FQ88 Confirmed.You have received Ksh1,500.00 from KCB 1 501901 \
+        on 26/8/26 at 9:21 PM New M-PESA balance is Ksh1,500.00.";
+    const P1_KCB: &str = "MBNHEUDF935FAZOG Completed. Your SEND TO M-PESA request of KES 1,500.00 \
+        from 135****140 to 254****143 - PLACEHOLDER NAME at 2026-08-26 09:21:49 PM has been \
+        processed successfully. Transaction cost KES 15.00 Incl. Tax Amount KES 1.50. \
+        M-PESA REF: UHQB94FQ88.";
+
+    // M-Pesa -> KCB paybill, KES 40,000, shared ref UH1B91GYNW.
+    const P2_KCB: &str = "Ksh 40000.00 sent to KCB Pay Bill 522522 for account 135***5140 \
+        PLACEHOLDER NAME has been received on 01/08/2026 at 12:21 PM. M-PESA ref UH1B91GYNW.";
+    const P2_MPESA: &str = "UH1B91GYNW Confirmed. KSH40,000.00 sent to KCB Paybill AC for account \
+        135***5140 on 1/8/26 at 12:21 PM New M-PESA balance is KSH16,877.47. \
+        Transaction cost, KSH99.00.";
+
+    fn refv(text: &str, source: &str) -> Option<String> {
+        parse_message(text, Some(source), &[])
+            .parsed_fields()
+            .get("ref")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }
+
+    fn amount(text: &str, source: &str) -> Option<f64> {
+        parse_message(text, Some(source), &[]).parsed_fields().get("amount").and_then(|v| v.as_f64())
+    }
+
+    #[test]
+    fn both_sides_of_a_kcb_to_mpesa_transfer_carry_the_same_ref() {
+        // ★★★ The join, on his real texts. The KCB message leads with its OWN
+        //     reference (MBNHEUDF935FAZOG) and carries the shared one at the
+        //     end -- capture the wrong token and these never meet.
+        assert_eq!(refv(P1_MPESA, "mpesa").as_deref(), Some("UHQB94FQ88"));
+        assert_eq!(refv(P1_KCB, "kcb").as_deref(), Some("UHQB94FQ88"));
+        assert_eq!(amount(P1_MPESA, "mpesa"), amount(P1_KCB, "kcb"));
+    }
+
+    #[test]
+    fn the_kcb_side_does_not_take_its_own_reference_as_the_key() {
+        // ★★ Stated as its own test because it is the whole failure mode: a
+        //    leading all-caps token looks exactly like a reference.
+        assert_ne!(refv(P1_KCB, "kcb").as_deref(), Some("MBNHEUDF935FAZOG"));
+    }
+
+    #[test]
+    fn both_sides_of_an_mpesa_to_kcb_paybill_carry_the_same_ref() {
+        assert_eq!(refv(P2_KCB, "kcb").as_deref(), Some("UH1B91GYNW"));
+        assert_eq!(refv(P2_MPESA, "mpesa").as_deref(), Some("UH1B91GYNW"));
+        assert_eq!(amount(P2_KCB, "kcb"), amount(P2_MPESA, "mpesa"));
+    }
+
+    #[test]
+    fn the_two_pairs_do_not_join_to_each_other() {
+        // ★ Different transfers must stay different. If refs collided the join
+        //   would hide a real transaction, which is the dangerous direction.
+        assert_ne!(refv(P1_MPESA, "mpesa"), refv(P2_MPESA, "mpesa"));
+    }
+
+    #[test]
+    fn money_leaving_kcb_asks_rather_than_filing_itself() {
+        // ★★★ The money-safety asymmetry, on the new shape. An outbound
+        //     transfer is not something to record without him.
+        let t = parse_message(P1_KCB, Some("kcb"), &[]);
+        assert_eq!(t.status(), "parsed_unmapped");
+        assert_eq!(t.parsed_fields().get("direction").and_then(|v| v.as_str()), Some("sent"));
+    }
+}
