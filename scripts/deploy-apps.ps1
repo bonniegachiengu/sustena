@@ -69,7 +69,13 @@ $dirty   = [bool](git -C $repo status --porcelain --untracked-files=no)
 if ($dirty -and -not $AllowDirty) {
     Die "the working tree has uncommitted changes. A deploy ships a commit, so the stamp on screen means something. Commit, or pass -AllowDirty."
 }
-$expected = "v$version | $hash"
+# *** The EXACT string the header renders, not an approximation of it.
+#     `commands.rs` formats "v{version} <middot> {hash}", so a script that
+#     promised "v1.1.2 | abc1234" would send him looking for text no app ever
+#     prints. Built from a char code to keep this file ASCII -- a literal
+#     non-ASCII glyph in here once broke the PowerShell 5.1 parser outright.
+$dot      = [char]0x00B7
+$expected = "v$version $dot $hash"
 Ok "version $version   hash $hash"
 Ok "the apps will show: $expected"
 
@@ -177,26 +183,101 @@ if (-not $PhoneOnly) {
     $after = Get-Item $installedExe
     Ok "after:  $($after.VersionInfo.FileVersion)  $($after.LastWriteTime)"
 
-    # *** VERIFY, from the INSTALLED artefact and not from what we built.
-    if ($after.Length -ne (Get-Item $built).Length) {
-        Die "the installed exe differs in size from the one just built. The copy did not land where it was read back from."
+    # =======================================================================
+    # SELF-VERIFY -- a deploy that cannot PROVE it landed the right bytes
+    # must fail, not print success.
+    #
+    # *** Two "verified" reports on 31 Aug were wrong because they asserted
+    #     from the act of copying rather than reading back what arrived.
+    #     Everything below reads the INSTALLED file.
+    # =======================================================================
+    $srcHash = (Get-FileHash $built -Algorithm SHA256).Hash
+    $depHash = (Get-FileHash $installedExe -Algorithm SHA256).Hash
+    Note "source   $srcHash"
+    Note "deployed $depHash"
+    if ($srcHash -ne $depHash) {
+        Die "the deployed exe does not hash-match the one just built. The copy did not land where it was read back from -- that is the 'shipped to a path he never opens' bug, caught."
     }
+    Ok 'hash match: the bytes at his launch path are the bytes just built'
+
     if ($after.VersionInfo.FileVersion -notlike "$version*") {
         Die "installed FileVersion $($after.VersionInfo.FileVersion) does not match VERSION $version."
     }
-    Ok "installed artefact matches what was built"
+
+    # *** The header string, confirmed INSIDE the artefact.
+    #
+    # ** Why this particular check is sound when grepping for UI text is not:
+    #    Tauri embeds the frontend compressed, so screen text is NOT findable
+    #    in the binary -- proven by control, since wording visibly on his lock
+    #    screen does not appear in it either. The build hash arrives through an
+    #    `env!` macro instead, as a plain Rust string, so it genuinely is
+    #    findable. It is also the one thing he reads off the screen to know
+    #    whether he is current, which makes it worth asserting.
+    $blob = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($installedExe))
+    if (-not $blob.Contains($hash)) {
+        Die "the deployed exe does not contain the build hash '$hash', so its header cannot render '$expected'. It was built from a different commit than this deploy believes."
+    }
+    Ok "header will render: $expected"
+
+    # =======================================================================
+    # THE WEBVIEW CACHE. Mandatory, every time.
+    #
+    # *** On 31 Aug a hash-correct exe was installed and the next launch STILL
+    #     showed the old interface. Tauri hands the frontend to WebView2, which
+    #     caches it under %LOCALAPPDATA% -- and that cache OUTLIVES the exe. A
+    #     new binary can therefore serve the previous UI, which looks exactly
+    #     like a deploy that never happened. Clearing it by hand once was not a
+    #     fix; doing it on every deploy is.
+    #
+    # ** ONLY the asset caches, and ONLY under Local. His household --
+    #    identity, peers.json, events -- lives in ROAMING and is never touched
+    #    by anything in this script.
+    # =======================================================================
+    $identifier = (Get-Content (Join-Path $tauri 'tauri.conf.json') -Raw | ConvertFrom-Json).identifier
+    $webview = Join-Path $env:LOCALAPPDATA (Join-Path $identifier 'EBWebView\Default')
+    if (Test-Path $webview) {
+        foreach ($c in 'Cache', 'Code Cache', 'GPUCache') {
+            $p = Join-Path $webview $c
+            if (Test-Path $p) {
+                Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue
+                if (Test-Path $p) {
+                    Die "could not clear the WebView cache at $p. Close the app and run again -- leaving it risks serving the old UI out of the new binary, which is the failure this step exists for."
+                }
+                Note "cleared WebView $c"
+            }
+        }
+        Ok 'WebView asset caches cleared -- the new UI cannot be masked by the old'
+    } else {
+        Note 'no WebView cache present (first run on this machine)'
+    }
+    $roaming = Join-Path $env:APPDATA $identifier
+    if (Test-Path $roaming) { Ok "household data untouched at $roaming" }
 }
 
 # ---------------------------------------------------------------------------
 # 4. The phone.
 # ---------------------------------------------------------------------------
+$phoneSkipped = $false
 if (-not $DesktopOnly) {
-    Say 'Building and installing the phone app'
+    Say 'The phone'
     if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = "$env:USERPROFILE\Android\sdk" }
     $adb = Join-Path $env:ANDROID_HOME 'platform-tools\adb.exe'
     if (-not (Test-Path $adb)) { Die "no adb at $adb." }
     $devices = & $adb devices | Select-String -Pattern '\tdevice$'
-    if (-not $devices) { Die "no phone on adb. Connect it and retry, or pass -DesktopOnly." }
+
+    # *** A NO-OP, not a failure. His phone is off USB most of the time and
+    #     that is normal, not an error. A deploy that goes red for the ordinary
+    #     case trains a person to ignore red -- which is exactly how a real
+    #     failure gets waved through. The desktop half above still stands on
+    #     its own, and this says plainly that it did.
+    if (-not $devices) {
+        Note 'no device on adb -- skipping the phone, which is fine.'
+        Note 'the desktop deploy above is complete and verified on its own.'
+        $phoneSkipped = $true
+    }
+}
+if (-not $DesktopOnly -and -not $phoneSkipped) {
+    Say 'Building and installing the phone app'
 
     # *** These are native commands that write progress to stderr. In
     #     PowerShell 5.1 that becomes a NativeCommandError and, under
@@ -238,5 +319,10 @@ if (-not $DesktopOnly) {
 }
 
 Say 'Deployed'
-Ok "both apps should now show:  $expected"
-Note "If a header shows anything else, the app is stale -- that is the whole point of the stamp."
+if ($phoneSkipped) {
+    Ok "Mycelium on this machine now shows:  $expected"
+    Note 'The phone was not attached, so it is untouched and still on whatever it had.'
+} else {
+    Ok "both apps should now show:  $expected"
+}
+Note 'If a header shows anything else, the app is stale -- that is the whole point of the stamp.'
