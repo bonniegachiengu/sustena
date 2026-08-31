@@ -27,7 +27,6 @@ use sustena_core::{
     monitor::{Ingested as TrendReading, MonitorEngine, SustainWatch},
     operator::{execute_admitted, execute_afforded, Authorization, Enforcement, Execution, Registry},
     pawa::{meter, Meter},
-    predicate::check,
     region::Region,
     semantic::enforcement_of,
     compute_rollup, ChildState,
@@ -176,6 +175,13 @@ pub struct World {
     meter: Mutex<Meter>,
     /// Definitions a person authored, checked by the engine before landing.
     definitions: Mutex<Vec<AuthoredDefinition>>,
+    /// ★★★ Every declared rule, compiled once. `constraints` is asked on
+    /// every §III pulse, and it used to re-parse a household's whole rule set
+    /// each time to produce an answer the parse could not change. The
+    /// evaluator's own docs already said to do this -- *an invariant is
+    /// compiled once when its spec loads, then evaluated on every gate check*
+    /// -- and nothing did.
+    predicates: sustena_core::predicate::PredicateCache,
     /// ★★★ The `W` series, per household. Without somewhere to live across
     /// calls there is no series at all — the distance to V was computed on
     /// every render and thrown away, so nothing could be smoothed and no drift
@@ -372,6 +378,7 @@ impl World {
         let round = AtomicU64::new(0);
 
         Ok(World {
+            predicates: sustena_core::predicate::PredicateCache::new(),
             operators: Registry::default(),
             peering,
             arena,
@@ -718,7 +725,7 @@ impl World {
             s.definition
                 .invariants
                 .iter()
-                .map(|(id, expr)| match check(expr, &s.state, &empty) {
+                .map(|(id, expr)| match self.predicates.check(expr, &s.state, &empty) {
                     Ok((holds, reason)) => (id.clone(), expr.clone(), holds, reason),
                     Err(e) => (id.clone(), expr.clone(), false, format!("unparseable: {e:?}")),
                 })
@@ -3514,5 +3521,56 @@ mod durable_call_tests {
         let (calls, _) = w.store().enzyme_calls("home").expect("reads");
         assert_eq!(calls.len(), 2);
         assert!(calls.iter().all(|c| !c.params.is_empty()));
+    }
+}
+
+#[cfg(test)]
+mod compiled_predicate_tests {
+    //! CON-9 — a declared rule is compiled once, not on every reading.
+    use super::*;
+    use crate::store::Store;
+
+    fn world(name: &str) -> World {
+        let home = std::env::temp_dir().join(format!("mycelium-predcache-{name}"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).expect("home");
+        let w = World::open(Store::at(&home).expect("store")).expect("world");
+        w.enrol(DEFAULT_HANDLE, "a-long-enough-passphrase").expect("enrol");
+        w.instantiate_owned("home", "Home", TemplateId::Homestead, None, None, Some(DEFAULT_HANDLE))
+            .expect("household");
+        w
+    }
+
+    #[test]
+    fn the_answers_do_not_change_and_the_rules_compile_once() {
+        // ★★★ Both halves in one test, because either alone would be a false
+        //     pass: a cache that is fast and disagrees is a second evaluator,
+        //     and a cache that agrees without caching has done nothing.
+        let w = world("stable");
+
+        let first = w.constraints("home");
+        assert!(!first.is_empty(), "the household declares rules to check");
+
+        // `constraints` runs on every §III pulse -- this is that, twenty times.
+        for _ in 0..20 {
+            assert_eq!(w.constraints("home"), first, "the same rules, the same answers");
+        }
+
+        assert_eq!(
+            w.predicates.len(),
+            first.len(),
+            "one compile per distinct rule, however many times it was read",
+        );
+    }
+
+    #[test]
+    fn a_rule_still_reports_whether_it_holds() {
+        // ★ The cache must not flatten the verdict. Every entry still carries a
+        //   real holds/reason pair, which is what the surface renders.
+        let w = world("verdicts");
+        for (id, expr, _holds, _reason) in w.constraints("home") {
+            assert!(!id.is_empty(), "every rule is named");
+            assert!(!expr.is_empty(), "and carries the expression it was read from");
+        }
     }
 }

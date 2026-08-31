@@ -18,11 +18,13 @@
 pub mod ast;
 pub mod eval;
 pub mod lex;
+pub mod cache;
 pub mod parse;
 pub mod types;
 
 pub use ast::{AggFunc, CompOp, Operand, PathSegment, Predicate, QuantKind, StatePath};
 pub use parse::{parse_path, parse_predicate, SyntaxError};
+pub use cache::PredicateCache;
 pub use types::{typecheck, Gamma, Ty};
 
 use serde_json::{Map, Value};
