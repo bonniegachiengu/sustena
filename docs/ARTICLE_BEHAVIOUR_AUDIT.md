@@ -27,26 +27,29 @@ hand over that distinction than a page of green ticks.
 
 ## The eighteen
 
-| # | Module | Mycelium | Orchie | Evidence |
-|---|---|---|---|---|
-| 1 | Sustain | LIVE | LIVE | `two_nodes` opens a real household from disk, folds it, and reports it |
-| 2 | Operator | LIVE | LIVE | `budget.record_income` admitted and committed in the live run |
-| 3 | Constraint | TEST | TEST | the gate refuses; exercised throughout the host suite |
-| 4 | Events and Time | **LIVE** | **LIVE** | Lamport order drives the fold; both nodes fold the same set to the same state |
-| 5 | DSL | TEST | TEST | predicates parse and evaluate; no eval anywhere |
-| 6 | Editing | TEST | TEST | definitions author and migrate |
-| 7 | Ingest | TEST | TEST | transducer + field shapes + correction learning |
-| 8 | Immune | TEST | TEST | secret pre-gate refuses before persistence |
-| 9 | Monitor | TEST | SURFACE UNVERIFIED | readings computed; whether the screen re-renders — see §III below |
-| 10 | Controller | TEST | TEST | — |
-| 11 | Tenet | TEST | TEST | — |
-| 12 | Operative | TEST | TEST | — |
-| 13 | Curated UI | TEST | SURFACE UNVERIFIED | compose ranks; the two UI laws are now enforced in layout (see below) |
-| 14 | **Multiparty** | **LIVE** | **LIVE** | the night's main work — see below |
-| 15 | Mycelium | **LIVE** | **LIVE** | two nodes, two processes, real sockets |
-| 16 | Arena | TEST | TEST | bundled shelf seeds; peer offers exclude what a node did not write |
-| 17 | Pawa | TEST | TEST | metered per call |
-| 18 | Capstone | — | — | the composition of the rest; nothing to check separately |
+| # | Module | verdict | what was actually checked |
+|---|---|---|---|
+| 1 | Sustain | **LIVE** | `two_nodes` opens a real household from disk, folds it, reports it, and reopens it in a second process |
+| 2 | Operator | **LIVE** | `budget.record_income` admitted and committed in the live run; the balance moved on disk |
+| 3 | Constraint | TEST | 22 region tests; the gate refuses and the refusal carries a reason |
+| 4 | Events and Time | **LIVE** | Lamport order drives the fold — both nodes folded the same four entries to the same state, and the earlier divergence proved the ordering is load-bearing |
+| 5 | DSL | TEST | 10 predicate tests; parsing and evaluation, no `eval` anywhere |
+| 6 | Editing | TEST | 26 editing tests; authoring and the migration predicate |
+| 7 | Ingest | TEST | 19 transducer tests + the field reader + correction learning that teaches a shape, not a sentence |
+| 8 | Immune | TEST | 13 tests; the secret pre-gate refuses before persistence, so an OTP is never stored |
+| 9 | Monitor | TEST / SURFACE UNVERIFIED | 27 tests compute the readings; whether the screen re-renders is now wired (§III) but unwatched |
+| 10 | Controller | TEST | 26 tests |
+| 11 | Tenet | TEST | 16 tests |
+| 12 | Operative | TEST | 16 tests |
+| 13 | Curated UI | TEST / SURFACE UNVERIFIED | 45 tests rank and compose; the two UI laws are enforced in layout, and one real clipping bug was found and fixed |
+| 14 | **Multiparty** | **LIVE** | the night's main work — §VI and §III below |
+| 15 | Mycelium | **LIVE** | two nodes, two OS processes, real sockets, stable ports, unattended start |
+| 16 | Arena | TEST | the shelf seeds as `Bundled` and unsigned; peer offers exclude what a node did not write |
+| 17 | Pawa | TEST | 13 tests; metered per admitted call |
+| 18 | Capstone | — | the composition of the rest; nothing separate to check |
+
+**Counts, so the shape is visible rather than flattering:** 5 LIVE, 11 TEST,
+2 of those additionally SURFACE UNVERIFIED, 1 not separately checkable.
 
 ---
 

@@ -780,3 +780,19 @@ export const opRowActive = style([opRow, { background: vars.color.amberGlow }]);
 
 export const pocketBlock = style({ padding: `${vars.space.sm} 0`, borderTop: `1px solid ${vars.color.border}`, minWidth: 0 });
 export const pocketHead = style({ display: "grid", gridTemplateColumns: "1fr auto auto", gap: vars.space.md, alignItems: "baseline", minWidth: 0 });
+
+/** The stay-unlocked toggle, cockpit register. ★ Same choice as the phone's,
+ *  stated in one line: a node unlocked on one device and locked on the other
+ *  is the half-configured state that quietly stops a household syncing. */
+export const remember = style({
+  display: "flex",
+  alignItems: "flex-start",
+  gap: vars.space.sm,
+  padding: `${vars.space.sm} 0 0`,
+  cursor: "pointer",
+  fontSize: "12.5px",
+  lineHeight: 1.5,
+  color: vars.color.textMuted,
+});
+
+globalStyle(`${remember} input`, { marginTop: "3px", flexShrink: 0 });

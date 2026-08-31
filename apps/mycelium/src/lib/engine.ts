@@ -139,6 +139,22 @@ export const engine = {
   identity: (): Promise<IdentityDto> => commands.getIdentity(),
   unlock: async (passphrase: string): Promise<IdentityDto> =>
     unwrap(await commands.unlockIdentity(passphrase)),
+
+  /**
+   * Come up unlocked from now on, without being asked.
+   *
+   * ★★★ It caches the DERIVED key, not the passphrase, so a passphrase reused
+   * elsewhere is not put at risk -- and only after the passphrase has actually
+   * opened the identity, so a wrong one can never be written down as if it
+   * were right. `forgetUnlock` deletes it and the gate is exactly as it was.
+   */
+  rememberUnlock: async (passphrase: string): Promise<void> => {
+    unwrap(await commands.rememberUnlock(passphrase));
+  },
+
+  forgetUnlock: async (): Promise<void> => {
+    unwrap(await commands.forgetUnlock());
+  },
   enrol: async (handle: string, passphrase: string): Promise<IdentityDto> =>
     unwrap(await commands.enrolIdentity(handle, passphrase)),
   lockIdentity: (): Promise<IdentityDto> => commands.lockIdentity(),
@@ -155,6 +171,35 @@ export const engine = {
     unwrap(await commands.captureMessage(sustainId, sourceId, raw)),
   // ── reading M-Pesa and KCB texts off the phone ───────────────────────────
   /** "granted" | "denied" | "prompt" | "prompt-with-rationale" */
+  /**
+   * Where this household's record begins, in unix SECONDS, or null for
+   * everything.
+   *
+   * ★★★ The intake boundary. A message older than this is not captured at all
+   * -- on Android it is not even read off the phone -- so starting Sustena
+   * today does not open the classify queue with years of texts.
+   */
+  intakeStart: async (): Promise<number | null> => await commands.getIntakeStart(),
+
+  /**
+   * Move where the record begins. ★ Only affects what is captured from now on;
+   * it never deletes anything already stored.
+   */
+  setIntakeStart: async (startAt: number | null): Promise<void> => {
+    unwrap(await commands.setIntakeStart(startAt));
+  },
+
+  /**
+   * What build is actually running — version plus git hash, both stamped at
+   * COMPILE time.
+   *
+   * ★★★ Rendered in the header of both faces. A whole night's work once sat in
+   * git while the app on screen was from yesterday and nobody could tell by
+   * looking; a hardcoded version would have lied with confidence. This one
+   * cannot: it is a property of the binary.
+   */
+  buildStamp: async (): Promise<string> => await commands.buildStamp(),
+
   smsPermission: async (): Promise<string> => unwrap(await commands.smsPermissionState()),
   smsRequestPermission: async (): Promise<string> => unwrap(await commands.smsRequestPermission()),
   /**

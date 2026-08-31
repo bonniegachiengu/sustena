@@ -157,6 +157,53 @@ fn main() {
             let refolded = world.reload(ID).expect("re-fold").state;
             println!("[B] rebuild_state == get_state: {}", reported == refolded);
         }
+        // ★★★ Implant the REAL device logs into two scratch nodes, with the
+        //     origins remapped onto these nodes' own keys. Same seqs, same
+        //     lamports, same counts -- so the replica frontiers are identical
+        //     to the real ones and the push can be debugged without rebuilding
+        //     a phone app.
+        Some("implant") => {
+            let (ra, rb) = (args[2].clone(), args[3].clone());
+            let (pa, pb) = (args[4].parse().unwrap(), args[5].parse().unwrap());
+            let (lap_log, ph_log) = (args[6].clone(), args[7].clone());
+            let (real_lap, real_ph) = (args[8].clone(), args[9].clone());
+            let a = open(&ra, pa);
+            let b = open(&rb, pb);
+            let (ka, kb) = (a.node_id().unwrap(), b.node_id().unwrap());
+
+            for (root, src, id) in [(&ra, &lap_log, "A"), (&rb, &ph_log, "B")] {
+                let text = std::fs::read_to_string(src).expect("read log");
+                let mut out = String::new();
+                for line in text.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let remapped = line.replace(&real_lap, &ka).replace(&real_ph, &kb);
+                    out.push_str(&remapped);
+                    out.push('\n');
+                }
+                let dir = std::path::PathBuf::from(root).join("events");
+                std::fs::create_dir_all(&dir).expect("events dir");
+                std::fs::write(dir.join(format!("{ID}.jsonl")), out).expect("write");
+                println!("implanted {id} <- {src}");
+            }
+
+            for (me, them, addr) in [
+                (&a, &kb, format!("127.0.0.1:{pb}")),
+                (&b, &ka, format!("127.0.0.1:{pa}")),
+            ] {
+                me.peering()
+                    .edit(|book| {
+                        book.seen(them, "peer", Some(addr.clone()));
+                        book.set_standing(them, Standing::Trusted);
+                        book.share(them, ID)
+                    })
+                    .expect("book")
+                    .expect("share");
+            }
+            println!("A key={ka} port={pa} log={}", log_len(&ra));
+            println!("B key={kb} port={pb} log={}", log_len(&rb));
+        }
         Some("show") => {
             let root = args[2].clone();
             let world = open(&root, args[3].parse().unwrap());

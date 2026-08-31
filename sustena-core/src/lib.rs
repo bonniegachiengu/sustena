@@ -155,6 +155,7 @@ pub mod immune;
 pub mod imports;
 pub mod independence;
 pub mod intake_key;
+pub mod intake_window;
 pub mod inverse;
 pub mod issuance;
 pub mod juul;
