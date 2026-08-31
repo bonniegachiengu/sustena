@@ -38,6 +38,59 @@ use serde_json::Value;
 use sustena_core::consensus::{Accepted, Promise, ProposalNumber};
 
 // ---------------------------------------------------------------------------
+// The convergence claim
+// ---------------------------------------------------------------------------
+
+/// Should this round be refused as an incoherent claim of convergence?
+///
+/// ★★★ A round that moves nothing in either direction is **claiming both
+/// sides already agree**. That claim went unchecked, and it cost a day: a real
+/// device sync reported `received = 0, sent = 0` against a peer whose own log
+/// could not justify the frontier it sent, and the reading was byte-identical
+/// to healthy idempotence. This is what tells those two apart.
+///
+/// ★★ **`theirs: None` is a peer on the older shape**, which makes no claim to
+/// check — so the answer is `None` and the sync proceeds exactly as before.
+/// That is the whole compatibility story: not a version gate, an absent field.
+///
+/// ★ Only when the round moved nothing. A sync still carrying entries has not
+/// finished converging, and comparing mid-flight would refuse ordinary work.
+///
+/// Pure, so all three cases are testable without a socket or a second machine.
+pub(crate) fn convergence_refusal(
+    handle: &str,
+    received: usize,
+    sent: usize,
+    ours: &sustena_core::Holdings,
+    theirs: Option<&sustena_core::Holdings>,
+) -> Option<String> {
+    if received != 0 || sent != 0 {
+        return None;
+    }
+    let theirs = theirs?;
+    if ours.digest == theirs.digest {
+        return None;
+    }
+    // ★★★ Two hashes only ever say "different". The counts are what name the
+    //     side that cannot be telling the truth -- the real failure was 285
+    //     against 2, and that reads instantly where a digest pair does not.
+    let culprit = if theirs.count < ours.count {
+        format!("{handle} holds {} entries but claims to be level with our {}", theirs.count, ours.count)
+    } else if ours.count < theirs.count {
+        format!("we hold {} entries but {handle} claims {} at the same frontier", ours.count, theirs.count)
+    } else {
+        format!("both sides hold {} entries, but not the SAME ones", ours.count)
+    };
+    // ★★ Refuses rather than repairing: which log is right is not something
+    //    arithmetic decides, and adopting either would be inventing a household.
+    Some(format!(
+        "refusing to call this converged: {culprit}. Frontiers agree and holdings do not (ours {}, theirs {}), so one of the two logs is not what its frontier says it is.",
+        &ours.digest[..12],
+        &theirs.digest[..12],
+    ))
+}
+
+// ---------------------------------------------------------------------------
 // The book
 // ---------------------------------------------------------------------------
 
@@ -624,6 +677,8 @@ impl Peering {
                 entries,
                 frontier,
                 spec: self.spec_of(sustain_id),
+                // ★ Sent beside the frontier so the asker can check the claim.
+                holdings: Some(replica.holdings()),
             },
         )
     }
@@ -669,6 +724,7 @@ impl Peering {
                 entries: Vec::new(),
                 frontier: replica.frontier(),
                 spec: None,
+                holdings: Some(replica.holdings()),
             },
         )
     }
@@ -716,8 +772,8 @@ impl Peering {
             )
             .map_err(|e| e.to_string())?;
         let reply = session.recv(&mut stream).map_err(|e| e.to_string())?;
-        let (entries, theirs, spec) = match reply {
-            Frame::Give { entries, frontier, spec, .. } => (entries, frontier, spec),
+        let (entries, theirs, spec, their_holdings) = match reply {
+            Frame::Give { entries, frontier, spec, holdings, .. } => (entries, frontier, spec, holdings),
             Frame::Refused { rule, reason } => {
                 let why = format!("{reason} [{rule}]");
                 self.edit(|b| b.note_error(&key, &why))?;
@@ -744,6 +800,34 @@ impl Peering {
             .filter_map(|e| serde_json::to_value(e).ok())
             .collect();
         let sent = outgoing.len();
+
+        // ── the convergence claim, checked ──────────────────────────────────
+        //
+        // *** A round that moves nothing in either direction is CLAIMING both
+        //     sides already agree. That claim was believed for a whole day: a
+        //     real device sync reported `received = 0, sent = 0` against a peer
+        //     whose own log could not justify the frontier it sent, and the
+        //     reading was indistinguishable from healthy idempotence. This is
+        //     the check that tells those two apart.
+        //
+        // **  Only when the round claims convergence. A sync that genuinely
+        //     moved entries has not finished converging, and comparing
+        //     mid-flight would refuse ordinary progress.
+        //
+        // *   `None` means a peer on the older shape, which simply does not
+        //     make the claim — so there is nothing to check and the sync runs
+        //     exactly as it did before.
+        if let Some(why) = convergence_refusal(
+            peer.handle(),
+            received,
+            sent,
+            &mine.holdings(),
+            their_holdings.as_ref(),
+        ) {
+            self.edit(|b| b.note_error(&key, &why))?;
+            return Err(why);
+        }
+
         session
             .send(
                 &mut stream,
@@ -752,6 +836,7 @@ impl Peering {
                     entries: outgoing,
                     frontier: mine.frontier(),
                     spec: None,
+                    holdings: Some(mine.holdings()),
                 },
             )
             .map_err(|e| e.to_string())?;

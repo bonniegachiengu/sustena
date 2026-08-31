@@ -479,7 +479,7 @@ pub use package::{
 };
 pub use trust::{PackageTrust, TrustSignal, TrustStanding};
 pub use sync::{
-    reconcile, Concurrent, LogEntry, Reconciliation, Replayable, Replica,
+    reconcile, Concurrent, Holdings, LogEntry, Reconciliation, Replayable, Replica,
 };
 pub use vclock::{
     assign_clocks, merge as merge_stamped, CausalVerdict, ClockError, Dimension, MergeResolution, Resolved,
