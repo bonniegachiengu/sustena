@@ -422,6 +422,21 @@ pub struct TrainedFigure {
     pub role: RouteRole,
     /// Where he said it belongs.
     pub pocket: String,
+    /// Where in the text he pointed, when the screen knows.
+    ///
+    /// ★★★ **Two figures in one message are often the same number.** A
+    /// transfer that states "received Ksh20,276.00 ... New M-PESA balance is
+    /// Ksh20,276.00" has the amount and the balance written identically, and
+    /// binding a tag by searching for its text takes the FIRST one every time.
+    /// So tagging the second as the balance quietly bound the first, the
+    /// second stayed frozen as a literal, and the rule matched no sibling at
+    /// all -- "teach one and all four follow" produced nothing, on his phone,
+    /// caught by the on-device pass.
+    ///
+    /// ★★ Optional, because a caller that only knows the text is still
+    /// answerable: it falls back to the first occurrence, which is what it did
+    /// before and is right whenever the figures differ.
+    pub at: Option<usize>,
 }
 
 /// **Teach a shape by example, one figure at a time.**
@@ -478,8 +493,15 @@ pub fn synthesize_from_training(
         if t.is_empty() {
             return Err(LearningRefusal::NothingToLearn);
         }
-        let Some(at) = raw_text.find(t) else {
-            return Err(LearningRefusal::NotInTheText { figure: t.to_string() });
+        // ★★ The place he pointed, when the screen said. Verified rather than
+        //    trusted: an offset that does not actually hold that figure is a
+        //    screen and an engine disagreeing, and binding to it anyway would
+        //    teach a rule to read the wrong part of every future message.
+        let at = match f.at {
+            Some(i) if raw_text.get(i..i + t.len()) == Some(t) => i,
+            _ => raw_text
+                .find(t)
+                .ok_or_else(|| LearningRefusal::NotInTheText { figure: t.to_string() })?,
         };
         let span = (at, at + t.len());
         // ★ Two figures cannot own the same ground. Left unchecked, the second
@@ -1121,11 +1143,13 @@ mod training_tests {
                 text: "1,000.00".into(),
                 role: RouteRole::In,
                 pocket: "Fuliza".into(),
+                at: None,
             },
             TrainedFigure {
                 text: "5.52".into(),
                 role: RouteRole::Fee,
                 pocket: "Fuliza fees".into(),
+                at: None,
             },
         ]
     }
@@ -1187,6 +1211,7 @@ mod training_tests {
             text: "1,000.00".into(),
             role: RouteRole::In,
             pocket: "salary".into(),
+            at: None,
         }];
         let r = synthesize_from_training("mpesa", FULIZA, &figures, "t2").expect("it learns");
         assert_eq!(r.status, RuleStatus::Mapped);
@@ -1226,6 +1251,7 @@ mod training_tests {
             text: "999.99".into(),
             role: RouteRole::Out,
             pocket: "food".into(),
+            at: None,
         }];
         let err = synthesize_from_training("mpesa", FULIZA, &figures, "t3").unwrap_err();
         match err {
@@ -1238,8 +1264,8 @@ mod training_tests {
     #[test]
     fn two_figures_claiming_the_same_ground_are_refused() {
         let figures = vec![
-            TrainedFigure { text: "1,000.00".into(), role: RouteRole::In, pocket: "a".into() },
-            TrainedFigure { text: "1,000.00".into(), role: RouteRole::Fee, pocket: "b".into() },
+            TrainedFigure { text: "1,000.00".into(), role: RouteRole::In, pocket: "a".into() , at: None },
+            TrainedFigure { text: "1,000.00".into(), role: RouteRole::Fee, pocket: "b".into() , at: None },
         ];
         let err = synthesize_from_training("mpesa", FULIZA, &figures, "t4").unwrap_err();
         assert!(matches!(err, LearningRefusal::Overlapping { .. }), "got {err:?}");
@@ -1257,9 +1283,9 @@ mod training_tests {
         //    hypothetical -- providers itemise -- and the second must not
         //    silently overwrite the first.
         let figures = vec![
-            TrainedFigure { text: "1,000.00".into(), role: RouteRole::In, pocket: "a".into() },
-            TrainedFigure { text: "5.52".into(), role: RouteRole::Fee, pocket: "b".into() },
-            TrainedFigure { text: "1,005.52".into(), role: RouteRole::Out, pocket: "c".into() },
+            TrainedFigure { text: "1,000.00".into(), role: RouteRole::In, pocket: "a".into() , at: None },
+            TrainedFigure { text: "5.52".into(), role: RouteRole::Fee, pocket: "b".into() , at: None },
+            TrainedFigure { text: "1,005.52".into(), role: RouteRole::Out, pocket: "c".into() , at: None },
         ];
         let r = synthesize_from_training("mpesa", FULIZA, &figures, "t6").expect("it learns");
         let groups: Vec<&str> = r.routes.iter().map(|x| x.group.as_str()).collect();
@@ -1299,11 +1325,13 @@ mod balance_role_tests {
                 text: "2,500.00".into(),
                 role: RouteRole::In,
                 pocket: "salary".into(),
+                at: None,
             },
             TrainedFigure {
                 text: "47,310.55".into(),
                 role: RouteRole::Balance,
                 pocket: String::new(),
+                at: None,
             },
         ]
     }
@@ -1367,13 +1395,13 @@ mod balance_role_tests {
     #[test]
     fn an_arrival_with_a_fee_still_asks_even_when_a_balance_is_taught() {
         let figures = vec![
-            TrainedFigure { text: "2,500.00".into(), role: RouteRole::In, pocket: "salary".into() },
-            TrainedFigure { text: "47,310.55".into(), role: RouteRole::Balance, pocket: String::new() },
+            TrainedFigure { text: "2,500.00".into(), role: RouteRole::In, pocket: "salary".into() , at: None },
+            TrainedFigure { text: "47,310.55".into(), role: RouteRole::Balance, pocket: String::new() , at: None },
         ];
         let mut with_fee = figures;
         with_fee.insert(
             1,
-            TrainedFigure { text: "10.15".into(), role: RouteRole::Fee, pocket: "charges".into() },
+            TrainedFigure { text: "10.15".into(), role: RouteRole::Fee, pocket: "charges".into() , at: None },
         );
         // The fee text has to be present for the figure to be found.
         let raw = "EQ8842003 Confirmed. You have received KES 2,500.00 from JANE DOE, charge KES 10.15, on 01/09/26. Your account balance is KES 47,310.55";
@@ -1390,6 +1418,7 @@ mod balance_role_tests {
             text: "47,310.55".into(),
             role: RouteRole::Balance,
             pocket: String::new(),
+            at: None,
         }];
         let r = synthesize_from_training("equity", raw, &figures, "t3").expect("learns");
         assert_eq!(r.status, RuleStatus::ParsedUnmapped, "nothing moved, so nothing files");
@@ -1416,16 +1445,18 @@ mod date_role_tests {
 
     fn taught() -> Vec<TrainedFigure> {
         vec![
-            TrainedFigure { text: "600.00".into(), role: RouteRole::Out, pocket: "Leisure".into() },
+            TrainedFigure { text: "600.00".into(), role: RouteRole::Out, pocket: "Leisure".into() , at: None },
             TrainedFigure {
                 text: "24/8/26 at 8:38 PM".into(),
                 role: RouteRole::Date,
                 pocket: String::new(),
+                at: None,
             },
             TrainedFigure {
                 text: "235.19".into(),
                 role: RouteRole::Balance,
                 pocket: String::new(),
+                at: None,
             },
         ]
     }
@@ -1486,16 +1517,18 @@ mod date_role_tests {
         //    both is still one thing to decide, unlike an arrival with a fee.
         let raw = "EQ1 Confirmed. You have received KES 2,500.00 from JANE DOE on 01/09/26 at 10:15 AM. Your account balance is KES 47,310.55";
         let figures = vec![
-            TrainedFigure { text: "2,500.00".into(), role: RouteRole::In, pocket: "salary".into() },
+            TrainedFigure { text: "2,500.00".into(), role: RouteRole::In, pocket: "salary".into() , at: None },
             TrainedFigure {
                 text: "01/09/26 at 10:15 AM".into(),
                 role: RouteRole::Date,
                 pocket: String::new(),
+                at: None,
             },
             TrainedFigure {
                 text: "47,310.55".into(),
                 role: RouteRole::Balance,
                 pocket: String::new(),
+                at: None,
             },
         ];
         let r = synthesize_from_training("equity", raw, &figures, "d2").expect("learns");
@@ -1510,6 +1543,7 @@ mod date_role_tests {
             text: "29/11/23".into(),
             role: RouteRole::Date,
             pocket: String::new(),
+            at: None,
         }];
         let r = synthesize_from_training("kcb", raw, &figures, "d3").expect("learns");
         let out = run_rules(&[r], raw).expect("reads it");
@@ -1518,5 +1552,73 @@ mod date_role_tests {
             Some("29/11/23"),
             "named `date`, not `datetime`, because there is no clock in it"
         );
+    }
+}
+
+#[cfg(test)]
+mod same_number_twice_tests {
+    use super::*;
+    use crate::parse_rule::run_rules;
+
+    /// His own message, and the shape that broke: the amount received and the
+    /// resulting balance are the SAME number, written twice.
+    const REAL: &str = "SJU5YDFCLZ confirmed. You have received Ksh20,276.00 from A PAYEE in KEN via FLEX MONEY TRANSFER on 30/10/24 at 6:16 PM. New M-PESA balance is Ksh20,276.00.";
+    const SIBLING: &str = "QKL2M8XYZW confirmed. You have received Ksh5,400.00 from B PAYEE in KEN via FLEX MONEY TRANSFER on 2/11/24 at 9:01 AM. New M-PESA balance is Ksh31,900.00.";
+
+    fn tagged_the_second_one() -> Vec<TrainedFigure> {
+        let second = REAL.rfind("20,276.00").expect("the balance, second occurrence");
+        vec![TrainedFigure {
+            text: "20,276.00".into(),
+            role: RouteRole::Balance,
+            pocket: String::new(),
+            at: Some(second),
+        }]
+    }
+
+
+    #[test]
+    fn the_figure_he_pointed_at_is_the_one_that_is_bound() {
+        // ★★★ Binding by text takes the FIRST occurrence, so tagging the
+        //     balance quietly bound the received amount instead -- and the
+        //     real balance stayed frozen as a literal, so the rule matched no
+        //     sibling and "teach one and all four follow" produced nothing.
+        //     Caught on his phone by the on-device pass.
+        let r = synthesize_from_training("mpesa", REAL, &tagged_the_second_one(), "s1")
+            .expect("learns");
+        let out = run_rules(&[r], SIBLING).expect("it recognises a sibling");
+        assert_eq!(
+            out.parsed_fields().get("balance_after").and_then(|v| v.as_f64()),
+            Some(31_900.0),
+            "the sibling's own closing figure, not its received amount"
+        );
+    }
+
+    #[test]
+    fn without_a_position_it_still_answers_by_text() {
+        // ★★ A caller that only knows the text is not left stuck: it falls
+        //    back to the first occurrence, which is right whenever the two
+        //    figures differ, and is what it did before.
+        let figures = vec![TrainedFigure {
+            text: "20,276.00".into(),
+            role: RouteRole::Balance,
+            pocket: String::new(),
+            at: None,
+        }];
+        assert!(synthesize_from_training("mpesa", REAL, &figures, "s2").is_ok());
+    }
+
+    #[test]
+    fn a_position_that_does_not_hold_that_figure_is_not_trusted() {
+        // ★★★ A screen and an engine disagreeing about where a figure sits is
+        //     exactly when NOT to bind blindly: it would teach a rule to read
+        //     the wrong part of every future message.
+        let figures = vec![TrainedFigure {
+            text: "20,276.00".into(),
+            role: RouteRole::Balance,
+            pocket: String::new(),
+            at: Some(3),
+        }];
+        let r = synthesize_from_training("mpesa", REAL, &figures, "s3").expect("falls back");
+        assert!(run_rules(&[r], REAL).is_some(), "and still reads its own example");
     }
 }

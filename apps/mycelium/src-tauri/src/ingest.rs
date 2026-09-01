@@ -5915,11 +5915,13 @@ mod refresh_readings_tests {
                 text: "2,500.00".into(),
                 role: sustena_core::RouteRole::In,
                 pocket: "salary".into(),
+                at: None,
             },
             sustena_core::TrainedFigure {
                 text: "47,310.55".into(),
                 role: sustena_core::RouteRole::Balance,
                 pocket: String::new(),
+                at: None,
             },
         ];
         sustena_core::synthesize_from_training("equity", UNREAD, &figures, "taught").expect("learns")

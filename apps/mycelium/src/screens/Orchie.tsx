@@ -1329,6 +1329,12 @@ export function TrainFlow(props: {
           text: f.text,
           role: f.role as "in" | "out" | "fee" | "balance" | "date",
           pocket: f.pocket,
+          // ★★ Where this figure actually sits. Two figures in one message are
+          //    often the same number -- "received Ksh20,276.00 ... balance is
+          //    Ksh20,276.00" -- and without the position the engine binds the
+          //    tag to the first one, leaving the second frozen so the rule
+          //    matches no sibling at all.
+          at: f.at,
         })),
       );
       setDone(

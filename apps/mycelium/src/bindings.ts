@@ -2550,7 +2550,14 @@ role: string;
 /**
  * The pocket he said it belongs to.
  */
-pocket: string }
+pocket: string; 
+/**
+ * Where in the message this figure sits, as the screen counted it.
+ * 
+ * ★★ Two figures in one message are often the same number, so the text
+ * alone cannot say which one he pointed at.
+ */
+at?: number | null }
 /**
  * What a transfer pass did.
  */

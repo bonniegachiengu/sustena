@@ -238,7 +238,19 @@ pub fn looks_like_a_reference(token: &str) -> bool {
     // ★★ Both present, and the letters are shouted. A code is not a word, and
     //    a word is not a code — "Confirmed" is long and all letters; "254712"
     //    is long and all digits. Neither is a reference.
-    digits >= 2 && uppers >= 2 && digits + uppers == t.len()
+    //
+    // ★★★ ONE digit is enough, and asking for two was wrong. Real M-Pesa
+    //     references carry as few as one — `SJU5YDFCLZ` is his own — and
+    //     failing to recognise those did not merely miss a field: an unrecognised
+    //     reference stays a LITERAL in a taught rule, so the rule matches only
+    //     messages carrying that exact code, which is one message. "Teach one
+    //     and all four follow" then silently produces nothing, which is how
+    //     this was found on his phone.
+    //
+    //     The length floor is what keeps words out. Eight-plus shouted
+    //     characters with a digit in them is a code; "CONFIRMED" and
+    //     "TRANSFER" have no digit and are still refused.
+    digits >= 1 && uppers >= 2 && digits + uppers == t.len()
 }
 
 /// A date in any of the shapes providers actually write.

@@ -1124,6 +1124,10 @@ pub fn train_rule(
             text: f.text.trim().to_string(),
             role,
             pocket: f.pocket.trim().to_string(),
+            // ★★ Where on screen he pointed. Two figures in one message are
+            //    often the same number, and binding by text alone takes the
+            //    first every time.
+            at: f.at.map(|i| i as usize),
         });
     }
 
