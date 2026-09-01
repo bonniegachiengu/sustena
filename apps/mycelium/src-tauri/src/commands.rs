@@ -3399,11 +3399,33 @@ pub fn sms_drain_queue(
     //   never move money -- and both statuses it can produce are already
     //   "needs attention", so nothing enters or leaves the queue because of it.
     if finished {
-        let learned = world.ingest().effective_rules().unwrap_or_default();
+        // ★★★ The SEED library too, and it was missing.
+        //
+        //     `effective_rules()` is the household's own learned rules and
+        //     nothing else, so this re-read has been running without the
+        //     shipped library the whole time — which is most of what can read a
+        //     message. The comment above says the current rules read those
+        //     texts perfectly, and they do; they just were not being handed to
+        //     the thing doing the reading.
+        let learned: Vec<_> = sustena_core::all_seed_rules()
+            .into_iter()
+            .chain(world.ingest().effective_rules().unwrap_or_default())
+            .collect();
         match world.ingest().reparse_unparsed(&sustain_id, &learned) {
             Ok(n) if n > 0 => trace!("re-read {n} stored message(s) with the current rules"),
             Ok(_) => {}
             Err(e) => trace!("backlog re-read failed, sweep still stands: {e}"),
+        }
+        // ★★★ And give the ones already on disk the time they always carried.
+        //     `sent_at_ms` is set only for a message the device watched ARRIVE,
+        //     so an imported history has none — and anything ordered by when a
+        //     thing happened skipped every one of them. The date and the clock
+        //     are in the text; this derives from them. It only ever adds a
+        //     time, so the worst it can do is leave a message as it found it.
+        match world.ingest().backfill_event_times(&sustain_id, &learned) {
+            Ok(n) if n > 0 => trace!("{n} stored message(s) recovered when they happened"),
+            Ok(_) => {}
+            Err(e) => trace!("event-time backfill failed, sweep still stands: {e}"),
         }
     }
     Ok(swept)

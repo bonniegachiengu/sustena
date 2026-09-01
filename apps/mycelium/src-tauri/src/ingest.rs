@@ -485,7 +485,7 @@ pub struct Reported {
 /// because `mpesa_pochi_received` states the **business** balance in
 /// `balance_after` — so the field name alone would attribute it to the wrong
 /// pot, and the instrument is what settles it.
-fn reported_account_of(m: &IngestedMessage) -> Option<(String, f64)> {
+pub fn reported_account_of(m: &IngestedMessage) -> Option<(String, f64)> {
     let number = |v: &serde_json::Value| {
         v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
     };
@@ -1170,7 +1170,19 @@ impl Ingested {
             if m.sustain_id != sustain_id {
                 continue;
             }
-            let (Some(at), Some((account, balance))) = (m.sent_at_ms, reported_account_of(&m))
+            // ★★★ When the message SAYS it happened, falling back to when the
+            //     device read it — the same precedence `mark_seen` has always
+            //     used, and it belongs here for the same reason.
+            //
+            //     Reading `sent_at_ms` alone was the bug. Android reports an
+            //     arrival time for a text it saw arrive; it reports none for
+            //     one read out of the inbox afterwards, which is every message
+            //     in a backfill. So a household that imported its history had
+            //     hundreds of perfectly readable balance statements that this
+            //     skipped, and the accounts they belonged to showed nothing.
+            //     The date is in the message, and the rules already capture it.
+            let (Some(at), Some((account, balance))) =
+                (m.event_at_ms.or(m.sent_at_ms), reported_account_of(&m))
             else {
                 continue;
             };
@@ -1720,6 +1732,24 @@ impl Ingested {
             next.parser_name = t.parser_name().to_string();
             next.reason = t.reason().to_string();
             next.parsed_fields = t.parsed_fields();
+            // ★★★ **The date it just gained is the time it happened.**
+            //
+            //     A message becomes readable here, which means it acquires the
+            //     `date` and `time` fields it did not have a moment ago. Not
+            //     deriving the event time from them left the whole re-read
+            //     backlog with no time at all — and anything ordered by "when
+            //     did this happen" skips a message with no answer, which is
+            //     exactly why 172 Pochi and M-Shwari texts could be read and
+            //     still not produce a balance.
+            //
+            // ★★ `.or(...)` and not an overwrite: a time already derived was
+            //    derived the same way from the same fields, and a re-read that
+            //    could quietly move when something happened would be worse than
+            //    one that leaves it alone.
+            next.event_at_ms = next.event_at_ms.or_else(|| {
+                sustena_core::event_time(&t.parsed_fields())
+                    .map(|at| at.to_epoch_ms(SENDER_UTC_OFFSET_MINUTES))
+            });
             next.external_ref = t.external_ref().map(str::to_string);
             next.operator = t.operator().map(str::to_string);
             next.params = t.operator_params();
@@ -1727,6 +1757,62 @@ impl Ingested {
             changed += 1;
         }
         Ok(changed)
+    }
+
+    /// **Give already-stored messages the time they always carried.**
+    ///
+    /// ★★★ Every message says when it happened; a great many had no event time
+    /// recorded anyway. Two causes, both real and both fixed elsewhere: rules
+    /// that let `.*?` swallow the " at 9:10 PM" plainly written in the text, and
+    /// a re-read that updated the fields without re-deriving the time from
+    /// them. Neither can help a message already on disk, which is what this is
+    /// for.
+    ///
+    /// The effect it exists to end: `sent_at_ms` is only ever set for a message
+    /// the device watched ARRIVE. Everything read out of the inbox afterwards
+    /// — which is an entire imported history — had no time at all, so anything
+    /// ordered by "when did this happen" skipped it. A household could hold a
+    /// hundred perfectly readable balance statements for an account and see
+    /// nothing for it.
+    ///
+    /// ★★ It only ever ADDS a time. It does not change status, does not file,
+    /// does not touch `filed`, and never overwrites a time already there. The
+    /// worst it can do is leave a message exactly as it found it.
+    ///
+    /// ★ Fields are refreshed alongside, because the time is derived FROM them
+    /// and a rule that has since learned to capture the clock is precisely the
+    /// case this repairs. A message whose re-read no longer recognises it is
+    /// left completely alone rather than downgraded.
+    ///
+    /// Returns how many gained a time.
+    pub fn backfill_event_times(
+        &self,
+        sustain_id: &str,
+        rules: &[ParseRule],
+    ) -> StoreResult<usize> {
+        let mut repaired = 0usize;
+        for m in self.current()? {
+            if m.sustain_id != sustain_id || m.event_at_ms.is_some() {
+                continue;
+            }
+            let t = parse_message(&m.raw_payload, Some(&m.source_id), rules);
+            let fields = t.parsed_fields();
+            // Nothing recognises it now: leave it exactly as it is.
+            if fields.is_empty() {
+                continue;
+            }
+            let Some(at) = sustena_core::event_time(&fields)
+                .map(|at| at.to_epoch_ms(SENDER_UTC_OFFSET_MINUTES))
+            else {
+                continue;
+            };
+            let mut next = m.clone();
+            next.event_at_ms = Some(at);
+            next.parsed_fields = fields;
+            self.append_message(&next)?;
+            repaired += 1;
+        }
+        Ok(repaired)
     }
 
     /// The rules in force: the latest version of each id.
@@ -2882,9 +2968,18 @@ mod reconciliation_tests {
 
     /// A real M-Pesa text, which like all of them ends by stating the balance.
     fn paid(ref_: &str, amount: &str, balance: &str) -> String {
+        paid_on(ref_, amount, balance, "20/7/26", "4:30 PM")
+    }
+
+    /// The same, with the day and clock it states made explicit.
+    ///
+    /// ★★ Added because the ordering tests below used to vary only the ARRIVAL
+    /// time, which was all the reconciler could see. It reads the stated time
+    /// now, so a fixture that says the same thing twice is no longer a fair
+    /// test of which message is newer -- and real messages never do.
+    fn paid_on(ref_: &str, amount: &str, balance: &str, date: &str, time: &str) -> String {
         format!(
-            "{ref_} Confirmed. Ksh{amount} paid to NAIVAS SUPERMARKET on 20/7/26 \
-             at 4:30 PM. New M-PESA balance is Ksh{balance}"
+            "{ref_} Confirmed. Ksh{amount} paid to NAIVAS SUPERMARKET on {date} at {time}.              New M-PESA balance is Ksh{balance}"
         )
     }
 
@@ -2903,27 +2998,67 @@ mod reconciliation_tests {
         //     newest-first, so capture order runs BACKWARDS through time. Here
         //     the older text is captured second, exactly as a real read does
         //     it, and the newer balance must still win.
+        //
+        // ★★ The two texts now state DIFFERENT days. They used to differ only
+        //    in arrival time, which was all the reconciler could see; it reads
+        //    what the message says now, so a fixture claiming the same moment
+        //    twice would no longer be asking a fair question.
         let (ing, rules) = store("ordering");
-        ing.capture_at("h", "mpesa", &paid("AAAAAAAAAA", "100.00", "9,000.00"), &rules,
-                       Some(2_000_000))
-            .expect("newer, read first");
-        ing.capture_at("h", "mpesa", &paid("BBBBBBBBBB", "200.00", "500.00"), &rules,
-                       Some(1_000_000))
-            .expect("older, read second");
+        ing.capture_at(
+            "h",
+            "mpesa",
+            &paid_on("AAAAAAAAAA", "100.00", "9,000.00", "21/7/26", "4:30 PM"),
+            &rules,
+            Some(2_000_000),
+        )
+        .expect("newer, read first");
+        ing.capture_at(
+            "h",
+            "mpesa",
+            &paid_on("BBBBBBBBBB", "200.00", "500.00", "20/7/26", "4:30 PM"),
+            &rules,
+            Some(1_000_000),
+        )
+        .expect("older, read second");
 
         let got = ing.reported_balances("h").expect("balances");
         assert_eq!(got["mpesa"].balance, 9000.0, "the newer text is the freshest word");
-        assert_eq!(got["mpesa"].at, 2_000_000);
     }
 
     #[test]
-    fn a_message_with_no_arrival_time_is_skipped_rather_than_assumed_recent() {
-        // ★★ Anything captured before arrival times were carried, and anything
-        //    pasted by hand. Guessing it were recent would let it overrule a
-        //    genuinely newer text about the same account.
+    fn a_message_with_no_arrival_time_is_placed_by_what_it_says() {
+        // ★★★ This used to assert the message was SKIPPED, and that was right
+        //     while the only reading available was when the device saw it
+        //     arrive: guessing such a message were recent would let it overrule
+        //     a genuinely newer text about the same account.
+        //
+        //     It is not a guess any more. The message states the day and the
+        //     clock, so it is placed at when it says it happened. That matters
+        //     well beyond a tidier rule -- Android reports an arrival time only
+        //     for a text it watched arrive, so an imported history has none at
+        //     all (2715 of 2757 real messages), and skipping them meant whole
+        //     accounts held a stated balance and showed nothing.
         let (ing, rules) = store("undated");
         ing.capture_at("h", "mpesa", &paid("CCCCCCCCCC", "100.00", "7,777.00"), &rules, None)
             .expect("undated");
+        let got = ing.reported_balances("h").expect("balances");
+        assert_eq!(got["mpesa"].balance, 7777.0, "read off the text, placed by its own date");
+    }
+
+    #[test]
+    fn a_message_that_says_nothing_about_when_is_still_skipped() {
+        // ★★ The original safety property, kept. No arrival time AND no date
+        //    in the text is genuinely no reading at all, and assuming it recent
+        //    would let it overrule a newer word about the same account.
+        let (ing, rules) = store("timeless");
+        ing.capture_at(
+            "h",
+            "mpesa",
+            "Confirmed. Ksh100.00 paid to NAIVAS SUPERMARKET. New M-PESA balance is Ksh7,777.00",
+            &rules,
+            None,
+        )
+        .expect("timeless");
         assert!(!ing.reported_balances("h").expect("balances").contains_key("mpesa"));
     }
 
@@ -4920,5 +5055,133 @@ mod skip_by_shape_tests {
 
     fn waiting(ing: &Ingested) -> usize {
         ing.current().expect("current").iter().filter(|m| m.needs_attention()).count()
+    }
+}
+
+#[cfg(test)]
+mod backfill_event_time_tests {
+    use super::*;
+    use std::{env, fs, path::PathBuf};
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-backfill-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    /// A real M-Shwari text. It states the day and the clock, and until the
+    /// rule was taught to capture the clock it produced no event time at all.
+    const MSHWARI: &str = "UHHB93DK8Y Confirmed.Ksh5,000.00 transferred from M-Shwari account on 17/8/26 at 8:23 PM. M-Shwari balance is Ksh3.64 .M-PESA balance is Ksh8,801.32 .Transaction cost Ksh.0.00";
+
+    fn seeded() -> Vec<ParseRule> {
+        sustena_core::all_seed_rules()
+    }
+
+    /// Store a message the way an INBOX READ does: no arrival time, because
+    /// Android only reports one for a text it watched arrive.
+    fn store_without_arrival(ing: &Ingested, raw: &str, seq: u64) -> IngestedMessage {
+        let rules = seeded();
+        let Capture::Stored(m) = ing.capture("h", "mpesa", raw, &rules).expect("capture") else {
+            panic!("stored")
+        };
+        let mut m = *m;
+        m.sent_at_ms = None;
+        m.event_at_ms = None;
+        m.seq = seq;
+        ing.append_message(&m).expect("append");
+        m
+    }
+
+    #[test]
+    fn a_message_with_no_arrival_time_still_says_when_it_happened() {
+        // ★★★ The whole bug, in one test. 2715 of 2757 real messages had no
+        //     arrival time, so every account whose balance lived in one of
+        //     them showed nothing at all.
+        let ing = Ingested::at(scratch("says-when")).expect("ingest");
+        store_without_arrival(&ing, MSHWARI, 1);
+        assert!(
+            ing.reported_balances("h").expect("balances").get("mshwari").is_none(),
+            "nothing to order by, so nothing to report"
+        );
+
+        let n = ing.backfill_event_times("h", &seeded()).expect("backfill");
+        assert_eq!(n, 1);
+
+        let got = ing.reported_balances("h").expect("balances");
+        let m = got.get("mshwari").expect("the account now reports");
+        assert_eq!(m.balance, 3.64, "and it is what the message says, to the cent");
+    }
+
+    #[test]
+    fn the_latest_by_the_clock_wins_not_the_latest_read() {
+        // ★★★ Two balances on ONE day, which is exactly the case that was
+        //     unorderable. A backlog is read newest-first, so trusting store
+        //     order would take the OLDEST figure as the freshest word.
+        let ing = Ingested::at(scratch("clock-wins")).expect("ingest");
+        let early = "UGUB917DH8 Confirmed, Ksh30,000.00 has been moved from your Pochi account to your M-PESA account on 30/7/26 at 7:57 AM. New Pochi balance is Ksh20,000.00. New M-PESA balance is Ksh1.00. Transaction cost, Ksh0.00.";
+        let late = "UGUB91AU3E Confirmed, Ksh20,000.00 has been moved from your Pochi account to your M-PESA account on 30/7/26 at 9:10 PM. New Pochi balance is Ksh0.00. New M-PESA balance is Ksh2.00. Transaction cost, Ksh0.00.";
+        // Stored newest-first, as a real inbox read arrives.
+        store_without_arrival(&ing, late, 1);
+        store_without_arrival(&ing, early, 2);
+
+        ing.backfill_event_times("h", &seeded()).expect("backfill");
+        let got = ing.reported_balances("h").expect("balances");
+        assert_eq!(
+            got.get("pochi").expect("pochi reports").balance,
+            0.0,
+            "9:10 PM is later than 7:57 AM, whatever order they were read in"
+        );
+    }
+
+    #[test]
+    fn it_never_overwrites_a_time_already_known() {
+        // ★★ A message the device watched arrive already has a real reading.
+        //    A repair that could quietly move when something happened would be
+        //    worse than one that leaves it alone.
+        let ing = Ingested::at(scratch("no-overwrite")).expect("ingest");
+        let mut m = store_without_arrival(&ing, MSHWARI, 1);
+        m.event_at_ms = Some(42);
+        ing.append_message(&m).expect("append");
+
+        assert_eq!(ing.backfill_event_times("h", &seeded()).expect("backfill"), 0);
+        let got = ing.current().expect("current");
+        let after = got.iter().find(|x| x.id == m.id).expect("still there");
+        assert_eq!(after.event_at_ms, Some(42), "left exactly as it was");
+    }
+
+    #[test]
+    fn a_message_nothing_can_read_is_left_completely_alone() {
+        // ★★ No rule recognises it, so there is no date to derive from and
+        //    nothing honest to do. It must not be downgraded on the way past.
+        let ing = Ingested::at(scratch("unreadable")).expect("ingest");
+        let m = store_without_arrival(&ing, "a text no rule has ever seen", 1);
+        assert_eq!(ing.backfill_event_times("h", &seeded()).expect("backfill"), 0);
+        let got = ing.current().expect("current");
+        let after = got.iter().find(|x| x.id == m.id).expect("still there");
+        assert_eq!(after.status, m.status);
+        assert!(after.event_at_ms.is_none());
+    }
+
+    #[test]
+    fn it_files_nothing_and_moves_no_money() {
+        // ★★★ A repair that could commit anything would be a money bug wearing
+        //     a maintenance hat. It only ever adds a time.
+        let ing = Ingested::at(scratch("files-nothing")).expect("ingest");
+        let m = store_without_arrival(&ing, MSHWARI, 1);
+        ing.backfill_event_times("h", &seeded()).expect("backfill");
+        let got = ing.current().expect("current");
+        let after = got.iter().find(|x| x.id == m.id).expect("still there");
+        assert!(after.filed.is_empty(), "nothing was filed");
+        assert_eq!(after.resolved, m.resolved);
+        assert_eq!(after.ignored, m.ignored);
+    }
+
+    #[test]
+    fn it_is_safe_to_run_twice() {
+        let ing = Ingested::at(scratch("twice")).expect("ingest");
+        store_without_arrival(&ing, MSHWARI, 1);
+        assert_eq!(ing.backfill_event_times("h", &seeded()).expect("first"), 1);
+        assert_eq!(ing.backfill_event_times("h", &seeded()).expect("second"), 0);
     }
 }
