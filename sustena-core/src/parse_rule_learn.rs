@@ -499,12 +499,26 @@ pub fn synthesize_from_training(
     //    the operator layer. Further figures of the same kind are numbered.
     let mut n_amount = 0usize;
     let mut n_fee = 0usize;
+    let mut n_balance = 0usize;
     let mut named: Vec<(usize, usize, String, &TrainedFigure)> = Vec::new();
     for (s, e, f) in &claimed {
         let group = match f.role {
             RouteRole::Fee => {
                 n_fee += 1;
                 if n_fee == 1 { "fee".to_string() } else { format!("fee_{n_fee}") }
+            }
+            // ★★★ `balance_after` is not an arbitrary name. It is one of the
+            //     names the balance reader already looks for, so a figure he
+            //     tags as the balance on a shape nobody wrote a rule for
+            //     becomes that account's authoritative figure with no further
+            //     wiring at all -- the same path M-Pesa's own shapes take.
+            RouteRole::Balance => {
+                n_balance += 1;
+                if n_balance == 1 {
+                    "balance_after".to_string()
+                } else {
+                    format!("balance_after_{n_balance}")
+                }
             }
             _ => {
                 n_amount += 1;
@@ -619,7 +633,13 @@ pub fn synthesize_from_training(
     //     Income only auto-files when it is the ONLY thing taught. A message
     //     carrying an arrival and a fee together is two decisions, and one of
     //     them is a spend.
-    let only_income = routes.len() == 1 && routes[0].role == RouteRole::In;
+    // ★★★ A balance is not a decision. It states what the account holds, so a
+    //     shape carrying an arrival AND its closing figure is still one thing
+    //     to decide -- unlike an arrival carrying a fee, which is two
+    //     movements into two places.
+    let movements: Vec<&FigureRoute> =
+        routes.iter().filter(|r| r.role != RouteRole::Balance).collect();
+    let only_income = movements.len() == 1 && movements[0].role == RouteRole::In;
 
     Ok(ParseRule {
         id: id.to_string(),
@@ -632,7 +652,7 @@ pub fn synthesize_from_training(
         params: if only_income {
             let mut p: BTreeMap<String, serde_json::Value> = BTreeMap::new();
             p.insert("amount".into(), serde_json::json!("$amount"));
-            p.insert("source".into(), serde_json::json!(routes[0].pocket.clone()));
+            p.insert("source".into(), serde_json::json!(movements[0].pocket.clone()));
             p
         } else {
             BTreeMap::new()
@@ -1241,5 +1261,124 @@ mod training_tests {
         }"#;
         let r: ParseRule = serde_json::from_str(json).expect("it loads");
         assert!(r.routes.is_empty(), "and means the honest 'nobody has said yet'");
+    }
+}
+
+#[cfg(test)]
+mod balance_role_tests {
+    use super::*;
+    use crate::parse_rule::run_rules;
+
+    /// A shape from a bank nobody has written a rule for. It states a movement
+    /// and the account's closing figure, the way every provider does.
+    const NEW_BANK: &str = "EQ8842001 Confirmed. You have received KES 2,500.00 from JANE DOE on 01/09/26 at 10:15 AM. Your account balance is KES 47,310.55";
+    const NEW_BANK_2: &str = "EQ8842002 Confirmed. You have received KES 900.00 from JOHN ROE on 02/09/26 at 11:20 AM. Your account balance is KES 48,210.55";
+
+    fn taught() -> Vec<TrainedFigure> {
+        vec![
+            TrainedFigure {
+                text: "2,500.00".into(),
+                role: RouteRole::In,
+                pocket: "salary".into(),
+            },
+            TrainedFigure {
+                text: "47,310.55".into(),
+                role: RouteRole::Balance,
+                pocket: String::new(),
+            },
+        ]
+    }
+
+    #[test]
+    fn a_taught_balance_lands_in_the_field_the_reader_looks_for() {
+        // ★★★ The whole mechanism. `balance_after` is one of the names the
+        //     balance reader already checks, so tagging a figure teaches this
+        //     node to read a new bank's authoritative number with no further
+        //     wiring -- the same path M-Pesa's own shapes take.
+        let r = synthesize_from_training("equity", NEW_BANK, &taught(), "t1").expect("learns");
+        assert!(r.extract.contains_key("balance_after"), "extracted: {:?}", r.extract.keys());
+        let out = run_rules(&[r], NEW_BANK).expect("reads its own example");
+        assert_eq!(
+            out.parsed_fields().get("balance_after").and_then(|v| v.as_f64()),
+            Some(47_310.55)
+        );
+    }
+
+    #[test]
+    fn it_reads_the_balance_out_of_the_next_message_of_that_shape() {
+        // ★★★ Positional, so the figure is read from where it SAT, not
+        //     remembered. This is what makes the newest message authoritative.
+        let r = synthesize_from_training("equity", NEW_BANK, &taught(), "t1").expect("learns");
+        let out = run_rules(&[r], NEW_BANK_2).expect("reads a sibling");
+        assert_eq!(
+            out.parsed_fields().get("balance_after").and_then(|v| v.as_f64()),
+            Some(48_210.55),
+            "the newer message's own closing figure"
+        );
+    }
+
+    #[test]
+    fn a_balance_is_never_routed_to_a_pocket() {
+        // ★★★ A closing figure is not a movement. Routing one into a pocket
+        //     would book money that never moved.
+        let r = synthesize_from_training("equity", NEW_BANK, &taught(), "t1").expect("learns");
+        let balance = r.routes.iter().find(|x| x.role == RouteRole::Balance).expect("routed");
+        assert!(balance.pocket.is_empty(), "it belongs to the account, not a pocket");
+        assert!(
+            r.routes.iter().filter(|x| x.role != RouteRole::Balance).all(|x| !x.pocket.is_empty()),
+            "while every real movement still names one"
+        );
+    }
+
+    #[test]
+    fn an_arrival_that_also_states_a_balance_still_files_itself() {
+        // ★★★ A balance is not a second decision. A shape carrying an arrival
+        //     AND its closing figure is one thing to decide -- unlike an
+        //     arrival carrying a FEE, which is two movements into two places.
+        let r = synthesize_from_training("equity", NEW_BANK, &taught(), "t1").expect("learns");
+        assert_eq!(r.status, RuleStatus::Mapped);
+        assert_eq!(r.operator.as_deref(), Some("budget.record_income"));
+        assert_eq!(
+            r.params.get("source").and_then(|v| v.as_str()),
+            Some("salary"),
+            "and it reads the MOVEMENT's pocket, not whichever figure came first"
+        );
+    }
+
+    #[test]
+    fn an_arrival_with_a_fee_still_asks_even_when_a_balance_is_taught() {
+        let figures = vec![
+            TrainedFigure { text: "2,500.00".into(), role: RouteRole::In, pocket: "salary".into() },
+            TrainedFigure { text: "47,310.55".into(), role: RouteRole::Balance, pocket: String::new() },
+        ];
+        let mut with_fee = figures;
+        with_fee.insert(
+            1,
+            TrainedFigure { text: "10.15".into(), role: RouteRole::Fee, pocket: "charges".into() },
+        );
+        // The fee text has to be present for the figure to be found.
+        let raw = "EQ8842003 Confirmed. You have received KES 2,500.00 from JANE DOE, charge KES 10.15, on 01/09/26. Your account balance is KES 47,310.55";
+        let r = synthesize_from_training("equity", raw, &with_fee, "t2").expect("learns");
+        assert_eq!(r.status, RuleStatus::ParsedUnmapped, "two movements is two decisions");
+    }
+
+    #[test]
+    fn a_balance_on_its_own_is_a_real_thing_to_teach() {
+        // ★★ A pure balance statement -- no movement at all -- is exactly the
+        //    shape a person most wants to tag, and it must not auto-file.
+        let raw = "EQ8842004 Your account balance is KES 47,310.55 as at 01/09/26";
+        let figures = vec![TrainedFigure {
+            text: "47,310.55".into(),
+            role: RouteRole::Balance,
+            pocket: String::new(),
+        }];
+        let r = synthesize_from_training("equity", raw, &figures, "t3").expect("learns");
+        assert_eq!(r.status, RuleStatus::ParsedUnmapped, "nothing moved, so nothing files");
+        assert!(r.operator.is_none());
+        let out = run_rules(&[r], raw).expect("reads it");
+        assert_eq!(
+            out.parsed_fields().get("balance_after").and_then(|v| v.as_f64()),
+            Some(47_310.55)
+        );
     }
 }

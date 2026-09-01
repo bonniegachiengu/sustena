@@ -151,6 +151,19 @@ pub enum RouteRole {
     Out,
     /// What the movement cost on top of itself.
     Fee,
+    /// What the account holds afterwards, as the provider states it.
+    ///
+    /// ★★★ **Not a movement, and that is the whole point.** The other three
+    /// roles say what happened to some money. This one says what the account
+    /// IS -- the bank's own closing figure, which is more truthful than any
+    /// sum this system could fold, because the bank is the one keeping the
+    /// account.
+    ///
+    /// ★★ So a balance is never routed to a pocket. It has no pocket; it
+    /// belongs to the ACCOUNT the message came from, and tagging one teaches
+    /// this node to read that account's authoritative figure out of a shape
+    /// nobody wrote a rule for.
+    Balance,
 }
 
 /// One figure in a message, and where it belongs.
@@ -176,6 +189,11 @@ pub struct FigureRoute {
     pub group: String,
     pub role: RouteRole,
     /// The pocket he said it belongs to.
+    ///
+    /// ★★ Empty for [`RouteRole::Balance`], which names no pocket: a closing
+    /// figure belongs to an account, and the account is the message's own
+    /// source. Left as a plain empty string rather than an `Option` so every
+    /// rule already written keeps deserialising unchanged.
     pub pocket: String,
 }
 
