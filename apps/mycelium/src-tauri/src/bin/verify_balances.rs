@@ -57,4 +57,17 @@ fn main() {
             None => println!("   {acct:>10} = {:.2}  (no message matched back!)\n", rep.balance),
         }
     }
+
+    // ── what filed itself, and what disagrees ────────────────────────────
+    let review = store.auto_filed_review(&sustain, 500).expect("review");
+    let doubted: Vec<_> = review.iter().filter(|r| !r.doubts.is_empty()).collect();
+    println!("\n=== filed without asking ===");
+    println!("{} auto-filed, {} with something against them", review.len(), doubted.len());
+    for r in doubted.iter().take(12) {
+        println!("\n   {}", r.message.raw_payload.replace('\n', " "));
+        println!("      booked: {:?} {:?}", r.message.operator, r.message.params);
+        for d in &r.doubts {
+            println!("      ! {}", d.say());
+        }
+    }
 }

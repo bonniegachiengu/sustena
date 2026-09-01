@@ -627,6 +627,22 @@ async trainRule(messageId: string, figures: TrainedFigureDto[]) : Promise<Result
 }
 },
 /**
+ * **What filed itself, and what disagrees with it.**
+ * 
+ * ★★★ A read, and only a read. The guard's whole job is to make automatic
+ * filings visible; giving it any power to change one would make it another
+ * thing that acts without being asked. Fixing goes through the ordinary
+ * append-only correction a person already uses.
+ */
+async autoFiled(sustainId: string, limit: number | null) : Promise<Result<AutoFiledDto[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("auto_filed", { sustainId, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * ★★★ `(async)`, because this reads the whole ingest log.
  * 
  * A sync command runs inline on the IPC thread, which on a phone is the thread
@@ -1051,6 +1067,39 @@ export type AuthoredDefinition = { id: string; label: string; dimensions: DimDec
  * The opening state a new instance starts from.
  */
 openingState: JsonValue }
+/**
+ * One filing nobody was asked about, and what disagrees with it.
+ * 
+ * ★★★ The surface exists so nothing lands in his books silently. Most of
+ * these are right, which is exactly why a wrong one is invisible without it:
+ * it did not need him, so it never reached him.
+ */
+export type AutoFiledDto = { messageId: string; 
+/**
+ * The text as it arrived.
+ */
+raw: string; 
+/**
+ * What was booked, in plain words.
+ */
+what: string; operator: string; amount: number; 
+/**
+ * The pocket it went to, when it went to one.
+ */
+pocket: string | null; 
+/**
+ * When it happened, in the message's own words (`"30/7/26 9:10 PM"`).
+ * 
+ * ★★ The text's own date and clock rather than an epoch, for two reasons:
+ * the ordering is already settled by the time this is built, and quoting
+ * what the message says needs no formatting decisions that could differ
+ * from what he would read on his phone.
+ */
+when: string; 
+/**
+ * Empty when nothing disagrees — which is most of them, and is the point.
+ */
+doubts: string[] }
 /**
  * A shared Sustain's body, as the Network screen sees it.
  */

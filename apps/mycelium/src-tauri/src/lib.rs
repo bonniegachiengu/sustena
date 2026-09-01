@@ -89,6 +89,7 @@ pub fn specta_builder() -> Builder {
         commands::link_number,
         commands::learn_rule,
         commands::train_rule,
+        commands::auto_filed,
         commands::get_feed,
         commands::orchie_infer,
         commands::orchie_confirm,
