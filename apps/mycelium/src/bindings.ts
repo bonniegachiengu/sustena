@@ -1552,7 +1552,7 @@ unlockRemembered: boolean }
 /**
  * One inference pass, on the wire.
  */
-export type InferenceDto = { status: "ready"; operator: string; params: JsonValue; why: string; description: string | null; fromHistory: boolean; historyUseCount: number | null } | 
+export type InferenceDto = { status: "ready"; operator: string; params: JsonValue; why: string; description: string | null; fromHistory: boolean; historyUseCount: number | null; taught?: boolean; routed?: RoutedFigureDto[] } | 
 /**
  * ★ `options: null` means the answer is not a tap — render an input.
  */
@@ -2091,6 +2091,27 @@ export type RollupDto = { sustainId: string; aggregates: AggregateDto[];
  * Linked children, and whether each was readable at all.
  */
 children: ChildStatusDto[] }
+/**
+ * A figure a taught shape says belongs somewhere, still awaiting a confirm.
+ * 
+ * ★★★ The Fuliza payoff. A borrow carries a sum AND an access fee that
+ * belong in different pockets; the sum is pre-filled into the main question,
+ * and each remaining figure comes back here so it can be confirmed in turn.
+ * Pre-filled is not filed — every one of these is still a tap he makes.
+ */
+export type RoutedFigureDto = { 
+/**
+ * `in` | `out` | `fee`.
+ */
+role: string; 
+/**
+ * Where he said figures like this belong.
+ */
+pocket: string; 
+/**
+ * What this message's own figure actually reads.
+ */
+amount: number }
 /**
  * What a royalty moved. ★★★ In **juul**, always.
  */

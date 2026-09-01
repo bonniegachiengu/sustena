@@ -1353,6 +1353,23 @@ pub struct NettingDto {
     pub ambiguous: u32,
 }
 
+/// A figure a taught shape says belongs somewhere, still awaiting a confirm.
+///
+/// ★★★ The Fuliza payoff. A borrow carries a sum AND an access fee that
+/// belong in different pockets; the sum is pre-filled into the main question,
+/// and each remaining figure comes back here so it can be confirmed in turn.
+/// Pre-filled is not filed — every one of these is still a tap he makes.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutedFigureDto {
+    /// `in` | `out` | `fee`.
+    pub role: String,
+    /// Where he said figures like this belong.
+    pub pocket: String,
+    /// What this message's own figure actually reads.
+    pub amount: f64,
+}
+
 /// One inference pass, on the wire.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "status", rename_all = "camelCase")]
@@ -1367,6 +1384,17 @@ pub enum InferenceDto {
         /// offers a change, and it still stops here for a confirmation.
         from_history: bool,
         history_use_count: Option<u32>,
+        /// The pocket came from a shape he taught, not from a habit inferred.
+        ///
+        /// ★★ A separate flag from `from_history` because they are different
+        /// claims and the screen says different things. "How you classified
+        /// this before" is a guess from a pattern; "the shape you taught" is
+        /// him being quoted back to himself.
+        #[serde(default)]
+        taught: bool,
+        /// The other figures this taught shape places, each still to confirm.
+        #[serde(default)]
+        routed: Vec<RoutedFigureDto>,
     },
     /// ★ `options: null` means the answer is not a tap — render an input.
     #[serde(rename_all = "camelCase")]

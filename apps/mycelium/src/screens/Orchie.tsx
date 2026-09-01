@@ -65,6 +65,7 @@ import {
   type InferenceDto,
   type JsonValue,
   type ShapeOfferDto,
+  type RoutedFigureDto,
   type SmsSweep,
   type CaptureContextDto,
   type ChoiceDto,
@@ -2889,14 +2890,60 @@ export function Classify(props: {
       //   anything was bought.
       setConfirmedOp(s.operator);
       if (v.verdict === "admitted") {
+        // ★★ Held BEFORE the reset, which clears the inference this came from.
+        const rest = s.routed ?? [];
         reset();
         setText("");
+        setTaughtRest(rest);
         props.onDone();
       }
     } catch (e) {
       setFailure(String(e).replace(/^Error:\s*/, ""));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * Figures a taught shape places that this confirm did not cover.
+   *
+   * ★★★ A Fuliza borrow is TWO movements into two pockets, and one confirm
+   * cannot honestly stand for both. So the sum is recorded first and the fee
+   * is offered straight after, pre-filled from what he taught and still
+   * requiring his tap. He never re-types where it goes; he never has it filed
+   * without looking either.
+   */
+  const [taughtRest, setTaughtRest] = createSignal<RoutedFigureDto[]>([]);
+  const [restBusy, setRestBusy] = createSignal(false);
+  const [restFailed, setRestFailed] = createSignal<string | null>(null);
+
+  const recordRest = async (f: RoutedFigureDto) => {
+    setRestBusy(true);
+    setRestFailed(null);
+    try {
+      // ★ Role decides the operator, exactly as it did when he taught it.
+      const op = f.role === "in" ? "budget.record_income" : "budget.spend";
+      const params: Record<string, unknown> =
+        f.role === "in"
+          ? { amount: f.amount, source: f.pocket }
+          : { pocket_name: f.pocket, amount: f.amount, description: "fee" };
+      const v = await engine.confirm(
+        props.sustain,
+        op,
+        params as JsonValue,
+        props.messageId,
+        null,
+      );
+      if (v.verdict !== "admitted") {
+        setRestFailed(v.reason ?? "the gate did not admit it");
+        return;
+      }
+      setTaughtRest((ps) => ps.slice(1));
+      props.onDone();
+    } catch (e) {
+      setRestFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setRestBusy(false);
     }
   };
 
@@ -3249,6 +3296,42 @@ export function Classify(props: {
                         right in the cockpit and noise here. */}
                     <p class={O.body}>{plainly(rd().operator, rd().params)}</p>
 
+                    {/* ★★★ A taught pre-fill is never silent either, and it
+                        says something DIFFERENT from a history one. "What you
+                        did before" is a habit inferred from counting; "the
+                        shape you taught" is him quoted back to himself. Two
+                        claims, two sentences. */}
+                    <Show when={rd().taught}>
+                      <div class={O.row}>
+                        <span class={O.badge.quiet}>from the shape you taught</span>
+                        <span class={O.spacer} />
+                        <button
+                          class={O.linkish}
+                          onClick={() => {
+                            setIgnoreHistory(true);
+                            const { pocket_name: _drop, ...rest } = known();
+                            void run(rest);
+                          }}
+                        >
+                          change
+                        </button>
+                      </div>
+                    </Show>
+
+                    {/* ★★ What it will ask NEXT, said before he taps. A second
+                        question appearing unannounced after a confirm reads
+                        like something went wrong. */}
+                    <Show when={(rd().routed ?? []).length > 0}>
+                      <For each={rd().routed ?? []}>
+                        {(f) => (
+                          <p class={O.caption}>
+                            then {f.role === "fee" ? "the fee" : "also"} Ksh {fmt(f.amount)} →{" "}
+                            {f.pocket}, which you confirm next.
+                          </p>
+                        )}
+                      </For>
+                    </Show>
+
                     {/* ★★ A history pre-fill is never silent. */}
                     <Show when={rd().fromHistory}>
                       <div class={O.row}>
@@ -3294,6 +3377,40 @@ export function Classify(props: {
             </Show>
           </div>
         )}
+      </Show>
+
+      {/* ═══ the rest of what he taught ═════════════════════════════════ */}
+      <Show when={taughtRest().length > 0}>
+        {(() => {
+          const f = () => taughtRest()[0]!;
+          return (
+            <div class={O.stack}>
+              <p class={O.body}>
+                {f().role === "fee" ? "And the fee" : "And"} Ksh {fmt(f().amount)} → {f().pocket}.
+              </p>
+              <p class={O.caption}>
+                Where this goes comes from the shape you taught. Nothing is filed until you tap.
+              </p>
+              <Show when={restFailed()}>{(m) => <p class={O.caption}>{m()}</p>}</Show>
+              <button
+                class={`${O.action.primary} ${O.actionWide}`}
+                disabled={restBusy()}
+                onClick={() => void recordRest(f())}
+              >
+                <Show when={restBusy()} fallback="record it too">
+                  <span class={O.working} /> working…
+                </Show>
+              </button>
+              <button
+                class={`${O.action.quiet} ${O.actionWide}`}
+                disabled={restBusy()}
+                onClick={() => setTaughtRest((ps) => ps.slice(1))}
+              >
+                skip this one
+              </button>
+            </div>
+          );
+        })()}
       </Show>
 
       {/* ═══ the gate's answer ══════════════════════════════════════════ */}

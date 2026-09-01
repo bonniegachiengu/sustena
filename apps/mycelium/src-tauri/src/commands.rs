@@ -2169,6 +2169,60 @@ pub(crate) fn printed_number(parsed: &BTreeMap<String, Value>) -> Option<String>
     Some(token.to_string())
 }
 
+/// **What a taught shape says about the message in front of him.**
+///
+/// ★★★ This is where teaching stops being readability and becomes worth the
+/// tap. A rule he trained carries `routes` — which captured figure belongs in
+/// which pocket — and the message here is a sibling of the one he taught on,
+/// so "which pocket" is already answered for the whole shape.
+///
+/// ★★ The first in/out route pre-fills the MAIN question; fees and any further
+/// figures come back separately. They are separate movements into separate
+/// pockets, and collapsing them into one confirm would file something he never
+/// saw. Pre-filled is not filed: every one of these is still a tap he makes.
+///
+/// ★ A route whose group this particular message does not carry is skipped
+/// rather than guessed at. Providers vary a shape — a borrow with no fee is a
+/// real message — and inventing a figure that is not there would be the one
+/// error that matters.
+///
+/// Returns `(pocket to pre-fill, the figures still to confirm)`.
+fn taught_routing(
+    rule: &sustena_core::ParseRule,
+    parsed: &BTreeMap<String, Value>,
+    primary_already_known: bool,
+) -> (Option<String>, Vec<crate::dto::RoutedFigureDto>) {
+    let mut primary: Option<String> = None;
+    let mut primary_taken = primary_already_known;
+    let mut routed: Vec<crate::dto::RoutedFigureDto> = Vec::new();
+
+    for route in &rule.routes {
+        let Some(amount) = parsed.get(&route.group).and_then(|v| {
+            v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
+        }) else {
+            continue;
+        };
+        let is_primary =
+            matches!(route.role, sustena_core::RouteRole::In | sustena_core::RouteRole::Out);
+        if is_primary && !primary_taken {
+            primary = Some(route.pocket.clone());
+            primary_taken = true;
+            continue;
+        }
+        routed.push(crate::dto::RoutedFigureDto {
+            role: match route.role {
+                sustena_core::RouteRole::In => "in",
+                sustena_core::RouteRole::Out => "out",
+                sustena_core::RouteRole::Fee => "fee",
+            }
+            .to_string(),
+            pocket: route.pocket.clone(),
+            amount,
+        });
+    }
+    (primary, routed)
+}
+
 /// **`ε → (o, θ)`** — one inference pass over a narrated effect or a captured
 /// message. Read-only: it resolves, it never writes.
 #[tauri::command]
@@ -2196,7 +2250,7 @@ pub fn orchie_infer(
         None => None,
     };
 
-    let known_map: BTreeMap<String, Value> = match known {
+    let mut known_map: BTreeMap<String, Value> = match known {
         Value::Object(o) => o.into_iter().collect(),
         _ => BTreeMap::new(),
     };
@@ -2219,6 +2273,41 @@ pub fn orchie_infer(
     } else {
         description.as_ref().and_then(|d| vendor_memory(&world, &sustain_id, &state, d))
     };
+
+    // ★★★ **What he taught, applied.** This is where teaching a shape stops
+    //     being readability and starts being worth the tap.
+    //
+    //     A rule he trained carries `routes`: which captured figure belongs in
+    //     which pocket. The message in front of him is a sibling of the one he
+    //     taught on, so the answer to "which pocket" is already given — for the
+    //     whole shape, not just this text. Putting it in `known` is exactly
+    //     right, because `known` means "facts a person has already answered"
+    //     and that is what a route is. It also means the engine's own
+    //     inference is untouched: nothing new to keep in step.
+    //
+    // ★★ The FIRST in/out route pre-fills the main question. Fees and any
+    //    further figures come back separately as `routed`, because they are
+    //    separate movements into separate pockets and collapsing them into one
+    //    confirm would file something he never saw.
+    //
+    // ★ `ignore_history` turns this off too. When he taps "change", he is
+    //   overruling what was remembered, and a route is a remembered thing.
+    let (taught_pocket, routed) = match (ignore_history, message.as_ref()) {
+        (false, Some(m)) => {
+            let rules = world.rules_for(&m.source_id).unwrap_or_default();
+            match rules.iter().find(|r| r.id == m.parser_name) {
+                Some(rule) => {
+                    taught_routing(rule, &m.parsed_fields, known_map.contains_key("pocket_name"))
+                }
+                None => (None, Vec::new()),
+            }
+        }
+        _ => (None, Vec::new()),
+    };
+    let taught = taught_pocket.is_some() || !routed.is_empty();
+    if let Some(p) = taught_pocket {
+        known_map.insert("pocket_name".into(), Value::String(p));
+    }
 
     // ★★★ Whose tab this is, if it is anyone's.
     //
@@ -2278,6 +2367,8 @@ pub fn orchie_infer(
             description,
             from_history,
             history_use_count,
+            taught,
+            routed,
         },
         sustena_core::Inference::NeedsDisambiguation { field, question, options, why } => {
             let options = options.map(|mut opts| {
@@ -3473,5 +3564,106 @@ mod feed_surface_tests {
         // matched, so the honest answer is None either way -- the point of the
         // assertion is that a body must never be the input.
         assert_eq!(source_of(body), None);
+    }
+}
+
+#[cfg(test)]
+mod taught_routing_tests {
+    use super::*;
+    use sustena_core::{FigureRoute, RouteRole};
+
+    /// The rule his Fuliza training produces: the sum to one pocket, the
+    /// access fee to another.
+    fn fuliza_rule() -> sustena_core::ParseRule {
+        let mut r = sustena_core::ParseRule {
+            id: "taught_mpesa_abc".into(),
+            source: "mpesa".into(),
+            version: 1,
+            pattern: "x".into(),
+            extract: Default::default(),
+            status: sustena_core::RuleStatus::ParsedUnmapped,
+            operator: None,
+            params: Default::default(),
+            flags: vec![],
+            reason_template: None,
+            trust: Default::default(),
+            provenance: String::new(),
+            examples: vec![],
+            routes: vec![],
+        };
+        r.routes = vec![
+            FigureRoute { group: "amount".into(), role: RouteRole::In, pocket: "Fuliza".into() },
+            FigureRoute {
+                group: "fee".into(),
+                role: RouteRole::Fee,
+                pocket: "Fuliza fees".into(),
+            },
+        ];
+        r
+    }
+
+    fn parsed(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    }
+
+    #[test]
+    fn the_sum_prefills_the_question_and_the_fee_comes_back_to_confirm() {
+        // ★★★ The whole payoff. He taught this shape once; a sibling now
+        //     arrives knowing where both its figures belong.
+        let f = parsed(&[("amount", serde_json::json!(250.0)), ("fee", serde_json::json!(1.38))]);
+        let (pocket, routed) = taught_routing(&fuliza_rule(), &f, false);
+        assert_eq!(pocket.as_deref(), Some("Fuliza"), "the main question is answered for him");
+        assert_eq!(routed.len(), 1, "and the fee is a separate confirm, not folded in");
+        assert_eq!(routed[0].pocket, "Fuliza fees");
+        assert_eq!(routed[0].role, "fee");
+        assert_eq!(routed[0].amount, 1.38, "this message's own figure, not the taught one");
+    }
+
+    #[test]
+    fn a_figure_the_message_does_not_carry_is_skipped_not_invented() {
+        // ★★★ A borrow with no fee is a real message. Inventing the figure
+        //     would file money that never moved.
+        let f = parsed(&[("amount", serde_json::json!(250.0))]);
+        let (pocket, routed) = taught_routing(&fuliza_rule(), &f, false);
+        assert_eq!(pocket.as_deref(), Some("Fuliza"));
+        assert!(routed.is_empty(), "no fee in the text means no fee to confirm");
+    }
+
+    #[test]
+    fn an_answer_he_already_gave_is_not_overwritten() {
+        // ★★ He is the authority on his own message. A route is what he said
+        //    about the SHAPE; an answer on this card is what he is saying about
+        //    THIS one, and the nearer statement wins.
+        let f = parsed(&[("amount", serde_json::json!(250.0)), ("fee", serde_json::json!(1.38))]);
+        let (pocket, routed) = taught_routing(&fuliza_rule(), &f, true);
+        assert!(pocket.is_none(), "his own pocket choice stands");
+        assert_eq!(routed.len(), 2, "and every routed figure is still offered");
+        assert_eq!(routed[0].pocket, "Fuliza", "including the one he overruled, as a figure");
+    }
+
+    #[test]
+    fn a_rule_nobody_taught_routes_nothing() {
+        // ★★ The shipped seed library has no routes, and must behave exactly
+        //    as it did before any of this existed.
+        let mut r = fuliza_rule();
+        r.routes = vec![];
+        let f = parsed(&[("amount", serde_json::json!(250.0))]);
+        let (pocket, routed) = taught_routing(&r, &f, false);
+        assert!(pocket.is_none());
+        assert!(routed.is_empty());
+    }
+
+    #[test]
+    fn a_figure_stored_as_text_with_commas_still_reads() {
+        // ★ Rules capture what the provider wrote. "1,000.00" is a string with
+        //   a comma in it, and a route that could not read it would silently
+        //   drop the figure it was taught to place.
+        let f = parsed(&[
+            ("amount", serde_json::json!("1,000.00")),
+            ("fee", serde_json::json!("5.52")),
+        ]);
+        let (pocket, routed) = taught_routing(&fuliza_rule(), &f, false);
+        assert_eq!(pocket.as_deref(), Some("Fuliza"));
+        assert_eq!(routed[0].amount, 5.52);
     }
 }
