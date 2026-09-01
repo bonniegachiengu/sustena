@@ -124,6 +124,16 @@ impl std::fmt::Debug for Unlocked {
 }
 
 impl Unlocked {
+    /// The signing key's own bytes.
+    ///
+    /// ★★★ Crate-private, and it is the only way out. It exists for ONE
+    /// caller -- `recovery_phrase`, which has to hand the key to a person so
+    /// they can carry their identity to another device. Anything else wanting
+    /// this wants to sign something, and should ask `sign` instead.
+    pub(crate) fn secret_bytes(&self) -> [u8; 32] {
+        self.signing.to_bytes()
+    }
+
     pub fn handle(&self) -> &str {
         &self.handle
     }
@@ -581,5 +591,327 @@ mod kdf_cost_tests {
         let store = IdentityStore::at(&dir);
         store.enrol("bonnie", "a-long-enough-passphrase").expect("enrolled");
         assert!(store.unlock("a-long-enough-passphrase").is_ok());
+    }
+}
+
+// ── carrying an identity to another device ──────────────────────────────────
+//
+// ★★★ **The problem this solves.** `identity.json` is a local file. A second
+// device has none, so a passphrase there means nothing and enrolling mints a
+// NEW keypair — a different principal, which cannot claim his Sustains and is
+// not him. "Log in on my laptop and my data is there" is impossible until an
+// identity can travel.
+//
+// ★★★ **Why the phrase IS the key, rather than something the key is derived
+// from.** Deriving a key from passphrase-plus-phrase is the tidier story, and
+// it cannot rescue the identity he ALREADY has: that one was generated from
+// random bytes months ago and no derivation will ever reproduce it. An
+// identity that cannot be carried is exactly the problem. So the phrase
+// encodes the secret itself, which works for every identity that exists today
+// and every one made after — the same model a wallet seed phrase uses.
+//
+// ★★ **What that costs, stated plainly.** The phrase is the key. Anyone
+// holding it is him. It is shown once, it is never stored anywhere by this
+// app, and it is worth writing on paper rather than keeping in a photo.
+//
+// ★ **Crockford base32, not words.** A word list means embedding and
+// maintaining two thousand words and getting a checksum scheme right; getting
+// it subtly wrong produces phrases that fail to restore, which is the worst
+// possible failure for a recovery mechanism. Crockford's alphabet already
+// excludes the characters people confuse (I, L, O, U) and defines how to fold
+// the ones they still mistype, so a transcription slip is corrected rather
+// than rejected. A friendlier word list is a later change that can reuse all
+// of this by swapping the encoding.
+
+/// Crockford's alphabet: no I, L, O or U, so there is nothing to confuse with
+/// 1, 0 or each other.
+const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/// The check symbol appended to a phrase, so a mistyped one is refused rather
+/// than silently restoring a different (wrong) identity.
+fn check_symbol(bytes: &[u8]) -> char {
+    let sum: u32 = bytes.iter().map(|b| u32::from(*b)).sum();
+    CROCKFORD[(sum % 32) as usize] as char
+}
+
+fn crockford_value(c: char) -> Option<u8> {
+    let c = c.to_ascii_uppercase();
+    // ★★ The letters people actually mistype, folded to what they meant.
+    let c = match c {
+        'I' | 'L' => '1',
+        'O' => '0',
+        'U' => 'V',
+        other => other,
+    };
+    CROCKFORD.iter().position(|b| *b as char == c).map(|i| i as u8)
+}
+
+/// The 32 secret bytes, as something a person can write down.
+pub fn phrase_of(secret: &[u8; 32]) -> String {
+    let mut bits = 0u32;
+    let mut nbits = 0u32;
+    let mut out = String::new();
+    for b in secret {
+        bits = (bits << 8) | u32::from(*b);
+        nbits += 8;
+        while nbits >= 5 {
+            nbits -= 5;
+            out.push(CROCKFORD[((bits >> nbits) & 31) as usize] as char);
+        }
+    }
+    if nbits > 0 {
+        out.push(CROCKFORD[((bits << (5 - nbits)) & 31) as usize] as char);
+    }
+    out.push(check_symbol(secret));
+    // ★ Grouped, because a wall of characters is where transcription goes
+    //   wrong. The groups are cosmetic and stripped on the way back in.
+    out.as_bytes()
+        .chunks(4)
+        .map(|c| String::from_utf8_lossy(c).to_string())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// The secret those words stand for.
+///
+/// ★★ Whitespace, dashes and case are all forgiven: a person copying this off
+/// paper should not be defeated by how they spaced it.
+pub fn secret_of(phrase: &str) -> Result<[u8; 32], IdentityError> {
+    let cleaned: Vec<char> = phrase
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-' && *c != '_')
+        .collect();
+    if cleaned.len() < 2 {
+        return Err(IdentityError::Malformed("that recovery phrase is too short".into()));
+    }
+    let (body, check) = cleaned.split_at(cleaned.len() - 1);
+    let mut bits = 0u32;
+    let mut nbits = 0u32;
+    let mut bytes: Vec<u8> = Vec::with_capacity(32);
+    for c in body {
+        let v = crockford_value(*c).ok_or_else(|| {
+            IdentityError::Malformed(format!("'{c}' is not part of a recovery phrase"))
+        })?;
+        bits = (bits << 5) | u32::from(v);
+        nbits += 5;
+        if nbits >= 8 {
+            nbits -= 8;
+            bytes.push(((bits >> nbits) & 0xff) as u8);
+        }
+    }
+    if bytes.len() != 32 {
+        return Err(IdentityError::Malformed(format!(
+            "a recovery phrase carries 32 bytes; this one carries {}",
+            bytes.len()
+        )));
+    }
+    let mut secret = [0u8; 32];
+    secret.copy_from_slice(&bytes);
+    // ★★★ The check runs BEFORE anything is written. A mistyped phrase is a
+    //     DIFFERENT valid-looking key, so without this a typo would silently
+    //     enrol a stranger's identity on his laptop and nothing would say so
+    //     until his data failed to arrive.
+    // ★★ Folded the same way the body is. The check symbol is drawn from the
+    //    same alphabet, so a person who correctly wrote an O for a 0 in THAT
+    //    position was having a correct transcription refused -- which a test
+    //    caught, and which would have read as "your phrase is wrong" to
+    //    somebody who had copied it perfectly.
+    let given = crockford_value(check[0])
+        .map(|v| CROCKFORD[v as usize] as char)
+        .ok_or_else(|| IdentityError::Malformed("that recovery phrase ends oddly".into()))?;
+    if check_symbol(&secret) != given {
+        return Err(IdentityError::Malformed(
+            "that recovery phrase has a typo in it somewhere".into(),
+        ));
+    }
+    Ok(secret)
+}
+
+impl IdentityStore {
+    /// **The phrase that carries this identity to another device.**
+    ///
+    /// ★★ Requires the passphrase, because it hands back the key itself. It is
+    /// never stored: it is derived from the sealed secret on demand, so there
+    /// is no second copy of his key anywhere on disk.
+    pub fn recovery_phrase(&self, passphrase: &str) -> Result<String, IdentityError> {
+        let unlocked = self.unlock(passphrase)?;
+        Ok(phrase_of(&unlocked.secret_bytes()))
+    }
+
+    /// **Become the same person on a device that has never seen him.**
+    ///
+    /// ★★★ This is what makes a second device HIM rather than a new principal.
+    /// The keypair is not generated, it is restored, so the public key — which
+    /// is what owns his Sustains and what a peer authenticates — is identical
+    /// to the one on his phone.
+    ///
+    /// ★★ The passphrase given here seals the key on THIS device and need not
+    /// match the other one. A passphrase is how a machine keeps a secret; the
+    /// phrase is who he is.
+    pub fn restore(
+        &self,
+        handle: &str,
+        passphrase: &str,
+        phrase: &str,
+    ) -> Result<Unlocked, IdentityError> {
+        if self.exists() {
+            return Err(IdentityError::AlreadyEnrolled);
+        }
+        check_passphrase(passphrase)?;
+        let secret = secret_of(phrase)?;
+        let signing = SigningKey::from_bytes(&secret);
+
+        let mut salt = [0u8; 16];
+        fill_random(&mut salt)?;
+        let mut nonce_bytes = [0u8; 24];
+        fill_random(&mut nonce_bytes)?;
+        let key = derive(passphrase, &salt, PBKDF2_ITERATIONS);
+        let cipher = XChaCha20Poly1305::new((&key).into());
+        let sealed = cipher
+            .encrypt(XNonce::from_slice(&nonce_bytes), signing.to_bytes().as_slice())
+            .map_err(|_| IdentityError::Io("sealing the key failed".into()))?;
+
+        let file = IdentityFile {
+            handle: handle.to_string(),
+            public_key: hex(signing.verifying_key().as_bytes()),
+            kdf: "pbkdf2-hmac-sha256".to_string(),
+            salt: hex(&salt),
+            iterations: PBKDF2_ITERATIONS,
+            sealed_secret: hex(&sealed),
+            nonce: hex(&nonce_bytes),
+            proof: hex(&signing.sign(PROOF_MESSAGE).to_bytes()),
+        };
+        let text =
+            serde_json::to_string_pretty(&file).map_err(|e| IdentityError::Io(e.to_string()))?;
+        let tmp = self.path.with_extension("json.tmp");
+        fs::write(&tmp, text).map_err(|e| IdentityError::Io(e.to_string()))?;
+        fs::rename(&tmp, &self.path).map_err(|e| IdentityError::Io(e.to_string()))?;
+        self.unlock(passphrase)
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use std::{env, fs, path::PathBuf};
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-recovery-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    const PASS: &str = "a good long passphrase";
+
+    #[test]
+    fn a_phrase_carries_the_key_there_and_back() {
+        let secret = [7u8; 32];
+        assert_eq!(secret_of(&phrase_of(&secret)).expect("round trip"), secret);
+    }
+
+    #[test]
+    fn the_same_person_appears_on_a_second_device() {
+        // ★★★ The whole point. A second device must be HIM -- the same public
+        //     key, which is what owns his Sustains and what a peer
+        //     authenticates -- not a new principal that can claim nothing.
+        let phone = IdentityStore::at(scratch("phone"));
+        let him = phone.enrol("bg.myc", PASS).expect("enrolled");
+        let phrase = phone.recovery_phrase(PASS).expect("phrase");
+
+        let laptop = IdentityStore::at(scratch("laptop"));
+        // ★★ A DIFFERENT passphrase on the new machine, deliberately. A
+        //    passphrase is how one machine keeps a secret; the phrase is who
+        //    he is.
+        let same = laptop.restore("bg.myc", "another good passphrase", &phrase).expect("restored");
+        assert_eq!(same.public_key(), him.public_key());
+    }
+
+    #[test]
+    fn a_typo_is_refused_rather_than_restoring_a_stranger() {
+        // ★★★ The failure that must not happen quietly. A mistyped phrase is a
+        //     DIFFERENT valid-looking key, so without a check it would enrol
+        //     somebody else's identity on his laptop and nothing would say so
+        //     until his data failed to arrive.
+        let phone = IdentityStore::at(scratch("typo"));
+        phone.enrol("bg.myc", PASS).expect("enrolled");
+        let phrase = phone.recovery_phrase(PASS).expect("phrase");
+
+        let mut wrong: Vec<char> = phrase.chars().collect();
+        let i = wrong.iter().position(|c| c.is_ascii_alphanumeric()).expect("a symbol");
+        wrong[i] = if wrong[i] == '7' { '9' } else { '7' };
+        let wrong: String = wrong.into_iter().collect();
+
+        let laptop = IdentityStore::at(scratch("typo-laptop"));
+        let err = laptop.restore("bg.myc", PASS, &wrong).unwrap_err();
+        assert!(matches!(err, IdentityError::Malformed(_)), "got {err:?}");
+        assert!(!laptop.exists(), "and nothing was written");
+    }
+
+    #[test]
+    fn how_he_spaced_it_does_not_matter() {
+        // ★★ Copied off paper. Spacing, case and dashes are his business.
+        let secret = [42u8; 32];
+        let phrase = phrase_of(&secret);
+        let messy = phrase.to_lowercase().replace('-', "  ");
+        assert_eq!(secret_of(&messy).expect("forgiving"), secret);
+    }
+
+    #[test]
+    fn the_letters_people_confuse_are_folded_not_rejected() {
+        // ★★ Crockford's whole point: O is 0 and I is 1, because on paper they
+        //    are the same shape. Rejecting them would fail a correct
+        //    transcription of a correct phrase.
+        let secret = [0u8; 32];
+        let phrase = phrase_of(&secret);
+        let confused = phrase.replace('0', "O");
+        assert_eq!(secret_of(&confused).expect("folded"), secret);
+    }
+
+    #[test]
+    fn nonsense_is_refused_with_something_readable() {
+        let laptop = IdentityStore::at(scratch("nonsense"));
+        for bad in ["", "hello", "not a phrase at all"] {
+            let err = laptop.restore("bg.myc", PASS, bad).unwrap_err();
+            assert!(matches!(err, IdentityError::Malformed(_)), "{bad:?} -> {err:?}");
+        }
+    }
+
+    #[test]
+    fn a_device_that_already_has_an_identity_refuses_to_be_overwritten() {
+        // ★★★ Restoring over a live identity would orphan every Sustain that
+        //     identity owns. It is refused, and the message says so.
+        let store = IdentityStore::at(scratch("occupied"));
+        store.enrol("bg.myc", PASS).expect("enrolled");
+        let phrase = store.recovery_phrase(PASS).expect("phrase");
+        assert!(matches!(
+            store.restore("bg.myc", PASS, &phrase).unwrap_err(),
+            IdentityError::AlreadyEnrolled
+        ));
+    }
+
+    #[test]
+    fn the_phrase_needs_the_passphrase() {
+        // ★ It hands back the key itself, so it is not something a passer-by
+        //   can read off an unlocked screen.
+        let store = IdentityStore::at(scratch("guarded"));
+        store.enrol("bg.myc", PASS).expect("enrolled");
+        assert!(store.recovery_phrase("the wrong passphrase").is_err());
+    }
+
+    #[test]
+    fn an_identity_made_before_any_of_this_can_still_travel() {
+        // ★★★ The reason the phrase encodes the key rather than deriving from
+        //     a passphrase. His identity was generated from random bytes long
+        //     before recovery existed; a derivation could never reproduce it,
+        //     and an identity that cannot be carried is the whole problem.
+        let old = IdentityStore::at(scratch("legacy"));
+        let him = old.enrol("bg.myc", PASS).expect("enrolled the old way");
+        let carried = old.recovery_phrase(PASS).expect("it still exports");
+        let new = IdentityStore::at(scratch("legacy-new"));
+        assert_eq!(
+            new.restore("bg.myc", PASS, &carried).expect("restored").public_key(),
+            him.public_key()
+        );
     }
 }
