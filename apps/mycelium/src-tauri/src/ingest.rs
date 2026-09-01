@@ -2071,6 +2071,98 @@ impl Ingested {
         Ok(filled)
     }
 
+    fn threads_path(&self) -> PathBuf {
+        self.root.join("threads.json")
+    }
+
+    /// **The threads this household reads**, its own plus the shipped two.
+    ///
+    /// ★★ Always answered through `all_threads`, so a caller can never see a
+    /// half-list. The built-ins are ordinary entries here, not special cases --
+    /// they are simply already there.
+    pub fn threads(&self) -> StoreResult<Vec<sustena_core::Thread>> {
+        let declared: Vec<sustena_core::Thread> = if self.threads_path().exists() {
+            serde_json::from_str(&fs::read_to_string(self.threads_path())?).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut all = sustena_core::all_threads(&declared);
+        // ★★ A forgotten built-in is recorded as a declaration with no senders,
+        //    which is what stops it returning. Such an entry reads nothing, so
+        //    it is not a thread -- showing it would put a dead row in his list
+        //    that looks like it is working.
+        all.retain(|t| !t.senders.is_empty());
+        Ok(all)
+    }
+
+    /// Only what a person declared, without the built-ins folded in.
+    pub fn declared_threads(&self) -> StoreResult<Vec<sustena_core::Thread>> {
+        if !self.threads_path().exists() {
+            return Ok(Vec::new());
+        }
+        Ok(serde_json::from_str(&fs::read_to_string(self.threads_path())?).unwrap_or_default())
+    }
+
+    /// **Add a thread, or replace one of the same id.**
+    ///
+    /// ★★★ Refuses a thread that claims no sender. An empty sender list
+    /// matches nothing, so it would sit in his list looking like a working
+    /// thread while silently reading none of his texts -- and he would conclude
+    /// the feature does not work rather than that the form was incomplete.
+    pub fn declare_thread(&self, thread: &sustena_core::Thread) -> StoreResult<()> {
+        let cleaned: Vec<String> = thread
+            .senders
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if thread.id.trim().is_empty() || cleaned.is_empty() {
+            return Err(StoreError::Io(
+                "a thread needs an id and at least one sender to read".to_string(),
+            ));
+        }
+        let mut all = self.declared_threads()?;
+        all.retain(|t| !t.id.eq_ignore_ascii_case(&thread.id));
+        all.push(sustena_core::Thread {
+            id: thread.id.trim().to_string(),
+            label: thread.label.trim().to_string(),
+            senders: cleaned,
+        });
+        self.write_threads(&all)
+    }
+
+    /// ★ Written through a temporary file and renamed, like every other
+    ///   whole-file writer here: a half-written thread list would silently stop
+    ///   reading a household's money texts.
+    fn write_threads(&self, all: &[sustena_core::Thread]) -> StoreResult<()> {
+        let text =
+            serde_json::to_string_pretty(all).map_err(|e| StoreError::Io(e.to_string()))?;
+        let tmp = self.threads_path().with_extension("json.tmp");
+        fs::write(&tmp, text)?;
+        fs::rename(&tmp, self.threads_path())?;
+        Ok(())
+    }
+
+    /// Stop reading a thread. ★ The built-ins can be forgotten this way too --
+    /// a household that does not bank with KCB should not carry it forever.
+    pub fn forget_thread(&self, id: &str) -> StoreResult<bool> {
+        let mut all = self.declared_threads()?;
+        let before = all.len();
+        all.retain(|t| !t.id.eq_ignore_ascii_case(id));
+        // ★★ Forgetting a BUILT-IN is recorded as an explicit empty
+        //    declaration, because there is nothing to remove from a list it was
+        //    never in -- and without this the built-in would silently return.
+        if before == all.len() && sustena_core::built_in_threads().iter().any(|b| b.id == id) {
+            all.push(sustena_core::Thread {
+                id: id.to_string(),
+                label: id.to_string(),
+                senders: Vec::new(),
+            });
+        }
+        self.write_threads(&all)?;
+        Ok(true)
+    }
+
     /// The rules in force: the latest version of each id.
     pub fn effective_rules(&self) -> StoreResult<Vec<ParseRule>> {
         let mut by_id: BTreeMap<String, ParseRule> = BTreeMap::new();
@@ -5795,5 +5887,100 @@ mod refresh_readings_tests {
         let rules: Vec<ParseRule> = seeded.iter().cloned().chain([taught_rule()]).collect();
         assert_eq!(ing.refresh_readings("h", &rules).expect("first"), 1);
         assert_eq!(ing.refresh_readings("h", &rules).expect("second"), 0);
+    }
+}
+
+#[cfg(test)]
+mod thread_tests {
+    use super::*;
+    use std::{env, fs, path::PathBuf};
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-threads-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    fn equity() -> sustena_core::Thread {
+        sustena_core::Thread {
+            id: "equity".into(),
+            label: "Equity".into(),
+            senders: vec!["EQUITY".into()],
+        }
+    }
+
+    #[test]
+    fn a_household_that_declared_nothing_still_reads_the_shipped_two() {
+        let ing = Ingested::at(scratch("empty")).expect("ingest");
+        let got = ing.threads().expect("threads");
+        let ids: Vec<&str> = got.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains(&"mpesa") && ids.contains(&"kcb"), "{ids:?}");
+    }
+
+    #[test]
+    fn a_declared_thread_survives_a_restart() {
+        // ★★ It is a file, not a session. A thread he added has to still be
+        //    there tomorrow or the whole feature is a demo.
+        let dir = scratch("persist");
+        Ingested::at(&dir).expect("ingest").declare_thread(&equity()).expect("declared");
+        let again = Ingested::at(&dir).expect("reopen");
+        assert!(again.threads().expect("threads").iter().any(|t| t.id == "equity"));
+    }
+
+    #[test]
+    fn a_thread_claiming_no_sender_is_refused() {
+        // ★★★ It would match nothing, so it would sit in his list looking like
+        //     a working thread while reading none of his texts -- and he would
+        //     conclude the feature is broken rather than the form incomplete.
+        let ing = Ingested::at(scratch("empty-senders")).expect("ingest");
+        let bad = sustena_core::Thread {
+            id: "sacco".into(),
+            label: "Sacco".into(),
+            senders: vec!["   ".into()],
+        };
+        assert!(ing.declare_thread(&bad).is_err());
+        assert!(ing.declared_threads().expect("declared").is_empty(), "and nothing was written");
+    }
+
+    #[test]
+    fn declaring_the_same_id_twice_replaces_rather_than_duplicates() {
+        let ing = Ingested::at(scratch("replace")).expect("ingest");
+        ing.declare_thread(&equity()).expect("first");
+        let wider = sustena_core::Thread {
+            id: "equity".into(),
+            label: "Equity Bank".into(),
+            senders: vec!["EQUITY".into(), "EQUITYBK".into()],
+        };
+        ing.declare_thread(&wider).expect("second");
+        let declared = ing.declared_threads().expect("declared");
+        assert_eq!(declared.len(), 1);
+        assert_eq!(declared[0].senders.len(), 2);
+    }
+
+    #[test]
+    fn a_forgotten_built_in_stays_forgotten() {
+        // ★★★ A household that does not bank with KCB should not carry it
+        //     forever. Removing it from a list it was never IN needs an
+        //     explicit record, or it silently returns on the next read.
+        let ing = Ingested::at(scratch("forget")).expect("ingest");
+        ing.forget_thread("kcb").expect("forget");
+        let ids: Vec<String> =
+            ing.threads().expect("threads").into_iter().map(|t| t.id).collect();
+        assert!(!ids.iter().any(|t| t == "kcb"), "{ids:?}");
+        assert!(ids.iter().any(|t| t == "mpesa"), "and the others are untouched");
+    }
+
+    #[test]
+    fn a_declared_thread_decides_a_real_senders_source() {
+        // ★★ End to end: the store's list is what the matcher answers from.
+        let ing = Ingested::at(scratch("matching")).expect("ingest");
+        ing.declare_thread(&equity()).expect("declared");
+        let all = ing.threads().expect("threads");
+        assert_eq!(
+            sustena_core::thread_for_sender("EQUITY BANK KE", &all).map(|t| t.id.as_str()),
+            Some("equity")
+        );
+        assert!(sustena_core::thread_for_sender("SOMEONE ELSE", &all).is_none());
     }
 }

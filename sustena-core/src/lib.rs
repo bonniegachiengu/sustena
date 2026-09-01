@@ -181,6 +181,7 @@ pub mod operator;
 pub mod panel;
 pub mod parse_rule;
 pub mod audit;
+pub mod sender;
 pub mod parse_rule_learn;
 pub mod path;
 pub mod pawa;
@@ -509,6 +510,7 @@ pub use effect_capture::{
     Choice, DeclaredParams, Inference, OperatorParams,
 };
 pub use audit::{doubts, Doubt, Filed};
+pub use sender::{all_threads, built_in_threads, is_known_sender, thread_for_sender, Thread};
 pub use parse_rule_learn::{
     synthesize_from_correction, synthesize_from_training, synthesize_with_shapes,
     verify_candidate, LearningRefusal, TrainedFigure,

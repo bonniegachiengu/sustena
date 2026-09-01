@@ -14,6 +14,12 @@ import app.tauri.plugin.Invoke
 import org.json.JSONArray
 
 @InvokeArg
+class SetThreadsArgs {
+    /** Sender strings, already flattened from the declared threads. */
+    var senders: List<String> = emptyList()
+}
+
+@InvokeArg
 class ReadInboxArgs {
     /**
      * Where this household's record begins, inclusive, as unix milliseconds.
@@ -141,7 +147,7 @@ class SmsCapturePlugin(private val activity: Activity) : Plugin(activity) {
                     val dIdx = cursor.getColumnIndexOrThrow(Telephony.Sms.DATE)
                     while (cursor.moveToNext()) {
                         val sender = cursor.getString(aIdx)
-                        if (!SmsSenderFilter.isKnownFinancialSender(sender)) {
+                        if (!SmsSenderFilter.isKnownFinancialSender(activity, sender)) {
                             // Counted once, on the first page, so a total is not
                             // multiplied by the number of pages.
                             if (args.offset == 0) filtered++
@@ -173,6 +179,25 @@ class SmsCapturePlugin(private val activity: Activity) : Plugin(activity) {
         o.put("hasMore", hasMore)
         o.put("nextOffset", args.offset + out.length())
         invoke.resolve(o)
+    }
+
+    /**
+     * Push down which senders this device should look at.
+     *
+     * ★★★ The receiver runs while the app does not, so it cannot ask the
+     * app anything. The list has to be sitting in SharedPreferences before the
+     * text arrives, which is why this is pushed rather than pulled.
+     *
+     * ★★ An empty list is honoured as empty. A person who removed every
+     * thread has said something, and quietly restoring the shipped two would
+     * read texts he told us not to.
+     */
+    @Command
+    fun setThreads(invoke: Invoke) {
+        val args = invoke.parseArgs(SetThreadsArgs::class.java)
+        SmsSenderFilter.setSenders(activity, args.senders.joinToString("
+"))
+        invoke.resolve()
     }
 
     @Command

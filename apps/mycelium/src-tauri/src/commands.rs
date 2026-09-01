@@ -1169,6 +1169,82 @@ fn plain_filing(operator: &str, amount: f64, pocket: Option<&str>) -> String {
     }
 }
 
+/// Send the declared senders down to the device's own filter.
+///
+/// ★★★ Without this the whole feature stops at the app boundary: the
+/// Android receiver decides whether a text is looked at AT ALL, and it runs
+/// while the app does not. A thread declared here and not pushed there is a
+/// thread whose texts are dropped before anything can read them.
+///
+/// ★★ Best effort and never fatal. Declaring the thread succeeded; failing
+/// the call because a push stumbled would throw away the part that worked, and
+/// the next sweep pushes again.
+fn push_threads_to_device(app: &tauri::AppHandle, world: &World) {
+    use tauri_plugin_sms_capture::SmsCaptureExt;
+    let Ok(threads) = world.ingest().threads() else {
+        return;
+    };
+    let senders: Vec<String> = threads.iter().flat_map(|t| t.senders.clone()).collect();
+    if let Err(e) = app.sms_capture().set_threads(senders) {
+        trace!("could not push the sender list to the device: {e}");
+    }
+}
+
+/// **The threads this household reads money texts from.**
+///
+/// ★★ The shipped two come back in the same list as the ones he added, because
+/// they are the same kind of thing -- they are simply already there.
+#[tauri::command]
+#[specta::specta]
+pub fn threads(world: State<'_, World>) -> Result<Vec<crate::dto::ThreadDto>, String> {
+    Ok(world
+        .ingest()
+        .threads()
+        .map_err(|e| e.to_string())?
+        .iter()
+        .map(crate::dto::ThreadDto::of)
+        .collect())
+}
+
+/// **Add a thread**: a sender whose money texts this node should read.
+///
+/// ★★★ This is what turns "M-Pesa and KCB" into "any patterned money text a
+/// household actually gets". Nothing about the new thread is special-cased:
+/// once its texts are captured they reach the same train page every other
+/// shape does, and he teaches them the same way.
+#[tauri::command]
+#[specta::specta]
+pub fn declare_thread(
+    app: tauri::AppHandle,
+    world: State<'_, World>,
+    id: String,
+    label: String,
+    senders: Vec<String>,
+) -> Result<Vec<crate::dto::ThreadDto>, String> {
+    let t = sustena_core::Thread {
+        id: id.trim().to_lowercase().replace(' ', "_"),
+        label: if label.trim().is_empty() { id.clone() } else { label },
+        senders,
+    };
+    world.ingest().declare_thread(&t).map_err(|e| e.to_string())?;
+    push_threads_to_device(&app, &world);
+    threads(world)
+}
+
+/// Stop reading a thread. ★ Its captured messages are untouched -- forgetting a
+/// sender is a decision about the future, not an erasure of the past.
+#[tauri::command]
+#[specta::specta]
+pub fn forget_thread(
+    app: tauri::AppHandle,
+    world: State<'_, World>,
+    id: String,
+) -> Result<Vec<crate::dto::ThreadDto>, String> {
+    world.ingest().forget_thread(&id).map_err(|e| e.to_string())?;
+    push_threads_to_device(&app, &world);
+    threads(world)
+}
+
 // ── Orchie ──────────────────────────────────────────────────
 
 /// **The curated feed** — `compose(r)` over one household.
@@ -3250,18 +3326,21 @@ pub struct SmsSweep {
 /// read later needs no migration.
 const ANY_SOURCE: &str = "inbox";
 
-/// M-Pesa or KCB, decided by WHO SENT IT. Never by the wording: several real
-/// KCB messages say M-PESA in their own text and are still KCB.
-fn source_of(sender: &str) -> Option<&'static str> {
-    let s = sender.to_uppercase();
-    // KCB first. A sender carrying both substrings is the bank.
-    if s.contains("KCB") {
-        Some("kcb")
-    } else if s.contains("MPESA") {
-        Some("mpesa")
-    } else {
-        None
-    }
+/// Which thread sent it, decided by WHO SENT IT and never by the wording:
+/// several real KCB messages say M-PESA in their own text and are still KCB.
+///
+/// ★★★ It used to be two hard-coded names, and that was the whole ceiling on
+/// this feature. A household banking anywhere else -- Equity, a sacco, any of
+/// the services that send patterned money texts -- had no way in at all, not
+/// "worse support", none. The threads a person declared decide now, with the
+/// shipped two among them as ordinary entries.
+///
+/// ★★ Longest match wins inside `thread_for_sender`, which is what makes a
+/// declared `KCBBANK` beat the built-in `KCB` rather than losing to whichever
+/// was checked first. The old code's "KCB first" comment was that same concern
+/// solved by ordering, which stops working the moment a third name exists.
+fn source_of(sender: &str, threads: &[sustena_core::Thread]) -> Option<String> {
+    sustena_core::thread_for_sender(sender, threads).map(|t| t.id.clone())
 }
 
 /// The host's clock, in epoch milliseconds.
@@ -3285,13 +3364,17 @@ fn sweep(world: &World, sustain_id: &str, batch: SmsBatch) -> SmsSweep {
         remaining: batch.remaining,
         ..Default::default()
     };
+    // ★ Read once for the whole batch. Which threads a household reads does not
+    //   change halfway through a sweep, and re-reading the file per message
+    //   would put a disk read in the inner loop of a two-thousand-text backlog.
+    let threads = world.ingest().threads().unwrap_or_else(|_| sustena_core::built_in_threads());
     for m in batch.messages {
-        let Some(source) = source_of(&m.sender) else {
+        let Some(source) = source_of(&m.sender, &threads) else {
             out.skipped_other_senders += 1;
             continue;
         };
         out.read += 1;
-        match world.capture_at(sustain_id, source, &m.body, Some(m.timestamp_ms)) {
+        match world.capture_at(sustain_id, &source, &m.body, Some(m.timestamp_ms)) {
             Ok(Capture::Rejected { .. }) => out.refused += 1,
             // ★ Counted on its own. Folding these into "refused" would report
             //   a household as having declined two thousand messages it simply
@@ -3459,6 +3542,15 @@ pub fn sms_drain_queue(
     let finished = batch.remaining == 0;
     let swept = sweep(&world, &sustain_id, batch);
 
+    // ★★ Re-pushed on every drained sweep, so the device's own filter heals
+    //    itself. A reinstall, a cleared app storage, or a thread declared while
+    //    the plugin was unreachable would otherwise leave the phone reading a
+    //    stale list -- and the symptom would be texts silently not arriving,
+    //    which is the hardest kind of failure to notice.
+    if finished {
+        push_threads_to_device(&app, &world);
+    }
+
     // ★★★ **Re-read what an older build could not.** A message is parsed once,
     //     on the way in, and never again -- so every shape whose rule shipped
     //     AFTER it was captured stays unreadable for ever. His inbox had 62
@@ -3555,6 +3647,13 @@ pub fn sms_clear_prompt(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod feed_surface_tests {
+
+    /// The shipped two, which is what these tests are about: sender routing
+    /// with nothing declared. Threads a household adds are covered in
+    /// `sustena_core::sender` and in `ingest::thread_tests`.
+    fn shipped() -> Vec<sustena_core::Thread> {
+        sustena_core::built_in_threads()
+    }
     use super::*;
     use crate::ingest::IngestedMessage;
 
@@ -3622,18 +3721,18 @@ mod feed_surface_tests {
 
     #[test]
     fn a_text_is_filed_by_who_sent_it() {
-        assert_eq!(source_of("MPESA"), Some("mpesa"));
-        assert_eq!(source_of("KCB"), Some("kcb"));
+        assert_eq!(source_of("MPESA", &shipped()).as_deref(), Some("mpesa"));
+        assert_eq!(source_of("KCB", &shipped()).as_deref(), Some("kcb"));
     }
 
     #[test]
     fn case_and_decoration_in_the_sender_id_do_not_change_the_source() {
         // ★ Carriers are not consistent, and a missed match would file a real
         //   message under nothing at all.
-        assert_eq!(source_of("mpesa"), Some("mpesa"));
-        assert_eq!(source_of("MPesa"), Some("mpesa"));
-        assert_eq!(source_of("KCB-BANK"), Some("kcb"));
-        assert_eq!(source_of("SAFARICOM-MPESA"), Some("mpesa"));
+        assert_eq!(source_of("mpesa", &shipped()).as_deref(), Some("mpesa"));
+        assert_eq!(source_of("MPesa", &shipped()).as_deref(), Some("mpesa"));
+        assert_eq!(source_of("KCB-BANK", &shipped()).as_deref(), Some("kcb"));
+        assert_eq!(source_of("SAFARICOM-MPESA", &shipped()).as_deref(), Some("mpesa"));
     }
 
     #[test]
@@ -3646,18 +3745,18 @@ mod feed_surface_tests {
         //
         //     This asserts the tie-break, not the wording: a sender carrying
         //     both substrings resolves to the bank.
-        assert_eq!(source_of("KCB-MPESA"), Some("kcb"));
-        assert_eq!(source_of("MPESA-KCB"), Some("kcb"));
+        assert_eq!(source_of("KCB-MPESA", &shipped()).as_deref(), Some("kcb"));
+        assert_eq!(source_of("MPESA-KCB", &shipped()).as_deref(), Some("kcb"));
     }
 
     #[test]
     fn an_unknown_sender_is_filed_nowhere() {
         // ★★ `sweep` counts a `None` as skipped rather than guessing a source.
         //    Guessing would put a stranger's text through a money parser.
-        assert_eq!(source_of("+254712345678"), None);
-        assert_eq!(source_of("EQUITY"), None);
-        assert_eq!(source_of("SAFARICOM"), None);
-        assert_eq!(source_of(""), None);
+        assert_eq!(source_of("+254712345678", &shipped()).as_deref(), None);
+        assert_eq!(source_of("EQUITY", &shipped()).as_deref(), None);
+        assert_eq!(source_of("SAFARICOM", &shipped()).as_deref(), None);
+        assert_eq!(source_of("", &shipped()).as_deref(), None);
     }
 
     #[test]
@@ -3669,7 +3768,7 @@ mod feed_surface_tests {
         // It contains "M-PESA" with a hyphen, which is not the substring
         // matched, so the honest answer is None either way -- the point of the
         // assertion is that a body must never be the input.
-        assert_eq!(source_of(body), None);
+        assert_eq!(source_of(body, &shipped()).as_deref(), None);
     }
 }
 

@@ -60,7 +60,7 @@ public class SmsReceiver extends BroadcastReceiver {
             return;
         }
 
-        if (!SmsSenderFilter.isKnownFinancialSender(sender)) {
+        if (!SmsSenderFilter.isKnownFinancialSender(context, sender)) {
             return; // someone else's text. Dropped here.
         }
 
