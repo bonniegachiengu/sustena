@@ -3747,6 +3747,7 @@ mod feed_surface_tests {
             sent_at_ms: None,
             event_at_ms: None,
             seq,
+            origin: None,
         }
     }
 
