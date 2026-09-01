@@ -46,7 +46,7 @@ import {
 } from "../ui";
 import { engine, fmt, type CaptureResult, type MessageDto } from "../lib/engine";
 import { world } from "../lib/live";
-import { Classify } from "./Orchie";
+import { Classify, TrainFlow } from "./Orchie";
 
 /** Tier → how it reads. ★ One place, so a tier cannot mean two things. */
 const TIER: Record<string, { tone: "ok" | "warn" | "danger" | "quiet"; says: string }> = {
@@ -68,6 +68,14 @@ export default function Ingest() {
   const [shown, setShown] = createSignal(PAGE);
   /** Which message the classifier is open on, if any. */
   const [classifying, setClassifying] = createSignal<string | null>(null);
+  /**
+   * The message he chose to teach Orchie the shape of.
+   *
+   * (*) The whole message, not its id: teaching needs the raw text, and the
+   * row already holds it. Looking it up again to get back what was in hand
+   * would be a round trip for nothing.
+   */
+  const [training, setTraining] = createSignal<MessageDto | null>(null);
 
   /**
    * (*) **Newest first.** The message a person still remembers is the cheapest
@@ -340,24 +348,31 @@ export default function Ingest() {
                       </NoteRow>
                     )}
                   </Show>
-                  <Show when={m.needsAttention}>
-                    {/* (*) The chips sit inside their own click boundary. The
-                        block around them is a door to the classifier, and
-                        "mark handled" is a different decision -- letting it
-                        bubble would open the flow the person just declined. */}
-                    <div onClick={(e) => e.stopPropagation()}>
+                  {/* (*) The chips sit inside their own click boundary. The
+                      block around them is a door to the classifier, and
+                      "mark handled" is a different decision -- letting it
+                      bubble would open the flow the person just declined. */}
+                  <div onClick={(e) => e.stopPropagation()}>
                     <Cluster>
-                      {/* (*) The dead end this replaced read "you choose the
-                          pocket in Orchie" -- a surface telling a person that
-                          the thing they came to do happens somewhere else. It
-                          happens here now, in the same classifier Orchie and the
-                          notification tap open. */}
-                      <Chip onClick={() => setClassifying(m.id)}>classify</Chip>
-                      <Chip onClick={() => void resolve(m)}>mark handled</Chip>
-                      <Caption>filed here · nothing moves until you confirm</Caption>
+                      <Show when={m.needsAttention}>
+                        {/* (*) The dead end this replaced read "you choose the
+                            pocket in Orchie" -- a surface telling a person that
+                            the thing they came to do happens somewhere else. It
+                            happens here now, in the same classifier Orchie and the
+                            notification tap open. */}
+                        <Chip onClick={() => setClassifying(m.id)}>classify</Chip>
+                        <Chip onClick={() => void resolve(m)}>mark handled</Chip>
+                      </Show>
+                      {/* (*) Offered on EVERY row, not only the ones nothing
+                          read. A message the parser read WRONGLY is worth
+                          teaching too, and it is the row he is looking at when
+                          he notices -- so the way to fix it belongs here. */}
+                      <Chip onClick={() => setTraining(m)}>train from this</Chip>
+                      <Show when={m.needsAttention}>
+                        <Caption>filed here · nothing moves until you confirm</Caption>
+                      </Show>
                     </Cluster>
-                    </div>
-                  </Show>
+                  </div>
                 </div>
               )}
             </For>
@@ -406,6 +421,23 @@ export default function Ingest() {
         Orchie feed renders and the notification tap opens -- imported, not
         reimplemented, so a change to how classifying works reaches every
         entry point at once. */}
+    {/* (*) The same teaching the Orchie feed and its classify card open --
+        imported, not reimplemented, so what a learned rule means is one
+        answer given in one place. */}
+    <Show when={training()}>
+      {(m) => (
+        <Modal title="teach this shape" onClose={() => setTraining(null)}>
+          <TrainFlow
+            sustain={sustain()}
+            messageId={m().id}
+            raw={m().rawPayload}
+            onDone={() => void refetch()}
+            onClose={() => setTraining(null)}
+          />
+        </Modal>
+      )}
+    </Show>
+
     <Show when={classifying()}>
       {(id) => (
         <Modal title="classify" onClose={() => setClassifying(null)}>

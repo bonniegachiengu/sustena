@@ -282,8 +282,8 @@
     {
       "id": "mpesa_pochi_withdraw",
       "source": "mpesa",
-      "version": 2,
-      "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed,?\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+has been moved from\\s+(?P<what>.+?)\\s+on\\s+(?P<date>\\S+).*?New (?:Pochi|business) balance is Ksh\\s*(?P<pochi>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
+      "version": 3,
+      "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed,?\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+has been moved from\\s+(?P<what>.+?)\\s+on\\s+(?P<date>\\S+)(?:\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}(?::\\d{2})?\\s*[APap]\\.?[Mm]\\.?))?.*?New (?:Pochi|business) balance is Ksh\\s*(?P<pochi>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
       "extract": {
         "ref": {
           "type": "string",
@@ -324,6 +324,11 @@
           "type": "string",
           "group": "date",
           "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
+          "value": null
         }
       },
       "status": "mapped",
@@ -346,8 +351,8 @@
     {
       "id": "mpesa_mshwari_withdraw",
       "source": "mpesa",
-      "version": 2,
-      "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.?\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+transferred from\\s+(?P<what>.+?)\\s+on\\s+(?P<date>\\S+).*?M-Shwari balance is Ksh\\s*(?P<mshwari>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
+      "version": 3,
+      "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.?\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+transferred from\\s+(?P<what>.+?)\\s+on\\s+(?P<date>\\S+)(?:\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}(?::\\d{2})?\\s*[APap]\\.?[Mm]\\.?))?.*?M-Shwari balance is Ksh\\s*(?P<mshwari>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
       "extract": {
         "ref": {
           "type": "string",
@@ -387,6 +392,11 @@
         "date": {
           "type": "string",
           "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
           "value": null
         }
       },
@@ -410,8 +420,8 @@
     {
       "id": "mpesa_mshwari_deposit",
       "source": "mpesa",
-      "version": 2,
-      "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.?\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+transferred to\\s+(?P<what>.+?)\\s+on\\s+(?P<date>\\S+).*?M-Shwari saving account balance is Ksh\\s*(?P<mshwari>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
+      "version": 3,
+      "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.?\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+transferred to\\s+(?P<what>.+?)\\s+on\\s+(?P<date>\\S+)(?:\\s+at\\s+(?P<time>\\d{1,2}:\\d{2}(?::\\d{2})?\\s*[APap]\\.?[Mm]\\.?))?.*?M-Shwari saving account balance is Ksh\\s*(?P<mshwari>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost[,:]?\\s*Ksh\\.?\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
       "extract": {
         "ref": {
           "type": "string",
@@ -451,6 +461,11 @@
         "date": {
           "type": "string",
           "group": "date",
+          "value": null
+        },
+        "time": {
+          "type": "string",
+          "group": "time",
           "value": null
         }
       },
@@ -594,6 +609,53 @@
       "examples": [
         "QGH7XJ4P2Q Confirmed. Ksh450.00 paid to NAIROBI WATER for account 998877 on 2/8/26 at 4:30 PM. New M-PESA balance is Ksh12,050.00"
       ]
+    },
+    {
+      "id": "mpesa_pochi_sent",
+      "source": "mpesa",
+      "version": 1,
+      "pattern": "(?P<ref>[A-Z0-9]{10})\\s+Confirmed\\.?\\s*Ksh\\s*(?P<amount>[\\d,]+(?:\\.\\d{1,2})?)\\s+sent to\\s+(?P<name>.+?)\\s+on\\s+(?P<date>\\S+)\\s+at\\s+(?P<time>[\\d:]+\\s*[APap]\\.?[Mm]\\.?)[\\s.]*New business balance is Ksh\\s*(?P<pochi>[\\d,]+(?:\\.\\d{1,2})?)(?:.*?Transaction cost,?\\s*Ksh\\s*(?P<cost>[\\d,]+(?:\\.\\d{1,2})?))?",
+      "extract": {
+        "ref": {
+          "type": "string",
+          "group": "ref",
+          "value": null
+        },
+        "amount": {
+          "type": "amount",
+          "group": "amount",
+          "value": null
+        },
+        "pochi_balance": {
+          "type": "amount",
+          "group": "pochi",
+          "value": null
+        },
+        "transaction_cost": {
+          "type": "amount",
+          "group": "cost",
+          "value": null
+        },
+        "counterparty": {
+          "type": "string",
+          "group": "name",
+          "value": null
+        },
+        "direction": {
+          "type": "literal",
+          "group": null,
+          "value": "sent"
+        },
+        "instrument": {
+          "type": "literal",
+          "group": null,
+          "value": "pochi"
+        }
+      },
+      "status": "parsed_unmapped",
+      "operator": null,
+      "params": {},
+      "reason_template": "a payment from Pochi la Biashara"
     },
     {
       "id": "mpesa_sent",
@@ -1092,7 +1154,7 @@
       "id": "kcb_send_to_mpesa",
       "source": "kcb",
       "version": 1,
-      "pattern": "SEND\\s+TO\\s+M-?PESA\\s+request\\s+of\\s+KES\\s*(?P<amount>[\\d,]+\\.?\\d*)\\s+from\\s+(?P<from_account>[\\d*]{4,})\\s+to\\s+(?P<to_account>[\\d*]{4,})\\s*[-–]\\s*(?P<name>[A-Za-z .'-]+?)\\s+has been received(?:[^.]*\\.)?\\s*(?:M-?PESA\\s+REF:?\\s*(?P<ref>[A-Z0-9]{8,}))?",
+      "pattern": "SEND\\s+TO\\s+M-?PESA\\s+request\\s+of\\s+KES\\s*(?P<amount>[\\d,]+\\.?\\d*)\\s+from\\s+(?P<from_account>[\\d*]{4,})\\s+to\\s+(?P<to_account>[\\d*]{4,})\\s*[-–—]\\s*(?P<name>[A-Za-z .'-]+?)(?:\\s+at\\s+(?P<when>[\\d/\\-]+\\s+[\\d:]+\\s*[APap]\\.?[Mm]\\.?))?\\s+has\\s+been\\s+(?:received|processed\\s+successfully)\\b(?:(?s:.*?)Transaction\\s+cost\\s+KES\\s*(?P<cost>[\\d,]+\\.?\\d*))?(?:(?s:.*?)M-?PESA\\s+REF:?\\s*(?P<ref>[A-Z0-9]{8,}))?",
       "extract": {
         "amount": {
           "type": "amount",
@@ -1123,6 +1185,11 @@
           "type": "string",
           "group": "ref",
           "value": null
+        },
+        "transaction_cost": {
+          "type": "amount",
+          "group": "cost",
+          "value": null
         }
       },
       "status": "parsed_unmapped",
@@ -1135,8 +1202,8 @@
       "trust": "shipped",
       "provenance": "sustena_core",
       "examples": [
-        "SEND TO M-PESA request of KES 2,000 from 135***140 to 254***143 - BONVENTURE NGUGI MAINA has been received for processing.",
-        "SEND TO M-PESA request of KES 2,000 from 135***140 to 254***143 - BONVENTURE NGUGI MAINA has been received for processing. M-PESA REF: UHPB9480T9"
+        "SEND TO M-PESA request of KES 2,000 from 135***140 to 254***143 - PLACEHOLDER NAME has been received for processing.",
+        "SEND TO M-PESA request of KES 2,000 from 135***140 to 254***143 - PLACEHOLDER NAME has been received for processing. M-PESA REF: UHPB9480T9"
       ]
     },
     {
@@ -1501,7 +1568,7 @@
       "trust": "shipped",
       "provenance": "sustena_core",
       "examples": [
-        "Ksh40000.00 sent to KCB Pay Bill 522522 for account 135***5140 BONVENTURE NGUGI MAINA has been received on 01/08/2026 at 12:21 PM. M-PESA ref UH1B91GYNW"
+        "Ksh40000.00 sent to KCB Pay Bill 522522 for account 135***5140 PLACEHOLDER NAME has been received on 01/08/2026 at 12:21 PM. M-PESA ref UH1B91GYNW"
       ]
     },
     {

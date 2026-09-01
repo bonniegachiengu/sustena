@@ -522,7 +522,7 @@ mod tests {
         // real M-Pesa messages on 26 Aug: Fuliza (borrow, interest, repay,
         // statement), Pochi la Biashara (in, moved), M-Shwari (in, out),
         // send-to-a-business, agent withdrawal, balance enquiry, failures.
-        assert_eq!(seed_rules("mpesa").len(), 19);
+        assert_eq!(seed_rules("mpesa").len(), 20);
         // 17 = 15 original shapes, + kcb_reversal for refund netting, and
         // + kcb_send_to_mpesa, the real shape his KCB app sends when he moves
         // his own money to his own M-Pesa.
@@ -723,5 +723,170 @@ mod tests {
                 assert_eq!(a, b, "{}", rule.id);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod transfer_pair_tests {
+    //! Two texts, one movement of his own money.
+    //!
+    //! ★★★ **The join key is the M-PESA ref both sides carry.** Amount and time
+    //! alone coincide -- two payments of the same size in the same minute are
+    //! ordinary -- but a shared reference is the banks agreeing they are talking
+    //! about one event. The KCB side's OWN reference is a different code
+    //! entirely, so a rule that captured the leading token would produce two
+    //! unrelated messages that never join.
+    //!
+    //! ★ Real shapes from his handset, with the name replaced and the account
+    //! number redacted. The structure and the ref-sharing are what is under
+    //! test, and both survive the substitution.
+    use super::*;
+
+    // KCB -> M-Pesa, KES 1,500, shared ref UHQB94FQ88.
+    const P1_MPESA: &str = "UHQB94FQ88 Confirmed.You have received Ksh1,500.00 from KCB 1 501901 \
+        on 26/8/26 at 9:21 PM New M-PESA balance is Ksh1,500.00.";
+    const P1_KCB: &str = "MBNHEUDF935FAZOG Completed. Your SEND TO M-PESA request of KES 1,500.00 \
+        from 135****140 to 254****143 - PLACEHOLDER NAME at 2026-08-26 09:21:49 PM has been \
+        processed successfully. Transaction cost KES 15.00 Incl. Tax Amount KES 1.50. \
+        M-PESA REF: UHQB94FQ88.";
+
+    // M-Pesa -> KCB paybill, KES 40,000, shared ref UH1B91GYNW.
+    const P2_KCB: &str = "Ksh 40000.00 sent to KCB Pay Bill 522522 for account 135***5140 \
+        PLACEHOLDER NAME has been received on 01/08/2026 at 12:21 PM. M-PESA ref UH1B91GYNW.";
+    const P2_MPESA: &str = "UH1B91GYNW Confirmed. KSH40,000.00 sent to KCB Paybill AC for account \
+        135***5140 on 1/8/26 at 12:21 PM New M-PESA balance is KSH16,877.47. \
+        Transaction cost, KSH99.00.";
+
+    fn refv(text: &str, source: &str) -> Option<String> {
+        parse_message(text, Some(source), &[])
+            .parsed_fields()
+            .get("ref")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }
+
+    fn amount(text: &str, source: &str) -> Option<f64> {
+        parse_message(text, Some(source), &[]).parsed_fields().get("amount").and_then(|v| v.as_f64())
+    }
+
+    #[test]
+    fn both_sides_of_a_kcb_to_mpesa_transfer_carry_the_same_ref() {
+        // ★★★ The join, on his real texts. The KCB message leads with its OWN
+        //     reference (MBNHEUDF935FAZOG) and carries the shared one at the
+        //     end -- capture the wrong token and these never meet.
+        assert_eq!(refv(P1_MPESA, "mpesa").as_deref(), Some("UHQB94FQ88"));
+        assert_eq!(refv(P1_KCB, "kcb").as_deref(), Some("UHQB94FQ88"));
+        assert_eq!(amount(P1_MPESA, "mpesa"), amount(P1_KCB, "kcb"));
+    }
+
+    #[test]
+    fn the_kcb_side_does_not_take_its_own_reference_as_the_key() {
+        // ★★ Stated as its own test because it is the whole failure mode: a
+        //    leading all-caps token looks exactly like a reference.
+        assert_ne!(refv(P1_KCB, "kcb").as_deref(), Some("MBNHEUDF935FAZOG"));
+    }
+
+    #[test]
+    fn both_sides_of_an_mpesa_to_kcb_paybill_carry_the_same_ref() {
+        assert_eq!(refv(P2_KCB, "kcb").as_deref(), Some("UH1B91GYNW"));
+        assert_eq!(refv(P2_MPESA, "mpesa").as_deref(), Some("UH1B91GYNW"));
+        assert_eq!(amount(P2_KCB, "kcb"), amount(P2_MPESA, "mpesa"));
+    }
+
+    #[test]
+    fn the_two_pairs_do_not_join_to_each_other() {
+        // ★ Different transfers must stay different. If refs collided the join
+        //   would hide a real transaction, which is the dangerous direction.
+        assert_ne!(refv(P1_MPESA, "mpesa"), refv(P2_MPESA, "mpesa"));
+    }
+
+    #[test]
+    fn money_leaving_kcb_asks_rather_than_filing_itself() {
+        // ★★★ The money-safety asymmetry, on the new shape. An outbound
+        //     transfer is not something to record without him.
+        let t = parse_message(P1_KCB, Some("kcb"), &[]);
+        assert_eq!(t.status(), "parsed_unmapped");
+        assert_eq!(t.parsed_fields().get("direction").and_then(|v| v.as_str()), Some("sent"));
+    }
+}
+
+#[cfg(test)]
+mod transfer_fee_read_tests {
+    //! The charge is read off his real text, not assumed.
+    use super::*;
+
+    #[test]
+    fn the_kcb_transfer_text_yields_its_transaction_cost() {
+        // ★★★ KES 1,500 moved, KES 15 charged -- his real pair. Without this
+        //     the move would show as costing nothing.
+        let t = parse_message(
+            "MBNHEUDF935FAZOG Completed. Your SEND TO M-PESA request of KES 1,500.00 from \
+             135****140 to 254****143 - PLACEHOLDER NAME at 2026-08-26 09:21:49 PM has been \
+             processed successfully. Transaction cost KES 15.00 Incl. Tax Amount KES 1.50. \
+             M-PESA REF: UHQB94FQ88.",
+            Some("kcb"),
+            &[],
+        );
+        let f = t.parsed_fields();
+        assert_eq!(f.get("amount").and_then(|v| v.as_f64()), Some(1500.0));
+        assert_eq!(f.get("transaction_cost").and_then(|v| v.as_f64()), Some(15.0));
+        assert_eq!(f.get("ref").and_then(|v| v.as_str()), Some("UHQB94FQ88"));
+    }
+
+    #[test]
+    fn the_shape_that_quotes_no_cost_still_reads() {
+        // ★★ Both the cost and the ref are optional. Requiring either would
+        //    stop reading a text we can otherwise read perfectly well.
+        let t = parse_message(
+            "SEND TO M-PESA request of KES 2,000 from 135***140 to 254***143 - \
+             PLACEHOLDER NAME has been received for processing.",
+            Some("kcb"),
+            &[],
+        );
+        assert_eq!(t.parsed_fields().get("amount").and_then(|v| v.as_f64()), Some(2000.0));
+        assert!(t.parsed_fields().get("transaction_cost").is_none(), "absent, not invented");
+    }
+}
+
+#[cfg(test)]
+mod pochi_sent_tests {
+    //! Money leaving the business account, from his real inbox.
+    use super::*;
+
+    // Real shape, name replaced. 122 texts in his inbox quote a business
+    // balance and none of them had a rule that read this one.
+    const SENT: &str = "UFDB97W6VC Confirmed. Ksh250.00 sent to PLACEHOLDER NAME on 13/6/26 \
+        at 10:58 PM. New business balance is Ksh343.00. Transaction cost, Ksh7.00. \
+        Amount you can transact within the day is 499,490.00.";
+
+    #[test]
+    fn a_payment_from_pochi_is_read_as_pochi() {
+        // ★★★ The BUSINESS balance is what makes this a Pochi text. An ordinary
+        //     send quotes the M-PESA balance instead, and reading this one as
+        //     ordinary would file the payment against the wrong pot and leave
+        //     Pochi with no balance at all.
+        let t = parse_message(SENT, Some("mpesa"), &[]);
+        let f = t.parsed_fields();
+        assert_eq!(t.parser_name(), "mpesa_pochi_sent");
+        assert_eq!(f.get("instrument").and_then(|v| v.as_str()), Some("pochi"));
+        assert_eq!(f.get("pochi_balance").and_then(|v| v.as_f64()), Some(343.0));
+        assert_eq!(f.get("amount").and_then(|v| v.as_f64()), Some(250.0));
+        assert_eq!(f.get("transaction_cost").and_then(|v| v.as_f64()), Some(7.0));
+    }
+
+    #[test]
+    fn money_leaving_still_asks() {
+        assert_eq!(parse_message(SENT, Some("mpesa"), &[]).status(), "parsed_unmapped");
+    }
+
+    #[test]
+    fn an_ordinary_send_is_not_captured_by_it() {
+        // ★★ It must not swallow the common shape. An ordinary payment quotes
+        //    the M-PESA balance and has to keep its own rule.
+        let ordinary = "UHVB950V7A Confirmed. Ksh5.00 sent to PLACEHOLDER NAME on 31/8/26 \
+            at 11:20 PM. New M-PESA balance is Ksh0.00. Transaction cost, Ksh0.00.";
+        let t = parse_message(ordinary, Some("mpesa"), &[]);
+        assert_ne!(t.parser_name(), "mpesa_pochi_sent");
+        assert_eq!(t.parsed_fields().get("instrument").and_then(|v| v.as_str()), None);
     }
 }

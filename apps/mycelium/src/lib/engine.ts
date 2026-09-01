@@ -52,6 +52,9 @@ import {
   type OrderDto,
   type MessageDto,
   type FeedDto,
+  type ShapeOfferDto,
+  type TrainedFigureDto,
+  type RoutedFigureDto,
   type InferenceDto,
   type AggregateDto,
   type SustainDto,
@@ -107,6 +110,9 @@ export type {
   OrderDto,
   MessageDto,
   FeedDto,
+  ShapeOfferDto,
+  TrainedFigureDto,
+  RoutedFigureDto,
   InferenceDto,
   SustainDto,
   SustainSummary,
@@ -318,6 +324,17 @@ export const engine = {
   /** "remember this format" — synthesise a rule from a confirmed correction. */
   learnRule: async (messageId: string, operator: string, params: JsonValue): Promise<string> =>
     unwrap(await commands.learnRule(messageId, operator, params)),
+
+  /**
+   * Teach a shape by pointing at its figures.
+   *
+   * ★★ Distinct from `learnRule` on purpose. That one learns from a decision
+   * already made; this one takes what a person is SAYING about the message in
+   * front of them — and only this one can carry more than one figure, which a
+   * Fuliza borrow needs and a single confirmed amount cannot express.
+   */
+  trainRule: async (messageId: string, figures: TrainedFigureDto[]): Promise<string> =>
+    unwrap(await commands.trainRule(messageId, figures)),
   sustain: (id: string | null = null): Promise<SustainDto | null> => commands.getSustain(id),
   select: async (id: string): Promise<boolean> => unwrap(await commands.selectSustain(id)),
   create: async (

@@ -222,6 +222,10 @@ pub struct SelfMove {
     pub from_account: String,
     pub to_account: String,
     pub amount: f64,
+    /// What the bank charged. ★ This is the shape that quotes a cost most
+    /// often -- one text naming both ends usually names the fee as well.
+    #[serde(default)]
+    pub fee: f64,
     /// An income already filed for the other side of this same move, if the
     /// partner text arrived first and applied itself.
     pub undo_income: Option<String>,
@@ -240,6 +244,23 @@ pub struct MatchedTransfer {
     pub from_account: String,
     pub to_account: String,
     pub amount: f64,
+    /// What the bank charged for the move, read off the leaving leg.
+    ///
+    /// ★★ Money that does NOT come back. The transfer nets to zero across his
+    /// own accounts; the charge is a real cost, and leaving it out would show a
+    /// move that cost nothing.
+    #[serde(default)]
+    pub fee: f64,
+    /// ★★★ An income already filed for the arriving leg, to be taken back off
+    /// the books before this transfer credits the same account.
+    ///
+    /// Every text saying money arrived reads the same whether it came from an
+    /// employer or from his own other account, so the arriving leg files itself
+    /// as income long before the leaving leg is read. Booking the transfer on
+    /// top of that would count the money twice -- once as earnings that never
+    /// happened, once as the move it really was.
+    #[serde(default)]
+    pub undo_income: Option<String>,
 }
 
 /// What a transfer pass found, and what it would not guess at.
@@ -425,6 +446,20 @@ pub struct FiledSpend {
     pub seq: u64,
 }
 
+/// What the bank charged for a move, if the text says.
+///
+/// ★ Absent is 0.0, not a guess. A shape whose rule extracts no cost is a shape
+/// we do not know the cost of, and inventing one would be worse than omitting it.
+fn fee_of(m: &IngestedMessage) -> f64 {
+    m.parsed_fields
+        .get("transaction_cost")
+        .and_then(|v| {
+            v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
+        })
+        .filter(|f| *f > 0.0)
+        .unwrap_or(0.0)
+}
+
 /// A balance a bank itself reported, and when.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Reported {
@@ -432,11 +467,43 @@ pub struct Reported {
     pub at: i64,
 }
 
-/// The running balance a message states, if it states one.
-fn reported_balance_of(m: &IngestedMessage) -> Option<f64> {
-    m.parsed_fields.get("balance_after").and_then(|v| {
+/// The running balance a message states, and **which account it belongs to**.
+///
+/// ★★★ **One sender is not one account.** Pochi la Biashara and M-Shwari arrive
+/// from the SAME M-Pesa sender as the main wallet, so keying a reported balance
+/// by `source_id` collapses three different pots into one and shows whichever
+/// text landed last. The rules already separate them — they carry an
+/// `instrument` — so the account is read from the message rather than guessed
+/// from the sender.
+///
+/// ★★ **`loan_balance` is deliberately not a balance here.** KCB's loan texts
+/// state what is OWED, and a household that saw its debt reported as money it
+/// holds would be looking at the most dangerous wrong number this app could
+/// print. Absent from the list on purpose, not by omission.
+///
+/// ★ Order matters: an instrument's own field is read before `balance_after`,
+/// because `mpesa_pochi_received` states the **business** balance in
+/// `balance_after` — so the field name alone would attribute it to the wrong
+/// pot, and the instrument is what settles it.
+pub fn reported_account_of(m: &IngestedMessage) -> Option<(String, f64)> {
+    let number = |v: &serde_json::Value| {
         v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
-    })
+    };
+    let balance = ["pochi_balance", "mshwari_balance", "actual_balance", "balance_after"]
+        .iter()
+        .find_map(|f| m.parsed_fields.get(*f).and_then(number))?;
+
+    // The pot this message is about: its own instrument, or the sender's main
+    // wallet when it names none.
+    let account = m
+        .parsed_fields
+        .get("instrument")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| m.source_id.clone());
+
+    Some((account, balance))
 }
 
 /// A declared capture source.
@@ -862,6 +929,7 @@ impl Ingested {
             from_account: from_account.to_string(),
             to_account: to_account.to_string(),
             amount,
+            fee: fee_of(m),
             undo_income: None,
             reclaimed_from_skip: false,
         })
@@ -1016,9 +1084,50 @@ impl Ingested {
                         from_account: out.source_id.clone(),
                         to_account: inn.source_id.clone(),
                         amount,
+                        fee: fee_of(out),
+                        // Both legs are still open, so nothing has been filed.
+                        undo_income: None,
                     });
                 }
-                0 if applied_partner > 0 => report.blocked_by_applied_income += 1,
+                0 if applied_partner > 0 => {
+                    // ★★★ The arriving leg already filed itself as income. That
+                    //     is not a reason to do nothing -- doing nothing IS the
+                    //     overstatement, and it sits on his totals until
+                    //     somebody notices. There is an inverse now, so the
+                    //     move can be booked properly: take the income back
+                    //     off, then record the transfer.
+                    //
+                    // ★★ ONLY on a shared reference, never on amount alone.
+                    //    This path UNDOES something already on the books, so
+                    //    it may act only on proof that the two texts are one
+                    //    event. A wrong join here would delete a real income.
+                    let filed = out.reference().and_then(|r| {
+                        all_mine
+                            .iter()
+                            .filter(|m| m.id != out.id && m.applied && m.netted_with.is_none())
+                            .filter(|m| m.operator.as_deref() == Some("budget.record_income"))
+                            .filter(|m| m.source_id != out.source_id)
+                            .find(|m| m.reference() == Some(r))
+                    });
+                    match filed {
+                        Some(inn) => {
+                            taken.insert(out.id.clone());
+                            taken.insert(inn.id.clone());
+                            report.matched.push(MatchedTransfer {
+                                out_leg: out.id.clone(),
+                                in_leg: inn.id.clone(),
+                                from_account: out.source_id.clone(),
+                                to_account: inn.source_id.clone(),
+                                amount,
+                                fee: fee_of(out),
+                                undo_income: Some(inn.id.clone()),
+                            });
+                        }
+                        // Amount-only resemblance to something already filed:
+                        // still reported, still not acted on.
+                        None => report.blocked_by_applied_income += 1,
+                    }
+                }
                 0 => report.unpaired += 1,
                 _ => report.ambiguous += 1,
             }
@@ -1061,10 +1170,23 @@ impl Ingested {
             if m.sustain_id != sustain_id {
                 continue;
             }
-            let (Some(at), Some(balance)) = (m.sent_at_ms, reported_balance_of(&m)) else {
+            // ★★★ When the message SAYS it happened, falling back to when the
+            //     device read it — the same precedence `mark_seen` has always
+            //     used, and it belongs here for the same reason.
+            //
+            //     Reading `sent_at_ms` alone was the bug. Android reports an
+            //     arrival time for a text it saw arrive; it reports none for
+            //     one read out of the inbox afterwards, which is every message
+            //     in a backfill. So a household that imported its history had
+            //     hundreds of perfectly readable balance statements that this
+            //     skipped, and the accounts they belonged to showed nothing.
+            //     The date is in the message, and the rules already capture it.
+            let (Some(at), Some((account, balance))) =
+                (m.event_at_ms.or(m.sent_at_ms), reported_account_of(&m))
+            else {
                 continue;
             };
-            let e = out.entry(m.source_id.clone()).or_insert(Reported { balance, at });
+            let e = out.entry(account).or_insert(Reported { balance, at });
             if at > e.at {
                 *e = Reported { balance, at };
             }
@@ -1270,10 +1392,26 @@ impl Ingested {
     /// The key a message would be skipped by, if it can teach one at all.
     pub fn skip_key(m: &IngestedMessage) -> Option<String> {
         let parser = m.parser_name.trim();
-        if parser.is_empty() {
+        if !parser.is_empty() {
+            return Some(format!("{}::{}", m.source_id, parser));
+        }
+        // ★★★ **A shape nothing can READ can still be one he never wants to be
+        //     asked about.** This returned None for an unparsed message, so
+        //     "never ask me about these again" was impossible for precisely the
+        //     messages that ask most: his inbox holds a cluster of 232 alike
+        //     texts nothing recognises, and the only answer available for them
+        //     was to dismiss them one at a time.
+        //
+        // ★★ The skeleton is the same shape key the corpus clusters on, so the
+        //    rule he teaches covers exactly the group he was shown -- not a
+        //    wider net he did not agree to.
+        let shape = sustena_core::corpus::skeleton(&m.raw_payload);
+        if shape.is_empty() {
             return None;
         }
-        Some(format!("{}::{}", m.source_id, parser))
+        use sha2::{Digest as _, Sha256};
+        let digest = format!("{:x}", Sha256::digest(shape.as_bytes()));
+        Some(format!("{}::shape::{}", m.source_id, &digest[..16]))
     }
 
     /// Learn "never ask me about these again", and apply it to what is already
@@ -1413,8 +1551,23 @@ impl Ingested {
             all.into_iter().filter(|m| m.needs_attention()).collect();
         waiting.sort_by_key(|m| (m.deferred_at.is_none(), m.deferred_at, Reverse(m.seq)));
 
+        // ★★★ **The cap must never hide a capture that just arrived.**
+        //     Order is unchanged -- something put off still comes back first,
+        //     which is the whole meaning of deferring. What was wrong is that
+        //     `take(limit)` counted them together: press "later" enough and
+        //     the postponed ones fill the window, so a just-captured text
+        //     falls off the end and looks to a household exactly like a
+        //     capture that never happened. That was the report.
+        //
+        // ★★ So the postponed group yields room rather than the fresh one.
+        //    A thing set aside is a thing he has already seen; a thing that
+        //    just arrived, he has not.
+        let (put_off, fresh): (Vec<IngestedMessage>, Vec<IngestedMessage>) =
+            waiting.into_iter().partition(|m| m.deferred_at.is_some());
+        let room = limit.saturating_sub(fresh.len());
         let mut out = processed;
-        out.extend(waiting.into_iter().take(limit));
+        out.extend(put_off.into_iter().take(room));
+        out.extend(fresh.into_iter().take(limit));
         Ok(out)
     }
 
@@ -1537,6 +1690,129 @@ impl Ingested {
     /// it is a new line, and the latest wins.
     pub fn add_rule(&self, rule: &ParseRule) -> StoreResult<()> {
         append_line(&self.rules_path(), rule)
+    }
+
+    /// Read the messages nothing could read, now that a rule exists for them.
+    ///
+    /// ★★★ **It improves READABILITY and never moves money.** A fresh capture
+    /// that maps to income applies itself, and that is right for a text that
+    /// just arrived. Doing the same to a backlog is not the same act: these
+    /// messages have been sitting for days, some may already have been recorded
+    /// by hand, and applying eleven of them because one rule was taught could
+    /// double-count a household's month in a single tap. So a re-parsed message
+    /// is only ever left `parsed_unmapped` -- readable, with its operator and
+    /// amount filled in, and still requiring the person to confirm.
+    ///
+    /// ★★ That keeps the money-safety asymmetry pointing the same way it
+    /// always has: the engine may read without asking, and may not spend
+    /// without asking.
+    ///
+    /// ★ Untouched: anything ignored, resolved, or already parsed. Re-reading
+    /// a message somebody already dealt with would undo their answer.
+    ///
+    /// Returns how many became readable.
+    pub fn reparse_unparsed(
+        &self,
+        sustain_id: &str,
+        rules: &[ParseRule],
+    ) -> StoreResult<usize> {
+        let mut changed = 0usize;
+        for m in self.current()? {
+            if m.sustain_id != sustain_id || m.status != "unparsed" || m.ignored || m.resolved {
+                continue;
+            }
+            let t = parse_message(&m.raw_payload, Some(&m.source_id), rules);
+            // Still unreadable, or a secret: leave it exactly as it was.
+            if t.operator().is_none() && t.parsed_fields().is_empty() {
+                continue;
+            }
+            let mut next = m.clone();
+            // ★★★ Never "mapped" here -- see above. Readable, not filed.
+            next.status = "parsed_unmapped".to_string();
+            next.parser_name = t.parser_name().to_string();
+            next.reason = t.reason().to_string();
+            next.parsed_fields = t.parsed_fields();
+            // ★★★ **The date it just gained is the time it happened.**
+            //
+            //     A message becomes readable here, which means it acquires the
+            //     `date` and `time` fields it did not have a moment ago. Not
+            //     deriving the event time from them left the whole re-read
+            //     backlog with no time at all — and anything ordered by "when
+            //     did this happen" skips a message with no answer, which is
+            //     exactly why 172 Pochi and M-Shwari texts could be read and
+            //     still not produce a balance.
+            //
+            // ★★ `.or(...)` and not an overwrite: a time already derived was
+            //    derived the same way from the same fields, and a re-read that
+            //    could quietly move when something happened would be worse than
+            //    one that leaves it alone.
+            next.event_at_ms = next.event_at_ms.or_else(|| {
+                sustena_core::event_time(&t.parsed_fields())
+                    .map(|at| at.to_epoch_ms(SENDER_UTC_OFFSET_MINUTES))
+            });
+            next.external_ref = t.external_ref().map(str::to_string);
+            next.operator = t.operator().map(str::to_string);
+            next.params = t.operator_params();
+            self.append_message(&next)?;
+            changed += 1;
+        }
+        Ok(changed)
+    }
+
+    /// **Give already-stored messages the time they always carried.**
+    ///
+    /// ★★★ Every message says when it happened; a great many had no event time
+    /// recorded anyway. Two causes, both real and both fixed elsewhere: rules
+    /// that let `.*?` swallow the " at 9:10 PM" plainly written in the text, and
+    /// a re-read that updated the fields without re-deriving the time from
+    /// them. Neither can help a message already on disk, which is what this is
+    /// for.
+    ///
+    /// The effect it exists to end: `sent_at_ms` is only ever set for a message
+    /// the device watched ARRIVE. Everything read out of the inbox afterwards
+    /// — which is an entire imported history — had no time at all, so anything
+    /// ordered by "when did this happen" skipped it. A household could hold a
+    /// hundred perfectly readable balance statements for an account and see
+    /// nothing for it.
+    ///
+    /// ★★ It only ever ADDS a time. It does not change status, does not file,
+    /// does not touch `filed`, and never overwrites a time already there. The
+    /// worst it can do is leave a message exactly as it found it.
+    ///
+    /// ★ Fields are refreshed alongside, because the time is derived FROM them
+    /// and a rule that has since learned to capture the clock is precisely the
+    /// case this repairs. A message whose re-read no longer recognises it is
+    /// left completely alone rather than downgraded.
+    ///
+    /// Returns how many gained a time.
+    pub fn backfill_event_times(
+        &self,
+        sustain_id: &str,
+        rules: &[ParseRule],
+    ) -> StoreResult<usize> {
+        let mut repaired = 0usize;
+        for m in self.current()? {
+            if m.sustain_id != sustain_id || m.event_at_ms.is_some() {
+                continue;
+            }
+            let t = parse_message(&m.raw_payload, Some(&m.source_id), rules);
+            let fields = t.parsed_fields();
+            // Nothing recognises it now: leave it exactly as it is.
+            if fields.is_empty() {
+                continue;
+            }
+            let Some(at) = sustena_core::event_time(&fields)
+                .map(|at| at.to_epoch_ms(SENDER_UTC_OFFSET_MINUTES))
+            else {
+                continue;
+            };
+            let mut next = m.clone();
+            next.event_at_ms = Some(at);
+            next.parsed_fields = fields;
+            self.append_message(&next)?;
+            repaired += 1;
+        }
+        Ok(repaired)
     }
 
     /// The rules in force: the latest version of each id.
@@ -2692,9 +2968,18 @@ mod reconciliation_tests {
 
     /// A real M-Pesa text, which like all of them ends by stating the balance.
     fn paid(ref_: &str, amount: &str, balance: &str) -> String {
+        paid_on(ref_, amount, balance, "20/7/26", "4:30 PM")
+    }
+
+    /// The same, with the day and clock it states made explicit.
+    ///
+    /// ★★ Added because the ordering tests below used to vary only the ARRIVAL
+    /// time, which was all the reconciler could see. It reads the stated time
+    /// now, so a fixture that says the same thing twice is no longer a fair
+    /// test of which message is newer -- and real messages never do.
+    fn paid_on(ref_: &str, amount: &str, balance: &str, date: &str, time: &str) -> String {
         format!(
-            "{ref_} Confirmed. Ksh{amount} paid to NAIVAS SUPERMARKET on 20/7/26 \
-             at 4:30 PM. New M-PESA balance is Ksh{balance}"
+            "{ref_} Confirmed. Ksh{amount} paid to NAIVAS SUPERMARKET on {date} at {time}.              New M-PESA balance is Ksh{balance}"
         )
     }
 
@@ -2713,27 +2998,67 @@ mod reconciliation_tests {
         //     newest-first, so capture order runs BACKWARDS through time. Here
         //     the older text is captured second, exactly as a real read does
         //     it, and the newer balance must still win.
+        //
+        // ★★ The two texts now state DIFFERENT days. They used to differ only
+        //    in arrival time, which was all the reconciler could see; it reads
+        //    what the message says now, so a fixture claiming the same moment
+        //    twice would no longer be asking a fair question.
         let (ing, rules) = store("ordering");
-        ing.capture_at("h", "mpesa", &paid("AAAAAAAAAA", "100.00", "9,000.00"), &rules,
-                       Some(2_000_000))
-            .expect("newer, read first");
-        ing.capture_at("h", "mpesa", &paid("BBBBBBBBBB", "200.00", "500.00"), &rules,
-                       Some(1_000_000))
-            .expect("older, read second");
+        ing.capture_at(
+            "h",
+            "mpesa",
+            &paid_on("AAAAAAAAAA", "100.00", "9,000.00", "21/7/26", "4:30 PM"),
+            &rules,
+            Some(2_000_000),
+        )
+        .expect("newer, read first");
+        ing.capture_at(
+            "h",
+            "mpesa",
+            &paid_on("BBBBBBBBBB", "200.00", "500.00", "20/7/26", "4:30 PM"),
+            &rules,
+            Some(1_000_000),
+        )
+        .expect("older, read second");
 
         let got = ing.reported_balances("h").expect("balances");
         assert_eq!(got["mpesa"].balance, 9000.0, "the newer text is the freshest word");
-        assert_eq!(got["mpesa"].at, 2_000_000);
     }
 
     #[test]
-    fn a_message_with_no_arrival_time_is_skipped_rather_than_assumed_recent() {
-        // ★★ Anything captured before arrival times were carried, and anything
-        //    pasted by hand. Guessing it were recent would let it overrule a
-        //    genuinely newer text about the same account.
+    fn a_message_with_no_arrival_time_is_placed_by_what_it_says() {
+        // ★★★ This used to assert the message was SKIPPED, and that was right
+        //     while the only reading available was when the device saw it
+        //     arrive: guessing such a message were recent would let it overrule
+        //     a genuinely newer text about the same account.
+        //
+        //     It is not a guess any more. The message states the day and the
+        //     clock, so it is placed at when it says it happened. That matters
+        //     well beyond a tidier rule -- Android reports an arrival time only
+        //     for a text it watched arrive, so an imported history has none at
+        //     all (2715 of 2757 real messages), and skipping them meant whole
+        //     accounts held a stated balance and showed nothing.
         let (ing, rules) = store("undated");
         ing.capture_at("h", "mpesa", &paid("CCCCCCCCCC", "100.00", "7,777.00"), &rules, None)
             .expect("undated");
+        let got = ing.reported_balances("h").expect("balances");
+        assert_eq!(got["mpesa"].balance, 7777.0, "read off the text, placed by its own date");
+    }
+
+    #[test]
+    fn a_message_that_says_nothing_about_when_is_still_skipped() {
+        // ★★ The original safety property, kept. No arrival time AND no date
+        //    in the text is genuinely no reading at all, and assuming it recent
+        //    would let it overrule a newer word about the same account.
+        let (ing, rules) = store("timeless");
+        ing.capture_at(
+            "h",
+            "mpesa",
+            "Confirmed. Ksh100.00 paid to NAIVAS SUPERMARKET. New M-PESA balance is Ksh7,777.00",
+            &rules,
+            None,
+        )
+        .expect("timeless");
         assert!(!ing.reported_balances("h").expect("balances").contains_key("mpesa"));
     }
 
@@ -3001,12 +3326,13 @@ mod transfer_tests {
         // halves are in hand the income is already on the books, which is
         // precisely the overstated income this mechanism exists to prevent.
         //
-        // It cannot be undone yet: there is no inverse of budget.record_income,
-        // and building one needs each applied income to carry the id of the
-        // message that caused it so the right entry comes back out. Until then
-        // this reports the situation instead of returning a bare zero, because
-        // "no transfers found" and "found one and cannot act on it" are
-        // different answers.
+        // ★★ These two texts quote DIFFERENT references, so they are joinable
+        //    only on amount -- and amount alone may not undo something already
+        //    on the books. An inverse exists now, but using it here would risk
+        //    deleting a real income on a resemblance. So this stays reported
+        //    rather than acted on, which is the safe direction: "found one and
+        //    cannot act on it" is a different answer from "no transfers found".
+        //    The shared-reference case IS acted on -- see the test below.
         let (ing, rules) = store("blocked");
         knows_his_own(&ing);
         ing.capture("h", "mpesa", &paid_to_account(OWN_ACCT, "2,000.00"), &rules).expect("out");
@@ -3368,19 +3694,28 @@ mod skip_rule_tests {
     }
 
     #[test]
-    fn a_message_no_rule_could_read_teaches_nothing() {
-        // ★★★ The safety property. `parser_name` is empty for anything
-        //     unparsed, so a rule keyed on it would mean "skip everything I
-        //     cannot read" — and that pile is exactly the one that needs a
-        //     person's eyes.
+    fn a_message_with_no_shape_at_all_teaches_nothing() {
+        // ★★★ The safety property, and what it now rests on.
+        //
+        //     It used to rest on `parser_name`, which is empty for anything
+        //     unparsed — so silencing an unreadable message would have meant
+        //     "skip everything I cannot read", and that pile is exactly the one
+        //     that needs a person's eyes. Keying on the SHAPE removes the
+        //     danger instead of accepting it: two unreadable texts that read
+        //     differently have different skeletons, so silencing one says
+        //     nothing about the other (see the test below).
+        //
+        //     What is still refused is a text with no skeleton to key on. There
+        //     is nothing there to recognise a second message by, so a rule
+        //     would be a guess, and it is not made.
         let (ing, rules) = store("unparsed");
         let Capture::Stored(m) = ing
-            .capture("h", "kcb", "some text no rule has ever seen", &rules)
+            .capture("h", "kcb", "!!! ??? ...", &rules)
             .expect("capture") else { panic!("stored") };
         assert_eq!(m.status, "unparsed");
 
         let out = ing.learn_skip("h", &m.id).expect("learn");
-        assert!(out.unlearnable, "it refuses rather than learning the dangerous rule");
+        assert!(out.unlearnable, "it refuses rather than learning a rule it cannot key");
         assert_eq!(out.cleared, 0);
         assert_eq!(waiting(&ing), 1, "and it is still there for him to look at");
         assert!(ing.skip_rules().expect("rules").is_empty(), "nothing was written");
@@ -4251,5 +4586,602 @@ mod intake_window_tests {
             1,
             "the record it already had is untouched"
         );
+    }
+}
+
+#[cfg(test)]
+mod per_account_balance_tests {
+    //! One sender is not one account: M-Pesa, Pochi and M-Shwari all arrive
+    //! from the same sender and are three different pots.
+    use super::*;
+
+    fn msg(source: &str, fields: &[(&str, serde_json::Value)]) -> IngestedMessage {
+        let mut m = IngestedMessage {
+            id: "x".into(),
+            sustain_id: "h".into(),
+            source_id: source.into(),
+            raw_payload: String::new(),
+            dedup_key: "k".into(),
+            status: "parsed_unmapped".into(),
+            parser_name: "p".into(),
+            reason: String::new(),
+            parsed_fields: Default::default(),
+            external_ref: None,
+            operator: None,
+            params: Default::default(),
+            applied: false,
+            gate_reason: None,
+            resolved: false,
+            netted_with: None,
+            same_event_as: None,
+            reclaimed: false,
+            deferred_at: None,
+            filed: Vec::new(),
+            ignored: false,
+            sent_at_ms: None,
+            event_at_ms: None,
+            seq: 1,
+        };
+        for (k, v) in fields {
+            m.parsed_fields.insert((*k).into(), v.clone());
+        }
+        m
+    }
+
+    #[test]
+    fn the_main_wallet_is_keyed_by_its_sender() {
+        let m = msg("mpesa", &[("balance_after", serde_json::json!(12154.47))]);
+        assert_eq!(reported_account_of(&m), Some(("mpesa".into(), 12154.47)));
+    }
+
+    #[test]
+    fn pochi_and_mshwari_are_their_own_pots_not_the_wallet() {
+        // ★★★ The whole point. Both arrive from the M-Pesa sender; keying by
+        //     sender would collapse three balances into whichever text landed
+        //     last, and the household would be shown one number for three pots.
+        let pochi = msg(
+            "mpesa",
+            &[("instrument", serde_json::json!("pochi")), ("pochi_balance", serde_json::json!(3400.0))],
+        );
+        assert_eq!(reported_account_of(&pochi), Some(("pochi".into(), 3400.0)));
+
+        let mshwari = msg(
+            "mpesa",
+            &[("instrument", serde_json::json!("mshwari")), ("mshwari_balance", serde_json::json!(20000.0))],
+        );
+        assert_eq!(reported_account_of(&mshwari), Some(("mshwari".into(), 20000.0)));
+    }
+
+    #[test]
+    fn a_pochi_receipt_states_the_business_balance_in_balance_after() {
+        // ★★★ The trap. `mpesa_pochi_received` puts the BUSINESS balance in
+        //     `balance_after`, so reading the field name alone would file it as
+        //     the main wallet. The instrument is what settles it.
+        let m = msg(
+            "mpesa",
+            &[("instrument", serde_json::json!("pochi")), ("balance_after", serde_json::json!(880.0))],
+        );
+        assert_eq!(reported_account_of(&m), Some(("pochi".into(), 880.0)));
+    }
+
+    #[test]
+    fn a_loan_balance_is_never_reported_as_money_held() {
+        // ★★★ The most dangerous wrong number this app could print. KCB's loan
+        //     texts state what is OWED; showing that as a balance would tell a
+        //     household it has money it does not have.
+        let m = msg("kcb", &[("loan_balance", serde_json::json!(5000.0))]);
+        assert_eq!(reported_account_of(&m), None, "debt is not a balance");
+    }
+
+    #[test]
+    fn a_message_stating_no_balance_reports_none() {
+        assert_eq!(reported_account_of(&msg("mpesa", &[])), None);
+    }
+
+    #[test]
+    fn a_comma_formatted_balance_is_read_as_a_number() {
+        // ★ Real texts write "Ksh12,154.47"; the field arrives as a string.
+        let m = msg("kcb", &[("actual_balance", serde_json::json!("59,055.00"))]);
+        assert_eq!(reported_account_of(&m), Some(("kcb".into(), 59_055.00)));
+    }
+
+    #[test]
+    fn fuliza_states_no_balance_so_it_contributes_no_account() {
+        // ★ It carries an instrument but no balance field -- an instrument
+        //   alone must not conjure a pot with an unknown figure in it.
+        let m = msg("mpesa", &[("instrument", serde_json::json!("fuliza"))]);
+        assert_eq!(reported_account_of(&m), None);
+    }
+}
+
+#[cfg(test)]
+mod queue_cap_tests {
+    //! The window is finite; what it drops must never be the thing that just
+    //! arrived and has not been seen.
+    use super::*;
+
+    fn waiting(seq: u64, deferred: Option<u64>) -> IngestedMessage {
+        IngestedMessage {
+            id: format!("m{seq}"),
+            sustain_id: "h".into(),
+            source_id: "mpesa".into(),
+            raw_payload: format!("text {seq}"),
+            dedup_key: format!("k{seq}"),
+            status: "parsed_unmapped".into(),
+            parser_name: "p".into(),
+            reason: String::new(),
+            parsed_fields: Default::default(),
+            external_ref: None,
+            operator: None,
+            params: Default::default(),
+            applied: false,
+            gate_reason: None,
+            resolved: false,
+            netted_with: None,
+            same_event_as: None,
+            reclaimed: false,
+            deferred_at: deferred,
+            filed: Vec::new(),
+            ignored: false,
+            sent_at_ms: None,
+            event_at_ms: None,
+            seq,
+        }
+    }
+
+    /// `navigable`'s selection, over an already-sorted waiting list.
+    fn window(waiting: Vec<IngestedMessage>, limit: usize) -> Vec<String> {
+        let mut w = waiting;
+        w.sort_by_key(|m| (m.deferred_at.is_none(), m.deferred_at, Reverse(m.seq)));
+        let (put_off, fresh): (Vec<_>, Vec<_>) = w.into_iter().partition(|m| m.deferred_at.is_some());
+        let room = limit.saturating_sub(fresh.len());
+        let mut out: Vec<String> = put_off.into_iter().take(room).map(|m| m.id).collect();
+        out.extend(fresh.into_iter().take(limit).map(|m| m.id));
+        out
+    }
+
+    #[test]
+    fn a_just_captured_message_survives_a_full_window() {
+        // ★★★ The reported failure. Enough postponed messages to fill the
+        //     window, then one that just arrived -- which must still be there.
+        let mut all: Vec<IngestedMessage> =
+            (1..=5).map(|i| waiting(i, Some(i * 100))).collect();
+        all.push(waiting(99, None));
+
+        let got = window(all, 5);
+        assert!(got.contains(&"m99".to_string()), "the new capture is reachable: {got:?}");
+    }
+
+    #[test]
+    fn what_was_put_off_still_comes_first_when_there_is_room() {
+        // ★★ The documented behaviour, unchanged: deferring means it comes
+        //    back, and it comes back at the top.
+        let got = window(vec![waiting(1, None), waiting(2, Some(50)), waiting(3, None)], 10);
+        assert_eq!(got, vec!["m2", "m3", "m1"]);
+    }
+
+    #[test]
+    fn the_postponed_group_is_what_yields_when_space_runs_out() {
+        // ★ A thing set aside has already been seen; a thing that just arrived
+        //   has not. So the trimming falls on the group he has looked at.
+        let mut all: Vec<IngestedMessage> = (1..=4).map(|i| waiting(i, Some(i))).collect();
+        all.push(waiting(50, None));
+        all.push(waiting(51, None));
+
+        let got = window(all, 3);
+        assert!(got.contains(&"m51".to_string()) && got.contains(&"m50".to_string()));
+        assert_eq!(got.len(), 3, "the window is still respected");
+    }
+}
+
+#[cfg(test)]
+mod reparse_tests {
+    //! Teaching a format makes the messages already in that format readable --
+    //! and never files them.
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("mycelium-reparse-{name}"));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).expect("scratch");
+        p
+    }
+
+    /// A rule that reads a shape the shipped set does not.
+    fn house_rule() -> ParseRule {
+        serde_json::from_value(serde_json::json!({
+            "id": "learned_test_shape",
+            "source": "mpesa",
+            "version": 1,
+            "pattern": r"CHAMA dues Ksh\s*(?P<amount>[\d,]+(?:\.\d{1,2})?) received",
+            "extract": {
+                "amount": { "type": "amount", "group": "amount", "value": null },
+                "direction": { "type": "literal", "group": null, "value": "received" }
+            },
+            "status": "parsed_unmapped",
+            "operator": null,
+            "params": {},
+            "reason_template": "a chama contribution"
+        }))
+        .expect("a well-formed rule")
+    }
+
+    fn capture_unreadable(ing: &Ingested, raw: &str) -> String {
+        match ing.capture_at("h", "mpesa", raw, &[], Some(1_788_000_000_000)).expect("capture") {
+            Capture::Stored(m) => {
+                assert_eq!(m.status, "unparsed", "the shipped rules must not read this");
+                m.id
+            }
+            other => panic!("expected a stored message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_messages_already_in_that_shape_become_readable() {
+        // ★★★ The promise the shape card makes. Three sitting unreadable; one
+        //     rule; all three readable, without three separate corrections.
+        let ing = Ingested::at(scratch("siblings")).expect("ingest");
+        let a = capture_unreadable(&ing, "CHAMA dues Ksh 500.00 received today");
+        let b = capture_unreadable(&ing, "CHAMA dues Ksh 1,200.00 received today");
+        let c = capture_unreadable(&ing, "CHAMA dues Ksh 80.00 received today");
+
+        let n = ing.reparse_unparsed("h", &[house_rule()]).expect("reparse");
+        assert_eq!(n, 3, "every sibling was re-read");
+
+        let now = ing.current().expect("current");
+        for id in [&a, &b, &c] {
+            let m = now.iter().rev().find(|m| &m.id == id).expect("the message");
+            assert_eq!(m.status, "parsed_unmapped", "readable");
+            assert!(m.parsed_fields.contains_key("amount"), "with its amount read");
+        }
+    }
+
+    #[test]
+    fn a_reparse_never_files_anything() {
+        // ★★★ The safety property, and the reason this is not just "re-run
+        //     capture". These have been sitting for days and some may already
+        //     have been recorded by hand; applying them because one rule was
+        //     taught could double-count a household's month in a single tap.
+        let ing = Ingested::at(scratch("never-files")).expect("ingest");
+        capture_unreadable(&ing, "CHAMA dues Ksh 500.00 received today");
+
+        ing.reparse_unparsed("h", &[house_rule()]).expect("reparse");
+
+        let m = ing.current().expect("current").pop().expect("the message");
+        assert!(!m.applied, "nothing was filed");
+        assert_ne!(m.status, "mapped", "and it was not marked as if it had been");
+        assert!(m.needs_attention(), "it still asks the person");
+    }
+
+    #[test]
+    fn a_message_somebody_already_answered_is_left_alone() {
+        // ★★ Re-reading a message he has dealt with would undo his answer.
+        let ing = Ingested::at(scratch("resolved")).expect("ingest");
+        let id = capture_unreadable(&ing, "CHAMA dues Ksh 500.00 received today");
+        assert!(ing.resolve(&id).expect("resolve"));
+
+        assert_eq!(ing.reparse_unparsed("h", &[house_rule()]).expect("reparse"), 0);
+        let m = ing.current().expect("current").into_iter().rev().find(|m| m.id == id).expect("m");
+        assert!(m.resolved, "his answer stands");
+    }
+
+    #[test]
+    fn a_message_no_rule_reads_is_untouched() {
+        // ★ A rule that does not match must change nothing at all.
+        let ing = Ingested::at(scratch("no-match")).expect("ingest");
+        capture_unreadable(&ing, "Some notice that matches nothing at all");
+        assert_eq!(ing.reparse_unparsed("h", &[house_rule()]).expect("reparse"), 0);
+    }
+}
+
+#[cfg(test)]
+mod paired_transfer_undo_tests {
+    //! A transfer must net to zero however the two texts arrive.
+    //!
+    //! ★★★ The arriving leg files itself as income the moment it is captured --
+    //! every text saying money arrived reads the same whether it came from an
+    //! employer or from his own other account. If the leaving leg is read
+    //! afterwards, the income is already on the books, and booking the transfer
+    //! on top of it counts the money twice.
+    use super::*;
+
+    const REF: &str = "UHQB94FQ88";
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let p = std::env::temp_dir().join(format!("mycelium-pairundo-{name}"));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).expect("scratch");
+        let ing = Ingested::at(p).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    fn his_numbers(ing: &Ingested) {
+        ing.set_own_identifiers(&OwnIdentifiers { mpesa: vec!["254700000143".into()], kcb: vec!["112233".into()] })
+            .expect("identifiers");
+    }
+
+    /// Money leaving M-Pesa for his own KCB account, quoting the shared ref.
+    fn out_leg() -> String {
+        format!(
+            "{REF} Confirmed. Ksh2,000.00 sent to KCB BANK for account 112233 on 2/8/26 \
+             at 9:00 AM. New M-PESA balance is Ksh12,050.00"
+        )
+    }
+
+    /// KCB's own words for that same money arriving, quoting the SAME ref.
+    fn in_leg() -> String {
+        format!(
+            "Ksh2,000.00 sent to KCB account PLACEHOLDER NAME 112233 has been received \
+             on 01/08/2026. M-PESA Ref {REF}"
+        )
+    }
+
+    #[test]
+    fn a_filed_income_is_named_for_undoing_when_the_refs_agree() {
+        // ★★★ The order that used to overstate him: the arriving leg lands and
+        //     files itself, the leaving leg is read later. The pair must still
+        //     become one move, with the income named so it comes back off.
+        let (ing, rules) = store("undo");
+        his_numbers(&ing);
+
+        let inn = ing.capture("h", "kcb", &in_leg(), &rules).expect("in");
+        let in_id = match inn {
+            Capture::Stored(m) => m.id,
+            other => panic!("expected a stored message, got {other:?}"),
+        };
+        // It really did apply itself on the way in.
+        ing.record_outcome(&in_id, true, None).expect("applied");
+
+        ing.capture("h", "mpesa", &out_leg(), &rules).expect("out");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert_eq!(r.matched.len(), 1, "the pair is one move: {r:?}");
+        assert_eq!(
+            r.matched[0].undo_income.as_deref(),
+            Some(in_id.as_str()),
+            "and the income already filed is named so it can come back off",
+        );
+        assert_eq!(r.blocked_by_applied_income, 0, "it is no longer merely reported");
+    }
+
+    #[test]
+    fn the_order_does_not_change_the_answer() {
+        // ★★★ Leaving leg first this time. The arriving leg still maps and
+        //     files itself the instant it is captured -- which makes the undo
+        //     the NORMAL path here, not an edge case -- so the answer must be
+        //     the same move with the same income named, either way round. A
+        //     total that depends on which text arrived first is not a total.
+        let (ing, rules) = store("order");
+        his_numbers(&ing);
+        ing.capture("h", "mpesa", &out_leg(), &rules).expect("out");
+        let inn = ing.capture("h", "kcb", &in_leg(), &rules).expect("in");
+        let in_id = match inn {
+            Capture::Stored(m) => m.id,
+            other => panic!("expected a stored message, got {other:?}"),
+        };
+        ing.record_outcome(&in_id, true, None).expect("applied");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert_eq!(r.matched.len(), 1, "one move either way round: {r:?}");
+        assert_eq!(r.matched[0].undo_income.as_deref(), Some(in_id.as_str()));
+    }
+
+    #[test]
+    fn an_amount_lookalike_that_was_filed_is_not_undone() {
+        // ★★★ The dangerous direction, refused. Undoing an income deletes
+        //     something real, so it may act only on a shared reference -- never
+        //     on two texts that merely happen to agree about a number.
+        let (ing, rules) = store("lookalike");
+        his_numbers(&ing);
+
+        let inn = ing
+            .capture(
+                "h",
+                "kcb",
+                "Ksh2,000.00 sent to KCB account PLACEHOLDER NAME 112233 has been received \
+                 on 01/08/2026. M-PESA Ref ZZZZ99ZZZZ",
+                &rules,
+            )
+            .expect("in");
+        if let Capture::Stored(m) = inn {
+            ing.record_outcome(&m.id, true, None).expect("applied");
+        }
+        ing.capture("h", "mpesa", &out_leg(), &rules).expect("out");
+
+        let r = ing.find_transfers("h").expect("transfers");
+        assert!(r.matched.is_empty(), "a resemblance is not proof");
+        assert_eq!(r.blocked_by_applied_income, 1, "reported, and left alone");
+    }
+}
+
+#[cfg(test)]
+mod skip_by_shape_tests {
+    //! "Never ask me about these again" has to work for the messages that ask
+    //! most -- the ones nothing can read.
+    use super::*;
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let p = std::env::temp_dir().join(format!("mycelium-skipshape-{name}"));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).expect("scratch");
+        let ing = Ingested::at(p).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    /// Two texts of one unreadable shape, differing only in their particulars.
+    fn notice(amount: &str, day: &str) -> String {
+        format!("UHOB943IFK Notice: Ksh{amount} of your limit was reviewed on {day}/8/26 by SYSTEM")
+    }
+
+    #[test]
+    fn a_shape_nothing_reads_can_still_be_silenced() {
+        // ★★★ The case that was impossible. His inbox holds hundreds of alike
+        //     texts nothing recognises, and the only answer available was to
+        //     dismiss them one at a time.
+        let (ing, rules) = store("silence");
+        let first = match ing.capture("h", "mpesa", &notice("100", "1"), &rules).expect("a") {
+            Capture::Stored(m) => {
+                assert_eq!(m.status, "unparsed", "nothing reads it, which is the point");
+                m.id
+            }
+            other => panic!("expected a stored message, got {other:?}"),
+        };
+        ing.capture("h", "mpesa", &notice("250", "2"), &rules).expect("b");
+        ing.capture("h", "mpesa", &notice("999", "3"), &rules).expect("c");
+
+        let learned = ing.learn_skip("h", &first).expect("skip");
+        assert!(!learned.unlearnable, "an unread shape is still a shape");
+        assert_eq!(learned.cleared, 3, "and the pile it was meant to clear is cleared");
+        assert_eq!(waiting(&ing), 0);
+    }
+
+    #[test]
+    fn silencing_one_shape_leaves_the_others_alone() {
+        // ★★★ The rule must cover exactly the group he was shown and no wider
+        //     net. Silencing one kind of notice must not silence his money.
+        let (ing, rules) = store("narrow");
+        let first = match ing.capture("h", "mpesa", &notice("100", "1"), &rules).expect("a") {
+            Capture::Stored(m) => m.id,
+            other => panic!("unexpected {other:?}"),
+        };
+        ing.capture("h", "mpesa", "Some entirely different text about something else", &rules)
+            .expect("other");
+
+        ing.learn_skip("h", &first).expect("skip");
+        assert_eq!(waiting(&ing), 1, "the unrelated message still asks");
+    }
+
+    fn waiting(ing: &Ingested) -> usize {
+        ing.current().expect("current").iter().filter(|m| m.needs_attention()).count()
+    }
+}
+
+#[cfg(test)]
+mod backfill_event_time_tests {
+    use super::*;
+    use std::{env, fs, path::PathBuf};
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-backfill-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    /// A real M-Shwari text. It states the day and the clock, and until the
+    /// rule was taught to capture the clock it produced no event time at all.
+    const MSHWARI: &str = "UHHB93DK8Y Confirmed.Ksh5,000.00 transferred from M-Shwari account on 17/8/26 at 8:23 PM. M-Shwari balance is Ksh3.64 .M-PESA balance is Ksh8,801.32 .Transaction cost Ksh.0.00";
+
+    fn seeded() -> Vec<ParseRule> {
+        sustena_core::all_seed_rules()
+    }
+
+    /// Store a message the way an INBOX READ does: no arrival time, because
+    /// Android only reports one for a text it watched arrive.
+    fn store_without_arrival(ing: &Ingested, raw: &str, seq: u64) -> IngestedMessage {
+        let rules = seeded();
+        let Capture::Stored(m) = ing.capture("h", "mpesa", raw, &rules).expect("capture") else {
+            panic!("stored")
+        };
+        let mut m = *m;
+        m.sent_at_ms = None;
+        m.event_at_ms = None;
+        m.seq = seq;
+        ing.append_message(&m).expect("append");
+        m
+    }
+
+    #[test]
+    fn a_message_with_no_arrival_time_still_says_when_it_happened() {
+        // ★★★ The whole bug, in one test. 2715 of 2757 real messages had no
+        //     arrival time, so every account whose balance lived in one of
+        //     them showed nothing at all.
+        let ing = Ingested::at(scratch("says-when")).expect("ingest");
+        store_without_arrival(&ing, MSHWARI, 1);
+        assert!(
+            ing.reported_balances("h").expect("balances").get("mshwari").is_none(),
+            "nothing to order by, so nothing to report"
+        );
+
+        let n = ing.backfill_event_times("h", &seeded()).expect("backfill");
+        assert_eq!(n, 1);
+
+        let got = ing.reported_balances("h").expect("balances");
+        let m = got.get("mshwari").expect("the account now reports");
+        assert_eq!(m.balance, 3.64, "and it is what the message says, to the cent");
+    }
+
+    #[test]
+    fn the_latest_by_the_clock_wins_not_the_latest_read() {
+        // ★★★ Two balances on ONE day, which is exactly the case that was
+        //     unorderable. A backlog is read newest-first, so trusting store
+        //     order would take the OLDEST figure as the freshest word.
+        let ing = Ingested::at(scratch("clock-wins")).expect("ingest");
+        let early = "UGUB917DH8 Confirmed, Ksh30,000.00 has been moved from your Pochi account to your M-PESA account on 30/7/26 at 7:57 AM. New Pochi balance is Ksh20,000.00. New M-PESA balance is Ksh1.00. Transaction cost, Ksh0.00.";
+        let late = "UGUB91AU3E Confirmed, Ksh20,000.00 has been moved from your Pochi account to your M-PESA account on 30/7/26 at 9:10 PM. New Pochi balance is Ksh0.00. New M-PESA balance is Ksh2.00. Transaction cost, Ksh0.00.";
+        // Stored newest-first, as a real inbox read arrives.
+        store_without_arrival(&ing, late, 1);
+        store_without_arrival(&ing, early, 2);
+
+        ing.backfill_event_times("h", &seeded()).expect("backfill");
+        let got = ing.reported_balances("h").expect("balances");
+        assert_eq!(
+            got.get("pochi").expect("pochi reports").balance,
+            0.0,
+            "9:10 PM is later than 7:57 AM, whatever order they were read in"
+        );
+    }
+
+    #[test]
+    fn it_never_overwrites_a_time_already_known() {
+        // ★★ A message the device watched arrive already has a real reading.
+        //    A repair that could quietly move when something happened would be
+        //    worse than one that leaves it alone.
+        let ing = Ingested::at(scratch("no-overwrite")).expect("ingest");
+        let mut m = store_without_arrival(&ing, MSHWARI, 1);
+        m.event_at_ms = Some(42);
+        ing.append_message(&m).expect("append");
+
+        assert_eq!(ing.backfill_event_times("h", &seeded()).expect("backfill"), 0);
+        let got = ing.current().expect("current");
+        let after = got.iter().find(|x| x.id == m.id).expect("still there");
+        assert_eq!(after.event_at_ms, Some(42), "left exactly as it was");
+    }
+
+    #[test]
+    fn a_message_nothing_can_read_is_left_completely_alone() {
+        // ★★ No rule recognises it, so there is no date to derive from and
+        //    nothing honest to do. It must not be downgraded on the way past.
+        let ing = Ingested::at(scratch("unreadable")).expect("ingest");
+        let m = store_without_arrival(&ing, "a text no rule has ever seen", 1);
+        assert_eq!(ing.backfill_event_times("h", &seeded()).expect("backfill"), 0);
+        let got = ing.current().expect("current");
+        let after = got.iter().find(|x| x.id == m.id).expect("still there");
+        assert_eq!(after.status, m.status);
+        assert!(after.event_at_ms.is_none());
+    }
+
+    #[test]
+    fn it_files_nothing_and_moves_no_money() {
+        // ★★★ A repair that could commit anything would be a money bug wearing
+        //     a maintenance hat. It only ever adds a time.
+        let ing = Ingested::at(scratch("files-nothing")).expect("ingest");
+        let m = store_without_arrival(&ing, MSHWARI, 1);
+        ing.backfill_event_times("h", &seeded()).expect("backfill");
+        let got = ing.current().expect("current");
+        let after = got.iter().find(|x| x.id == m.id).expect("still there");
+        assert!(after.filed.is_empty(), "nothing was filed");
+        assert_eq!(after.resolved, m.resolved);
+        assert_eq!(after.ignored, m.ignored);
+    }
+
+    #[test]
+    fn it_is_safe_to_run_twice() {
+        let ing = Ingested::at(scratch("twice")).expect("ingest");
+        store_without_arrival(&ing, MSHWARI, 1);
+        assert_eq!(ing.backfill_event_times("h", &seeded()).expect("first"), 1);
+        assert_eq!(ing.backfill_event_times("h", &seeded()).expect("second"), 0);
     }
 }

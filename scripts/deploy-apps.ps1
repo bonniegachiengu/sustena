@@ -328,12 +328,61 @@ if (-not $DesktopOnly) {
     if ($phoneSkipped) {
         Note "not installed -- no device. The APK is ready at $apk"
     } else {
+        # *** `adb install` is NOT used, and that is deliberate. MIUI refuses
+        #     it outright with INSTALL_FAILED_USER_RESTRICTED ("Install
+        #     canceled by user") on this device even with USB debugging
+        #     authorised -- a phone-side policy, not something the flags here
+        #     can talk it out of. Pushing the file and letting the package
+        #     manager install it locally is the route that works, and it has
+        #     the side benefit of a byte count on both sides of the wire.
+        $staged = '/data/local/tmp/mycelium-deploy.apk'
+        & $adb push $apk $staged | Out-Null
+        if ($LASTEXITCODE -ne 0) { Die "adb push failed ($LASTEXITCODE)." }
+
+        # *** Compared before installing. A truncated push installs a
+        #     truncated app, and the failure would surface as something
+        #     inexplicable on his screen rather than as a push that went wrong.
+        $localSize = (Get-Item $apk).Length
+        $pushedSize = (& $adb shell stat -c %s $staged | Out-String).Trim()
+        if ("$pushedSize" -ne "$localSize") {
+            Die "the APK arrived on the phone as $pushedSize bytes but is $localSize here."
+        }
+
         # -r keeps his data: identity, household, peer book.
-        & $adb install -r $apk | Out-Null
-        if ($LASTEXITCODE -ne 0) { Die "adb install failed ($LASTEXITCODE)." }
+        #
+        # *** Retried ONCE, because MIUI's refusal is transient. An install
+        #     that fails with INSTALL_FAILED_USER_RESTRICTED and then succeeds
+        #     seconds later on the identical file is a phone-side policy check
+        #     losing a race, not a bad APK -- observed exactly that, and it
+        #     cost a manual step. One retry, and only for that refusal: a
+        #     genuine failure still stops, because retrying a real error until
+        #     it looks like success is how a broken deploy gets called done.
+        $installOut = (& $adb shell pm install -r -t $staged | Out-String).Trim()
+        if ($installOut -match 'INSTALL_FAILED_USER_RESTRICTED') {
+            Note 'the phone refused the install; retrying once'
+            Start-Sleep -Seconds 3
+            $installOut = (& $adb shell pm install -r -t $staged | Out-String).Trim()
+        }
+        if ($LASTEXITCODE -ne 0 -or $installOut -notmatch 'Success') {
+            # *** The staged copy is deliberately LEFT in place on failure.
+            #     Deleting it was a real bug here once: the install failed, the
+            #     cleanup ran anyway, and there was nothing left to retry with.
+            Die "pm install failed: $installOut. The APK is still staged at $staged on the phone."
+        }
+        & $adb shell rm -f $staged | Out-Null
+
+        # *** Verified from the DEVICE's own copy, not from what was sent. The
+        #     failure this whole file exists to end was asserting an install
+        #     from the sending side.
+        $onDevice = (& $adb shell pm path online.vyybandasky.sustena.mycelium | Out-String).Trim() -replace '^package:',''
+        $onDeviceSize = (& $adb shell stat -c %s $onDevice | Out-String).Trim()
+        if ("$onDeviceSize" -ne "$localSize") {
+            Die "the installed APK on the phone is $onDeviceSize bytes but the one built here is $localSize."
+        }
+
         $installedVersion = (& $adb shell dumpsys package online.vyybandasky.sustena.mycelium |
             Select-String 'versionName=' | Select-Object -First 1) -replace '.*versionName=',''
-        Ok "phone now on $($installedVersion.Trim())"
+        Ok "phone now on $($installedVersion.Trim()), and its APK matches this build byte for byte"
         if ($installedVersion.Trim() -ne $version) {
             Die "the phone reports $($installedVersion.Trim()) but VERSION is $version."
         }

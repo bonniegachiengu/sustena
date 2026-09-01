@@ -63,9 +63,19 @@ public final class ClassifyNotifier {
             if (nm == null) return;
             ensureChannel(nm);
 
+            // *** It fires BEFORE anything is parsed, so it cannot know a
+            //     decision is needed. It said "a transaction to file" for
+            //     every financial text -- including an M-Pesa receipt that
+            //     maps to income and files ITSELF, which then never becomes a
+            //     queue item. Tapping that opened a queue it was not in, and
+            //     read as the app losing the message.
+            //
+            // **  `waiting` is the native queue depth -- texts caught and not
+            //     yet swept -- not the number needing an answer. Saying
+            //     "caught" is the most this side actually knows.
             String title = waiting > 1
-                    ? waiting + " transactions to file"
-                    : "A transaction to file";
+                    ? waiting + " texts caught"
+                    : "Caught a transaction text";
 
             Notification n = new Notification.Builder(ctx, CHANNEL)
                     .setContentTitle(title)

@@ -1022,6 +1022,34 @@ pub struct AttentionDto {
     pub message_id: Option<String>,
 }
 
+/// A recurring shape nothing recognises, and what teaching it would buy.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ShapeOfferDto {
+    /// A real message from the cluster, so a person can read what they teach.
+    pub example: String,
+    /// The id of that message, so teaching it is the ordinary classify flow.
+    pub message_id: String,
+    /// How many messages share this shape, including the example.
+    pub count: u32,
+}
+
+/// One figure a person pointed at while teaching a shape.
+///
+/// ★★★ He points at a number in his own bank's text and says what it is and
+/// where it belongs. Nothing here is an operator name or a field path — those
+/// are the machine's vocabulary, and he is describing his own money.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TrainedFigureDto {
+    /// The figure exactly as it appears in the message, e.g. `"5.52"`.
+    pub text: String,
+    /// `in` | `out` | `fee`.
+    pub role: String,
+    /// The pocket he said it belongs to.
+    pub pocket: String,
+}
+
 /// The whole curated view.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -1035,6 +1063,14 @@ pub struct FeedDto {
     /// waiting, with anything he deferred at the head of that. ONE card renders
     /// at a time; this is the list it steps through, not a list to display.
     pub queue: Vec<CaptureContextDto>,
+    /// ★★★ Shapes this inbox repeats that nothing recognises yet. Teaching
+    /// ONE of them teaches every message that shares it -- which is the whole
+    /// leverage, and why the count is carried: it is what the answer is worth.
+    ///
+    /// ★★ Never a guess at meaning. A cluster says "these look alike", never
+    /// "these are spends".
+    pub shapes: Vec<ShapeOfferDto>,
+
     /// Where in `queue` the first unanswered message sits, so the card opens
     /// on work rather than on history.
     pub queue_start: u32,
@@ -1097,6 +1133,25 @@ pub struct OwnIdentifiersDto {
     pub kcb: Vec<String>,
 }
 
+/// One move between his own accounts, as it happened.
+///
+/// ★★★ A count alone said "3 moves were recognised" and nothing about WHICH
+/// money, so a person could not check it against anything. These are what make
+/// the report auditable rather than merely reassuring.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveLineDto {
+    pub from: String,
+    pub to: String,
+    pub amount: f64,
+    /// What the bank took. Zero when the text did not say.
+    pub fee: f64,
+    /// ★★ True when an income had already been filed for the arriving leg and
+    /// was taken back off. Said out loud, because a balance that drops without
+    /// explanation is the thing this whole mechanism exists to avoid.
+    pub undid_income: bool,
+}
+
 /// What a transfer pass did.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -1116,6 +1171,8 @@ pub struct TransferDto {
     /// taken back. Reported rather than left as a silent zero.
     pub blocked: u32,
     pub ambiguous: u32,
+    /// What actually moved, one line each.
+    pub lines: Vec<MoveLineDto>,
 }
 
 /// The household's own distance from where it wants to be, over time.
@@ -1296,6 +1353,23 @@ pub struct NettingDto {
     pub ambiguous: u32,
 }
 
+/// A figure a taught shape says belongs somewhere, still awaiting a confirm.
+///
+/// ★★★ The Fuliza payoff. A borrow carries a sum AND an access fee that
+/// belong in different pockets; the sum is pre-filled into the main question,
+/// and each remaining figure comes back here so it can be confirmed in turn.
+/// Pre-filled is not filed — every one of these is still a tap he makes.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutedFigureDto {
+    /// `in` | `out` | `fee`.
+    pub role: String,
+    /// Where he said figures like this belong.
+    pub pocket: String,
+    /// What this message's own figure actually reads.
+    pub amount: f64,
+}
+
 /// One inference pass, on the wire.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(tag = "status", rename_all = "camelCase")]
@@ -1310,6 +1384,17 @@ pub enum InferenceDto {
         /// offers a change, and it still stops here for a confirmation.
         from_history: bool,
         history_use_count: Option<u32>,
+        /// The pocket came from a shape he taught, not from a habit inferred.
+        ///
+        /// ★★ A separate flag from `from_history` because they are different
+        /// claims and the screen says different things. "How you classified
+        /// this before" is a guess from a pattern; "the shape you taught" is
+        /// him being quoted back to himself.
+        #[serde(default)]
+        taught: bool,
+        /// The other figures this taught shape places, each still to confirm.
+        #[serde(default)]
+        routed: Vec<RoutedFigureDto>,
     },
     /// ★ `options: null` means the answer is not a tap — render an input.
     #[serde(rename_all = "camelCase")]

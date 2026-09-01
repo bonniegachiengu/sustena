@@ -43,6 +43,7 @@
  */
 import {
   createEffect,
+  createMemo,
   createResource,
   createSignal,
   For,
@@ -58,10 +59,13 @@ import { onPulse } from "../lib/pulse";
 import {
   engine,
   fmt,
+  pockets as pocketsOf,
   type FeedDto,
   type GateResult,
   type InferenceDto,
   type JsonValue,
+  type ShapeOfferDto,
+  type RoutedFigureDto,
   type SmsSweep,
   type CaptureContextDto,
   type ChoiceDto,
@@ -586,10 +590,30 @@ export default function Orchie(props: { onFace?: () => void }) {
    * change — and taking the target once, so it cannot re-fire on an unrelated
    * launch later.
    */
+  /** The message a notification tap was about, until the queue shows it. */
+  const [tapped, setTapped] = createSignal<string | null>(null);
+  /** The shape he chose to teach, if he chose one. */
+  const [training, setTraining] = createSignal<ShapeOfferDto | null>(null);
+
   const answerTap = async () => {
     try {
       const pending = await engine.smsPendingClassify();
-      if (pending) await drain();
+      if (pending) {
+        await drain();
+        // ★★★ The queue must be CURRENT before the tap is resolved against it.
+        //     `drain` only refetches when it actually swept something, so a tap
+        //     about a message that was already ingested would be matched
+        //     against a stale list -- and a miss there does not read as "not
+        //     found yet", it reads as "that message is not waiting on you",
+        //     which is a confident wrong answer about his money.
+        await refetch();
+        // ★★★ The tap said WHICH message. Draining and then showing whatever
+        //     was oldest threw that away, so a notification about the text
+        //     that just arrived opened the queue at something from days ago.
+        //     The raw text is the handle -- an id would not survive the
+        //     unlock in between, which is why the plugin hands back text.
+        setTapped(pending);
+      }
     } catch {
       // Not an Android build. There is no tap to answer.
     }
@@ -738,7 +762,49 @@ export default function Orchie(props: { onFace?: () => void }) {
                   the card whenever anything refetched and throw away answers
                   given halfway through. The id changes exactly when the
                   subject does, which is exactly when a new card is right. */}
-              <QueueCard feed={f()} onChanged={() => void refetch()} />
+              {/* ★★★ Shapes the inbox repeats that nothing reads yet.
+                  Teaching one teaches every message like it, which is the
+                  difference between answering a queue and ending it. It never
+                  says what they MEAN -- only that they look alike. */}
+              <For each={f().shapes}>
+                {(sh) => (
+                  <Show
+                    when={training()?.messageId !== sh.messageId}
+                    fallback={
+                      <TrainFlow
+                        sustain={f().sustainId}
+                        messageId={sh.messageId}
+                        raw={sh.example}
+                        count={sh.count}
+                        onDone={() => void refetch()}
+                        onClose={() => setTraining(null)}
+                      />
+                    }
+                  >
+                    <div class={O.card}>
+                      <h2 class={O.cardTitle}>a shape worth teaching</h2>
+                      <p class={O.caption}>
+                        {sh.count} messages look like this one and nothing reads them yet. Teach it
+                        once and all {sh.count} become readable — you still confirm each before
+                        anything is filed.
+                      </p>
+                      <p class={O.raw}>{sh.example}</p>
+                      <button
+                        class={`${O.action.primary} ${O.actionWide}`}
+                        onClick={() => setTraining(sh)}
+                      >
+                        teach this shape
+                      </button>
+                    </div>
+                  </Show>
+                )}
+              </For>
+              <QueueCard
+                feed={f()}
+                openRaw={tapped()}
+                onOpened={() => setTapped(null)}
+                onChanged={() => void refetch()}
+              />
 
               {/* ═══ the calm read ═══════════════════════════════════════ */}
               <Summary feed={f()} />
@@ -840,11 +906,45 @@ export default function Orchie(props: { onFace?: () => void }) {
               <Show when={moves()}>
                 {(t) => (
                   <div class={O.card}>
+                    <h2 class={O.cardTitle}>
+                      {t().moved === 1 ? "a move between your accounts" : "moves between your accounts"}
+                    </h2>
                     <p class={O.caption}>
-                      {t().moved} of your own {t().moved === 1 ? "move" : "moves"} between your
-                      accounts {t().moved === 1 ? "was" : "were"} recognised and recorded as money
-                      changing place. Neither spending nor income.
+                      Recorded as money changing place. Neither spending nor income.
                     </p>
+
+                    {/* ★★★ ONE line per move, not two rows. Two texts describe
+                        one movement of his own money, and showing them
+                        separately is what made a transfer look like an expense
+                        and an income. The amounts are here so the report can be
+                        CHECKED against his bank rather than merely believed. */}
+                    <For each={t().lines}>
+                      {(mv) => (
+                        <>
+                          <div class={O.row}>
+                            <span class={O.figureLabel}>
+                              {mv.from} {"→"} {mv.to}
+                            </span>
+                            <span class={O.caption}>{fmt(mv.amount)}</span>
+                          </div>
+                          {/* ★★ The charge is real money and does not come back,
+                              so it is named rather than folded into the amount. */}
+                          <Show when={mv.fee > 0}>
+                            <p class={O.caption}>and {fmt(mv.fee)} charged for it, which does not come back</p>
+                          </Show>
+                          {/* ★★★ A balance dropping with no explanation is the
+                              thing this exists to prevent. If an income was
+                              taken back off, say so. */}
+                          <Show when={mv.undidIncome}>
+                            <p class={O.caption}>
+                              this had been filed as income when it arrived {"—"} that entry was
+                              taken back off, because it was your own money moving, not money earned.
+                            </p>
+                          </Show>
+                        </>
+                      )}
+                    </For>
+
                     <button class={O.linkish} onClick={() => setMoves(null)}>
                       got it
                     </button>
@@ -983,7 +1083,348 @@ function DeviceCard(props: { device: DeviceDto }) {
  * render: showing them all is the flood the attention budget exists to
  * prevent, and it froze the app once already.
  */
-function QueueCard(props: { feed: FeedDto; onChanged: () => void }) {
+/* ═══ teaching a shape ═════════════════════════════════════════════════════
+ *
+ * ★★★ **A card that cannot be tapped is worse than no card.** The discovery
+ * half found the shapes and offered them, and there was nothing to do with the
+ * offer. It said "teach it once and all 232 become readable" and then withheld
+ * the teaching, which is the one thing the feature exists for.
+ *
+ * ★★★ **Teaching is per FIGURE, not per message.** The first version of this
+ * asked one question — what does this message mean — and that cannot express
+ * the case it was built for. A Fuliza borrow carries a sum borrowed AND an
+ * access fee, which belong in different places. One answer for the whole
+ * message forces the fee to be re-typed on every message of a shape already
+ * explained once. So each figure gets its own row: what it is, and where it
+ * belongs.
+ *
+ * ★★★ **Plain words, and the guess already made.** He is looking at his own
+ * bank's text and pointing at numbers in it. The question is "what is this
+ * one", never "select an operator", and the reading this arrives at is already
+ * filled in — so the ordinary case is read-and-confirm, and a wrong guess costs
+ * one tap.
+ *
+ * ★★ **What is taught is the SHAPE, never the filing.** A taught rule makes
+ * messages like this READABLE and remembers where each figure belongs. It does
+ * not file them. The one exception is a lone arrival, which is the same
+ * exception every other learner in this codebase makes — and the engine, not
+ * this screen, is what enforces it. The copy says so rather than leaving it to
+ * be discovered.
+ */
+
+/** What a figure is, in the words a person would use. */
+type FigureRole = "in" | "out" | "fee" | "skip";
+
+const ROLE_LABEL: Record<FigureRole, string> = {
+  in: "money in",
+  out: "money out",
+  fee: "a fee",
+  skip: "ignore this one",
+};
+
+/** One number found in the message, with what this thinks it is. */
+type Figure = { text: string; at: number; role: FigureRole; pocket: string };
+
+/**
+ * Every money figure in the text, in the order they appear.
+ *
+ * ★★ Currency-prefixed only, which is the same conservative rule the engine's
+ * own trainer uses. Every run of digits would offer him account fragments and
+ * dates to classify, and a list full of noise is a list nobody reads.
+ */
+function figuresIn(raw: string): { text: string; at: number }[] {
+  const out: { text: string; at: number }[] = [];
+  const re = /(?:ksh|kes)\.?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    const t = m[1];
+    if (t) out.push({ text: t, at: m.index + m[0].length - t.length });
+  }
+  return out;
+}
+
+/**
+ * What each figure probably is, from the words around it.
+ *
+ * ★★ Deliberately simple and deliberately visible. It is a starting point he
+ * can see and correct in one tap, not a classifier asking to be trusted — and
+ * every guess it makes is sitting in front of him next to the sentence that
+ * produced it.
+ */
+function guessRoles(raw: string, found: { text: string; at: number }[]): FigureRole[] {
+  const lower = raw.toLowerCase();
+  return found.map((f, i) => {
+    // The 40 characters before the figure are what names it.
+    const before = lower.slice(Math.max(0, f.at - 40), f.at);
+    if (/fee|charge|cost|commission/.test(before)) return "fee";
+    if (/balance|outstanding|total|limit|available/.test(before)) return "skip";
+    if (/received|credited|deposit|refund/.test(before)) return "in";
+    if (/sent|paid|bought|withdraw|debited|spent/.test(before)) return "out";
+    // ★ The first figure is usually the one that moved; later unexplained ones
+    //   are usually running totals, so silence is the safer default for them.
+    return i === 0 ? "out" : "skip";
+  });
+}
+
+export function TrainFlow(props: {
+  sustain: string;
+  messageId: string;
+  raw: string;
+  /** How many messages share this shape, when it came from a shape card. */
+  count?: number;
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const found = createMemo(() => figuresIn(props.raw));
+
+  /**
+   * The household's pockets, fetched here rather than passed in.
+   *
+   * ★★ Self-sufficient on purpose. This page opens from three different places
+   * — a shape card, the classify card, and the Mycelium ingest list — and only
+   * one of them has a pocket list to hand. Threading one through the other two
+   * would make the entry points differ in what they can offer, which is
+   * exactly the kind of drift that leaves one door quietly worse than another.
+   */
+  const [sustainNow] = createResource(
+    () => props.sustain,
+    (id: string) => engine.sustain(id),
+  );
+  // ★ The shared reader, not a second one. Two ways of finding a household's
+  //   pockets is two ways for them to disagree.
+  const pocketNames = () => pocketsOf(sustainNow()?.state).map((p) => p.name);
+
+  const [figures, setFigures] = createSignal<Figure[]>([]);
+  createEffect(() => {
+    const f = found();
+    const guessed = guessRoles(props.raw, f);
+    setFigures(
+      f.map((x: { text: string; at: number }, i: number) => ({
+        ...x,
+        role: guessed[i] ?? "skip",
+        pocket: "",
+      })),
+    );
+  });
+
+  const [busy, setBusy] = createSignal(false);
+  const [failure, setFailure] = createSignal<string | null>(null);
+  const [done, setDone] = createSignal<string | null>(null);
+  /** Which row is choosing a pocket, if any. */
+  const [picking, setPicking] = createSignal<number | null>(null);
+
+  const many = () => (props.count ?? 0) > 1;
+  const kept = () => figures().filter((f) => f.role !== "skip");
+  const unplaced = () => kept().filter((f) => !f.pocket.trim());
+
+  const setRole = (i: number, role: FigureRole) =>
+    setFigures((fs) => fs.map((f, j) => (j === i ? { ...f, role } : f)));
+  const setPocket = (i: number, pocket: string) => {
+    setFigures((fs) => fs.map((f, j) => (j === i ? { ...f, pocket } : f)));
+    setPicking(null);
+  };
+
+  const teach = async () => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const use = kept();
+      if (use.length === 0) {
+        // ★★ Nothing to read means one honest answer: stop asking about these.
+        const out = await engine.learnSkip(props.sustain, props.messageId);
+        if (out.unlearnable) {
+          setFailure("nothing here repeats reliably enough to recognise again");
+          return;
+        }
+        setDone(
+          out.cleared > 0
+            ? `done — ${out.cleared} like this cleared, and you will not be asked again`
+            : "done — you will not be asked about these again",
+        );
+        props.onDone();
+        return;
+      }
+      if (unplaced().length > 0) {
+        setFailure("every figure you kept needs a pocket");
+        return;
+      }
+      await engine.trainRule(
+        props.messageId,
+        use.map((f) => ({ text: f.text, role: f.role as "in" | "out" | "fee", pocket: f.pocket })),
+      );
+      setDone(
+        many()
+          ? `learned — all ${props.count} are read this way now, and each still asks you before it is filed`
+          : "learned — messages like this are read this way now, and each still asks you before it is filed",
+      );
+      props.onDone();
+    } catch (e) {
+      setFailure(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div class={O.card}>
+      <h2 class={O.cardTitle}>teach this shape</h2>
+      <p class={O.raw}>{props.raw}</p>
+      <Show when={many()}>
+        <p class={O.caption}>{props.count} messages look like this one.</p>
+      </Show>
+
+      <Show
+        when={!done()}
+        fallback={
+          <>
+            <p class={O.caption}>{done()}</p>
+            <button class={`${O.action.secondary} ${O.actionWide}`} onClick={props.onClose}>
+              close
+            </button>
+          </>
+        }
+      >
+        <Show
+          when={found().length > 0}
+          fallback={
+            <>
+              {/* ★★ No figures at all is a real answer, not an error. It is
+                  almost always a notice rather than a transaction. */}
+              <p class={O.caption}>
+                There are no amounts in this message, so there is nothing to file. You can stop
+                Orchie asking about messages like it.
+              </p>
+              <button
+                class={`${O.action.primary} ${O.actionWide}`}
+                disabled={busy()}
+                onClick={() => void teach()}
+              >
+                {busy()
+                  ? "…"
+                  : many()
+                    ? `never ask me about these ${props.count} again`
+                    : "never ask me about these again"}
+              </button>
+              <button class={`${O.action.quiet} ${O.actionWide}`} onClick={props.onClose}>
+                not now
+              </button>
+            </>
+          }
+        >
+          <p class={O.caption}>
+            What is each amount, and where does it belong? Orchie has guessed — change what is
+            wrong.
+          </p>
+
+          <For each={figures()}>
+            {(f, i) => (
+              <div class={O.figureRow}>
+                <p class={O.figureValue}>Ksh {f.text}</p>
+                {/* ★★ The sentence this number came out of, so he is reading
+                    his own message rather than a bare figure with no context. */}
+                <p class={O.caption}>
+                  …{props.raw.slice(Math.max(0, f.at - 34), f.at).trimStart()}
+                  <b>{f.text}</b>
+                </p>
+                <div class={O.chips}>
+                  <For each={["in", "out", "fee", "skip"] as FigureRole[]}>
+                    {(r) => (
+                      <button
+                        class={f.role === r ? O.chipChosen : O.chip}
+                        onClick={() => setRole(i(), r)}
+                      >
+                        {ROLE_LABEL[r]}
+                      </button>
+                    )}
+                  </For>
+                </div>
+
+                <Show when={f.role !== "skip"}>
+                  <Show
+                    when={picking() === i()}
+                    fallback={
+                      <button class={O.linkish} onClick={() => setPicking(i())}>
+                        {f.pocket ? `→ ${f.pocket} · change` : "→ which pocket?"}
+                      </button>
+                    }
+                  >
+                    <div class={O.chips}>
+                      <For each={pocketNames()}>
+                        {(p) => (
+                          <button class={O.chip} onClick={() => setPocket(i(), p)}>
+                            {p}
+                          </button>
+                        )}
+                      </For>
+                    </div>
+                    {/* ★ A pocket that does not exist yet is the common case
+                        for a fee: nobody makes a "Fuliza fees" envelope until
+                        the day they meet a Fuliza fee. */}
+                    <input
+                      class={O.input}
+                      placeholder="or type a new pocket name"
+                      onChange={(e) => {
+                        const v = e.currentTarget.value.trim();
+                        if (v) setPocket(i(), v);
+                      }}
+                    />
+                  </Show>
+                </Show>
+              </div>
+            )}
+          </For>
+
+          {/* ★★★ The safety property, on screen, in his words. */}
+          <p class={O.caption}>
+            This teaches Orchie to READ messages like this. You still confirm each one before
+            anything is filed.
+          </p>
+
+          <Show when={failure()}>{(f) => <p class={O.caption}>{f()}</p>}</Show>
+
+          <button
+            class={`${O.action.primary} ${O.actionWide}`}
+            disabled={busy()}
+            onClick={() => void teach()}
+          >
+            {busy()
+              ? "teaching…"
+              : kept().length === 0
+                ? many()
+                  ? `never ask me about these ${props.count} again`
+                  : "never ask me about these again"
+                : many()
+                  ? `teach this — all ${props.count} become readable`
+                  : "teach this"}
+          </button>
+          <button
+            class={`${O.action.quiet} ${O.actionWide}`}
+            disabled={busy()}
+            onClick={props.onClose}
+          >
+            not now
+          </button>
+        </Show>
+      </Show>
+    </div>
+  );
+}
+
+function QueueCard(props: {
+  feed: FeedDto;
+  onChanged: () => void;
+  /** Raw text of a message a notification tap was about, if this was a tap. */
+  openRaw?: string | null;
+  onOpened?: () => void;
+}) {
+  /**
+   * Which message he chose to teach, by id.
+   *
+   * ★★ Held as an id rather than a flag, so moving to the next message
+   * leaves teaching behind by construction: the id no longer matches, and
+   * there is no reset to forget to run.
+   */
+  const [teachingId, setTeachingId] = createSignal<string | null>(null);
   const queue = () => props.feed.queue;
   // ★★ The index is held here and only reset when the queue's own identity
   //    changes, so a background refetch does not throw away where he is.
@@ -995,6 +1436,48 @@ function QueueCard(props: { feed: FeedDto; onChanged: () => void }) {
     return Math.min(Math.max(0, i), max);
   };
   const current = () => queue()[idx()];
+  /** How many still need an answer -- the filed ones are walkable, not work. */
+  const waitingCount = () => queue().filter((c) => c.status !== "processed").length;
+  /** Where he is among those, 1-based. */
+  const waitingPos = () =>
+    queue().slice(0, idx() + 1).filter((c) => c.status !== "processed").length;
+
+  // ★★★ Open on the message the notification was about.
+  //
+  // ★★ Matched on raw text, because that is the handle that survives the
+  //    unlock between the tap and the queue arriving. Cleared once honoured
+  //    so a later refetch cannot drag him back to it while he is working.
+  //
+  // ★ A tap for a message that is NOT in the queue leaves the card where it
+  //   was rather than jumping somewhere arbitrary -- it was already filed, or
+  //   the sweep has not reached it, and both are better answered by the queue
+  //   he can see than by a guess.
+  // ★★★ **A tap that lands on nothing must SAY so.** The notification is
+  //     posted by the receiver before anything is parsed, so it fires for
+  //     every financial text -- including one that needs no decision at all.
+  //     An M-Pesa receipt maps to income and files itself, so it never
+  //     becomes a queue item, and tapping its notification opened the queue
+  //     at something unrelated with no explanation. That reads as the app
+  //     losing his message. It did not lose it; there was nothing to ask.
+  const [tapMissed, setTapMissed] = createSignal(false);
+  // ★★★ A tap has to LAND somewhere. Routing to the right card is useless if
+  //     the card is below the fold -- the screen still reads as the ordinary
+  //     landing view, which is what was reported.
+  let cardEl: HTMLDivElement | undefined;
+  createEffect(() => {
+    const raw = props.openRaw;
+    if (!raw) return;
+    const i = queue().findIndex((c) => c.raw === raw);
+    if (i >= 0) {
+      setAt(i);
+      setTapMissed(false);
+    } else {
+      setTapMissed(true);
+    }
+    // Bring it to him rather than leaving him to find it.
+    queueMicrotask(() => cardEl?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    props.onOpened?.();
+  });
   const [busy, setBusy] = createSignal(false);
 
   const back = () => setAt(Math.max(0, idx() - 1));
@@ -1037,7 +1520,15 @@ function QueueCard(props: { feed: FeedDto; onChanged: () => void }) {
 
   return (
     <Show when={queue().length > 0}>
-      <div class={O.cardPrimary}>
+      <div class={O.cardPrimary} ref={cardEl}>
+        {/* ★★★ Answering a tap that had nothing to open. Silence here
+            read as the app having lost his message. */}
+        <Show when={tapMissed()}>
+          <p class={O.caption}>
+            that message is not waiting on you — it either filed itself or was already
+            answered. Nothing was lost; there was nothing to ask.
+          </p>
+        </Show>
         <div class={O.row}>
           {/* ★★ Back is plain navigation and never changes anything. */}
           <button
@@ -1049,8 +1540,18 @@ function QueueCard(props: { feed: FeedDto; onChanged: () => void }) {
             ‹ back
           </button>
           <span class={O.spacer} />
+          {/* ★★★ Count what NEEDS him, not what he can walk to. The
+              queue deliberately keeps the last 15 he has already filed so he
+              can change his mind -- but counting those in made a queue of 60
+              waiting read as "1 of 75", which looks like a backlog growing
+              rather than one being worked. Same list, honest number. */}
           <span class={O.caption}>
-            {idx() + 1} of {queue().length}
+            <Show
+              when={current()?.status !== "processed"}
+              fallback={<>already filed · {waitingCount()} still waiting</>}
+            >
+              {waitingPos()} of {waitingCount()}
+            </Show>
             <Show when={label()}> · {label()}</Show>
           </span>
           <span class={O.spacer} />
@@ -1078,15 +1579,39 @@ function QueueCard(props: { feed: FeedDto; onChanged: () => void }) {
                   below — the first filing stays on the record and the change is added after it.
                 </p>
               </Show>
-              <CaptureFacts head={c} />
-              <Classify
-                sustain={props.feed.sustainId}
-                messageId={c.id}
-                autoStart={c.status !== "processed"}
-                personPockets={props.feed.personPockets}
-                backfill
-                onDone={props.onChanged}
-              />
+              {/* ★★★ The same teaching, reachable from the message he is
+                  actually looking at. A person who has just read a text he
+                  does not recognise is exactly the person who can say what it
+                  means, and making him find it again in a shapes list later
+                  would be asking him to remember instead of to answer. */}
+              <Show
+                when={teachingId() !== c.id}
+                fallback={
+                  <TrainFlow
+                    sustain={props.feed.sustainId}
+                    messageId={c.id}
+                    raw={c.raw}
+                    onDone={props.onChanged}
+                    onClose={() => setTeachingId(null)}
+                  />
+                }
+              >
+                <CaptureFacts head={c} />
+                <Classify
+                  sustain={props.feed.sustainId}
+                  messageId={c.id}
+                  autoStart={c.status !== "processed"}
+                  personPockets={props.feed.personPockets}
+                  backfill
+                  onDone={props.onChanged}
+                />
+                <div class={O.row}>
+                  <span class={O.spacer} />
+                  <button class={O.linkish} onClick={() => setTeachingId(c.id)}>
+                    teach Orchie this shape
+                  </button>
+                </div>
+              </Show>
             </>
           )}
         </Show>
@@ -1599,10 +2124,24 @@ function AccountsCard(props: { feed: FeedDto; onChanged: () => void }) {
         <For each={accounts()}>
           {(a) => (
             <>
+              {/* ★★★ **A pot we have no arithmetic for shows the BANK's
+                  figure, not zero.** Pochi and M-Shwari arrive without anyone
+                  declaring them, so there is nothing of ours to compare — and
+                  rendering `balance` there would print "0" for an account the
+                  bank told us, in writing, holds thousands. Showing their
+                  number and saying whose it is beats showing a confident lie. */}
               <div class={O.row}>
                 <span class={O.figureLabel}>{a.label}</span>
-                <span class={O.caption}>{fmt(a.balance)}</span>
+                <span class={O.caption}>
+                  {a.drift === null && a.reported !== null ? fmt(a.reported) : fmt(a.balance)}
+                </span>
               </div>
+              <Show when={a.drift === null && a.reported !== null}>
+                <p class={O.caption}>
+                  as {a.label} itself last said. Nothing here has been sorted into
+                  pockets yet, so this is their figure rather than ours.
+                </p>
+              </Show>
               {/* ★★★ The bank's own word, next to ours. Reported, never
                   corrected: a difference is a real thing to look into, and
                   quietly moving our figure to match would erase whatever
@@ -2351,14 +2890,60 @@ export function Classify(props: {
       //   anything was bought.
       setConfirmedOp(s.operator);
       if (v.verdict === "admitted") {
+        // ★★ Held BEFORE the reset, which clears the inference this came from.
+        const rest = s.routed ?? [];
         reset();
         setText("");
+        setTaughtRest(rest);
         props.onDone();
       }
     } catch (e) {
       setFailure(String(e).replace(/^Error:\s*/, ""));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * Figures a taught shape places that this confirm did not cover.
+   *
+   * ★★★ A Fuliza borrow is TWO movements into two pockets, and one confirm
+   * cannot honestly stand for both. So the sum is recorded first and the fee
+   * is offered straight after, pre-filled from what he taught and still
+   * requiring his tap. He never re-types where it goes; he never has it filed
+   * without looking either.
+   */
+  const [taughtRest, setTaughtRest] = createSignal<RoutedFigureDto[]>([]);
+  const [restBusy, setRestBusy] = createSignal(false);
+  const [restFailed, setRestFailed] = createSignal<string | null>(null);
+
+  const recordRest = async (f: RoutedFigureDto) => {
+    setRestBusy(true);
+    setRestFailed(null);
+    try {
+      // ★ Role decides the operator, exactly as it did when he taught it.
+      const op = f.role === "in" ? "budget.record_income" : "budget.spend";
+      const params: Record<string, unknown> =
+        f.role === "in"
+          ? { amount: f.amount, source: f.pocket }
+          : { pocket_name: f.pocket, amount: f.amount, description: "fee" };
+      const v = await engine.confirm(
+        props.sustain,
+        op,
+        params as JsonValue,
+        props.messageId,
+        null,
+      );
+      if (v.verdict !== "admitted") {
+        setRestFailed(v.reason ?? "the gate did not admit it");
+        return;
+      }
+      setTaughtRest((ps) => ps.slice(1));
+      props.onDone();
+    } catch (e) {
+      setRestFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setRestBusy(false);
     }
   };
 
@@ -2711,6 +3296,42 @@ export function Classify(props: {
                         right in the cockpit and noise here. */}
                     <p class={O.body}>{plainly(rd().operator, rd().params)}</p>
 
+                    {/* ★★★ A taught pre-fill is never silent either, and it
+                        says something DIFFERENT from a history one. "What you
+                        did before" is a habit inferred from counting; "the
+                        shape you taught" is him quoted back to himself. Two
+                        claims, two sentences. */}
+                    <Show when={rd().taught}>
+                      <div class={O.row}>
+                        <span class={O.badge.quiet}>from the shape you taught</span>
+                        <span class={O.spacer} />
+                        <button
+                          class={O.linkish}
+                          onClick={() => {
+                            setIgnoreHistory(true);
+                            const { pocket_name: _drop, ...rest } = known();
+                            void run(rest);
+                          }}
+                        >
+                          change
+                        </button>
+                      </div>
+                    </Show>
+
+                    {/* ★★ What it will ask NEXT, said before he taps. A second
+                        question appearing unannounced after a confirm reads
+                        like something went wrong. */}
+                    <Show when={(rd().routed ?? []).length > 0}>
+                      <For each={rd().routed ?? []}>
+                        {(f) => (
+                          <p class={O.caption}>
+                            then {f.role === "fee" ? "the fee" : "also"} Ksh {fmt(f.amount)} →{" "}
+                            {f.pocket}, which you confirm next.
+                          </p>
+                        )}
+                      </For>
+                    </Show>
+
                     {/* ★★ A history pre-fill is never silent. */}
                     <Show when={rd().fromHistory}>
                       <div class={O.row}>
@@ -2756,6 +3377,40 @@ export function Classify(props: {
             </Show>
           </div>
         )}
+      </Show>
+
+      {/* ═══ the rest of what he taught ═════════════════════════════════ */}
+      <Show when={taughtRest().length > 0}>
+        {(() => {
+          const f = () => taughtRest()[0]!;
+          return (
+            <div class={O.stack}>
+              <p class={O.body}>
+                {f().role === "fee" ? "And the fee" : "And"} Ksh {fmt(f().amount)} → {f().pocket}.
+              </p>
+              <p class={O.caption}>
+                Where this goes comes from the shape you taught. Nothing is filed until you tap.
+              </p>
+              <Show when={restFailed()}>{(m) => <p class={O.caption}>{m()}</p>}</Show>
+              <button
+                class={`${O.action.primary} ${O.actionWide}`}
+                disabled={restBusy()}
+                onClick={() => void recordRest(f())}
+              >
+                <Show when={restBusy()} fallback="record it too">
+                  <span class={O.working} /> working…
+                </Show>
+              </button>
+              <button
+                class={`${O.action.quiet} ${O.actionWide}`}
+                disabled={restBusy()}
+                onClick={() => setTaughtRest((ps) => ps.slice(1))}
+              >
+                skip this one
+              </button>
+            </div>
+          );
+        })()}
       </Show>
 
       {/* ═══ the gate's answer ══════════════════════════════════════════ */}
@@ -2881,12 +3536,29 @@ export function Classify(props: {
               >
                 <Show when={confirmed()}>
                   {(p) => (
-                    <button
-                      class={`${O.action.secondary} ${O.actionWide}`}
-                      onClick={() => void remember(v().operator, p())}
-                    >
-                      remember this format
-                    </button>
+                    <>
+                      {/* ★★★ The offer was silent about what it buys. A button
+                          reading "remember this format" tells you what it does
+                          and not why you would want it, so the one control that
+                          makes the app get better at reading his bank sat there
+                          unexplained. Said plainly, before the press.
+
+                          ★★ Still `secondary`, not amber: amber means *the one
+                          thing to do next*, and this is genuinely optional —
+                          promoting it would compete with finishing the message
+                          and make the queue harder to work, which is the
+                          opposite of prominent. */}
+                      <p class={O.caption}>
+                        teach this shape once and the next message like it is read without
+                        asking — whatever the amount, the name or the date.
+                      </p>
+                      <button
+                        class={`${O.action.secondary} ${O.actionWide}`}
+                        onClick={() => void remember(v().operator, p())}
+                      >
+                        remember this format
+                      </button>
+                    </>
                   )}
                 </Show>
               </Show>

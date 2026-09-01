@@ -308,3 +308,56 @@ mod tests {
         assert_eq!(skew_ms(5_000, 1_000), 4_000);
     }
 }
+
+#[cfg(test)]
+mod backfill_shapes_tests {
+    use super::*;
+    use crate::transducer::parse_message;
+
+    /// Real texts, redacted only where a name appeared. These are the shapes
+    /// that had a date, had a time written plainly in them, and produced no
+    /// event time at all -- so every balance they carried was invisible to
+    /// anything that orders by when a thing happened.
+    const POCHI: &str = "UGUB91AU3E Confirmed, Ksh20,000.00 has been moved from your Pochi account to your M-PESA account on 30/7/26 at 9:10 PM.. New Pochi balance is Ksh0.00. New M-PESA balance is Ksh26,393.47.";
+    const MSHWARI: &str = "UHHB93DK8Y Confirmed.Ksh5,000.00 transferred from M-Shwari account on 17/8/26 at 8:23 PM. M-Shwari balance is Ksh3.64 .M-PESA balance is Ksh8,801.32 .Transaction cost Ksh.0.00";
+
+    fn timed(raw: &str) -> Option<Local> {
+        let rules = crate::transducer::seed_rules("mpesa");
+        let t = parse_message(raw, Some("mpesa"), &rules);
+        event_time(&t.parsed_fields())
+    }
+
+
+    #[test]
+    fn a_pochi_move_says_when_it_happened() {
+        // ★★★ The time was in the text the whole time; the rule let `.*?`
+        //     swallow it. Two Pochi balances on one day were unorderable for
+        //     want of a field the message was already carrying.
+        let at = timed(POCHI).expect("the message says when");
+        assert_eq!((at.year, at.month, at.day), (2026, 7, 30));
+        assert_eq!((at.hour, at.minute), (21, 10), "9:10 PM is 21:10");
+    }
+
+    #[test]
+    fn an_mshwari_transfer_says_when_it_happened() {
+        let at = timed(MSHWARI).expect("the message says when");
+        assert_eq!((at.year, at.month, at.day), (2026, 8, 17));
+        assert_eq!((at.hour, at.minute), (20, 23));
+    }
+
+    #[test]
+    fn the_same_shape_without_a_time_still_reads() {
+        // ★★★ The capture is OPTIONAL, and it has to be. Providers vary their
+        //     own formats, and a rule that suddenly required a time would stop
+        //     recognising the messages it used to read -- trading an ordering
+        //     gap for a much worse one.
+        let raw = "UGUB91AU3E Confirmed, Ksh20,000.00 has been moved from your Pochi account to your M-PESA account on 30/7/26. New Pochi balance is Ksh0.00.";
+        let rules = crate::transducer::seed_rules("mpesa");
+        let t = parse_message(raw, Some("mpesa"), &rules);
+        assert!(
+            t.parsed_fields().contains_key("pochi_balance"),
+            "it still reads the balance: {:?}",
+            t.parsed_fields()
+        );
+    }
+}
