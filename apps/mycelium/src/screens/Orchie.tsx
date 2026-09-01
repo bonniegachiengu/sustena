@@ -594,6 +594,13 @@ export default function Orchie(props: { onFace?: () => void }) {
       const pending = await engine.smsPendingClassify();
       if (pending) {
         await drain();
+        // ★★★ The queue must be CURRENT before the tap is resolved against it.
+        //     `drain` only refetches when it actually swept something, so a tap
+        //     about a message that was already ingested would be matched
+        //     against a stale list -- and a miss there does not read as "not
+        //     found yet", it reads as "that message is not waiting on you",
+        //     which is a confident wrong answer about his money.
+        await refetch();
         // ★★★ The tap said WHICH message. Draining and then showing whatever
         //     was oldest threw that away, so a notification about the text
         //     that just arrived opened the queue at something from days ago.
