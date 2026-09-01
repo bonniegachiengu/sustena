@@ -349,7 +349,20 @@ if (-not $DesktopOnly) {
         }
 
         # -r keeps his data: identity, household, peer book.
+        #
+        # *** Retried ONCE, because MIUI's refusal is transient. An install
+        #     that fails with INSTALL_FAILED_USER_RESTRICTED and then succeeds
+        #     seconds later on the identical file is a phone-side policy check
+        #     losing a race, not a bad APK -- observed exactly that, and it
+        #     cost a manual step. One retry, and only for that refusal: a
+        #     genuine failure still stops, because retrying a real error until
+        #     it looks like success is how a broken deploy gets called done.
         $installOut = (& $adb shell pm install -r -t $staged | Out-String).Trim()
+        if ($installOut -match 'INSTALL_FAILED_USER_RESTRICTED') {
+            Note 'the phone refused the install; retrying once'
+            Start-Sleep -Seconds 3
+            $installOut = (& $adb shell pm install -r -t $staged | Out-String).Trim()
+        }
         if ($LASTEXITCODE -ne 0 -or $installOut -notmatch 'Success') {
             # *** The staged copy is deliberately LEFT in place on failure.
             #     Deleting it was a real bug here once: the install failed, the
