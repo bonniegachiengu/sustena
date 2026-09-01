@@ -873,11 +873,45 @@ export default function Orchie(props: { onFace?: () => void }) {
               <Show when={moves()}>
                 {(t) => (
                   <div class={O.card}>
+                    <h2 class={O.cardTitle}>
+                      {t().moved === 1 ? "a move between your accounts" : "moves between your accounts"}
+                    </h2>
                     <p class={O.caption}>
-                      {t().moved} of your own {t().moved === 1 ? "move" : "moves"} between your
-                      accounts {t().moved === 1 ? "was" : "were"} recognised and recorded as money
-                      changing place. Neither spending nor income.
+                      Recorded as money changing place. Neither spending nor income.
                     </p>
+
+                    {/* ★★★ ONE line per move, not two rows. Two texts describe
+                        one movement of his own money, and showing them
+                        separately is what made a transfer look like an expense
+                        and an income. The amounts are here so the report can be
+                        CHECKED against his bank rather than merely believed. */}
+                    <For each={t().lines}>
+                      {(mv) => (
+                        <>
+                          <div class={O.row}>
+                            <span class={O.figureLabel}>
+                              {mv.from} {"→"} {mv.to}
+                            </span>
+                            <span class={O.caption}>{fmt(mv.amount)}</span>
+                          </div>
+                          {/* ★★ The charge is real money and does not come back,
+                              so it is named rather than folded into the amount. */}
+                          <Show when={mv.fee > 0}>
+                            <p class={O.caption}>and {fmt(mv.fee)} charged for it, which does not come back</p>
+                          </Show>
+                          {/* ★★★ A balance dropping with no explanation is the
+                              thing this exists to prevent. If an income was
+                              taken back off, say so. */}
+                          <Show when={mv.undidIncome}>
+                            <p class={O.caption}>
+                              this had been filed as income when it arrived {"—"} that entry was
+                              taken back off, because it was your own money moving, not money earned.
+                            </p>
+                          </Show>
+                        </>
+                      )}
+                    </For>
+
                     <button class={O.linkish} onClick={() => setMoves(null)}>
                       got it
                     </button>

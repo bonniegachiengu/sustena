@@ -1710,8 +1710,18 @@ pub fn apply_transfers(
         params.insert("from_account".into(), Value::String(mv.from_account.clone()));
         params.insert("to_account".into(), Value::String(mv.to_account.clone()));
         params.insert("amount".into(), serde_json::json!(mv.amount));
+        if mv.fee > 0.0 {
+            params.insert("fee".into(), serde_json::json!(mv.fee));
+        }
         match world.call(&sustain_id, "budget.transfer", &params) {
             Ok(Some((x, _))) if x.committed() => {
+                out.lines.push(crate::dto::MoveLineDto {
+                    from: mv.from_account.clone(),
+                    to: mv.to_account.clone(),
+                    amount: mv.amount,
+                    fee: mv.fee,
+                    undid_income: mv.undo_income.is_some(),
+                });
                 world.ingest().mark_self_moved(&mv.message).map_err(|e| e.to_string())?;
                 // The income it replaced is settled too, so it stops asking.
                 if let Some(income_id) = &mv.undo_income {
@@ -1756,6 +1766,13 @@ pub fn apply_transfers(
         // The same door every other write uses.
         match world.call(&sustain_id, "budget.transfer", &params) {
             Ok(Some((x, _))) if x.committed() => {
+                out.lines.push(crate::dto::MoveLineDto {
+                    from: t.from_account.clone(),
+                    to: t.to_account.clone(),
+                    amount: t.amount,
+                    fee: t.fee,
+                    undid_income: t.undo_income.is_some(),
+                });
                 world
                     .ingest()
                     .mark_transferred(&t.out_leg, &t.in_leg)

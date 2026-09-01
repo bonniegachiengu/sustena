@@ -2273,7 +2273,8 @@ export type TemplateId =
 /**
  * What a transfer pass did.
  */
-export type TransferDto = { 
+export type MoveLineDto = { from: string; to: string; amount: number; fee: number; undidIncome: boolean }
+export type TransferDto = { lines: MoveLineDto[]; 
 /**
  * Pairs recognised as one move and recorded as one.
  */

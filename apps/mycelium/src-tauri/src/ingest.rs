@@ -222,6 +222,10 @@ pub struct SelfMove {
     pub from_account: String,
     pub to_account: String,
     pub amount: f64,
+    /// What the bank charged. ★ This is the shape that quotes a cost most
+    /// often -- one text naming both ends usually names the fee as well.
+    #[serde(default)]
+    pub fee: f64,
     /// An income already filed for the other side of this same move, if the
     /// partner text arrived first and applied itself.
     pub undo_income: Option<String>,
@@ -925,6 +929,7 @@ impl Ingested {
             from_account: from_account.to_string(),
             to_account: to_account.to_string(),
             amount,
+            fee: fee_of(m),
             undo_income: None,
             reclaimed_from_skip: false,
         })

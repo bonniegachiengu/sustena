@@ -1117,6 +1117,25 @@ pub struct OwnIdentifiersDto {
     pub kcb: Vec<String>,
 }
 
+/// One move between his own accounts, as it happened.
+///
+/// ★★★ A count alone said "3 moves were recognised" and nothing about WHICH
+/// money, so a person could not check it against anything. These are what make
+/// the report auditable rather than merely reassuring.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveLineDto {
+    pub from: String,
+    pub to: String,
+    pub amount: f64,
+    /// What the bank took. Zero when the text did not say.
+    pub fee: f64,
+    /// ★★ True when an income had already been filed for the arriving leg and
+    /// was taken back off. Said out loud, because a balance that drops without
+    /// explanation is the thing this whole mechanism exists to avoid.
+    pub undid_income: bool,
+}
+
 /// What a transfer pass did.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -1136,6 +1155,8 @@ pub struct TransferDto {
     /// taken back. Reported rather than left as a silent zero.
     pub blocked: u32,
     pub ambiguous: u32,
+    /// What actually moved, one line each.
+    pub lines: Vec<MoveLineDto>,
 }
 
 /// The household's own distance from where it wants to be, over time.
