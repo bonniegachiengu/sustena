@@ -195,8 +195,7 @@ class SmsCapturePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun setThreads(invoke: Invoke) {
         val args = invoke.parseArgs(SetThreadsArgs::class.java)
-        SmsSenderFilter.setSenders(activity, args.senders.joinToString("
-"))
+        SmsSenderFilter.setSenders(activity, args.senders.joinToString("\n"))
         invoke.resolve()
     }
 
