@@ -500,6 +500,7 @@ pub fn synthesize_from_training(
     let mut n_amount = 0usize;
     let mut n_fee = 0usize;
     let mut n_balance = 0usize;
+    let mut n_date = 0usize;
     let mut named: Vec<(usize, usize, String, &TrainedFigure)> = Vec::new();
     for (s, e, f) in &claimed {
         let group = match f.role {
@@ -520,6 +521,17 @@ pub fn synthesize_from_training(
                     format!("balance_after_{n_balance}")
                 }
             }
+            // ★★★ `datetime` when the span he tagged carries a clock, `date`
+            //     when it is only a day. Both are names `event_time` already
+            //     reads, so a tagged date becomes an ORDERING fact with no
+            //     further wiring -- and ordering is the whole reason a balance
+            //     means anything, since the account's figure is whichever of
+            //     its messages is latest.
+            RouteRole::Date => {
+                n_date += 1;
+                let base = if f.text.contains(" at ") { "datetime" } else { "date" };
+                if n_date == 1 { base.to_string() } else { format!("{base}_{n_date}") }
+            }
             _ => {
                 n_amount += 1;
                 if n_amount == 1 { "amount".to_string() } else { format!("amount_{n_amount}") }
@@ -532,7 +544,12 @@ pub fn synthesize_from_training(
     let reading = read(raw_text);
     let mut spans: Vec<(usize, usize, String, FieldKind)> = named
         .iter()
-        .map(|(s, e, g, _)| (*s, *e, g.clone(), FieldKind::Amount))
+        .map(|(s, e, g, f)| {
+            // ★ A date is read as TEXT. Typing it as an amount would send it
+            //   through numeric parsing and lose it entirely.
+            let kind = if f.role == RouteRole::Date { FieldKind::Text } else { FieldKind::Amount };
+            (*s, *e, g.clone(), kind)
+        })
         .collect();
     // ★★★ **Currency figures are claimed first, and that ORDER is the fix.**
     //
@@ -637,8 +654,10 @@ pub fn synthesize_from_training(
     //     shape carrying an arrival AND its closing figure is still one thing
     //     to decide -- unlike an arrival carrying a fee, which is two
     //     movements into two places.
-    let movements: Vec<&FigureRoute> =
-        routes.iter().filter(|r| r.role != RouteRole::Balance).collect();
+    let movements: Vec<&FigureRoute> = routes
+        .iter()
+        .filter(|r| !matches!(r.role, RouteRole::Balance | RouteRole::Date))
+        .collect();
     let only_income = movements.len() == 1 && movements[0].role == RouteRole::In;
 
     Ok(ParseRule {
@@ -1379,6 +1398,125 @@ mod balance_role_tests {
         assert_eq!(
             out.parsed_fields().get("balance_after").and_then(|v| v.as_f64()),
             Some(47_310.55)
+        );
+    }
+}
+
+#[cfg(test)]
+mod date_role_tests {
+    use super::*;
+    use crate::parse_rule::run_rules;
+
+    /// His own message, and the one the whole feature is about: the account's
+    /// figure is whichever message is LATEST, so this date decides which
+    /// balance is current.
+    const REAL: &str = "UHOB946Y0H Confirmed. Ksh600.00 paid to PETER MAINA NDIGIRIGI. on 24/8/26 at 8:38 PM.New M-PESA balance is Ksh235.19. Transaction cost, Ksh0.00.";
+    /// A sibling, a day later and with a different balance.
+    const LATER: &str = "UHOB947Z1K Confirmed. Ksh80.00 paid to SOME OTHER PAYEE. on 25/8/26 at 9:10 AM.New M-PESA balance is Ksh155.19. Transaction cost, Ksh0.00.";
+
+    fn taught() -> Vec<TrainedFigure> {
+        vec![
+            TrainedFigure { text: "600.00".into(), role: RouteRole::Out, pocket: "Leisure".into() },
+            TrainedFigure {
+                text: "24/8/26 at 8:38 PM".into(),
+                role: RouteRole::Date,
+                pocket: String::new(),
+            },
+            TrainedFigure {
+                text: "235.19".into(),
+                role: RouteRole::Balance,
+                pocket: String::new(),
+            },
+        ]
+    }
+
+
+    #[test]
+    fn a_tagged_date_becomes_a_real_reading() {
+        let r = synthesize_from_training("mpesa", REAL, &taught(), "d1").expect("learns");
+        let out = run_rules(&[r], REAL).expect("reads its own example");
+        let f = out.parsed_fields();
+        assert_eq!(
+            f.get("datetime").and_then(|v| v.as_str()),
+            Some("24/8/26 at 8:38 PM"),
+            "the day and the clock, in one tag: {f:?}"
+        );
+    }
+
+    #[test]
+    fn the_tagged_date_orders_the_cluster() {
+        // ★★★ The whole point, and why he asked for it. An account shows the
+        //     balance of its LATEST message, so a date that does not read is a
+        //     balance that may be the wrong one.
+        let r = synthesize_from_training("mpesa", REAL, &taught(), "d1").expect("learns");
+        let first = run_rules(std::slice::from_ref(&r), REAL).expect("first");
+        let second = run_rules(&[r], LATER).expect("second");
+        let at = |t: &crate::transducer::Transduction| {
+            crate::event_time::event_time(&t.parsed_fields())
+                .expect("it says when")
+                .to_epoch_ms(180)
+        };
+        assert!(at(&second) > at(&first), "25/8 9:10 AM is after 24/8 8:38 PM");
+    }
+
+    #[test]
+    fn the_date_is_read_out_of_a_sibling_not_remembered() {
+        let r = synthesize_from_training("mpesa", REAL, &taught(), "d1").expect("learns");
+        let out = run_rules(&[r], LATER).expect("reads a sibling");
+        assert_eq!(
+            out.parsed_fields().get("datetime").and_then(|v| v.as_str()),
+            Some("25/8/26 at 9:10 AM"),
+            "the sibling's OWN date, from where the taught one sat"
+        );
+    }
+
+    #[test]
+    fn a_date_is_never_routed_to_a_pocket_and_never_files() {
+        let r = synthesize_from_training("mpesa", REAL, &taught(), "d1").expect("learns");
+        let date = r.routes.iter().find(|x| x.role == RouteRole::Date).expect("routed");
+        assert!(date.pocket.is_empty(), "nothing moved, so there is no pocket");
+        // A spend is present, so this asks either way -- but the date must not
+        // be what makes it a movement.
+        assert_eq!(r.status, RuleStatus::ParsedUnmapped);
+    }
+
+    #[test]
+    fn a_date_alongside_a_lone_arrival_still_files_itself() {
+        // ★★ Neither a date nor a balance is a decision. An arrival carrying
+        //    both is still one thing to decide, unlike an arrival with a fee.
+        let raw = "EQ1 Confirmed. You have received KES 2,500.00 from JANE DOE on 01/09/26 at 10:15 AM. Your account balance is KES 47,310.55";
+        let figures = vec![
+            TrainedFigure { text: "2,500.00".into(), role: RouteRole::In, pocket: "salary".into() },
+            TrainedFigure {
+                text: "01/09/26 at 10:15 AM".into(),
+                role: RouteRole::Date,
+                pocket: String::new(),
+            },
+            TrainedFigure {
+                text: "47,310.55".into(),
+                role: RouteRole::Balance,
+                pocket: String::new(),
+            },
+        ];
+        let r = synthesize_from_training("equity", raw, &figures, "d2").expect("learns");
+        assert_eq!(r.status, RuleStatus::Mapped);
+        assert_eq!(r.operator.as_deref(), Some("budget.record_income"));
+    }
+
+    #[test]
+    fn a_bare_day_with_no_clock_is_still_a_date() {
+        let raw = "KCB Your loan is due on 29/11/23. Outstanding KES 597.42";
+        let figures = vec![TrainedFigure {
+            text: "29/11/23".into(),
+            role: RouteRole::Date,
+            pocket: String::new(),
+        }];
+        let r = synthesize_from_training("kcb", raw, &figures, "d3").expect("learns");
+        let out = run_rules(&[r], raw).expect("reads it");
+        assert_eq!(
+            out.parsed_fields().get("date").and_then(|v| v.as_str()),
+            Some("29/11/23"),
+            "named `date`, not `datetime`, because there is no clock in it"
         );
     }
 }

@@ -435,6 +435,32 @@ fn counterparty_after(text: &str, from: usize) -> Option<Field> {
         return None;
     }
     let tail = &text[from..];
+
+    // ★★★ **The verb may already carry its preposition.** `OUT_WORDS` holds
+    //     "paid to" and "sent to" whole, so the search resumes AFTER the "to"
+    //     and then went hunting for another preposition -- finding the " at "
+    //     before the clock, and reading no counterparty at all. The effect
+    //     reached much further than a missing field: a taught rule froze the
+    //     payee's name into its pattern, so "teach one and all sixteen become
+    //     readable" only held for the sixteen paid to the same person.
+    //
+    //     So when a capitalised run starts right here, it IS the party. Only
+    //     when it does not do we look onward for a preposition, which is the
+    //     "received from JANE" shape this was written for.
+    if let Some(m) = name_re().captures(tail).and_then(|c| c.get(1)) {
+        if m.start() <= 1 {
+            let who = m.as_str().trim();
+            if !who.is_empty() && !is_currency(who) {
+                return Some(Field {
+                    role: Role::Counterparty,
+                    at: (from + m.start(), from + m.start() + who.len()),
+                    text: who.to_string(),
+                    because: "a capitalised run directly after a verb that carries its preposition",
+                });
+            }
+        }
+    }
+
     let lower = tail.to_lowercase();
     // The nearest preposition after the verb.
     let (prep_at, prep) = PARTY_WORDS
@@ -643,6 +669,15 @@ pub fn group_pattern(group: &str) -> String {
     //    falling to the text pattern below would have them read words.
     if group.starts_with("amount") || group.starts_with("fee") || group.starts_with("balance") {
         return format!(r"(?P<{group}>[0-9][0-9,]*(?:\.[0-9]{{1,2}})?)");
+    }
+    // ★★ A whole "24/8/26 at 8:38 PM" in one group. `event_time` already
+    //    accepts a combined `datetime` and splits it on " at ", so a person
+    //    tagging the date they can see gets both halves without being asked to
+    //    tag two separate tokens for one fact.
+    if group == "datetime" {
+        return format!(
+            r"(?P<{group}>\d{{1,2}}[/-]\d{{1,2}}[/-]\d{{2,4}}(?:\s+at\s+\d{{1,2}}:\d{{2}}(?::\d{{2}})?\s*(?:[AaPp]\.?[Mm]\.?)?)?)"
+        );
     }
     let inner = match group {
         "amount" | "balance_after" | "fee" => r"[0-9][0-9,]*(?:\.[0-9]{1,2})?",

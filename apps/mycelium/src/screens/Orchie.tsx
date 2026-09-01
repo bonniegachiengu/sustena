@@ -1113,13 +1113,14 @@ function DeviceCard(props: { device: DeviceDto }) {
  */
 
 /** What a figure is, in the words a person would use. */
-type FigureRole = "in" | "out" | "fee" | "balance" | "skip";
+type FigureRole = "in" | "out" | "fee" | "balance" | "date" | "skip";
 
 const ROLE_LABEL: Record<FigureRole, string> = {
   in: "money in",
   out: "money out",
   fee: "a fee",
   balance: "the balance",
+  date: "the date",
   skip: "ignore this one",
 };
 
@@ -1136,11 +1137,12 @@ const ROLE_HINT: Record<FigureRole, string> = {
   out: "you paid for something",
   fee: "what the movement cost on top of itself",
   balance: "what the account holds after this — the bank's own figure",
+  date: "when this happened — it decides which message is the latest",
   skip: "no money moved — leave this one out",
 };
 
 /** One number found in the message, with what this thinks it is. */
-type Figure = { text: string; at: number; role: FigureRole; pocket: string };
+type Figure = { text: string; at: number; kind: "money" | "date"; role: FigureRole; pocket: string };
 
 /**
  * Every money figure in the text, in the order they appear.
@@ -1149,15 +1151,44 @@ type Figure = { text: string; at: number; role: FigureRole; pocket: string };
  * own trainer uses. Every run of digits would offer him account fragments and
  * dates to classify, and a list full of noise is a list nobody reads.
  */
-function figuresIn(raw: string): { text: string; at: number }[] {
-  const out: { text: string; at: number }[] = [];
+function figuresIn(raw: string): { text: string; at: number; kind: "money" }[] {
+  const out: { text: string; at: number; kind: "money" }[] = [];
   const re = /(?:ksh|kes)\.?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw)) !== null) {
     const t = m[1];
-    if (t) out.push({ text: t, at: m.index + m[0].length - t.length });
+    if (t) out.push({ text: t, at: m.index + m[0].length - t.length, kind: "money" });
   }
   return out;
+}
+
+/**
+ * Every date in the text, with its clock when one follows.
+ *
+ * ★★★ A date is a different KIND of token from a money figure, and it has to
+ * be offered or it cannot be tagged. It matters more than it looks: an
+ * account shows the balance of its LATEST message, so a date that is misread
+ * is a balance that may be the wrong one.
+ *
+ * ★★ The clock is taken with the day when the text joins them ("24/8/26 at
+ * 8:38 PM"), because that is one fact a person would point at once. The
+ * engine reads that combined form directly.
+ */
+function datesIn(raw: string): { text: string; at: number; kind: "date" }[] {
+  const out: { text: string; at: number; kind: "date" }[] = [];
+  const re =
+    /\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}(?:\s+at\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp]\.?[Mm]\.?)?)?)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    const t = m[1];
+    if (t) out.push({ text: t.trim(), at: m.index, kind: "date" });
+  }
+  return out;
+}
+
+/** Everything taggable in the message, in the order it appears. */
+function tokensIn(raw: string): { text: string; at: number; kind: "money" | "date" }[] {
+  return [...figuresIn(raw), ...datesIn(raw)].sort((a, b) => a.at - b.at);
 }
 
 /**
@@ -1168,9 +1199,15 @@ function figuresIn(raw: string): { text: string; at: number }[] {
  * every guess it makes is sitting in front of him next to the sentence that
  * produced it.
  */
-function guessRoles(raw: string, found: { text: string; at: number }[]): FigureRole[] {
+function guessRoles(
+  raw: string,
+  found: { text: string; at: number; kind: "money" | "date" }[],
+): FigureRole[] {
   const lower = raw.toLowerCase();
   return found.map((f, i) => {
+    // ★★ A date token can only be a date. Offering it the money roles would
+    //    be asking a question with no right answer.
+    if (f.kind === "date") return "date";
     // The 40 characters before the figure are what names it.
     const before = lower.slice(Math.max(0, f.at - 40), f.at);
     if (/fee|charge|cost|commission/.test(before)) return "fee";
@@ -1197,7 +1234,7 @@ export function TrainFlow(props: {
   onDone: () => void;
   onClose: () => void;
 }) {
-  const found = createMemo(() => figuresIn(props.raw));
+  const found = createMemo(() => tokensIn(props.raw));
 
   /**
    * The household's pockets, fetched here rather than passed in.
@@ -1234,7 +1271,7 @@ export function TrainFlow(props: {
     const f = found();
     const guessed = guessRoles(props.raw, f);
     setFigures(
-      f.map((x: { text: string; at: number }, i: number) => ({
+      f.map((x: { text: string; at: number; kind: "money" | "date" }, i: number) => ({
         ...x,
         role: guessed[i] ?? "skip",
         pocket: "",
@@ -1251,7 +1288,8 @@ export function TrainFlow(props: {
   const many = () => (props.count ?? 0) > 1;
   const kept = () => figures().filter((f) => f.role !== "skip");
   // ★★ A balance names no pocket, so it is never "unplaced".
-  const needsPocket = (f: Figure) => f.role !== "skip" && f.role !== "balance";
+  const needsPocket = (f: Figure) =>
+    f.role !== "skip" && f.role !== "balance" && f.role !== "date";
   const unplaced = () => figures().filter((f) => needsPocket(f) && !f.pocket.trim());
 
   const setRole = (i: number, role: FigureRole) =>
@@ -1289,7 +1327,7 @@ export function TrainFlow(props: {
         props.messageId,
         use.map((f) => ({
           text: f.text,
-          role: f.role as "in" | "out" | "fee" | "balance",
+          role: f.role as "in" | "out" | "fee" | "balance" | "date",
           pocket: f.pocket,
         })),
       );
@@ -1369,7 +1407,7 @@ export function TrainFlow(props: {
           <For each={figures()}>
             {(f, i) => (
               <div class={O.figureRow}>
-                <p class={O.figureValue}>Ksh {f.text}</p>
+                <p class={O.figureValue}>{f.kind === "date" ? f.text : `Ksh ${f.text}`}</p>
                 {/* ★★ The sentence this number came out of, so he is reading
                     his own message rather than a bare figure with no context. */}
                 <p class={O.caption}>
@@ -1377,7 +1415,13 @@ export function TrainFlow(props: {
                   <b>{f.text}</b>
                 </p>
                 <div class={O.chips}>
-                  <For each={["in", "out", "fee", "balance", "skip"] as FigureRole[]}>
+                  <For
+                    each={
+                      (f.kind === "date"
+                        ? ["date", "skip"]
+                        : ["in", "out", "fee", "balance", "skip"]) as FigureRole[]
+                    }
+                  >
                     {(r) => (
                       <button
                         class={f.role === r ? O.chipChosen : O.chip}
