@@ -70,6 +70,36 @@ export default function Lock(props: {
 
   const enrolling = () => !props.identity.enrolled;
 
+  /**
+   * ★★★ **Restoring, not enrolling.** A device with no identity has two very
+   * different things it might be: somebody's first, or somebody's second. Only
+   * the second can hold his household -- enrolling on a laptop mints a NEW
+   * key, a different principal that can claim nothing and will never show his
+   * data however well sync works. The door has to offer both.
+   */
+  const [restoring, setRestoring] = createSignal(false);
+  const [phrase, setPhrase] = createSignal("");
+
+  const restore = async () => {
+    setFailure(null);
+    if (pass() !== confirm()) {
+      setFailure("the two passphrases do not match");
+      return;
+    }
+    setBusy(true);
+    try {
+      const id = await engine.restoreIdentity(handle(), pass(), phrase());
+      setPass("");
+      setConfirm("");
+      setPhrase("");
+      props.onUnlocked(id);
+    } catch (e) {
+      setFailure(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const go = async () => {
     setFailure(null);
     if (enrolling() && pass() !== confirm()) {
@@ -117,13 +147,36 @@ export default function Lock(props: {
 
           <div class={O.card}>
             <h2 class={O.cardTitle}>
-              {enrolling() ? "set a passphrase" : "welcome back"}
+              {!enrolling()
+                ? "welcome back"
+                : restoring()
+                  ? "bring your household here"
+                  : "set a passphrase"}
             </h2>
             <p class={O.body}>
-              {enrolling()
-                ? "This phone does not have your key yet. Choose a passphrase. It never leaves this phone, and it is the only way in."
-                : "Enter your passphrase to open your household."}
+              {!enrolling()
+                ? "Enter your passphrase to open your household."
+                : restoring()
+                  ? "Type the recovery phrase from the device you already use. This device then becomes the same you, and your household can reach it."
+                  : "This device does not have your key yet. Choose a passphrase. It never leaves this device, and it is the only way in."}
             </p>
+
+            {/* ★★★ The recovery phrase, on a device that has no identity yet.
+                Without this the only thing a second device can do is mint a
+                NEW key -- a different person, who owns none of his Sustains
+                and will never show his data however well sync works. */}
+            <Show when={enrolling() && restoring()}>
+              <textarea
+                class={O.input}
+                autocapitalize="none"
+                autocomplete="off"
+                spellcheck={false}
+                rows={3}
+                placeholder="your recovery phrase"
+                value={phrase()}
+                onInput={(e) => setPhrase(e.currentTarget.value)}
+              />
+            </Show>
 
             <Show when={enrolling()}>
               <input
@@ -199,13 +252,37 @@ export default function Lock(props: {
             </label>
             <button
               class={`${O.action.primary} ${O.actionWide}`}
-              onClick={() => void go()}
-              disabled={busy() || pass() === ""}
+              onClick={() => void (restoring() ? restore() : go())}
+              disabled={
+                busy() || pass() === "" || (restoring() && phrase().trim() === "")
+              }
             >
-              <Show when={busy()} fallback={enrolling() ? "create it" : "open"}>
+              <Show
+                when={busy()}
+                fallback={
+                  !enrolling() ? "open" : restoring() ? "bring it here" : "create it"
+                }
+              >
                 <span class={O.working} /> checking…
               </Show>
             </button>
+
+            {/* ★★ Offered as a plain question rather than buried in settings.
+                Somebody holding a second device is standing at this exact
+                screen, and it is the only moment the choice can be made. */}
+            <Show when={enrolling()}>
+              <button
+                class={`${O.action.quiet} ${O.actionWide}`}
+                onClick={() => {
+                  setFailure(null);
+                  setRestoring(!restoring());
+                }}
+              >
+                {restoring()
+                  ? "actually, this is my first device"
+                  : "I already use Sustena on another device"}
+              </button>
+            </Show>
 
             {/* ★ The host's own words, unchanged. A friendlier lie here would
                 be a worse one -- and on a phone it would be the only thing

@@ -1231,6 +1231,39 @@ impl World {
         Ok(handle)
     }
 
+    /// The phrase that carries this identity elsewhere.
+    pub fn recovery_phrase(&self, passphrase: &str) -> Result<String, IdentityError> {
+        self.identities.recovery_phrase(passphrase)
+    }
+
+    /// **Restore this identity here**, so this device is the same person.
+    ///
+    /// ★★ It comes up exactly as an enrolment does -- unlocked, peering
+    /// identity set, listener started -- because it IS an enrolment, of a key
+    /// that already existed.
+    pub fn restore(
+        &self,
+        handle: &str,
+        passphrase: &str,
+        phrase: &str,
+    ) -> Result<String, IdentityError> {
+        let u = self.identities.restore(handle, passphrase, phrase)?;
+        let handle = u.handle().to_string();
+        self.peering.set_identity(Some(u.clone()));
+        *self.identity.lock().expect("identity lock") = Some(u);
+        self.start_listening_if_configured();
+        // ★★★ And it claims what is already here. A restored identity on a
+        //     device that was seeded before ownership was declared should own
+        //     that household, not sit beside it -- the same claim an unlock
+        //     makes, for the same reason.
+        if let Ok(claimed) = self.claim_unowned_for(&handle) {
+            for id in claimed {
+                eprintln!("[mycelium] {handle} claimed ownership of {id} on restore");
+            }
+        }
+        Ok(handle)
+    }
+
     /// Come up unlocked, if this node has been told to remember its unlock.
     ///
     /// ★★★ **Why this exists.** A node that waits for a person is a node that

@@ -817,6 +817,37 @@ pub fn enrol_identity(
     Ok(get_identity(world))
 }
 
+/// **The phrase that carries this identity to another device.**
+///
+/// ★★★ It hands back the key itself, so it needs the passphrase even
+/// though the app is already unlocked: an unlocked screen left on a table
+/// should not be a way to walk off with somebody's identity.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn recovery_phrase(world: State<'_, World>, passphrase: String) -> Result<String, String> {
+    trace!("recovery_phrase");
+    world.recovery_phrase(&passphrase).map_err(|e| e.to_string())
+}
+
+/// **Become the same person on a device that has never seen him.**
+///
+/// ★★★ This is what makes a second device HIM rather than a new principal.
+/// The keypair is restored, not generated, so the public key that owns his
+/// Sustains and authenticates to a peer is identical on both.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn restore_identity(
+    world: State<'_, World>,
+    handle: String,
+    passphrase: String,
+    phrase: String,
+) -> Result<IdentityDto, String> {
+    let handle = if handle.trim().is_empty() { DEFAULT_HANDLE.to_string() } else { handle };
+    trace!("restore_identity  {handle}");
+    world.restore(&handle, &passphrase, &phrase).map_err(|e| e.to_string())?;
+    Ok(get_identity(world))
+}
+
 /// Drop the private key from memory. ★ Not a UI state — the key genuinely
 /// leaves, so a locked cockpit cannot act even if a surface forgot to stop it.
 #[tauri::command]

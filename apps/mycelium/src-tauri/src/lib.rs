@@ -64,6 +64,8 @@ pub fn specta_builder() -> Builder {
         commands::unlock_identity,
         commands::enrol_identity,
         commands::lock_identity,
+        commands::recovery_phrase,
+        commands::restore_identity,
         commands::get_ingest,
         commands::capture_message,
         commands::sms_permission_state,
