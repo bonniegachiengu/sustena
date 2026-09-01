@@ -1380,10 +1380,26 @@ impl Ingested {
     /// The key a message would be skipped by, if it can teach one at all.
     pub fn skip_key(m: &IngestedMessage) -> Option<String> {
         let parser = m.parser_name.trim();
-        if parser.is_empty() {
+        if !parser.is_empty() {
+            return Some(format!("{}::{}", m.source_id, parser));
+        }
+        // ★★★ **A shape nothing can READ can still be one he never wants to be
+        //     asked about.** This returned None for an unparsed message, so
+        //     "never ask me about these again" was impossible for precisely the
+        //     messages that ask most: his inbox holds a cluster of 232 alike
+        //     texts nothing recognises, and the only answer available for them
+        //     was to dismiss them one at a time.
+        //
+        // ★★ The skeleton is the same shape key the corpus clusters on, so the
+        //    rule he teaches covers exactly the group he was shown -- not a
+        //    wider net he did not agree to.
+        let shape = sustena_core::corpus::skeleton(&m.raw_payload);
+        if shape.is_empty() {
             return None;
         }
-        Some(format!("{}::{}", m.source_id, parser))
+        use sha2::{Digest as _, Sha256};
+        let digest = format!("{:x}", Sha256::digest(shape.as_bytes()));
+        Some(format!("{}::shape::{}", m.source_id, &digest[..16]))
     }
 
     /// Learn "never ask me about these again", and apply it to what is already
@@ -3543,19 +3559,28 @@ mod skip_rule_tests {
     }
 
     #[test]
-    fn a_message_no_rule_could_read_teaches_nothing() {
-        // ★★★ The safety property. `parser_name` is empty for anything
-        //     unparsed, so a rule keyed on it would mean "skip everything I
-        //     cannot read" — and that pile is exactly the one that needs a
-        //     person's eyes.
+    fn a_message_with_no_shape_at_all_teaches_nothing() {
+        // ★★★ The safety property, and what it now rests on.
+        //
+        //     It used to rest on `parser_name`, which is empty for anything
+        //     unparsed — so silencing an unreadable message would have meant
+        //     "skip everything I cannot read", and that pile is exactly the one
+        //     that needs a person's eyes. Keying on the SHAPE removes the
+        //     danger instead of accepting it: two unreadable texts that read
+        //     differently have different skeletons, so silencing one says
+        //     nothing about the other (see the test below).
+        //
+        //     What is still refused is a text with no skeleton to key on. There
+        //     is nothing there to recognise a second message by, so a rule
+        //     would be a guess, and it is not made.
         let (ing, rules) = store("unparsed");
         let Capture::Stored(m) = ing
-            .capture("h", "kcb", "some text no rule has ever seen", &rules)
+            .capture("h", "kcb", "!!! ??? ...", &rules)
             .expect("capture") else { panic!("stored") };
         assert_eq!(m.status, "unparsed");
 
         let out = ing.learn_skip("h", &m.id).expect("learn");
-        assert!(out.unlearnable, "it refuses rather than learning the dangerous rule");
+        assert!(out.unlearnable, "it refuses rather than learning a rule it cannot key");
         assert_eq!(out.cleared, 0);
         assert_eq!(waiting(&ing), 1, "and it is still there for him to look at");
         assert!(ing.skip_rules().expect("rules").is_empty(), "nothing was written");
@@ -4832,5 +4857,68 @@ mod paired_transfer_undo_tests {
         let r = ing.find_transfers("h").expect("transfers");
         assert!(r.matched.is_empty(), "a resemblance is not proof");
         assert_eq!(r.blocked_by_applied_income, 1, "reported, and left alone");
+    }
+}
+
+#[cfg(test)]
+mod skip_by_shape_tests {
+    //! "Never ask me about these again" has to work for the messages that ask
+    //! most -- the ones nothing can read.
+    use super::*;
+
+    fn store(name: &str) -> (Ingested, Vec<ParseRule>) {
+        let p = std::env::temp_dir().join(format!("mycelium-skipshape-{name}"));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).expect("scratch");
+        let ing = Ingested::at(p).expect("ingest");
+        let rules = ing.effective_rules().expect("rules");
+        (ing, rules)
+    }
+
+    /// Two texts of one unreadable shape, differing only in their particulars.
+    fn notice(amount: &str, day: &str) -> String {
+        format!("UHOB943IFK Notice: Ksh{amount} of your limit was reviewed on {day}/8/26 by SYSTEM")
+    }
+
+    #[test]
+    fn a_shape_nothing_reads_can_still_be_silenced() {
+        // ★★★ The case that was impossible. His inbox holds hundreds of alike
+        //     texts nothing recognises, and the only answer available was to
+        //     dismiss them one at a time.
+        let (ing, rules) = store("silence");
+        let first = match ing.capture("h", "mpesa", &notice("100", "1"), &rules).expect("a") {
+            Capture::Stored(m) => {
+                assert_eq!(m.status, "unparsed", "nothing reads it, which is the point");
+                m.id
+            }
+            other => panic!("expected a stored message, got {other:?}"),
+        };
+        ing.capture("h", "mpesa", &notice("250", "2"), &rules).expect("b");
+        ing.capture("h", "mpesa", &notice("999", "3"), &rules).expect("c");
+
+        let learned = ing.learn_skip("h", &first).expect("skip");
+        assert!(!learned.unlearnable, "an unread shape is still a shape");
+        assert_eq!(learned.cleared, 3, "and the pile it was meant to clear is cleared");
+        assert_eq!(waiting(&ing), 0);
+    }
+
+    #[test]
+    fn silencing_one_shape_leaves_the_others_alone() {
+        // ★★★ The rule must cover exactly the group he was shown and no wider
+        //     net. Silencing one kind of notice must not silence his money.
+        let (ing, rules) = store("narrow");
+        let first = match ing.capture("h", "mpesa", &notice("100", "1"), &rules).expect("a") {
+            Capture::Stored(m) => m.id,
+            other => panic!("unexpected {other:?}"),
+        };
+        ing.capture("h", "mpesa", "Some entirely different text about something else", &rules)
+            .expect("other");
+
+        ing.learn_skip("h", &first).expect("skip");
+        assert_eq!(waiting(&ing), 1, "the unrelated message still asks");
+    }
+
+    fn waiting(ing: &Ingested) -> usize {
+        ing.current().expect("current").iter().filter(|m| m.needs_attention()).count()
     }
 }
