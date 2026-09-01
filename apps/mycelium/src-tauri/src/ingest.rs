@@ -1787,7 +1787,23 @@ impl Ingested {
     ) -> StoreResult<usize> {
         let mut changed = 0usize;
         for m in self.current()? {
-            if m.sustain_id != sustain_id || m.status != "unparsed" || m.ignored || m.resolved {
+            // ★★★ **`resolved` is deliberately NOT a reason to skip, and that
+            //     was the bug behind an infinite teach loop.**
+            //
+            //     The shapes offered for teaching are unparsed messages, and
+            //     that list never excluded resolved ones -- but this re-read
+            //     did. So a cluster he had dealt with by hand was offered,
+            //     taught, and changed nothing: still unparsed, so still
+            //     offered, forever. He could not get past the button.
+            //
+            //     The two flags are orthogonal and conflating them is what
+            //     broke. `resolved` is his decision about a message.
+            //     `unparsed` is a statement about whether anything can READ
+            //     it. Teaching answers the second and must not touch the
+            //     first -- which is exactly what happens below: status and
+            //     fields only, and `needs_attention()` requires `!resolved`,
+            //     so nothing a person settled can re-enter his queue.
+            if m.sustain_id != sustain_id || m.status != "unparsed" || m.ignored {
                 continue;
             }
             let t = parse_message(&m.raw_payload, Some(&m.source_id), rules);
@@ -5202,15 +5218,29 @@ mod reparse_tests {
     }
 
     #[test]
-    fn a_message_somebody_already_answered_is_left_alone() {
-        // ★★ Re-reading a message he has dealt with would undo his answer.
+    fn a_message_somebody_already_answered_keeps_his_answer() {
+        // ★★★ This used to assert the message was SKIPPED, and the skip was a
+        //     real bug: the shapes offered for teaching include resolved
+        //     messages, so a cluster he had dealt with by hand could be taught
+        //     and change nothing -- still unparsed, so offered again, forever.
+        //     He could not get past the button.
+        //
+        //     What actually had to be protected is his ANSWER, and it is. The
+        //     two flags are orthogonal: `resolved` is his decision, `unparsed`
+        //     is whether anything can read it. Teaching answers the second.
         let ing = Ingested::at(scratch("resolved")).expect("ingest");
         let id = capture_unreadable(&ing, "CHAMA dues Ksh 500.00 received today");
         assert!(ing.resolve(&id).expect("resolve"));
 
-        assert_eq!(ing.reparse_unparsed("h", &[house_rule()]).expect("reparse"), 0);
+        assert_eq!(ing.reparse_unparsed("h", &[house_rule()]).expect("reparse"), 1);
         let m = ing.current().expect("current").into_iter().rev().find(|m| m.id == id).expect("m");
         assert!(m.resolved, "his answer stands");
+        assert!(m.filed.is_empty(), "and nothing was filed by re-reading it");
+        assert!(
+            !m.needs_attention(),
+            "and it does not come back into his queue -- the property that matters"
+        );
+        assert_ne!(m.status, "unparsed", "but it is readable now, so it stops being offered");
     }
 
     #[test]
@@ -5818,9 +5848,13 @@ mod refresh_readings_tests {
         ing.resolve(&m.id).expect("resolved");
         assert!(reported_account_of(&m).is_none(), "and its balance is unread");
 
+        // ★★ Re-reading now reaches a settled message too -- see
+        //    `a_message_somebody_already_answered_keeps_his_answer` for why
+        //    skipping it was an infinite teach loop. Either path gives the
+        //    balance its reading; what matters here is that it HAS one.
         let rules: Vec<ParseRule> = seeded.iter().cloned().chain([taught_rule()]).collect();
-        assert_eq!(ing.reparse_unparsed("h", &rules).expect("reparse"), 0, "settled stays settled");
-        assert_eq!(ing.refresh_readings("h", &rules).expect("refresh"), 1);
+        assert_eq!(ing.reparse_unparsed("h", &rules).expect("reparse"), 1);
+        ing.refresh_readings("h", &rules).expect("refresh");
 
         let after = ing.current().expect("current");
         let now = after.iter().find(|x| x.id == m.id).expect("still on file");

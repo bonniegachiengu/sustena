@@ -14,117 +14,82 @@ fn main() {
     let store = Ingested::at(&root).expect("the store opens");
     let seeded = sustena_core::all_seed_rules();
 
-    // The newest message nobody can read that states a balance.
-    // Plain scanning rather than a regex: this is a throwaway checker and it
-    // is not worth a dependency the app itself does not need here.
-    fn figure_after(text: &str, marker: &str) -> Option<String> {
-        let at = text.find(marker)? + marker.len();
-        let rest = text[at..].trim_start();
-        let rest = rest.strip_prefix("Ksh").unwrap_or(rest).trim_start();
-        let n: String =
-            rest.chars().take_while(|c| c.is_ascii_digit() || *c == ',' || *c == '.').collect();
-        let n = n.trim_end_matches('.').to_string();
-        (!n.is_empty() && n.chars().any(|c| c.is_ascii_digit())).then_some(n)
-    }
-    fn figure_before(text: &str, marker: &str) -> Option<String> {
-        let at = text.find(marker)?;
-        let head = text[..at].trim_end();
-        let n: String = head
-            .chars()
-            .rev()
-            .take_while(|c| c.is_ascii_digit() || *c == ',' || *c == '.')
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        (!n.is_empty() && n.chars().any(|c| c.is_ascii_digit())).then_some(n)
-    }
-
-    let mut best: Option<(i64, mycelium_lib::ingest::IngestedMessage, String, String)> = None;
-    for m in store.current().expect("current") {
-        if m.sustain_id != sustain || !m.parser_name.trim().is_empty() {
-            continue;
-        }
-        let (Some(b), Some(x)) = (
-            figure_after(&m.raw_payload, "balance is"),
-            figure_before(&m.raw_payload, " paid to"),
-        ) else {
-            continue;
-        };
-        // Order by what the text says, using the same reader the engine uses.
-        let t = sustena_core::parse_message(&m.raw_payload, Some(&m.source_id), &seeded);
-        let at = sustena_core::event_time(&t.parsed_fields()).map(|d| d.to_epoch_ms(180));
-        let at = at.or(m.sent_at_ms).unwrap_or(0);
-        if best.as_ref().is_none_or(|(prev, ..)| at > *prev) {
-            best = Some((at, m, x, b));
-        }
-    }
-
-    let Some((_, m, amount_text, balance_text)) = best else {
-        println!("no unreadable message states a balance -- nothing to demonstrate");
+    // The shape the feed would offer, built exactly as `get_feed` builds it.
+    let corpus: Vec<(String, String)> = store
+        .current()
+        .expect("current")
+        .into_iter()
+        .filter(|m| m.sustain_id == sustain && m.status == "unparsed" && !m.ignored)
+        .map(|m| (m.id, m.raw_payload))
+        .collect();
+    let clusters =
+        sustena_core::corpus::cluster(corpus.iter().map(|(i, r)| (i.as_str(), r.as_str())));
+    let Some(top) = clusters.first() else {
+        println!("nothing unreadable to teach");
         return;
     };
+    println!("OFFERED: {} messages share this shape", top.count());
+    println!("   {}", top.example.replace('\n', " "));
 
-    println!("BEFORE");
-    let before = store.reported_balances(&sustain).expect("balances");
-    for (k, v) in &before {
-        println!("   {k:>10} {:>12.2}", v.balance);
-    }
-    println!("\nteaching this message, which nothing reads today:");
-    println!("   {}", m.raw_payload.replace('\n', " "));
-    println!("   spend {amount_text}  ·  balance {balance_text}");
+    let id = top.members.first().expect("a member").clone();
+    let m = store.current().unwrap().into_iter().find(|x| x.id == id).expect("the message");
+    println!("   resolved={}  status={:?}", m.resolved, m.status);
 
-    let figures = vec![
-        sustena_core::TrainedFigure {
-            text: amount_text,
-            role: sustena_core::RouteRole::Out,
-            pocket: "shopping".into(),
-        },
-        sustena_core::TrainedFigure {
-            text: balance_text,
-            role: sustena_core::RouteRole::Balance,
-            pocket: String::new(),
-        },
-    ];
-    let rule = sustena_core::synthesize_from_training("mpesa", &m.raw_payload, &figures, "taught_demo")
-        .expect("it learns");
-    println!("
-   status of the message: {:?}  resolved={} ignored={}", m.status, m.resolved, m.ignored);
-    println!("   the rule reads its own example: {}",
-        sustena_core::run_rules(std::slice::from_ref(&rule), &m.raw_payload).is_some());
-    if let Some(t) = sustena_core::run_rules(std::slice::from_ref(&rule), &m.raw_payload) {
-        println!("   fields: {:?}", t.parsed_fields());
-    }
-    store.add_rule(&rule).expect("saved");
-
-    let rules: Vec<_> = seeded.iter().cloned().chain(store.learned_rules().unwrap()).collect();
-    let n = store.reparse_unparsed(&sustain, &rules).expect("re-read");
-    let r = store.refresh_readings(&sustain, &rules).expect("refresh");
-    let t = store.backfill_event_times(&sustain, &rules).expect("times");
-    println!("\n{n} message(s) became readable, {t} recovered when they happened");
-
-    println!("\nAFTER");
-    let after = store.reported_balances(&sustain).expect("balances");
-    for (k, v) in &after {
-        println!("   {k:>10} {:>12.2}", v.balance);
-    }
-
-    // And the message each figure now comes from, so the number can be read back.
-    println!("\nthe message behind each figure:");
-    for (acct, rep) in &after {
-        for msg in store.current().unwrap() {
-            if msg.sustain_id != sustain {
-                continue;
-            }
-            if msg.event_at_ms.or(msg.sent_at_ms) == Some(rep.at) {
-                if let Some((a, b)) = mycelium_lib::ingest::reported_account_of(&msg) {
-                    if &a == acct && (b - rep.balance).abs() < 0.005 {
-                        println!("   {acct:>10} = {:.2}", rep.balance);
-                        println!("        {}\n", msg.raw_payload.replace('\n', " "));
-                        break;
-                    }
-                }
-            }
+    // Teach it the way the button does: every currency figure, first one out.
+    let mut figures: Vec<sustena_core::TrainedFigure> = Vec::new();
+    let mut seen = 0;
+    let text = m.raw_payload.clone();
+    let mut rest = text.as_str();
+    while let Some(at) = rest.to_uppercase().find("KSH") {
+        let after = &rest[at + 3..];
+        let n: String = after
+            .trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == ',' || *c == '.')
+            .collect();
+        let n = n.trim_end_matches('.').to_string();
+        if n.chars().any(|c| c.is_ascii_digit()) {
+            seen += 1;
+            figures.push(sustena_core::TrainedFigure {
+                text: n,
+                role: if seen == 1 {
+                    sustena_core::RouteRole::Out
+                } else {
+                    sustena_core::RouteRole::Balance
+                },
+                pocket: if seen == 1 { "Leisure".into() } else { String::new() },
+            });
+        }
+        rest = &rest[at + 3..];
+        if seen >= 2 {
+            break;
         }
     }
+    println!("   teaching {} figure(s)", figures.len());
+
+    let rule = sustena_core::synthesize_from_training("mpesa", &m.raw_payload, &figures, "taught_loop")
+        .expect("it learns");
+    store.add_rule(&rule).expect("saved");
+    let rules: Vec<_> = seeded.iter().cloned().chain(store.learned_rules().unwrap()).collect();
+    let n = store.reparse_unparsed(&sustain, &rules).expect("re-read");
+    println!("
+AFTER TEACHING: {n} message(s) became readable");
+
+    // Would the feed offer the SAME shape again? That is the loop.
+    let corpus2: Vec<(String, String)> = store
+        .current()
+        .expect("current")
+        .into_iter()
+        .filter(|m| m.sustain_id == sustain && m.status == "unparsed" && !m.ignored)
+        .map(|m| (m.id, m.raw_payload))
+        .collect();
+    let again =
+        sustena_core::corpus::cluster(corpus2.iter().map(|(i, r)| (i.as_str(), r.as_str())));
+    let same = again.iter().any(|c| c.skeleton == top.skeleton);
+    println!("SAME SHAPE OFFERED AGAIN: {same}   <-- must be false");
+    let after = store.current().unwrap().into_iter().find(|x| x.id == id).expect("still there");
+    println!("that message: status={:?} resolved={} filed={}",
+        after.status, after.resolved, after.filed.len());
+    println!("back in his queue: {}   <-- must be false if it was settled",
+        after.needs_attention() && m.resolved);
 }
