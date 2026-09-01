@@ -735,6 +735,80 @@ impl Store {
 /// ★ The one place the legacy defaults are interpreted, so there is exactly
 /// one answer to *what does an unstamped line mean* rather than one per
 /// call site.
+/// **Which DEVICE wrote an entry** — not which person.
+///
+/// ★★★ These were the same string until now, and that was a real bug waiting.
+/// A CRDT entry is identified by `(node, counter)`, and `node` was the
+/// person's public key. That is fine while a person has one device. It stops
+/// being fine the moment an identity can travel: his laptop presents the same
+/// key, both machines write `key:1`, `key:2`, … and two DIFFERENT entries
+/// collide on one stamp. Not a merge conflict — silent loss.
+///
+/// So a person is a key and a device is this. Ownership, authentication and
+/// authorship still belong to the key; only the stamp belongs to the device.
+///
+/// ★★ Random, not derived. Deriving it from the key would make two devices of
+/// one person collide again, which is the whole thing being fixed; deriving it
+/// from hardware would change when a phone is replaced and orphan its own
+/// history.
+///
+/// ★ Created once and kept. Every entry this machine has already written is
+/// attributed to it (they carry no explicit origin, so they are attributed to
+/// whatever this returns) — which is correct, because this machine did write
+/// them.
+pub fn device_id(root: &Path) -> String {
+    let path = root.join("device.id");
+    if let Ok(existing) = fs::read_to_string(&path) {
+        let trimmed = existing.trim().to_string();
+        if !trimmed.is_empty() {
+            return trimmed;
+        }
+    }
+
+    // ★★★ **A machine that already has a history keeps the id it wrote it
+    //     with.** This is the whole migration, and it is deliberately nothing.
+    //
+    //     His phone stamped years of entries with his public key -- some of
+    //     them carrying it explicitly as an `origin`, most implicitly by
+    //     carrying none. Handing that machine a fresh random id would split
+    //     one device's history across two node names: the explicit ones stay
+    //     under the key, the rest move, and its own next sequence falls back
+    //     into numbers it has already used. Measured on his real store, that
+    //     took `next_seq` from 312 to 272.
+    //
+    //     So an install that already has an identity adopts it as its device
+    //     id, and not one entry is re-attributed. Only a machine with no
+    //     identity yet -- a genuinely new device, which is exactly the one
+    //     that would collide -- draws a random one. The collision this fix
+    //     exists for is between HIS PHONE and HIS LAPTOP, and the laptop is
+    //     always the new machine.
+    let identity = root.join("identity.json");
+    if let Ok(text) = fs::read_to_string(&identity) {
+        if let Ok(v) = serde_json::from_str::<Value>(&text) {
+            if let Some(key) = v.get("public_key").and_then(Value::as_str) {
+                if !key.is_empty() {
+                    let _ = fs::write(&path, key);
+                    return key.to_string();
+                }
+            }
+        }
+    }
+
+    let mut bytes = [0u8; 16];
+    if getrandom::getrandom(&mut bytes).is_err() {
+        // ★ Even here, never a constant: a shared fallback id would put two
+        //   machines back into the collision this exists to prevent.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        bytes[..16].copy_from_slice(&nanos.to_le_bytes()[..16.min(16)]);
+    }
+    let id: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let _ = fs::write(&path, &id);
+    id
+}
+
 fn entry_of(line: LoggedEvent, this_node: &str) -> LogEntry<LoggedEvent> {
     let origin = line.origin.clone().unwrap_or_else(|| this_node.to_string());
     // ★★★ **`counter = seq + 1`, and the off-by-one is load-bearing.** A

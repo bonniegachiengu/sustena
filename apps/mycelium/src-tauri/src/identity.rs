@@ -627,11 +627,28 @@ mod kdf_cost_tests {
 /// 1, 0 or each other.
 const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-/// The check symbol appended to a phrase, so a mistyped one is refused rather
-/// than silently restoring a different (wrong) identity.
-fn check_symbol(bytes: &[u8]) -> char {
-    let sum: u32 = bytes.iter().map(|b| u32::from(*b)).sum();
-    CROCKFORD[(sum % 32) as usize] as char
+/// The check appended to a phrase, so a mistyped one is refused rather than
+/// silently restoring a different -- and wrong -- identity.
+///
+/// ★★★ **TWO symbols, from a position-sensitive sum.** The first version was
+/// one symbol from a plain byte sum, which is 1-in-32 to accept a typo by
+/// coincidence and blind to transposition entirely -- a sum does not care what
+/// order the bytes came in. A test caught it by getting unlucky, which is
+/// exactly how a person would have found it: a phrase that restored the wrong
+/// identity in silence.
+///
+/// ★★ Ten bits and order-sensitive is enough here. This is not defending
+/// against an adversary -- somebody who can choose the phrase already has the
+/// key -- it is defending against a hand copying twenty-six characters off
+/// paper, where the realistic mistakes are one wrong symbol and two swapped.
+fn check_symbols(bytes: &[u8]) -> [char; 2] {
+    let (mut a, mut b) = (1u32, 0u32);
+    for byte in bytes {
+        a = (a + u32::from(*byte)) % 1021;
+        b = (b + a) % 1021;
+    }
+    let sum = (b << 10) | a;
+    [CROCKFORD[((sum >> 5) & 31) as usize] as char, CROCKFORD[(sum & 31) as usize] as char]
 }
 
 fn crockford_value(c: char) -> Option<u8> {
@@ -662,7 +679,9 @@ pub fn phrase_of(secret: &[u8; 32]) -> String {
     if nbits > 0 {
         out.push(CROCKFORD[((bits << (5 - nbits)) & 31) as usize] as char);
     }
-    out.push(check_symbol(secret));
+    for c in check_symbols(secret) {
+        out.push(c);
+    }
     // ★ Grouped, because a wall of characters is where transcription goes
     //   wrong. The groups are cosmetic and stripped on the way back in.
     out.as_bytes()
@@ -681,10 +700,10 @@ pub fn secret_of(phrase: &str) -> Result<[u8; 32], IdentityError> {
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '-' && *c != '_')
         .collect();
-    if cleaned.len() < 2 {
+    if cleaned.len() < 3 {
         return Err(IdentityError::Malformed("that recovery phrase is too short".into()));
     }
-    let (body, check) = cleaned.split_at(cleaned.len() - 1);
+    let (body, check) = cleaned.split_at(cleaned.len() - 2);
     let mut bits = 0u32;
     let mut nbits = 0u32;
     let mut bytes: Vec<u8> = Vec::with_capacity(32);
@@ -716,10 +735,13 @@ pub fn secret_of(phrase: &str) -> Result<[u8; 32], IdentityError> {
     //    position was having a correct transcription refused -- which a test
     //    caught, and which would have read as "your phrase is wrong" to
     //    somebody who had copied it perfectly.
-    let given = crockford_value(check[0])
-        .map(|v| CROCKFORD[v as usize] as char)
-        .ok_or_else(|| IdentityError::Malformed("that recovery phrase ends oddly".into()))?;
-    if check_symbol(&secret) != given {
+    let mut given = ['0'; 2];
+    for (i, c) in check.iter().enumerate() {
+        given[i] = crockford_value(*c)
+            .map(|v| CROCKFORD[v as usize] as char)
+            .ok_or_else(|| IdentityError::Malformed("that recovery phrase ends oddly".into()))?;
+    }
+    if check_symbols(&secret) != given {
         return Err(IdentityError::Malformed(
             "that recovery phrase has a typo in it somewhere".into(),
         ));
@@ -846,6 +868,75 @@ mod recovery_tests {
         let err = laptop.restore("bg.myc", PASS, &wrong).unwrap_err();
         assert!(matches!(err, IdentityError::Malformed(_)), "got {err:?}");
         assert!(!laptop.exists(), "and nothing was written");
+    }
+
+    #[test]
+    fn every_single_symbol_typo_is_caught() {
+        // ★★★ Exhaustive, not sampled, because the previous check passed for a
+        //     while by luck: a one-symbol sum accepts a wrong phrase once in
+        //     thirty-two, and the test that found it did so by drawing an
+        //     unlucky random key. A recovery phrase that silently restores the
+        //     WRONG identity is the worst failure this code has, so it is
+        //     proven over every position and every substitution rather than
+        //     over one random attempt.
+        let secret = [0x5au8; 32];
+        let phrase = phrase_of(&secret);
+        let symbols: Vec<char> = phrase.chars().filter(|c| *c != '-').collect();
+        let mut checked = 0;
+        for i in 0..symbols.len() {
+            for &c in CROCKFORD.iter() {
+                let c = c as char;
+                if c == symbols[i] {
+                    continue;
+                }
+                let mut wrong = symbols.clone();
+                wrong[i] = c;
+                let wrong: String = wrong.into_iter().collect();
+                // ★★ The danger is a typo that decodes to a DIFFERENT key
+                //    without being refused -- that restores a stranger's
+                //    identity in silence. Being refused is safe, and so is
+                //    decoding to the same key: the final symbol carries
+                //    padding bits that are discarded, so altering it changes
+                //    nothing about the secret. Both are fine; a silent
+                //    substitution is not.
+                match secret_of(&wrong) {
+                    Err(_) => {}
+                    Ok(other) => assert_eq!(
+                        other, secret,
+                        "a one-symbol typo silently restored a DIFFERENT key: position {i} -> {c}"
+                    ),
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked > 1000, "it really did try them all: {checked}");
+    }
+
+    #[test]
+    fn two_swapped_symbols_are_caught() {
+        // ★★ The other mistake a hand makes. A plain sum is blind to it --
+        //    it does not care what order the bytes arrived in.
+        let secret = [0x11u8; 32];
+        let phrase = phrase_of(&secret);
+        let mut symbols: Vec<char> = phrase.chars().filter(|c| *c != '-').collect();
+        let mut swapped = 0;
+        for i in 0..symbols.len() - 1 {
+            if symbols[i] == symbols[i + 1] {
+                continue;
+            }
+            symbols.swap(i, i + 1);
+            let s: String = symbols.iter().collect();
+            match secret_of(&s) {
+                Err(_) => {}
+                Ok(other) => assert_eq!(
+                    other, secret,
+                    "a transposition at {i} silently restored a DIFFERENT key"
+                ),
+            }
+            symbols.swap(i, i + 1);
+            swapped += 1;
+        }
+        assert!(swapped > 0, "there was something to swap");
     }
 
     #[test]
