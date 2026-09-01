@@ -1178,7 +1178,7 @@ function guessRoles(raw: string, found: { text: string; at: number }[]): FigureR
     //     right, so it is guessed rather than left as "ignore". "outstanding"
     //     and "limit" stay out: a loan's outstanding total and a transaction
     //     limit are not what an account holds.
-    if (/balance|avail|available/.test(before)) return "balance";
+    if (/\bbalance\b|avail|available/.test(before)) return "balance";
     if (/outstanding|limit|transact/.test(before)) return "skip";
     if (/received|credited|deposit|refund/.test(before)) return "in";
     if (/sent|paid|bought|withdraw|debited|spent/.test(before)) return "out";
