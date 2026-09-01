@@ -306,6 +306,13 @@ pub struct Peering {
     book: Mutex<Book>,
     path: PathBuf,
     store: Store,
+    /// Where this node keeps its files, so the captured queue can be opened
+    /// when a peer asks for it.
+    ///
+    /// ★★ The root rather than an open store: `Ingested` is a handle over a
+    /// directory, and holding one here for the lifetime of the process would
+    /// keep a second view of the same files alive for no reason.
+    root: PathBuf,
     listening: Mutex<Option<u16>>,
     /// What this node will offer a peer, and hand over on request.
     ///
@@ -362,6 +369,7 @@ impl Peering {
             book: Mutex::new(book),
             path,
             store,
+            root: root.to_path_buf(),
             listening: Mutex::new(None),
             identity: Mutex::new(None),
             specs: Mutex::new(BTreeMap::new()),
@@ -556,6 +564,19 @@ impl Peering {
                 Frame::Want { sustain_id, have } => {
                     self.answer_want(&mut session, stream, &peer, &sustain_id, &have, &public_key)?;
                 }
+                Frame::WantIngest { sustain_id, have } => {
+                    self.answer_want_ingest(
+                        &mut session,
+                        stream,
+                        &peer,
+                        &sustain_id,
+                        &have,
+                        &public_key,
+                    )?;
+                }
+                Frame::GiveIngest { sustain_id, entries, .. } => {
+                    self.accept_ingest(&sustain_id, entries, &public_key)?;
+                }
                 Frame::Give { sustain_id, entries, .. } => {
                     self.accept_give(&mut session, stream, &peer, &sustain_id, entries, &public_key)?;
                 }
@@ -638,6 +659,75 @@ impl Peering {
                 }
             }
         }
+    }
+
+    /// Hand a peer the captured messages it does not have.
+    ///
+    /// ★★ The same permission gate the event log uses, checked separately
+    /// rather than assumed: a Sustain not shared with this peer does not share
+    /// its queue either, and the refusal is visible on the wire.
+    fn answer_want_ingest(
+        &self,
+        session: &mut Session,
+        stream: &mut TcpStream,
+        peer: &Handshake,
+        sustain_id: &str,
+        have: &VectorClock,
+        me: &str,
+    ) -> WireResult<()> {
+        if !self.book().may_have(peer.public_key(), sustain_id) {
+            return session.send(
+                stream,
+                &Frame::Refused {
+                    rule: "permitted".into(),
+                    reason: format!("{sustain_id} is not shared with {}", peer.handle()),
+                },
+            );
+        }
+        let ingest = crate::ingest::Ingested::at(&self.root)
+            .map_err(|e| WireError::Io(e.to_string()))?;
+        let replica =
+            ingest.replica(sustain_id, me).map_err(|e| WireError::Io(e.to_string()))?;
+        let entries: Vec<serde_json::Value> = replica
+            .missing_from(have)
+            .into_iter()
+            .filter_map(|e| serde_json::to_value(e).ok())
+            .collect();
+        let frontier = replica.frontier();
+        session.send(
+            stream,
+            &Frame::GiveIngest { sustain_id: sustain_id.to_string(), entries, frontier },
+        )
+    }
+
+    /// Take in a peer's captured messages.
+    ///
+    /// ★★★ Nothing is filed by this, ever. A received message arrives
+    /// needing whatever attention it needed on the other device, because it is
+    /// the same kind of thing -- where it was READ changes nothing about
+    /// whether a person still has to answer it.
+    fn accept_ingest(
+        &self,
+        sustain_id: &str,
+        entries: Vec<serde_json::Value>,
+        me: &str,
+    ) -> WireResult<()> {
+        let incoming: Vec<_> = entries
+            .into_iter()
+            .filter_map(|v| serde_json::from_value(v).ok())
+            .collect();
+        if incoming.is_empty() {
+            return Ok(());
+        }
+        let ingest = crate::ingest::Ingested::at(&self.root)
+            .map_err(|e| WireError::Io(e.to_string()))?;
+        let took = ingest
+            .merge_messages(sustain_id, me, incoming)
+            .map_err(|e| WireError::Io(e.to_string()))?;
+        if took > 0 {
+            eprintln!("[peer] took {took} captured message(s) for {sustain_id}");
+        }
+        Ok(())
     }
 
     fn answer_want(
@@ -847,6 +937,22 @@ impl Peering {
             return Err(why);
         }
 
+        // ── and the captured queue ──────────────────────────────────────────
+        //
+        // ★★★ A second conversation on the same connection. The event log
+        //     holds what the household DECIDED; this holds what it was ASKED.
+        //     Without it a second device holds the same Sustains and shows an
+        //     empty queue and no account balances, because every one of those
+        //     figures is read off a message it never received.
+        //
+        // ★★ Best effort, deliberately. The event sync has already succeeded
+        //    and been acknowledged by this point, and a peer that does not
+        //    understand these frames is a peer on an older build -- refusing
+        //    the whole round over that would mean an update on one device
+        //    stopped the other syncing at all, which is worse than a queue
+        //    that arrives later.
+        let _ = self.sync_ingest(&mut session, &mut stream, &node, sustain_id);
+
         Ok(SyncOutcome {
             peer: key,
             handle: peer.handle().to_string(),
@@ -855,6 +961,60 @@ impl Peering {
             sent,
             spec,
         })
+    }
+
+    /// Pull the peer's captured messages, then push this node's.
+    fn sync_ingest(
+        &self,
+        session: &mut Session,
+        stream: &mut TcpStream,
+        node: &str,
+        sustain_id: &str,
+    ) -> Result<(), String> {
+        let ingest =
+            crate::ingest::Ingested::at(&self.root).map_err(|e| e.to_string())?;
+        let mine = ingest.replica(sustain_id, node).map_err(|e| e.to_string())?;
+        session
+            .send(
+                stream,
+                &Frame::WantIngest {
+                    sustain_id: sustain_id.to_string(),
+                    have: mine.frontier(),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        let reply = session.recv(stream).map_err(|e| e.to_string())?;
+        let entries = match reply {
+            Frame::GiveIngest { entries, .. } => entries,
+            Frame::Refused { rule, reason } => return Err(format!("{reason} [{rule}]")),
+            other => return Err(format!("unexpected reply to WantIngest: {other:?}")),
+        };
+        let incoming: Vec<_> =
+            entries.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect();
+        let took = ingest
+            .merge_messages(sustain_id, node, incoming)
+            .map_err(|e| e.to_string())?;
+        if took > 0 {
+            eprintln!("[peer] took {took} captured message(s) for {sustain_id}");
+        }
+
+        // Then what they are missing.
+        let mine = ingest.replica(sustain_id, node).map_err(|e| e.to_string())?;
+        let outgoing: Vec<serde_json::Value> = mine
+            .ordered()
+            .into_iter()
+            .filter_map(|e| serde_json::to_value(e).ok())
+            .collect();
+        session
+            .send(
+                stream,
+                &Frame::GiveIngest {
+                    sustain_id: sustain_id.to_string(),
+                    entries: outgoing,
+                    frontier: mine.frontier(),
+                },
+            )
+            .map_err(|e| e.to_string())
     }
 }
 

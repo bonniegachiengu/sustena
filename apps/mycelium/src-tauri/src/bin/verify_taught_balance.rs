@@ -58,6 +58,7 @@ fn main() {
                     sustena_core::RouteRole::Balance
                 },
                 pocket: if seen == 1 { "Leisure".into() } else { String::new() },
+                at: None,
             });
         }
         rest = &rest[at + 3..];

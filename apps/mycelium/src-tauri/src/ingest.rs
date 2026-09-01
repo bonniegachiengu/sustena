@@ -39,12 +39,13 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sustena_core::sync::{LogEntry, Replica};
 use sustena_core::{parse_message, ParseRule};
 
 use crate::store::{StoreError, StoreResult};
 
 /// One captured message, as the queue holds it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IngestedMessage {
     pub id: String,
     pub sustain_id: String,
@@ -150,6 +151,18 @@ pub struct IngestedMessage {
     pub event_at_ms: Option<i64>,
     /// A monotonic capture order — the host's, not a clock.
     pub seq: u64,
+    /// Which node first captured this message.
+    ///
+    /// ★★★ The other half of its identity. `seq` alone is a number local to
+    /// whoever counted it, so two devices that each captured their own third
+    /// message would both call it 3 -- and a merge keyed on that would treat
+    /// two different texts as one. `(origin, seq)` is unique by construction,
+    /// which is what makes replication possible at all.
+    ///
+    /// ★★ Defaulted, so every message already on his phone loads unchanged
+    /// and is treated as this node's own -- which it is.
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 impl IngestedMessage {
@@ -203,7 +216,7 @@ impl IngestedMessage {
 /// ★ The params as they were sent, not as they were inferred. An inference can
 /// be edited before it is confirmed, and it is the confirmed call that moved
 /// money.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Filing {
     pub operator: String,
     pub params: BTreeMap<String, serde_json::Value>,
@@ -863,6 +876,10 @@ impl Ingested {
             event_at_ms: sustena_core::event_time(&t.parsed_fields())
                 .map(|at| at.to_epoch_ms(SENDER_UTC_OFFSET_MINUTES)),
             seq,
+            // ★ Left unset here and filled by the replica when it is asked for
+            //   one: a store does not know its own node name, and inventing a
+            //   field for it would put the same fact in two places.
+            origin: None,
         };
         self.append_message(&message)?;
         // ★★ When the message says it happened, falling back to when the
@@ -2177,6 +2194,81 @@ impl Ingested {
         }
         self.write_threads(&all)?;
         Ok(true)
+    }
+
+    // ── carrying the queue to another device ────────────────────────────────
+    //
+    // ★★★ **Why the ingest store needs its own replication.** The event log
+    // already syncs, and it holds what a household DECIDED. It does not hold
+    // what it was asked — the captured texts, what each was read as, which are
+    // still waiting. So a second device could hold the same Sustains and show
+    // an empty queue and no account balances, because every one of those
+    // figures is read off a message this node never received.
+    //
+    // ★★★ **A separate replica, not folded into the event log.** A message is
+    // not an event: it does not change state, it is not gated, and replaying it
+    // must not file anything. Putting them in one log would mean the fold had
+    // to know which lines to skip, and a bug in that skip is money moving that
+    // nobody asked for. Two logs, one mechanism — `Replica<T>` is generic and
+    // this is exactly the second T it was written for.
+
+    /// This store's messages as a replica, ready to compare with a peer's.
+    ///
+    /// ★★ `counter = seq + 1`, the same off-by-one the event log needs and for
+    /// the same reason: an absent vector-clock component is `0` and means
+    /// *this node has written nothing*, so a message at counter `0` would be
+    /// indistinguishable from a node that had never captured anything and
+    /// `missing_from` would never send it.
+    pub fn replica(
+        &self,
+        sustain_id: &str,
+        this_node: &str,
+    ) -> StoreResult<Replica<IngestedMessage>> {
+        let mut replica = Replica::new();
+        for m in self.current()? {
+            if m.sustain_id != sustain_id {
+                continue;
+            }
+            replica.insert(entry_of_message(m, this_node));
+        }
+        Ok(replica)
+    }
+
+    /// **Take in a peer's messages.**
+    ///
+    /// ★★★ Only what this node has never seen, decided by `(origin, seq)`
+    /// rather than by the message id: two devices that each captured their own
+    /// third message would both call it seq 3, and an id is derived from the
+    /// text, so the same text captured on both phones is legitimately the same
+    /// message and must NOT be stored twice. The stamp answers both.
+    ///
+    /// ★★ Nothing is filed, ever. A received message arrives exactly as a
+    /// captured one does — needing attention if it needs attention — because
+    /// it is the same kind of thing. Whether it was read here or on his phone
+    /// changes nothing about whether a person still has to answer it.
+    ///
+    /// Returns how many were new.
+    pub fn merge_messages(
+        &self,
+        sustain_id: &str,
+        this_node: &str,
+        incoming: Vec<LogEntry<IngestedMessage>>,
+    ) -> StoreResult<usize> {
+        let have = self.replica(sustain_id, this_node)?;
+        let mut taken = 0usize;
+        for entry in incoming {
+            if have.contains(&entry.stamp.node, entry.stamp.counter) {
+                continue;
+            }
+            let mut m = entry.payload;
+            // ★★ Remembered, so a second sync recognises it as theirs rather
+            //    than adopting it as this node's own and sending it back.
+            m.origin = Some(entry.stamp.node.clone());
+            m.sustain_id = sustain_id.to_string();
+            self.append_message(&m)?;
+            taken += 1;
+        }
+        Ok(taken)
     }
 
     /// The rules in force: the latest version of each id.
@@ -3926,6 +4018,7 @@ mod reference_tests {
             sent_at_ms: None,
             event_at_ms: None,
             seq: 1,
+            origin: None,
         };
         m.parsed_fields.insert("ref".into(), serde_json::json!("AB12"));
         assert_eq!(m.reference(), None);
@@ -4985,6 +5078,7 @@ mod per_account_balance_tests {
             sent_at_ms: None,
             event_at_ms: None,
             seq: 1,
+            origin: None,
         };
         for (k, v) in fields {
             m.parsed_fields.insert((*k).into(), v.clone());
@@ -5066,6 +5160,7 @@ mod queue_cap_tests {
 
     fn waiting(seq: u64, deferred: Option<u64>) -> IngestedMessage {
         IngestedMessage {
+            origin: None,
             id: format!("m{seq}"),
             sustain_id: "h".into(),
             source_id: "mpesa".into(),
@@ -5820,11 +5915,13 @@ mod refresh_readings_tests {
                 text: "2,500.00".into(),
                 role: sustena_core::RouteRole::In,
                 pocket: "salary".into(),
+                at: None,
             },
             sustena_core::TrainedFigure {
                 text: "47,310.55".into(),
                 role: sustena_core::RouteRole::Balance,
                 pocket: String::new(),
+                at: None,
             },
         ];
         sustena_core::synthesize_from_training("equity", UNREAD, &figures, "taught").expect("learns")
@@ -6016,5 +6113,167 @@ mod thread_tests {
             Some("equity")
         );
         assert!(sustena_core::thread_for_sender("SOMEONE ELSE", &all).is_none());
+    }
+}
+
+/// One message as a replicable entry.
+///
+/// ★★ Mirrors `store::entry_of` deliberately, down to the off-by-one, so the
+/// two logs cannot drift in how they answer "have I seen this?".
+fn entry_of_message(m: IngestedMessage, this_node: &str) -> LogEntry<IngestedMessage> {
+    let origin = m.origin.clone().unwrap_or_else(|| this_node.to_string());
+    let counter = m.seq + 1;
+    LogEntry {
+        stamp: sustena_core::CausalStamp { counter, node: origin.clone() },
+        // ★ A capture is not caused by another capture, so its scalar clock is
+        //   its own count. Ordering between nodes falls to the stamp, which is
+        //   all a queue needs -- unlike the event log, nothing here folds.
+        lamport: counter,
+        clock: sustena_core::VectorClock::new().at(&origin, counter),
+        t_event: m.event_at_ms.or(m.sent_at_ms).unwrap_or(0),
+        payload: m,
+    }
+}
+
+#[cfg(test)]
+mod ingest_replication_tests {
+    use super::*;
+    use std::{env, fs, path::PathBuf};
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-repl-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    fn text(n: u32, bal: &str) -> String {
+        format!(
+            "UH0B94{n:04} Confirmed. Ksh{n}00.00 paid to A PAYEE on 20/7/26              at 4:30 PM. New M-PESA balance is Ksh{bal}"
+        )
+    }
+
+    fn capture(ing: &Ingested, n: u32, bal: &str) {
+        let rules = sustena_core::all_seed_rules();
+        ing.capture("h", "mpesa", &text(n, bal), &rules).expect("capture");
+    }
+
+    fn ids(ing: &Ingested) -> Vec<String> {
+        let mut v: Vec<String> =
+            ing.current().expect("current").into_iter().map(|m| m.id).collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+
+    #[test]
+    fn a_second_device_ends_up_holding_the_same_messages() {
+        // ★★★ The headline. Without this a laptop holds his Sustains and shows
+        //     an empty queue and no balances, because every figure is read off
+        //     a message it never received.
+        let phone = Ingested::at(scratch("phone")).expect("phone");
+        let laptop = Ingested::at(scratch("laptop")).expect("laptop");
+        for n in 1..=3 {
+            capture(&phone, n, "1,000.00");
+        }
+        assert!(ids(&laptop).is_empty());
+
+        let theirs = phone.replica("h", "phone").expect("replica");
+        let took = laptop
+            .merge_messages("h", "laptop", theirs.ordered().into_iter().cloned().collect())
+            .expect("merge");
+        assert_eq!(took, 3);
+        assert_eq!(ids(&laptop), ids(&phone), "the same messages, both sides");
+    }
+
+    #[test]
+    fn syncing_twice_takes_nothing_the_second_time() {
+        // ★★★ The property a sync is worth nothing without. Re-taking messages
+        //     would grow his queue on every round.
+        let phone = Ingested::at(scratch("idem-phone")).expect("phone");
+        let laptop = Ingested::at(scratch("idem-laptop")).expect("laptop");
+        capture(&phone, 1, "500.00");
+        let send = || {
+            phone.replica("h", "phone").expect("r").ordered().into_iter().cloned().collect()
+        };
+        assert_eq!(laptop.merge_messages("h", "laptop", send()).expect("first"), 1);
+        assert_eq!(laptop.merge_messages("h", "laptop", send()).expect("second"), 0);
+        assert_eq!(ids(&laptop).len(), 1);
+    }
+
+    #[test]
+    fn two_devices_that_each_captured_their_own_third_message_keep_both() {
+        // ★★★ The reason the stamp is (origin, seq) and not seq. Both nodes
+        //     call their own third capture seq 3; keyed on that alone, one
+        //     household's message would silently overwrite the other's.
+        let phone = Ingested::at(scratch("both-phone")).expect("phone");
+        let laptop = Ingested::at(scratch("both-laptop")).expect("laptop");
+        capture(&phone, 7, "700.00");
+        capture(&laptop, 9, "900.00");
+
+        let from_phone: Vec<_> =
+            phone.replica("h", "phone").expect("r").ordered().into_iter().cloned().collect();
+        laptop.merge_messages("h", "laptop", from_phone).expect("merge");
+        assert_eq!(ids(&laptop).len(), 2, "both survive: {:?}", ids(&laptop));
+    }
+
+    #[test]
+    fn a_received_message_is_not_adopted_as_this_nodes_own() {
+        // ★★ Otherwise the laptop would send the phone's messages back to it
+        //    as if it had captured them, and each round would look like new
+        //    work forever.
+        let phone = Ingested::at(scratch("adopt-phone")).expect("phone");
+        let laptop = Ingested::at(scratch("adopt-laptop")).expect("laptop");
+        capture(&phone, 4, "400.00");
+        let from_phone: Vec<_> =
+            phone.replica("h", "phone").expect("r").ordered().into_iter().cloned().collect();
+        laptop.merge_messages("h", "laptop", from_phone).expect("merge");
+
+        let back = laptop.replica("h", "laptop").expect("r");
+        let stamps: Vec<String> =
+            back.ordered().into_iter().map(|e| e.stamp.node.clone()).collect();
+        assert_eq!(stamps, vec!["phone"], "still theirs: {stamps:?}");
+    }
+
+    #[test]
+    fn nothing_is_filed_by_receiving_it() {
+        // ★★★ A message is not an event. Replaying one must never move money,
+        //     which is the whole reason this is a separate log.
+        let phone = Ingested::at(scratch("nofile-phone")).expect("phone");
+        let laptop = Ingested::at(scratch("nofile-laptop")).expect("laptop");
+        capture(&phone, 5, "500.00");
+        let from_phone: Vec<_> =
+            phone.replica("h", "phone").expect("r").ordered().into_iter().cloned().collect();
+        laptop.merge_messages("h", "laptop", from_phone).expect("merge");
+        for m in laptop.current().expect("current") {
+            assert!(m.filed.is_empty(), "nothing was filed");
+            assert!(!m.applied, "and nothing was applied");
+        }
+    }
+
+    #[test]
+    fn what_the_phone_read_arrives_with_it() {
+        // ★★ The parsed fields travel WITH the message, which is why messages
+        //    alone are enough for a laptop to show the same balances -- it does
+        //    not have to re-derive anything.
+        let phone = Ingested::at(scratch("fields-phone")).expect("phone");
+        let laptop = Ingested::at(scratch("fields-laptop")).expect("laptop");
+        capture(&phone, 6, "1,234.00");
+        let from_phone: Vec<_> =
+            phone.replica("h", "phone").expect("r").ordered().into_iter().cloned().collect();
+        laptop.merge_messages("h", "laptop", from_phone).expect("merge");
+        let got = laptop.reported_balances("h").expect("balances");
+        assert_eq!(got.get("mpesa").map(|r| r.balance), Some(1234.0));
+    }
+
+    #[test]
+    fn another_households_messages_are_not_taken() {
+        let phone = Ingested::at(scratch("scope-phone")).expect("phone");
+        let laptop = Ingested::at(scratch("scope-laptop")).expect("laptop");
+        capture(&phone, 8, "800.00");
+        let theirs: Vec<_> =
+            phone.replica("h", "phone").expect("r").ordered().into_iter().cloned().collect();
+        assert!(!theirs.is_empty());
+        assert_eq!(laptop.replica("other", "laptop").expect("r").len(), 0);
     }
 }

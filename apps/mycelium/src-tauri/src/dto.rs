@@ -1048,6 +1048,12 @@ pub struct TrainedFigureDto {
     pub role: String,
     /// The pocket he said it belongs to.
     pub pocket: String,
+    /// Where in the message this figure sits, as the screen counted it.
+    ///
+    /// ★★ Two figures in one message are often the same number, so the text
+    /// alone cannot say which one he pointed at.
+    #[serde(default)]
+    pub at: Option<u32>,
 }
 
 /// One filing nobody was asked about, and what disagrees with it.

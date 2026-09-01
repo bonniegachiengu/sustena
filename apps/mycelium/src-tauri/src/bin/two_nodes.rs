@@ -68,6 +68,11 @@ fn log_len(root: &str) -> usize {
         .unwrap_or(0)
 }
 
+/// How many captured messages this node holds.
+fn captured(w: &World) -> usize {
+    w.ingest().current().map(|v| v.len()).unwrap_or(0)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -107,8 +112,21 @@ fn main() {
                     .expect("share");
             }
             println!("prepared");
-            println!("  A {ra} key={ka} port={pa} balance={} log={}", balance(&a), log_len(&ra));
-            println!("  B {rb} key={kb} port={pb} balance={} log={}", balance(&b), log_len(&rb));
+            // Each node captures a text the other has never seen, so a sync
+            // has something real to carry in BOTH directions.
+            for (w, who) in [(&a, "A"), (&b, "B")] {
+                let rules = sustena_core::all_seed_rules();
+                let text = format!(
+                    "UH0B94{who}12 Confirmed. Ksh{}00.00 paid to A PAYEE on 20/7/26 at 4:30 PM.                      New M-PESA balance is Ksh{}.00",
+                    if who == "A" { 3 } else { 7 },
+                    if who == "A" { "300" } else { "700" }
+                );
+                let _ = w.ingest().capture("homestead", "mpesa", &text, &rules);
+            }
+            println!("  A {ra} key={ka} port={pa} balance={} log={} captured={}",
+                balance(&a), log_len(&ra), captured(&a));
+            println!("  B {rb} key={kb} port={pb} balance={} log={} captured={}",
+                balance(&b), log_len(&rb), captured(&b));
         }
         Some("serve") => {
             let (root, port) = (args[2].clone(), args[3].parse().unwrap());
@@ -160,6 +178,7 @@ fn main() {
                 return;
             };
             let refolded = world.reload(ID).expect("re-fold").state;
+            println!("[B] captured now {}", captured(&world));
             println!("[B] rebuild_state == get_state: {}", reported == refolded);
         }
         // ★★★ Implant the REAL device logs into two scratch nodes, with the
