@@ -76,6 +76,60 @@ fn captured(w: &World) -> usize {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        // ★★★ **The same person, on two devices.** This is the shape that
+        //     matters for "my laptop shows what my phone shows", and it is not
+        //     the shape the other modes test: there, two DIFFERENT people
+        //     share a household. Here one identity is carried to a second
+        //     machine by its recovery phrase, which is what a person actually
+        //     does -- and whether two nodes holding one key can peer at all is
+        //     the question this answers before anybody is asked to type
+        //     anything.
+        Some("twin") => {
+            let (ra, rb) = (args[2].clone(), args[3].clone());
+            let (pa, pb) = (args[4].parse().unwrap(), args[5].parse().unwrap());
+
+            let a = open(&ra, pa);
+            let phrase = a.recovery_phrase(PASS).expect("a phrase to carry");
+            println!("[A] recovery phrase: {phrase}");
+
+            // B is a fresh machine that has never seen him.
+            let home = PathBuf::from(&rb);
+            std::fs::create_dir_all(&home).expect("home");
+            let store = Store::at(&home).expect("store");
+            let b = World::open(store).expect("world");
+            let mut net = b.network();
+            net.listen_port = pb;
+            net.auto_reconnect = false;
+            b.set_network(net).expect("settings");
+            b.restore(DEFAULT_HANDLE, PASS, &phrase).expect("restored");
+            b.remember_unlock(PASS).expect("remember");
+
+            println!("[A] key {}", a.node_id().unwrap());
+            println!("[B] key {}", b.node_id().unwrap());
+            println!(
+                "same principal: {}",
+                a.node_id().unwrap() == b.node_id().unwrap()
+            );
+
+            // Only A has the household and the captured text.
+            let _ = a.instantiate_owned(
+                ID,
+                "Homestead",
+                TemplateId::Habitat,
+                None,
+                None,
+                Some(DEFAULT_HANDLE),
+            );
+            let rules = sustena_core::all_seed_rules();
+            let _ = a.ingest().capture(
+                "homestead",
+                "mpesa",
+                "UH0B94TW12 Confirmed. Ksh450.00 paid to A PAYEE on 20/7/26 at 4:30 PM.                  New M-PESA balance is Ksh1,234.00",
+                &rules,
+            );
+            println!("[A] log={} captured={}", log_len(&ra), captured(&a));
+            println!("[B] log={} captured={}", log_len(&rb), captured(&b));
+        }
         Some("prepare") => {
             let (ra, rb) = (args[2].clone(), args[3].clone());
             let (pa, pb) = (args[4].parse().unwrap(), args[5].parse().unwrap());

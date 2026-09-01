@@ -581,10 +581,30 @@ pub fn handshake(
     if protocol != PROTOCOL {
         return Err(WireError::Version { theirs: protocol, ours: PROTOCOL });
     }
-    // ★ A peer claiming this node's own key is either a loopback or an
-    //   impersonation, and neither is a peer.
-    if public_key == me.public_key() {
-        return Err(WireError::Protocol("that is this node's own key".into()));
+    // ★★★ **The same key is now a real peer, and refusing it broke the
+    //     feature portable identity exists for.**
+    //
+    //     This used to refuse any peer presenting this node's own key, on the
+    //     grounds that it is "either a loopback or an impersonation, and
+    //     neither is a peer". That was true when an identity could not travel.
+    //     It is not any more: a person carries his identity to a second device
+    //     by its recovery phrase precisely so that device is HIM and can own
+    //     his Sustains -- and then the two could not speak, because each saw
+    //     its own key. A laptop that holds his household and cannot sync with
+    //     his phone is the whole point missed.
+    //
+    //     Impersonation was never what this caught. The peer has to SIGN the
+    //     nonce below, which needs the private key; somebody holding that key
+    //     IS him, and no equality check adds anything.
+    //
+    // ★★ What remains worth refusing is a node talking to ITSELF, and that is
+    //    a mirror rather than a key: a real self-connection echoes this very
+    //    hello back, ephemeral and all. Two ephemerals are generated per
+    //    connection from the OS, so two genuine machines cannot collide on one
+    //    -- and the ephemeral is exactly the thing a mirror cannot help
+    //    repeating.
+    if their_ephemeral == my_ephemeral {
+        return Err(WireError::Protocol("this node is talking to itself".into()));
     }
 
     let my_proof = Frame::Proof {

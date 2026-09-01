@@ -675,7 +675,7 @@ impl Peering {
         have: &VectorClock,
         me: &str,
     ) -> WireResult<()> {
-        if !self.book().may_have(peer.public_key(), sustain_id) {
+        if peer.public_key() != me && !self.book().may_have(peer.public_key(), sustain_id) {
             return session.send(
                 stream,
                 &Frame::Refused {
@@ -739,9 +739,11 @@ impl Peering {
         have: &VectorClock,
         me: &str,
     ) -> WireResult<()> {
-        if !self.book().may_have(peer.public_key(), sustain_id) {
+        if peer.public_key() != me && !self.book().may_have(peer.public_key(), sustain_id) {
             // ★★★ Authenticated, and refused anyway. The second conjunct,
-            //     visible on the wire.
+            //     visible on the wire. (`me` is this node's own key: a peer
+            //     presenting it is this person's other device, and he does not
+            //     need permission to read his own household.)
             return session.send(
                 stream,
                 &Frame::Refused {
@@ -839,7 +841,12 @@ impl Peering {
         let key = peer.public_key().to_string();
 
         self.edit(|b| b.seen(&key, peer.handle(), Some(address.to_string())))?;
-        if !self.book().may_have(&key, sustain_id) {
+        // ★★★ **A person does not share a household with himself.** Since an
+        //     identity can travel, his laptop presents the same key as his
+        //     phone -- and requiring him to "trust" and "share with" his own
+        //     key would be a permission dialog asking whether he may read his
+        //     own books. The signature already proved this peer holds his key.
+        if key != me.public_key() && !self.book().may_have(&key, sustain_id) {
             let why = format!(
                 "this node has not shared {sustain_id} with {} — trust the key and share it first",
                 peer.handle()
