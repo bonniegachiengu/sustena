@@ -958,8 +958,15 @@ pub fn resolve_message(world: State<'_, World>, id: String) -> Result<bool, Stri
 /// message that taught it, and must not capture a message an existing rule
 /// already handles. ★★★ A learned SPEND rule carries no operator, so a
 /// correction can never teach the system to spend on someone's behalf.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
+/// ★★★ **Runs off the main thread.** A plain Tauri command executes on
+/// the main thread, which is the UI thread for the webview -- and this one
+/// walks the whole message store, verifies a candidate against every rule,
+/// then re-reads the entire unparsed backlog. On a real store of a few
+/// thousand texts that is seconds of frozen screen, which is exactly what
+/// he saw when he tapped the button. Declaring it async puts it on the
+/// async runtime instead, so the screen keeps answering.
 pub fn learn_rule(
     world: State<'_, World>,
     message_id: String,
@@ -1038,8 +1045,15 @@ pub fn learn_rule(
 /// ★ Nothing is filed here. A taught rule with anything other than a lone
 /// arrival is `ParsedUnmapped` by construction — it makes the message
 /// READABLE, and he still confirms each one. See `synthesize_from_training`.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
+/// ★★★ **Runs off the main thread.** A plain Tauri command executes on
+/// the main thread, which is the UI thread for the webview -- and this one
+/// walks the whole message store, verifies a candidate against every rule,
+/// then re-reads the entire unparsed backlog. On a real store of a few
+/// thousand texts that is seconds of frozen screen, which is exactly what
+/// he saw when he tapped the button. Declaring it async puts it on the
+/// async runtime instead, so the screen keeps answering.
 pub fn train_rule(
     world: State<'_, World>,
     message_id: String,
@@ -1212,7 +1226,7 @@ pub fn threads(world: State<'_, World>) -> Result<Vec<crate::dto::ThreadDto>, St
 /// household actually gets". Nothing about the new thread is special-cased:
 /// once its texts are captured they reach the same train page every other
 /// shape does, and he teaches them the same way.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn declare_thread(
     app: tauri::AppHandle,
@@ -1233,7 +1247,7 @@ pub fn declare_thread(
 
 /// Stop reading a thread. ★ Its captured messages are untouched -- forgetting a
 /// sender is a decision about the future, not an erasure of the past.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn forget_thread(
     app: tauri::AppHandle,
@@ -1307,6 +1321,13 @@ fn oldest_waiting(queued: &[crate::ingest::IngestedMessage]) -> Option<CaptureCo
 /// at all: this is what it was doing.
 #[tauri::command(async)]
 #[specta::specta]
+/// ★★★ **Runs off the main thread.** A plain Tauri command executes on
+/// the main thread, which is the UI thread for the webview -- and this one
+/// walks the whole message store, verifies a candidate against every rule,
+/// then re-reads the entire unparsed backlog. On a real store of a few
+/// thousand texts that is seconds of frozen screen, which is exactly what
+/// he saw when he tapped the button. Declaring it async puts it on the
+/// async runtime instead, so the screen keeps answering.
 pub fn get_feed(
     world: State<'_, World>,
     sustain_id: String,
@@ -2019,6 +2040,13 @@ pub fn apply_transfers(
 /// the pile it was meant to clear exactly as it was.
 #[tauri::command(async)]
 #[specta::specta]
+/// ★★★ **Runs off the main thread.** A plain Tauri command executes on
+/// the main thread, which is the UI thread for the webview -- and this one
+/// walks the whole message store, verifies a candidate against every rule,
+/// then re-reads the entire unparsed backlog. On a real store of a few
+/// thousand texts that is seconds of frozen screen, which is exactly what
+/// he saw when he tapped the button. Declaring it async puts it on the
+/// async runtime instead, so the screen keeps answering.
 pub fn learn_skip(
     world: State<'_, World>,
     sustain_id: String,

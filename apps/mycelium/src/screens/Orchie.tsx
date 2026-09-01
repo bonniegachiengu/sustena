@@ -1217,7 +1217,20 @@ export function TrainFlow(props: {
   const pocketNames = () => pocketsOf(sustainNow()?.state).map((p) => p.name);
 
   const [figures, setFigures] = createSignal<Figure[]>([]);
+  /**
+   * ★★★ Seeded ONCE per message, never re-seeded.
+   *
+   * This was half the reported data loss. The effect below re-ran whenever its
+   * dependencies re-fired -- and a refetch of the feed hands back fresh objects
+   * -- so his roles and pockets were silently replaced by the guesses again
+   * while he was part-way through. Keyed on the message id, changing the
+   * SUBJECT re-seeds and nothing else does.
+   */
+  const [seededFor, setSeededFor] = createSignal<string | null>(null);
   createEffect(() => {
+    const id = props.messageId;
+    if (seededFor() === id) return;
+    setSeededFor(id);
     const f = found();
     const guessed = guessRoles(props.raw, f);
     setFigures(
@@ -1265,7 +1278,7 @@ export function TrainFlow(props: {
             ? `done — ${out.cleared} like this cleared, and you will not be asked again`
             : "done — you will not be asked about these again",
         );
-        props.onDone();
+        setTimeout(() => props.onDone(), 1600);
         return;
       }
       if (unplaced().length > 0) {
@@ -1285,9 +1298,18 @@ export function TrainFlow(props: {
           ? `learned — all ${props.count} are read this way now, and each still asks you before it is filed`
           : "learned — messages like this are read this way now, and each still asks you before it is filed",
       );
-      props.onDone();
+      // ★★★ Confirmation FIRST, then advance. Refetching in the same breath
+      //     removed this card from the list the instant it succeeded, so the
+      //     screen simply changed and he had no way to tell a success from
+      //     being thrown back to the start. A moment to read it, then the
+      //     queue moves on by itself.
+      setTimeout(() => props.onDone(), 1600);
     } catch (e) {
-      setFailure(String(e).replace(/^Error:\s*/, ""));
+      // ★★★ His answers are KEPT. A failure that also wiped the form meant
+      //     doing the whole thing again to find out whether it would fail
+      //     again -- and that is what an infinite loop feels like from the
+      //     outside.
+      setFailure(`${String(e).replace(/^Error:\s*/, "")} — your answers are still here, try again`);
     } finally {
       setBusy(false);
     }
