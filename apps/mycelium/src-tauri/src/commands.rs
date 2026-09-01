@@ -1078,12 +1078,15 @@ pub fn train_rule(
             "out" => RouteRole::Out,
             "fee" => RouteRole::Fee,
             "balance" => RouteRole::Balance,
+            "date" => RouteRole::Date,
             other => return Err(format!("'{other}' is not a role a figure can have")),
         };
         // ★★★ A balance names no pocket, and demanding one would make the most
         //     useful thing on the page impossible to say. It states what the
         //     ACCOUNT holds; the account is the message's own source.
-        if role != RouteRole::Balance && f.pocket.trim().is_empty() {
+        if !matches!(role, RouteRole::Balance | RouteRole::Date)
+            && f.pocket.trim().is_empty()
+        {
             return Err("every figure that moves needs a pocket to belong to".into());
         }
         trained.push(TrainedFigure {
@@ -2379,7 +2382,9 @@ fn taught_routing(
             sustena_core::RouteRole::In => "in",
             sustena_core::RouteRole::Out => "out",
             sustena_core::RouteRole::Fee => "fee",
-            sustena_core::RouteRole::Balance => continue,
+            // ★ Neither a balance nor a date is money going anywhere, so
+            //   neither is ever offered as something to confirm.
+            sustena_core::RouteRole::Balance | sustena_core::RouteRole::Date => continue,
         };
         let Some(amount) = parsed.get(&route.group).and_then(|v| {
             v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))

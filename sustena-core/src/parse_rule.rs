@@ -151,6 +151,16 @@ pub enum RouteRole {
     Out,
     /// What the movement cost on top of itself.
     Fee,
+    /// When the provider says it happened.
+    ///
+    /// ★★★ **Not decoration — it is what makes the balance mean anything.**
+    /// An account's figure is whichever of its messages is LATEST, so a wrong
+    /// or missing date silently picks the wrong balance. Tagging the date makes
+    /// its position part of the taught shape, which is a cleaner answer than
+    /// any heuristic guessing where a date sits.
+    ///
+    /// ★★ Like a balance, it names no pocket: nothing moved.
+    Date,
     /// What the account holds afterwards, as the provider states it.
     ///
     /// ★★★ **Not a movement, and that is the whole point.** The other three
