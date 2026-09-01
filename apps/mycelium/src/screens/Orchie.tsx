@@ -1113,13 +1113,30 @@ function DeviceCard(props: { device: DeviceDto }) {
  */
 
 /** What a figure is, in the words a person would use. */
-type FigureRole = "in" | "out" | "fee" | "skip";
+type FigureRole = "in" | "out" | "fee" | "balance" | "skip";
 
 const ROLE_LABEL: Record<FigureRole, string> = {
   in: "money in",
   out: "money out",
   fee: "a fee",
+  balance: "the balance",
   skip: "ignore this one",
+};
+
+/**
+ * What each role means, in his words, under the chips he just tapped.
+ *
+ * ★★★ "the balance" is the one that needs saying out loud. It is not money
+ * moving anywhere -- it is what the account HOLDS, the bank's own closing
+ * figure, and tagging it is what makes that account's displayed balance the
+ * bank's number rather than a total this app reconstructed.
+ */
+const ROLE_HINT: Record<FigureRole, string> = {
+  in: "someone paid you, or money arrived",
+  out: "you paid for something",
+  fee: "what the movement cost on top of itself",
+  balance: "what the account holds after this — the bank's own figure",
+  skip: "no money moved — leave this one out",
 };
 
 /** One number found in the message, with what this thinks it is. */
@@ -1157,7 +1174,12 @@ function guessRoles(raw: string, found: { text: string; at: number }[]): FigureR
     // The 40 characters before the figure are what names it.
     const before = lower.slice(Math.max(0, f.at - 40), f.at);
     if (/fee|charge|cost|commission/.test(before)) return "fee";
-    if (/balance|outstanding|total|limit|available/.test(before)) return "skip";
+    // ★★★ A closing figure is the most valuable thing on the page to get
+    //     right, so it is guessed rather than left as "ignore". "outstanding"
+    //     and "limit" stay out: a loan's outstanding total and a transaction
+    //     limit are not what an account holds.
+    if (/balance|avail|available/.test(before)) return "balance";
+    if (/outstanding|limit|transact/.test(before)) return "skip";
     if (/received|credited|deposit|refund/.test(before)) return "in";
     if (/sent|paid|bought|withdraw|debited|spent/.test(before)) return "out";
     // ★ The first figure is usually the one that moved; later unexplained ones
@@ -1215,7 +1237,9 @@ export function TrainFlow(props: {
 
   const many = () => (props.count ?? 0) > 1;
   const kept = () => figures().filter((f) => f.role !== "skip");
-  const unplaced = () => kept().filter((f) => !f.pocket.trim());
+  // ★★ A balance names no pocket, so it is never "unplaced".
+  const needsPocket = (f: Figure) => f.role !== "skip" && f.role !== "balance";
+  const unplaced = () => figures().filter((f) => needsPocket(f) && !f.pocket.trim());
 
   const setRole = (i: number, role: FigureRole) =>
     setFigures((fs) => fs.map((f, j) => (j === i ? { ...f, role } : f)));
@@ -1245,12 +1269,16 @@ export function TrainFlow(props: {
         return;
       }
       if (unplaced().length > 0) {
-        setFailure("every figure you kept needs a pocket");
+        setFailure("every figure that moves needs a pocket");
         return;
       }
       await engine.trainRule(
         props.messageId,
-        use.map((f) => ({ text: f.text, role: f.role as "in" | "out" | "fee", pocket: f.pocket })),
+        use.map((f) => ({
+          text: f.text,
+          role: f.role as "in" | "out" | "fee" | "balance",
+          pocket: f.pocket,
+        })),
       );
       setDone(
         many()
@@ -1327,7 +1355,7 @@ export function TrainFlow(props: {
                   <b>{f.text}</b>
                 </p>
                 <div class={O.chips}>
-                  <For each={["in", "out", "fee", "skip"] as FigureRole[]}>
+                  <For each={["in", "out", "fee", "balance", "skip"] as FigureRole[]}>
                     {(r) => (
                       <button
                         class={f.role === r ? O.chipChosen : O.chip}
@@ -1339,7 +1367,9 @@ export function TrainFlow(props: {
                   </For>
                 </div>
 
-                <Show when={f.role !== "skip"}>
+                <p class={O.caption}>{ROLE_HINT[f.role]}</p>
+
+                <Show when={needsPocket(f)}>
                   <Show
                     when={picking() === i()}
                     fallback={

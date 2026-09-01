@@ -1063,10 +1063,14 @@ pub fn train_rule(
             "in" => RouteRole::In,
             "out" => RouteRole::Out,
             "fee" => RouteRole::Fee,
+            "balance" => RouteRole::Balance,
             other => return Err(format!("'{other}' is not a role a figure can have")),
         };
-        if f.pocket.trim().is_empty() {
-            return Err("every figure needs a pocket to belong to".into());
+        // ★★★ A balance names no pocket, and demanding one would make the most
+        //     useful thing on the page impossible to say. It states what the
+        //     ACCOUNT holds; the account is the message's own source.
+        if role != RouteRole::Balance && f.pocket.trim().is_empty() {
+            return Err("every figure that moves needs a pocket to belong to".into());
         }
         trained.push(TrainedFigure {
             text: f.text.trim().to_string(),
@@ -2260,6 +2264,19 @@ fn taught_routing(
     let mut routed: Vec<crate::dto::RoutedFigureDto> = Vec::new();
 
     for route in &rule.routes {
+        // ★★★ A balance is never something to confirm. It is what the account
+        //     holds, not money going anywhere, and offering it as a filing
+        //     would book a whole account as a transaction.
+        //
+        // ★★ Decided by the same match that names the role, so the skip and
+        //    the label cannot drift apart -- the compiler caught exactly that
+        //    when they were two separate decisions.
+        let role = match route.role {
+            sustena_core::RouteRole::In => "in",
+            sustena_core::RouteRole::Out => "out",
+            sustena_core::RouteRole::Fee => "fee",
+            sustena_core::RouteRole::Balance => continue,
+        };
         let Some(amount) = parsed.get(&route.group).and_then(|v| {
             v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
         }) else {
@@ -2273,12 +2290,7 @@ fn taught_routing(
             continue;
         }
         routed.push(crate::dto::RoutedFigureDto {
-            role: match route.role {
-                sustena_core::RouteRole::In => "in",
-                sustena_core::RouteRole::Out => "out",
-                sustena_core::RouteRole::Fee => "fee",
-            }
-            .to_string(),
+            role: role.to_string(),
             pocket: route.pocket.clone(),
             amount,
         });
@@ -3489,6 +3501,15 @@ pub fn sms_drain_queue(
             Ok(n) if n > 0 => trace!("{n} stored message(s) recovered when they happened"),
             Ok(_) => {}
             Err(e) => trace!("event-time backfill failed, sweep still stands: {e}"),
+        }
+        // ★★★ And fill in readings the current rules can now supply. A text he
+        //     dealt with by hand months ago still states the account's closing
+        //     figure; teaching that shape has to reach it, or the source of
+        //     truth stays unread on hundreds of settled messages.
+        match world.ingest().refresh_readings(&sustain_id, &learned) {
+            Ok(n) if n > 0 => trace!("{n} stored message(s) learned something new"),
+            Ok(_) => {}
+            Err(e) => trace!("reading refresh failed, sweep still stands: {e}"),
         }
     }
     Ok(swept)

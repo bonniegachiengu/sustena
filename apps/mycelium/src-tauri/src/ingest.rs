@@ -467,6 +467,19 @@ pub struct Reported {
     pub at: i64,
 }
 
+/// The bank's own closing figure against the one this node folded.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BalanceDrift {
+    pub account: String,
+    /// What the account's latest message says it holds. The source of truth.
+    pub stated: f64,
+    /// What this node's own books make it.
+    pub folded: f64,
+    /// `stated - folded`. Positive means the account holds more than we think.
+    pub gap: f64,
+    pub at: i64,
+}
+
 /// One automatic filing, and what disagrees with it.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Reviewed {
@@ -1201,6 +1214,52 @@ impl Ingested {
                 *e = Reported { balance, at };
             }
         }
+        Ok(out)
+    }
+
+    /// **Where the bank's own figure and our folded one disagree.**
+    ///
+    /// ★★★ The stated balance is the source of truth, and that is not a
+    /// preference -- the bank keeps the account, and anything folded here is a
+    /// reconstruction of it from texts that may be missing one. So the stated
+    /// figure is what a household is shown.
+    ///
+    /// ★★ But a gap between the two is a READING, not an embarrassment to
+    /// hide. It means this node's picture of an account has drifted from the
+    /// account itself: a message never arrived, one was filed twice, or
+    /// something moved that no text described. Surfacing it is how any of those
+    /// get noticed at all, so it is returned rather than quietly reconciled
+    /// away.
+    ///
+    /// ★ Only accounts the household actually folds are compared. An account
+    /// with no folded figure is not "out by its whole balance"; it is simply
+    /// one this node has never tried to track, and saying otherwise would be a
+    /// fabricated alarm on every new source he adds.
+    pub fn balance_drift(
+        &self,
+        sustain_id: &str,
+        folded: &BTreeMap<String, f64>,
+    ) -> StoreResult<Vec<BalanceDrift>> {
+        let stated = self.reported_balances(sustain_id)?;
+        let mut out: Vec<BalanceDrift> = Vec::new();
+        for (account, reported) in stated {
+            let Some(&ours) = folded.get(&account) else {
+                continue;
+            };
+            let gap = reported.balance - ours;
+            // ★ A cent of rounding is not drift. Anything a person could see
+            //   on a statement is.
+            if gap.abs() >= 1.0 {
+                out.push(BalanceDrift {
+                    account,
+                    stated: reported.balance,
+                    folded: ours,
+                    gap,
+                    at: reported.at,
+                });
+            }
+        }
+        out.sort_by(|a, b| b.gap.abs().partial_cmp(&a.gap.abs()).unwrap_or(std::cmp::Ordering::Equal));
         Ok(out)
     }
 
@@ -1955,6 +2014,61 @@ impl Ingested {
         });
         out.truncate(limit);
         Ok(out)
+    }
+
+    /// **Fill in readings a newly-taught rule can now supply.**
+    ///
+    /// ★★★ Why this is separate from `reparse_unparsed`. That one deliberately
+    /// skips a message a person has RESOLVED, and it is right to: a settled
+    /// decision should not reopen itself because the rules improved. But
+    /// re-reading a message's FIELDS is not reopening the decision. It is
+    /// learning something more about a text whose meaning was already settled.
+    ///
+    /// This is exactly the case balance-as-source-of-truth runs into. A
+    /// household has hundreds of texts it dealt with by hand, each stating the
+    /// account's closing figure, none of it read -- and teaching the shape
+    /// would have changed nothing at all, because every one of them was
+    /// resolved.
+    ///
+    /// ★★ It only ever ADDS. Existing fields win on conflict, so a figure a
+    /// filing was made against can never shift underneath it; status,
+    /// `resolved`, `applied`, `filed` and the gate's own reason are all left
+    /// exactly as they were. The worst it can do is nothing.
+    ///
+    /// Returns how many messages learned something.
+    pub fn refresh_readings(&self, sustain_id: &str, rules: &[ParseRule]) -> StoreResult<usize> {
+        let mut filled = 0usize;
+        for m in self.current()? {
+            if m.sustain_id != sustain_id || m.ignored {
+                continue;
+            }
+            let t = parse_message(&m.raw_payload, Some(&m.source_id), rules);
+            let fresh = t.parsed_fields();
+            if fresh.is_empty() {
+                continue;
+            }
+            let mut next = m.clone();
+            let mut gained = false;
+            for (k, v) in fresh {
+                // ★ Only gaps. Never an overwrite.
+                if !next.parsed_fields.contains_key(&k) {
+                    next.parsed_fields.insert(k, v);
+                    gained = true;
+                }
+            }
+            if !gained {
+                continue;
+            }
+            // ★★ And if it now says when it happened, take that too -- a
+            //    balance nobody can order is a balance nobody can use.
+            if next.event_at_ms.is_none() {
+                next.event_at_ms = sustena_core::event_time(&next.parsed_fields)
+                    .map(|at| at.to_epoch_ms(SENDER_UTC_OFFSET_MINUTES));
+            }
+            self.append_message(&next)?;
+            filled += 1;
+        }
+        Ok(filled)
     }
 
     /// The rules in force: the latest version of each id.
@@ -5467,5 +5581,219 @@ mod auto_filed_review_tests {
         let m = capture(&ing, &received("JJJJJJJJJJ", "500.00", "9,000.00", "20/7/26", "4:30 PM"));
         ing.record_outcome(&m.id, true, None).expect("outcome");
         assert!(ing.auto_filed_review("other", 20).expect("review").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod balance_drift_tests {
+    use super::*;
+    use std::{env, fs, path::PathBuf};
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-drift-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    fn with_balance(ing: &Ingested, balance: &str) {
+        let raw = format!(
+            "AAAAAAAAAA Confirmed. Ksh100.00 paid to NAIVAS SUPERMARKET on 20/7/26              at 4:30 PM. New M-PESA balance is Ksh{balance}"
+        );
+        let rules = sustena_core::all_seed_rules();
+        ing.capture("h", "mpesa", &raw, &rules).expect("capture");
+    }
+
+    fn folded(pairs: &[(&str, f64)]) -> BTreeMap<String, f64> {
+        pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
+    }
+
+    #[test]
+    fn agreement_is_silent() {
+        let ing = Ingested::at(scratch("agree")).expect("ingest");
+        with_balance(&ing, "9,000.00");
+        let got = ing.balance_drift("h", &folded(&[("mpesa", 9_000.0)])).expect("drift");
+        assert!(got.is_empty(), "nothing to say when the two agree");
+    }
+
+    #[test]
+    fn a_real_gap_is_reported_with_both_figures() {
+        // ★★★ The reading that matters. Our books say one thing, the bank says
+        //     another, and the gap is the size of what this node has missed.
+        let ing = Ingested::at(scratch("gap")).expect("ingest");
+        with_balance(&ing, "9,000.00");
+        let got = ing.balance_drift("h", &folded(&[("mpesa", 7_500.0)])).expect("drift");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].account, "mpesa");
+        assert_eq!(got[0].stated, 9_000.0, "the bank's figure, which is the truth");
+        assert_eq!(got[0].folded, 7_500.0);
+        assert_eq!(got[0].gap, 1_500.0, "the account holds more than we thought");
+    }
+
+    #[test]
+    fn an_account_nobody_folds_is_not_an_alarm() {
+        // ★★★ Otherwise every new source he adds would arrive already
+        //     "wrong by its whole balance", which is a fabricated alarm and
+        //     exactly the kind of noise that teaches a person to ignore this.
+        let ing = Ingested::at(scratch("untracked")).expect("ingest");
+        with_balance(&ing, "9,000.00");
+        assert!(ing.balance_drift("h", &folded(&[])).expect("drift").is_empty());
+    }
+
+    #[test]
+    fn a_rounding_cent_is_not_drift() {
+        let ing = Ingested::at(scratch("cent")).expect("ingest");
+        with_balance(&ing, "9,000.00");
+        assert!(ing
+            .balance_drift("h", &folded(&[("mpesa", 8_999.99)]))
+            .expect("drift")
+            .is_empty());
+    }
+
+    #[test]
+    fn the_widest_gap_leads() {
+        let ing = Ingested::at(scratch("ordering")).expect("ingest");
+        with_balance(&ing, "9,000.00");
+        let rules = sustena_core::all_seed_rules();
+        ing.capture(
+            "h",
+            "kcb",
+            "KES 500.00 transaction made on KCB card 1234XXXXXXXX5678 at Java              on 1/8/26 12:25pm, Avail balance KES 2,000.00",
+            &rules,
+        )
+        .expect("kcb");
+        let got = ing
+            .balance_drift("h", &folded(&[("mpesa", 8_900.0), ("kcb", 100.0)]))
+            .expect("drift");
+        assert_eq!(got[0].account, "kcb", "the bigger surprise first: {got:?}");
+    }
+}
+
+#[cfg(test)]
+mod refresh_readings_tests {
+    use super::*;
+    use std::{env, fs, path::PathBuf};
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-refresh-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    /// A bank nobody has written a rule for, stating a movement and the
+    /// account's closing figure the way every provider does.
+    ///
+    /// ★★ Deliberately NOT an M-Pesa shape. The shipped library reads those,
+    /// so using one would test nothing: the whole point of a taught balance is
+    /// a sender this node has never seen. An earlier draft of this test used a
+    /// real unparsed message from his own store and it came back
+    /// `parsed_unmapped` -- readable all along, and unparsed only because it
+    /// was captured by an older build.
+    const UNREAD: &str = "EQ8842001 Confirmed. You have received KES 2,500.00 from JANE DOE on 01/09/26 at 10:15 AM. Your account balance is KES 47,310.55";
+
+    fn taught_rule() -> ParseRule {
+        let figures = vec![
+            sustena_core::TrainedFigure {
+                text: "2,500.00".into(),
+                role: sustena_core::RouteRole::In,
+                pocket: "salary".into(),
+            },
+            sustena_core::TrainedFigure {
+                text: "47,310.55".into(),
+                role: sustena_core::RouteRole::Balance,
+                pocket: String::new(),
+            },
+        ];
+        sustena_core::synthesize_from_training("equity", UNREAD, &figures, "taught").expect("learns")
+    }
+
+    #[test]
+    fn a_taught_balance_reaches_a_message_he_already_settled() {
+        // ★★★ The case that made this necessary, and it is the common one. A
+        //     household deals with texts by hand for months; every one states
+        //     the account's closing figure; all of them are resolved. Teaching
+        //     the shape would have changed nothing at all without this, because
+        //     `reparse_unparsed` rightly refuses to reopen a settled message.
+        let ing = Ingested::at(scratch("settled")).expect("ingest");
+        let seeded = sustena_core::all_seed_rules();
+        let Capture::Stored(m) = ing.capture("h", "equity", UNREAD, &seeded).expect("capture")
+        else {
+            panic!("stored")
+        };
+        assert_eq!(m.status, "unparsed", "no shipped rule reads it");
+        // He dealt with it by hand at the time.
+        ing.resolve(&m.id).expect("resolved");
+        assert!(reported_account_of(&m).is_none(), "and its balance is unread");
+
+        let rules: Vec<ParseRule> = seeded.iter().cloned().chain([taught_rule()]).collect();
+        assert_eq!(ing.reparse_unparsed("h", &rules).expect("reparse"), 0, "settled stays settled");
+        assert_eq!(ing.refresh_readings("h", &rules).expect("refresh"), 1);
+
+        let after = ing.current().expect("current");
+        let now = after.iter().find(|x| x.id == m.id).expect("still on file");
+        assert_eq!(
+            reported_account_of(now),
+            Some(("equity".to_string(), 47_310.55)),
+            "the bank's own closing figure, now readable"
+        );
+        assert!(now.resolved, "and his decision is untouched");
+    }
+
+    #[test]
+    fn it_never_overwrites_a_reading_a_filing_was_made_against() {
+        // ★★★ The safety property. A figure a filing was made against must not
+        //     shift underneath it, so existing fields win and this only fills
+        //     gaps.
+        let ing = Ingested::at(scratch("no-overwrite")).expect("ingest");
+        let seeded = sustena_core::all_seed_rules();
+        let Capture::Stored(m) = ing.capture("h", "equity", UNREAD, &seeded).expect("capture")
+        else {
+            panic!("stored")
+        };
+        let mut m = *m;
+        m.parsed_fields.insert("amount".into(), serde_json::json!(999.0));
+        ing.append_message(&m).expect("append");
+
+        let rules: Vec<ParseRule> = seeded.iter().cloned().chain([taught_rule()]).collect();
+        ing.refresh_readings("h", &rules).expect("refresh");
+
+        let after = ing.current().expect("current");
+        let now = after.iter().find(|x| x.id == m.id).expect("there");
+        assert_eq!(
+            now.parsed_fields.get("amount").and_then(|v| v.as_f64()),
+            Some(999.0),
+            "what was already read stands"
+        );
+        assert_eq!(
+            now.parsed_fields.get("balance_after").and_then(|v| v.as_f64()),
+            Some(47_310.55),
+            "and the gap is filled"
+        );
+    }
+
+    #[test]
+    fn a_message_nothing_reads_gains_nothing_and_is_left_alone() {
+        let ing = Ingested::at(scratch("nothing")).expect("ingest");
+        let seeded = sustena_core::all_seed_rules();
+        let Capture::Stored(m) =
+            ing.capture("h", "mpesa", "a text no rule has ever seen", &seeded).expect("capture")
+        else {
+            panic!("stored")
+        };
+        assert_eq!(ing.refresh_readings("h", &seeded).expect("refresh"), 0);
+        let after = ing.current().expect("current");
+        let now = after.iter().find(|x| x.id == m.id).expect("there");
+        assert_eq!(now.status, m.status);
+    }
+
+    #[test]
+    fn it_is_safe_to_run_twice() {
+        let ing = Ingested::at(scratch("twice")).expect("ingest");
+        let seeded = sustena_core::all_seed_rules();
+        ing.capture("h", "equity", UNREAD, &seeded).expect("capture");
+        let rules: Vec<ParseRule> = seeded.iter().cloned().chain([taught_rule()]).collect();
+        assert_eq!(ing.refresh_readings("h", &rules).expect("first"), 1);
+        assert_eq!(ing.refresh_readings("h", &rules).expect("second"), 0);
     }
 }
