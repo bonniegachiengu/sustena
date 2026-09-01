@@ -611,6 +611,13 @@ fn transfer(
     let from = normalize_pocket_name(&text(params, "from_account"));
     let to = normalize_pocket_name(&text(params, "to_account"));
     let amount = num(params, "amount");
+    // ★★★ **The fee is not part of the move; it is money that LEAVES.**
+    //     A transfer between his own accounts nets to zero, but the bank
+    //     charge does not come back -- it is a real cost, and folding it into
+    //     the amount would either overstate what arrived or hide what it
+    //     cost. Optional and defaulting to zero, so every existing caller
+    //     behaves exactly as before.
+    let fee = num(params, "fee").max(0.0);
 
     if from.is_empty() || to.is_empty() {
         return OperatorResult::fail(
@@ -625,7 +632,8 @@ fn transfer(
         );
     }
 
-    move_account(state, &from, -amount);
+    // The move itself, then the charge -- both off the sending side.
+    move_account(state, &from, -(amount + fee));
     move_account(state, &to, amount);
 
     // Both ends are the household's own, so this is internal and is not a flow.
@@ -636,12 +644,28 @@ fn transfer(
         &format!("finances.accounts.{to}"),
     ));
 
+    // ★★ A separate movement, because it has a different destination. The
+    //    transfer goes account-to-account and stays inside the household;
+    //    the charge goes to the bank and does not come back. One movement
+    //    covering both would make an internal move look like an outflow
+    //    for its whole size.
+    if fee > 0.0 {
+        movements.push(Movement::new(
+            "money",
+            fee,
+            &format!("finances.accounts.{from}"),
+            "bank charges",
+        ));
+    }
+
     events.push(EmittedEvent {
         name: "event.finances.transferred".into(),
-        payload: json!({"from": from, "to": to, "amount": money(amount)}),
+        payload: json!({"from": from, "to": to, "amount": money(amount), "fee": money(fee)}),
     });
 
-    OperatorResult::ok(json!({"from": from, "to": to, "amount": money(amount)}))
+    OperatorResult::ok(
+        json!({"from": from, "to": to, "amount": money(amount), "fee": money(fee)}),
+    )
 }
 
 // ── budget.place_unaccounted ─────────────────────────────────────────────────
@@ -1755,5 +1779,97 @@ mod debt_tests {
             assert!(ex.committed(), "{op}: {:?}", ex.result.reason);
             assert!(crate::ledger::reconcile(&ex.mutations, &ex.movements).is_empty());
         }
+    }
+}
+
+#[cfg(test)]
+mod transfer_fee_tests {
+    //! A move between his own accounts nets to zero. The bank's charge does not.
+    use super::*;
+    use crate::operator::{execute, Enforcement, Execution, Registry as Reg};
+
+    fn run(state: &Value, op: &str, ps: &[(&str, Value)]) -> Execution {
+        let reg = Reg::default();
+        let params: Map<String, Value> =
+            ps.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect();
+        execute(&reg, &reg.names(), &Enforcement::default(), state, op, &params)
+    }
+
+    fn two_accounts() -> Value {
+        json!({"finances": {
+            "liquid": {"balance": 0.0},
+            "pockets": {},
+            "accounts": {"mpesa": {"balance": 10000.0}, "kcb": {"balance": 5000.0}},
+            "income": {"monthly_total": 0.0, "sources": []}}})
+    }
+
+    fn balance(s: &Value, account: &str) -> f64 {
+        s.pointer(&format!("/finances/accounts/{account}/balance")).and_then(Value::as_f64).unwrap()
+    }
+
+    #[test]
+    fn without_a_fee_the_household_holds_exactly_what_it_held() {
+        // ★★★ The property the whole transfer mechanism exists for: moving his
+        //     own money changes where it is and not how much there is.
+        let before = two_accounts();
+        let ex = run(&before, "budget.transfer", &[
+            ("from_account", json!("mpesa")), ("to_account", json!("kcb")), ("amount", json!(2000.0)),
+        ]);
+        let after = ex.state;
+        assert_eq!(balance(&after, "mpesa"), 8000.0);
+        assert_eq!(balance(&after, "kcb"), 7000.0);
+        assert_eq!(
+            balance(&after, "mpesa") + balance(&after, "kcb"),
+            balance(&before, "mpesa") + balance(&before, "kcb"),
+            "net zero across his own accounts",
+        );
+    }
+
+    #[test]
+    fn the_fee_comes_off_the_sending_side_and_does_not_arrive() {
+        // ★★★ His real pair: KES 1,500 moved, KES 15 charged. The charge is
+        //     money that left the household -- folding it into the amount would
+        //     either overstate what arrived or hide what it cost.
+        let before = two_accounts();
+        let ex = run(&before, "budget.transfer", &[
+            ("from_account", json!("mpesa")), ("to_account", json!("kcb")),
+            ("amount", json!(1500.0)), ("fee", json!(15.0)),
+        ]);
+        let after = ex.state;
+        assert_eq!(balance(&after, "mpesa"), 8485.0, "1,500 moved and 15 charged");
+        assert_eq!(balance(&after, "kcb"), 6500.0, "only the 1,500 arrived");
+
+        let held_before = balance(&before, "mpesa") + balance(&before, "kcb");
+        let held_after = balance(&after, "mpesa") + balance(&after, "kcb");
+        assert_eq!(held_before - held_after, 15.0, "the household is exactly the fee poorer");
+    }
+
+    #[test]
+    fn the_charge_is_reported_as_leaving_not_as_part_of_the_move() {
+        // ★★ Two movements, with different destinations. One covering both
+        //    would make an internal move look like an outflow for its whole
+        //    size, which is the opposite of what a transfer is.
+        let ex = run(&two_accounts(), "budget.transfer", &[
+            ("from_account", json!("mpesa")), ("to_account", json!("kcb")),
+            ("amount", json!(1500.0)), ("fee", json!(15.0)),
+        ]);
+        let out: Vec<&crate::flow::Movement> =
+            ex.movements.iter().filter(|m| m.to == "bank charges").collect();
+        assert_eq!(out.len(), 1, "the charge is its own movement");
+        assert_eq!(out[0].qty, 15.0);
+        assert!(
+            ex.movements.iter().any(|m| m.to == "finances.accounts.kcb" && m.qty == 1500.0),
+            "and the move itself is still account-to-account",
+        );
+    }
+
+    #[test]
+    fn a_transfer_with_no_fee_reports_no_charge() {
+        // ★ Absence must stay absent: a zero-value charge movement would put a
+        //   line in his history for something that never happened.
+        let ex = run(&two_accounts(), "budget.transfer", &[
+            ("from_account", json!("mpesa")), ("to_account", json!("kcb")), ("amount", json!(100.0)),
+        ]);
+        assert!(!ex.movements.iter().any(|m| m.to == "bank charges"));
     }
 }

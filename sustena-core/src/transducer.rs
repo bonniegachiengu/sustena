@@ -809,3 +809,41 @@ mod transfer_pair_tests {
         assert_eq!(t.parsed_fields().get("direction").and_then(|v| v.as_str()), Some("sent"));
     }
 }
+
+#[cfg(test)]
+mod transfer_fee_read_tests {
+    //! The charge is read off his real text, not assumed.
+    use super::*;
+
+    #[test]
+    fn the_kcb_transfer_text_yields_its_transaction_cost() {
+        // ★★★ KES 1,500 moved, KES 15 charged -- his real pair. Without this
+        //     the move would show as costing nothing.
+        let t = parse_message(
+            "MBNHEUDF935FAZOG Completed. Your SEND TO M-PESA request of KES 1,500.00 from \
+             135****140 to 254****143 - PLACEHOLDER NAME at 2026-08-26 09:21:49 PM has been \
+             processed successfully. Transaction cost KES 15.00 Incl. Tax Amount KES 1.50. \
+             M-PESA REF: UHQB94FQ88.",
+            Some("kcb"),
+            &[],
+        );
+        let f = t.parsed_fields();
+        assert_eq!(f.get("amount").and_then(|v| v.as_f64()), Some(1500.0));
+        assert_eq!(f.get("transaction_cost").and_then(|v| v.as_f64()), Some(15.0));
+        assert_eq!(f.get("ref").and_then(|v| v.as_str()), Some("UHQB94FQ88"));
+    }
+
+    #[test]
+    fn the_shape_that_quotes_no_cost_still_reads() {
+        // ★★ Both the cost and the ref are optional. Requiring either would
+        //    stop reading a text we can otherwise read perfectly well.
+        let t = parse_message(
+            "SEND TO M-PESA request of KES 2,000 from 135***140 to 254***143 - \
+             PLACEHOLDER NAME has been received for processing.",
+            Some("kcb"),
+            &[],
+        );
+        assert_eq!(t.parsed_fields().get("amount").and_then(|v| v.as_f64()), Some(2000.0));
+        assert!(t.parsed_fields().get("transaction_cost").is_none(), "absent, not invented");
+    }
+}

@@ -1092,7 +1092,7 @@
    "id": "kcb_send_to_mpesa",
    "source": "kcb",
    "version": 1,
-   "pattern": "SEND\\s+TO\\s+M-?PESA\\s+request\\s+of\\s+KES\\s*(?P<amount>[\\d,]+\\.?\\d*)\\s+from\\s+(?P<from_account>[\\d*]{4,})\\s+to\\s+(?P<to_account>[\\d*]{4,})\\s*[-–—]\\s*(?P<name>[A-Za-z .'-]+?)(?:\\s+at\\s+(?P<when>[\\d/\\-]+\\s+[\\d:]+\\s*[APap]\\.?[Mm]\\.?))?\\s+has\\s+been\\s+(?:received|processed\\s+successfully)\\b(?:(?s:.*?)M-?PESA\\s+REF:?\\s*(?P<ref>[A-Z0-9]{8,}))?",
+   "pattern": "SEND\\s+TO\\s+M-?PESA\\s+request\\s+of\\s+KES\\s*(?P<amount>[\\d,]+\\.?\\d*)\\s+from\\s+(?P<from_account>[\\d*]{4,})\\s+to\\s+(?P<to_account>[\\d*]{4,})\\s*[-–—]\\s*(?P<name>[A-Za-z .'-]+?)(?:\\s+at\\s+(?P<when>[\\d/\\-]+\\s+[\\d:]+\\s*[APap]\\.?[Mm]\\.?))?\\s+has\\s+been\\s+(?:received|processed\\s+successfully)\\b(?:(?s:.*?)Transaction\\s+cost\\s+KES\\s*(?P<cost>[\\d,]+\\.?\\d*))?(?:(?s:.*?)M-?PESA\\s+REF:?\\s*(?P<ref>[A-Z0-9]{8,}))?",
    "extract": {
     "amount": {
      "type": "amount",
@@ -1122,6 +1122,11 @@
     "ref": {
      "type": "string",
      "group": "ref",
+     "value": null
+    },
+    "transaction_cost": {
+     "type": "amount",
+     "group": "cost",
      "value": null
     }
    },

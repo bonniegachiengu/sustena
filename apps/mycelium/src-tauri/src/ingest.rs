@@ -240,6 +240,13 @@ pub struct MatchedTransfer {
     pub from_account: String,
     pub to_account: String,
     pub amount: f64,
+    /// What the bank charged for the move, read off the leaving leg.
+    ///
+    /// ★★ Money that does NOT come back. The transfer nets to zero across his
+    /// own accounts; the charge is a real cost, and leaving it out would show a
+    /// move that cost nothing.
+    #[serde(default)]
+    pub fee: f64,
     /// ★★★ An income already filed for the arriving leg, to be taken back off
     /// the books before this transfer credits the same account.
     ///
@@ -433,6 +440,20 @@ pub struct FiledSpend {
     pub counterparty: String,
     pub raw: String,
     pub seq: u64,
+}
+
+/// What the bank charged for a move, if the text says.
+///
+/// ★ Absent is 0.0, not a guess. A shape whose rule extracts no cost is a shape
+/// we do not know the cost of, and inventing one would be worse than omitting it.
+fn fee_of(m: &IngestedMessage) -> f64 {
+    m.parsed_fields
+        .get("transaction_cost")
+        .and_then(|v| {
+            v.as_f64().or_else(|| v.as_str().and_then(|s| s.replace(',', "").parse().ok()))
+        })
+        .filter(|f| *f > 0.0)
+        .unwrap_or(0.0)
 }
 
 /// A balance a bank itself reported, and when.
@@ -1058,6 +1079,7 @@ impl Ingested {
                         from_account: out.source_id.clone(),
                         to_account: inn.source_id.clone(),
                         amount,
+                        fee: fee_of(out),
                         // Both legs are still open, so nothing has been filed.
                         undo_income: None,
                     });
@@ -1092,6 +1114,7 @@ impl Ingested {
                                 from_account: out.source_id.clone(),
                                 to_account: inn.source_id.clone(),
                                 amount,
+                                fee: fee_of(out),
                                 undo_income: Some(inn.id.clone()),
                             });
                         }

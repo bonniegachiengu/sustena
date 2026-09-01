@@ -1747,6 +1747,12 @@ pub fn apply_transfers(
         params.insert("from_account".into(), Value::String(t.from_account.clone()));
         params.insert("to_account".into(), Value::String(t.to_account.clone()));
         params.insert("amount".into(), serde_json::json!(t.amount));
+        // ★★ The charge rides with the move rather than being filed
+        //    separately: it is one act, and splitting it would put a
+        //    mystery expense in his history with nothing to explain it.
+        if t.fee > 0.0 {
+            params.insert("fee".into(), serde_json::json!(t.fee));
+        }
         // The same door every other write uses.
         match world.call(&sustain_id, "budget.transfer", &params) {
             Ok(Some((x, _))) if x.committed() => {
