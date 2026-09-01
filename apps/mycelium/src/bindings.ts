@@ -600,6 +600,33 @@ async learnRule(messageId: string, operator: string, params: JsonValue) : Promis
 }
 },
 /**
+ * **Teach a shape by pointing at its figures.**
+ * 
+ * ★★★ The difference from [`learn_rule`] is who is talking. `learn_rule`
+ * learns from a decision already made — it takes the amount he confirmed and
+ * works out the shape around it. This takes what he is *saying about the
+ * message in front of him*: these numbers mean these things and belong in
+ * these pockets. Only the second can express a Fuliza borrow, which carries a
+ * sum AND an access fee that belong in different places.
+ * 
+ * ★★ Refusals come back as they are, in the words the refusal itself uses. A
+ * figure he named that is not in the text is a thing he can see and fix; a
+ * silent drop would leave a rule that reads the wrong number out of every
+ * later message with nothing on screen to say so.
+ * 
+ * ★ Nothing is filed here. A taught rule with anything other than a lone
+ * arrival is `ParsedUnmapped` by construction — it makes the message
+ * READABLE, and he still confirms each one. See `synthesize_from_training`.
+ */
+async trainRule(messageId: string, figures: TrainedFigureDto[]) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("train_rule", { messageId, figures }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * ★★★ `(async)`, because this reads the whole ingest log.
  * 
  * A sync command runs inline on the IPC thread, which on a phone is the thread
@@ -1345,8 +1372,7 @@ export type ExclusionDto = { sustainId: string; label: string; isHousehold: bool
 /**
  * The whole curated view.
  */
-export type ShapeOfferDto = { example: string; messageId: string; count: number }
-export type FeedDto = { sustainId: string; label: string; cards: CardDto[]; shapes: ShapeOfferDto[]; 
+export type FeedDto = { sustainId: string; label: string; cards: CardDto[]; 
 /**
  * ★★★ The queue he can walk, in the order he should meet it.
  * 
@@ -1355,6 +1381,15 @@ export type FeedDto = { sustainId: string; label: string; cards: CardDto[]; shap
  * at a time; this is the list it steps through, not a list to display.
  */
 queue: CaptureContextDto[]; 
+/**
+ * ★★★ Shapes this inbox repeats that nothing recognises yet. Teaching
+ * ONE of them teaches every message that shares it -- which is the whole
+ * leverage, and why the count is carried: it is what the answer is worth.
+ * 
+ * ★★ Never a guess at meaning. A cluster says "these look alike", never
+ * "these are spends".
+ */
+shapes: ShapeOfferDto[]; 
 /**
  * Where in `queue` the first unanswered message sits, so the card opens
  * on work rather than on history.
@@ -1682,6 +1717,24 @@ rawPayload: string; amount: number | null; counterparty: string | null; directio
  * What the gate said, when a mapped message was refused.
  */
 gateReason: string | null; resolved: boolean; needsAttention: boolean }
+/**
+ * One move between his own accounts, as it happened.
+ * 
+ * ★★★ A count alone said "3 moves were recognised" and nothing about WHICH
+ * money, so a person could not check it against anything. These are what make
+ * the report auditable rather than merely reassuring.
+ */
+export type MoveLineDto = { from: string; to: string; amount: number; 
+/**
+ * What the bank took. Zero when the text did not say.
+ */
+fee: number; 
+/**
+ * ★★ True when an income had already been filed for the arriving leg and
+ * was taken back off. Said out loud, because a balance that drops without
+ * explanation is the thing this whole mechanism exists to avoid.
+ */
+undidIncome: boolean }
 /**
  * What a netting pass did.
  */
@@ -2069,6 +2122,22 @@ status: string; operator: string | null;
  */
 trust: string; examples: number }
 /**
+ * A recurring shape nothing recognises, and what teaching it would buy.
+ */
+export type ShapeOfferDto = { 
+/**
+ * A real message from the cluster, so a person can read what they teach.
+ */
+example: string; 
+/**
+ * The id of that message, so teaching it is the ordinary classify flow.
+ */
+messageId: string; 
+/**
+ * How many messages share this shape, including the example.
+ */
+count: number }
+/**
  * What "skip all like this" did.
  */
 export type SkipLearnedDto = { 
@@ -2271,10 +2340,29 @@ export type TemplateId =
  */
 "device"
 /**
+ * One figure a person pointed at while teaching a shape.
+ * 
+ * ★★★ He points at a number in his own bank's text and says what it is and
+ * where it belongs. Nothing here is an operator name or a field path — those
+ * are the machine's vocabulary, and he is describing his own money.
+ */
+export type TrainedFigureDto = { 
+/**
+ * The figure exactly as it appears in the message, e.g. `"5.52"`.
+ */
+text: string; 
+/**
+ * `in` | `out` | `fee`.
+ */
+role: string; 
+/**
+ * The pocket he said it belongs to.
+ */
+pocket: string }
+/**
  * What a transfer pass did.
  */
-export type MoveLineDto = { from: string; to: string; amount: number; fee: number; undidIncome: boolean }
-export type TransferDto = { lines: MoveLineDto[]; 
+export type TransferDto = { 
 /**
  * Pairs recognised as one move and recorded as one.
  */
@@ -2298,7 +2386,11 @@ reclaimed: number;
  * A partner leg that had already been filed as income and could not be
  * taken back. Reported rather than left as a silent zero.
  */
-blocked: number; ambiguous: number }
+blocked: number; ambiguous: number; 
+/**
+ * What actually moved, one line each.
+ */
+lines: MoveLineDto[] }
 /**
  * One side of a settled transfer, as the cockpit shows it.
  */

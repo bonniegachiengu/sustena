@@ -43,6 +43,7 @@
  */
 import {
   createEffect,
+  createMemo,
   createResource,
   createSignal,
   For,
@@ -58,6 +59,7 @@ import { onPulse } from "../lib/pulse";
 import {
   engine,
   fmt,
+  pockets as pocketsOf,
   type FeedDto,
   type GateResult,
   type InferenceDto,
@@ -1087,47 +1089,81 @@ function DeviceCard(props: { device: DeviceDto }) {
  * offer. It said "teach it once and all 232 become readable" and then withheld
  * the teaching, which is the one thing the feature exists for.
  *
- * ★★★ **Plain words, and the guess already chosen.** He is answering about his
- * own money at a glance, so the question is "what does this mean" and never
- * "select an operator". The answer this thinks is right is already highlighted,
- * so the ordinary case is one tap and a wrong guess costs one more.
+ * ★★★ **Teaching is per FIGURE, not per message.** The first version of this
+ * asked one question — what does this message mean — and that cannot express
+ * the case it was built for. A Fuliza borrow carries a sum borrowed AND an
+ * access fee, which belong in different places. One answer for the whole
+ * message forces the fee to be re-typed on every message of a shape already
+ * explained once. So each figure gets its own row: what it is, and where it
+ * belongs.
  *
- * ★★ **What is taught is the SHAPE, never the destination.** Teaching a spend
- * makes messages like it readable; it does not decide the pocket. Every one
- * still comes to him to be filed. That asymmetry is the engine's, not this
- * screen's — `parse_rule_learn` fills a learned rule's params for income only
- * — and the copy here says so plainly rather than implying more.
+ * ★★★ **Plain words, and the guess already made.** He is looking at his own
+ * bank's text and pointing at numbers in it. The question is "what is this
+ * one", never "select an operator", and the reading this arrives at is already
+ * filled in — so the ordinary case is read-and-confirm, and a wrong guess costs
+ * one tap.
+ *
+ * ★★ **What is taught is the SHAPE, never the filing.** A taught rule makes
+ * messages like this READABLE and remembers where each figure belongs. It does
+ * not file them. The one exception is a lone arrival, which is the same
+ * exception every other learner in this codebase makes — and the engine, not
+ * this screen, is what enforces it. The copy says so rather than leaving it to
+ * be discovered.
  */
-type Meaning = "in" | "out" | "moved" | "info";
 
-/** What the parser thinks this means, from how banks write. */
-function guessMeaning(raw: string): Meaning {
-  const t = raw.toLowerCase();
-  if (/transferred|moved from|transfer to/.test(t)) return "moved";
-  if (/you have received|received from|credited|deposit/.test(t)) return "in";
-  if (/sent to|paid to|spent|withdraw|you bought|debited/.test(t)) return "out";
-  return "info";
+/** What a figure is, in the words a person would use. */
+type FigureRole = "in" | "out" | "fee" | "skip";
+
+const ROLE_LABEL: Record<FigureRole, string> = {
+  in: "money in",
+  out: "money out",
+  fee: "a fee",
+  skip: "ignore this one",
+};
+
+/** One number found in the message, with what this thinks it is. */
+type Figure = { text: string; at: number; role: FigureRole; pocket: string };
+
+/**
+ * Every money figure in the text, in the order they appear.
+ *
+ * ★★ Currency-prefixed only, which is the same conservative rule the engine's
+ * own trainer uses. Every run of digits would offer him account fragments and
+ * dates to classify, and a list full of noise is a list nobody reads.
+ */
+function figuresIn(raw: string): { text: string; at: number }[] {
+  const out: { text: string; at: number }[] = [];
+  const re = /(?:ksh|kes)\.?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    const t = m[1];
+    if (t) out.push({ text: t, at: m.index + m[0].length - t.length });
+  }
+  return out;
 }
 
-/** The first money figure in the text. */
-function guessAmount(raw: string): string {
-  const m = raw.match(/(?:ksh|kes)[. ]*([0-9,]+(?:[.][0-9]{1,2})?)/i);
-  return m?.[1] ? m[1].replace(/,/g, "") : "";
+/**
+ * What each figure probably is, from the words around it.
+ *
+ * ★★ Deliberately simple and deliberately visible. It is a starting point he
+ * can see and correct in one tap, not a classifier asking to be trusted — and
+ * every guess it makes is sitting in front of him next to the sentence that
+ * produced it.
+ */
+function guessRoles(raw: string, found: { text: string; at: number }[]): FigureRole[] {
+  const lower = raw.toLowerCase();
+  return found.map((f, i) => {
+    // The 40 characters before the figure are what names it.
+    const before = lower.slice(Math.max(0, f.at - 40), f.at);
+    if (/fee|charge|cost|commission/.test(before)) return "fee";
+    if (/balance|outstanding|total|limit|available/.test(before)) return "skip";
+    if (/received|credited|deposit|refund/.test(before)) return "in";
+    if (/sent|paid|bought|withdraw|debited|spent/.test(before)) return "out";
+    // ★ The first figure is usually the one that moved; later unexplained ones
+    //   are usually running totals, so silence is the safer default for them.
+    return i === 0 ? "out" : "skip";
+  });
 }
-
-/** Who the money involved, as the bank names them. */
-function guessWho(raw: string): string {
-  const m = raw.match(/(?:sent to|paid to|received from|from|to)\s+([A-Za-z][A-Za-z0-9 .&-]{2,40})/);
-  if (!m?.[1]) return "";
-  return m[1].replace(/\s+(?:on|for|at)$/i, "").trim();
-}
-
-const MEANINGS: { key: Meaning; label: string; hint: string }[] = [
-  { key: "in", label: "money came in", hint: "someone paid you, or money arrived" },
-  { key: "out", label: "money went out", hint: "you paid for something" },
-  { key: "moved", label: "moved between your own accounts", hint: "your money, changing place" },
-  { key: "info", label: "just information", hint: "no money moved — stop asking about these" },
-];
 
 export function TrainFlow(props: {
   sustain: string;
@@ -1138,23 +1174,62 @@ export function TrainFlow(props: {
   onDone: () => void;
   onClose: () => void;
 }) {
-  const [meaning, setMeaning] = createSignal<Meaning>(guessMeaning(props.raw));
-  const [amount, setAmount] = createSignal(guessAmount(props.raw));
-  const [who, setWho] = createSignal(guessWho(props.raw));
+  const found = createMemo(() => figuresIn(props.raw));
+
+  /**
+   * The household's pockets, fetched here rather than passed in.
+   *
+   * ★★ Self-sufficient on purpose. This page opens from three different places
+   * — a shape card, the classify card, and the Mycelium ingest list — and only
+   * one of them has a pocket list to hand. Threading one through the other two
+   * would make the entry points differ in what they can offer, which is
+   * exactly the kind of drift that leaves one door quietly worse than another.
+   */
+  const [sustainNow] = createResource(
+    () => props.sustain,
+    (id: string) => engine.sustain(id),
+  );
+  // ★ The shared reader, not a second one. Two ways of finding a household's
+  //   pockets is two ways for them to disagree.
+  const pocketNames = () => pocketsOf(sustainNow()?.state).map((p) => p.name);
+
+  const [figures, setFigures] = createSignal<Figure[]>([]);
+  createEffect(() => {
+    const f = found();
+    const guessed = guessRoles(props.raw, f);
+    setFigures(
+      f.map((x: { text: string; at: number }, i: number) => ({
+        ...x,
+        role: guessed[i] ?? "skip",
+        pocket: "",
+      })),
+    );
+  });
+
   const [busy, setBusy] = createSignal(false);
   const [failure, setFailure] = createSignal<string | null>(null);
   const [done, setDone] = createSignal<string | null>(null);
+  /** Which row is choosing a pocket, if any. */
+  const [picking, setPicking] = createSignal<number | null>(null);
 
   const many = () => (props.count ?? 0) > 1;
-  const wantsFigures = () => meaning() !== "info";
-  const chosen = () => MEANINGS.find((m) => m.key === meaning());
+  const kept = () => figures().filter((f) => f.role !== "skip");
+  const unplaced = () => kept().filter((f) => !f.pocket.trim());
+
+  const setRole = (i: number, role: FigureRole) =>
+    setFigures((fs) => fs.map((f, j) => (j === i ? { ...f, role } : f)));
+  const setPocket = (i: number, pocket: string) => {
+    setFigures((fs) => fs.map((f, j) => (j === i ? { ...f, pocket } : f)));
+    setPicking(null);
+  };
 
   const teach = async () => {
     setBusy(true);
     setFailure(null);
     try {
-      if (meaning() === "info") {
-        // ★★ Not a rule about money. A rule about never being asked again.
+      const use = kept();
+      if (use.length === 0) {
+        // ★★ Nothing to read means one honest answer: stop asking about these.
         const out = await engine.learnSkip(props.sustain, props.messageId);
         if (out.unlearnable) {
           setFailure("nothing here repeats reliably enough to recognise again");
@@ -1165,32 +1240,22 @@ export function TrainFlow(props: {
             ? `done — ${out.cleared} like this cleared, and you will not be asked again`
             : "done — you will not be asked about these again",
         );
-      } else {
-        const value = Number(amount());
-        if (!Number.isFinite(value) || value <= 0) {
-          setFailure("that amount does not look like a number");
-          return;
-        }
-        const operator =
-          meaning() === "in"
-            ? "budget.record_income"
-            : meaning() === "out"
-              ? "budget.spend"
-              : "budget.transfer";
-        const params: Record<string, unknown> = { amount: value };
-        if (meaning() === "in") params.source = who() || "unknown";
-        if (meaning() === "out") params.description = who() || "unknown";
-        await engine.learnRule(props.messageId, operator, params as JsonValue);
-        setDone(
-          meaning() === "in"
-            ? many()
-              ? `learned — all ${props.count} are read as money in from now on`
-              : "learned — messages like this are read as money in from now on"
-            : many()
-              ? `learned — all ${props.count} are readable now, and each still asks you where it belongs`
-              : "learned — messages like this are readable now, and each still asks you where it belongs",
-        );
+        props.onDone();
+        return;
       }
+      if (unplaced().length > 0) {
+        setFailure("every figure you kept needs a pocket");
+        return;
+      }
+      await engine.trainRule(
+        props.messageId,
+        use.map((f) => ({ text: f.text, role: f.role as "in" | "out" | "fee", pocket: f.pocket })),
+      );
+      setDone(
+        many()
+          ? `learned — all ${props.count} are read this way now, and each still asks you before it is filed`
+          : "learned — messages like this are read this way now, and each still asks you before it is filed",
+      );
       props.onDone();
     } catch (e) {
       setFailure(String(e).replace(/^Error:\s*/, ""));
@@ -1218,61 +1283,127 @@ export function TrainFlow(props: {
           </>
         }
       >
-        <p class={O.caption}>What does this message mean?</p>
-        {/* ★★ The guess is already chosen, so the ordinary case is one tap. */}
-        <div class={O.chips}>
-          <For each={MEANINGS}>
-            {(m) => (
+        <Show
+          when={found().length > 0}
+          fallback={
+            <>
+              {/* ★★ No figures at all is a real answer, not an error. It is
+                  almost always a notice rather than a transaction. */}
+              <p class={O.caption}>
+                There are no amounts in this message, so there is nothing to file. You can stop
+                Orchie asking about messages like it.
+              </p>
               <button
-                class={meaning() === m.key ? O.chipChosen : O.chip}
-                onClick={() => setMeaning(m.key)}
+                class={`${O.action.primary} ${O.actionWide}`}
+                disabled={busy()}
+                onClick={() => void teach()}
               >
-                {m.label}
+                {busy()
+                  ? "…"
+                  : many()
+                    ? `never ask me about these ${props.count} again`
+                    : "never ask me about these again"}
               </button>
+              <button class={`${O.action.quiet} ${O.actionWide}`} onClick={props.onClose}>
+                not now
+              </button>
+            </>
+          }
+        >
+          <p class={O.caption}>
+            What is each amount, and where does it belong? Orchie has guessed — change what is
+            wrong.
+          </p>
+
+          <For each={figures()}>
+            {(f, i) => (
+              <div class={O.figureRow}>
+                <p class={O.figureValue}>Ksh {f.text}</p>
+                {/* ★★ The sentence this number came out of, so he is reading
+                    his own message rather than a bare figure with no context. */}
+                <p class={O.caption}>
+                  …{props.raw.slice(Math.max(0, f.at - 34), f.at).trimStart()}
+                  <b>{f.text}</b>
+                </p>
+                <div class={O.chips}>
+                  <For each={["in", "out", "fee", "skip"] as FigureRole[]}>
+                    {(r) => (
+                      <button
+                        class={f.role === r ? O.chipChosen : O.chip}
+                        onClick={() => setRole(i(), r)}
+                      >
+                        {ROLE_LABEL[r]}
+                      </button>
+                    )}
+                  </For>
+                </div>
+
+                <Show when={f.role !== "skip"}>
+                  <Show
+                    when={picking() === i()}
+                    fallback={
+                      <button class={O.linkish} onClick={() => setPicking(i())}>
+                        {f.pocket ? `→ ${f.pocket} · change` : "→ which pocket?"}
+                      </button>
+                    }
+                  >
+                    <div class={O.chips}>
+                      <For each={pocketNames()}>
+                        {(p) => (
+                          <button class={O.chip} onClick={() => setPocket(i(), p)}>
+                            {p}
+                          </button>
+                        )}
+                      </For>
+                    </div>
+                    {/* ★ A pocket that does not exist yet is the common case
+                        for a fee: nobody makes a "Fuliza fees" envelope until
+                        the day they meet a Fuliza fee. */}
+                    <input
+                      class={O.input}
+                      placeholder="or type a new pocket name"
+                      onChange={(e) => {
+                        const v = e.currentTarget.value.trim();
+                        if (v) setPocket(i(), v);
+                      }}
+                    />
+                  </Show>
+                </Show>
+              </div>
             )}
           </For>
-        </div>
-        <p class={O.caption}>{chosen()?.hint}</p>
 
-        <Show when={wantsFigures()}>
-          <p class={O.caption}>How much?</p>
-          <input
-            class={O.input}
-            inputmode="decimal"
-            value={amount()}
-            onInput={(e) => setAmount(e.currentTarget.value)}
-          />
-          <Show when={meaning() !== "moved"}>
-            <p class={O.caption}>{meaning() === "in" ? "Who paid you?" : "Who did you pay?"}</p>
-            <input class={O.input} value={who()} onInput={(e) => setWho(e.currentTarget.value)} />
-          </Show>
-          {/* ★★★ Said out loud, because it is the safety property: teaching a
-              shape never decides where money goes. */}
-          <Show when={meaning() !== "in"}>
-            <p class={O.caption}>You still confirm each one before anything is filed.</p>
-          </Show>
+          {/* ★★★ The safety property, on screen, in his words. */}
+          <p class={O.caption}>
+            This teaches Orchie to READ messages like this. You still confirm each one before
+            anything is filed.
+          </p>
+
+          <Show when={failure()}>{(f) => <p class={O.caption}>{f()}</p>}</Show>
+
+          <button
+            class={`${O.action.primary} ${O.actionWide}`}
+            disabled={busy()}
+            onClick={() => void teach()}
+          >
+            {busy()
+              ? "teaching…"
+              : kept().length === 0
+                ? many()
+                  ? `never ask me about these ${props.count} again`
+                  : "never ask me about these again"
+                : many()
+                  ? `teach this — all ${props.count} become readable`
+                  : "teach this"}
+          </button>
+          <button
+            class={`${O.action.quiet} ${O.actionWide}`}
+            disabled={busy()}
+            onClick={props.onClose}
+          >
+            not now
+          </button>
         </Show>
-
-        <Show when={failure()}>{(f) => <p class={O.caption}>{f()}</p>}</Show>
-
-        <button
-          class={`${O.action.primary} ${O.actionWide}`}
-          disabled={busy()}
-          onClick={() => void teach()}
-        >
-          {busy()
-            ? "teaching…"
-            : meaning() === "info"
-              ? many()
-                ? `never ask me about these ${props.count} again`
-                : "never ask me about these again"
-              : many()
-                ? `teach this — all ${props.count} become readable`
-                : "teach this"}
-        </button>
-        <button class={`${O.action.quiet} ${O.actionWide}`} disabled={busy()} onClick={props.onClose}>
-          not now
-        </button>
       </Show>
     </div>
   );

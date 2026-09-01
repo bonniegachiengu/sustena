@@ -707,3 +707,27 @@ globalStyle(`${remember} em`, {
 });
 
 globalStyle(`${remember} input`, { marginTop: "2px", flexShrink: 0 });
+
+/**
+ * One figure being taught, and its own decisions.
+ *
+ * ★★ Boxed and separated, because the mistake to design against is answering
+ * for the wrong number. Two figures in one message need to look like two
+ * questions, not one paragraph with several taps in it.
+ */
+export const figureRow = style({
+  borderTop: `1px solid ${vars.color.border}`,
+  paddingTop: 12,
+  marginTop: 12,
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+});
+
+/** The number itself, large enough to check at a glance. */
+export const figureValue = style({
+  fontFamily: vars.font.mono,
+  fontSize: 18,
+  fontWeight: 600,
+  color: vars.color.textPrimary,
+});

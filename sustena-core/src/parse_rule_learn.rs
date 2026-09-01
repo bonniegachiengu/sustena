@@ -53,8 +53,8 @@ use regex::Regex;
 use std::sync::OnceLock;
 
 use crate::parse_rule::{
-    apply_rule, typecheck_rule, FieldKind, FieldSpec, OperatorUniverse, ParseRule, ParseRuleTrust,
-    RuleStatus,
+    apply_rule, typecheck_rule, FieldKind, FieldSpec, FigureRoute, OperatorUniverse, ParseRule,
+    ParseRuleTrust, RouteRole, RuleStatus,
 };
 
 /// A leading transaction reference — `TGH4A2B9CD Confirmed…`.
@@ -68,6 +68,18 @@ fn leading_ref_re() -> &'static Regex {
 /// ★ The raw message carries the ORIGINAL formatting — thousands separators, a
 /// trailing `.00` — not a float's own rendering. Tried in order; the first one
 /// actually present wins.
+/// A money figure written with its currency, `Ksh 1,005.52`.
+///
+/// ★ Currency-prefixed on purpose. It is the one form that is unambiguously an
+/// amount rather than an account fragment, a date part, or a phone number.
+fn money_figure_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)(?:ksh|kes)\.?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)")
+            .expect("a literal regex")
+    })
+}
+
 fn amount_texts(amount: f64) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut push = |s: String| {
@@ -194,6 +206,7 @@ pub fn synthesize_from_correction(
         trust: ParseRuleTrust::UserCorrected,
         provenance: "human_correction".into(),
         examples: vec![raw_text.to_string()],
+        routes: Vec::new(),
     })
 }
 
@@ -334,6 +347,7 @@ pub fn synthesize_with_shapes(
         trust: ParseRuleTrust::UserCorrected,
         provenance: "human_correction + field shapes".into(),
         examples: vec![raw_text.to_string()],
+        routes: Vec::new(),
     })
 }
 
@@ -366,6 +380,16 @@ pub enum LearningRefusal {
     NoFidelity,
     /// It fires on a message an existing rule already handles.
     Regression { existing_rule: String, example: String },
+    /// Nothing was pointed at, so there is nothing to bind a rule to.
+    NothingToLearn,
+    /// A figure was named that does not appear in the sample.
+    ///
+    /// ★★ A refusal rather than a silent drop. A rule missing a figure he
+    /// thought he taught would read the wrong number out of every later
+    /// message of that shape, and nothing on screen would say so.
+    NotInTheText { figure: String },
+    /// Two figures claimed the same ground.
+    Overlapping { figure: String },
 }
 
 impl std::fmt::Display for LearningRefusal {
@@ -379,8 +403,250 @@ impl std::fmt::Display for LearningRefusal {
                 f,
                 "the candidate would also match a message '{existing_rule}' already handles: {example}"
             ),
+            Self::NothingToLearn => write!(f, "no figures were given, so there is nothing to learn"),
+            Self::NotInTheText { figure } => {
+                write!(f, "'{figure}' does not appear in this message, so there is nowhere to read it from")
+            }
+            Self::Overlapping { figure } => {
+                write!(f, "'{figure}' overlaps a figure already claimed, so one of them would be lost")
+            }
         }
     }
+}
+
+/// One figure a person pointed at, and what they said it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrainedFigure {
+    /// The figure exactly as it appears in the sample, e.g. `"5.52"`.
+    pub text: String,
+    pub role: RouteRole,
+    /// Where he said it belongs.
+    pub pocket: String,
+}
+
+/// **Teach a shape by example, one figure at a time.**
+///
+/// ★★★ **The difference from `synthesize_with_shapes`.** That one learns from a
+/// correction a person had already made — it takes the single confirmed amount
+/// and works out what the rest of the message looks like around it. This one
+/// takes what a person is *saying about the message in front of them*: these
+/// numbers, here, mean these things, and belong in these pockets.
+///
+/// That distinction is the whole of Bonnie's Fuliza case. A borrow carries the
+/// sum borrowed AND the access fee charged for it. One confirmed amount cannot
+/// express that, so the fee was re-typed on every message of a shape he had
+/// already explained. N figures can.
+///
+/// ★★★ **Positional, which is what makes one answer cover the cluster.** Each
+/// figure's span in the sample becomes a named capture group, and the text
+/// between spans becomes literal context with elastic whitespace. So the rule
+/// does not remember `5.52`; it remembers *the number that sits where 5.52
+/// sat*, and reads whatever is there in the next message of that shape.
+///
+/// ★★ **Everything not pointed at is still generalised, not frozen.** The field
+/// reader's own findings — dates, references, the counterparty, account numbers
+/// — are folded in around the person's figures exactly as the correction
+/// learner folds them in. Without that, a rule learned from one sample would
+/// carry that day's date and somebody's phone number and never match again.
+/// This is not a new discipline; it is the same one, and a test holds it.
+///
+/// ★ **It refuses rather than guessing.** A figure the person names that does
+/// not appear in the sample is not silently dropped, and two figures claiming
+/// the same ground is not silently resolved. Both come back as refusals,
+/// because a rule built on either would read the wrong number out of every
+/// future message and nothing on screen would say so.
+pub fn synthesize_from_training(
+    source: &str,
+    raw_text: &str,
+    figures: &[TrainedFigure],
+    id: &str,
+) -> Result<ParseRule, LearningRefusal> {
+    use crate::field_shape::{read, Role};
+
+    if figures.is_empty() {
+        return Err(LearningRefusal::NothingToLearn);
+    }
+
+    // ── Where each figure sits ────────────────────────────────────────────
+    //
+    // ★★ First occurrence, and claimed in the order given. A figure that
+    //    appears twice is ambiguous, and taking the first is the reading a
+    //    person doing the pointing would expect.
+    let mut claimed: Vec<(usize, usize, &TrainedFigure)> = Vec::new();
+    for f in figures {
+        let t = f.text.trim();
+        if t.is_empty() {
+            return Err(LearningRefusal::NothingToLearn);
+        }
+        let Some(at) = raw_text.find(t) else {
+            return Err(LearningRefusal::NotInTheText { figure: t.to_string() });
+        };
+        let span = (at, at + t.len());
+        // ★ Two figures cannot own the same ground. Left unchecked, the second
+        //   group would be dropped by the cursor walk below and the rule would
+        //   quietly know one less thing than he taught it.
+        if claimed.iter().any(|(s, e, _)| *s < span.1 && span.0 < *e) {
+            return Err(LearningRefusal::Overlapping { figure: t.to_string() });
+        }
+        claimed.push((span.0, span.1, f));
+    }
+
+    // ── Names for the groups ──────────────────────────────────────────────
+    //
+    // ★★ The FIRST in/out figure is plain `amount` and the first fee is plain
+    //    `fee`, because those are the names the rest of the system already
+    //    binds — a taught rule and an induced one must be indistinguishable to
+    //    the operator layer. Further figures of the same kind are numbered.
+    let mut n_amount = 0usize;
+    let mut n_fee = 0usize;
+    let mut named: Vec<(usize, usize, String, &TrainedFigure)> = Vec::new();
+    for (s, e, f) in &claimed {
+        let group = match f.role {
+            RouteRole::Fee => {
+                n_fee += 1;
+                if n_fee == 1 { "fee".to_string() } else { format!("fee_{n_fee}") }
+            }
+            _ => {
+                n_amount += 1;
+                if n_amount == 1 { "amount".to_string() } else { format!("amount_{n_amount}") }
+            }
+        };
+        named.push((*s, *e, group, f));
+    }
+
+    // ── Everything he did NOT point at, generalised anyway ────────────────
+    let reading = read(raw_text);
+    let mut spans: Vec<(usize, usize, String, FieldKind)> = named
+        .iter()
+        .map(|(s, e, g, _)| (*s, *e, g.clone(), FieldKind::Amount))
+        .collect();
+    // ★★★ **Currency figures are claimed first, and that ORDER is the fix.**
+    //
+    //     A real bug lived here. The field reader can return a wide text span
+    //     that swallows a figure whole — "…outstanding amount is Ksh 1,005.52
+    //     due on…" read as one counterparty — and when that span was later
+    //     dropped for having a group name already used, the figure inside it
+    //     fell back into the literal context. The rule was then pinned to one
+    //     day's outstanding balance: it matched the message it was taught on
+    //     and no sibling, which is precisely the promise "teach one, all N
+    //     follow" is made of. A test caught it; nothing else would have.
+    //
+    //     Claiming money first makes that unrepresentable rather than merely
+    //     fixed: a number is a number, and the reader gets what is left.
+    //
+    //     Deliberately conservative — only figures written with an explicit
+    //     `Ksh`/`KES`. Generalising every run of digits would swallow account
+    //     fragments and dates and turn a precise rule into one that matches
+    //     nearly anything, which is the more dangerous mistake by far.
+    for m in money_figure_re().captures_iter(raw_text) {
+        let g = m.get(1).expect("the figure group");
+        if spans.iter().any(|(s, e, _, _)| g.start() < *e && *s < g.end()) {
+            continue;
+        }
+        n_amount += 1;
+        spans.push((g.start(), g.end(), format!("amount_{n_amount}"), FieldKind::Amount));
+    }
+
+    // ★★ Everything else the reader found — dates, references, the party,
+    //    account numbers — folded in around what is already claimed. Without
+    //    this a rule would carry that day's date and somebody's phone number.
+    for fld in &reading.fields {
+        // ★ Anything already claimed wins its ground outright: the person's
+        //   figures first, then the money above.
+        if spans.iter().any(|(s, e, _, _)| fld.at.0 < *e && *s < fld.at.1) {
+            continue;
+        }
+        // ★ A figure the money pass did not take (written without a currency)
+        //   still gets a group of its own rather than being frozen. It is read
+        //   but never routed — he remains the authority on what means what.
+        if matches!(fld.role, Role::Amount | Role::Fee) {
+            n_amount += 1;
+            spans.push((fld.at.0, fld.at.1, format!("amount_{n_amount}"), FieldKind::Amount));
+            continue;
+        }
+        spans.push((
+            fld.at.0,
+            fld.at.1,
+            fld.role.group().to_string(),
+            match fld.role {
+                Role::Balance => FieldKind::Amount,
+                _ => FieldKind::Text,
+            },
+        ));
+    }
+
+    spans.sort_by_key(|s| s.0);
+
+    // ── The pattern ───────────────────────────────────────────────────────
+    let mut seen: Vec<String> = Vec::new();
+    let mut pattern = String::new();
+    let mut extract: BTreeMap<String, FieldSpec> = BTreeMap::new();
+    let mut cursor = 0usize;
+    for (start, end, group, kind) in spans {
+        if start < cursor || seen.contains(&group) {
+            continue;
+        }
+        pattern.push_str(&shape_literal(&raw_text[cursor..start]));
+        pattern.push_str(&crate::field_shape::group_pattern(&group));
+        extract.insert(
+            group.clone(),
+            FieldSpec { kind, group: Some(group.clone()), value: None },
+        );
+        seen.push(group);
+        cursor = end;
+    }
+    pattern.push_str(&shape_literal(&raw_text[cursor..]));
+
+    let routes: Vec<FigureRoute> = named
+        .iter()
+        .filter(|(_, _, g, _)| seen.contains(g))
+        .map(|(_, _, g, f)| FigureRoute {
+            group: g.clone(),
+            role: f.role,
+            pocket: f.pocket.trim().to_string(),
+        })
+        .collect();
+    if routes.is_empty() {
+        return Err(LearningRefusal::NothingToLearn);
+    }
+
+    // ★★★ **Money arriving may file itself; money leaving may not.** The
+    //     asymmetry the whole ingest path is built on, and teaching does not
+    //     get to weaken it. A taught rule that says "this is a fee of 5.52 for
+    //     the Fuliza fees pocket" still comes to him to confirm — what it saves
+    //     is the re-typing, not the deciding.
+    //
+    //     Income only auto-files when it is the ONLY thing taught. A message
+    //     carrying an arrival and a fee together is two decisions, and one of
+    //     them is a spend.
+    let only_income = routes.len() == 1 && routes[0].role == RouteRole::In;
+
+    Ok(ParseRule {
+        id: id.to_string(),
+        source: source.to_string(),
+        version: 1,
+        pattern,
+        extract,
+        status: if only_income { RuleStatus::Mapped } else { RuleStatus::ParsedUnmapped },
+        operator: only_income.then(|| "budget.record_income".to_string()),
+        params: if only_income {
+            let mut p: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+            p.insert("amount".into(), serde_json::json!("$amount"));
+            p.insert("source".into(), serde_json::json!(routes[0].pocket.clone()));
+            p
+        } else {
+            BTreeMap::new()
+        },
+        flags: vec!["IGNORECASE".into()],
+        reason_template: (!only_income).then(|| {
+            "Recognised from a shape you taught — the figures are read, and you confirm."
+                .to_string()
+        }),
+        trust: ParseRuleTrust::UserCorrected,
+        provenance: "human_training + field shapes".into(),
+        examples: vec![raw_text.to_string()],
+        routes,
+    })
 }
 
 /// **`V(r)`** — both conditions, both required. See the module docs.
@@ -790,5 +1056,190 @@ mod shape_learning_tests {
         let a = synthesize_with_shapes("m", RECEIVED, "budget.record_income", &params(5000.0), "i");
         let b = synthesize_with_shapes("m", RECEIVED, "budget.record_income", &params(5000.0), "i");
         assert_eq!(a, b);
+    }
+}
+
+#[cfg(test)]
+mod training_tests {
+    use super::*;
+    use crate::parse_rule::{run_rules, RuleStatus};
+
+    /// Bonnie's own case, and the reason this exists: two numbers, two
+    /// meanings, two pockets, one message.
+    const FULIZA: &str = "TFF9J0ABCD Confirmed. Fuliza M-PESA amount is Ksh 1,000.00. \
+                          Access Fee charged Ksh 5.52. Total Fuliza M-PESA outstanding \
+                          amount is Ksh 1,005.52 due on 15/8/26.";
+
+    /// A second message of the SAME shape, different figures. This is what the
+    /// taught rule has to read, and the whole claim of "teach one, all N follow".
+    const FULIZA_2: &str = "QKL2M8XYZW Confirmed. Fuliza M-PESA amount is Ksh 250.00. \
+                            Access Fee charged Ksh 1.38. Total Fuliza M-PESA outstanding \
+                            amount is Ksh 251.38 due on 3/9/26.";
+
+    fn fuliza_figures() -> Vec<TrainedFigure> {
+        vec![
+            TrainedFigure {
+                text: "1,000.00".into(),
+                role: RouteRole::In,
+                pocket: "Fuliza".into(),
+            },
+            TrainedFigure {
+                text: "5.52".into(),
+                role: RouteRole::Fee,
+                pocket: "Fuliza fees".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn two_figures_in_one_message_get_two_routes() {
+        // ★★★ The whole point. One amount could never express "the sum
+        //     borrowed goes here and the fee goes there", so the fee was
+        //     re-typed on every message of a shape already explained once.
+        let r = synthesize_from_training("mpesa", FULIZA, &fuliza_figures(), "t1")
+            .expect("it learns");
+        assert_eq!(r.routes.len(), 2);
+        assert_eq!(r.routes[0].group, "amount");
+        assert_eq!(r.routes[0].role, RouteRole::In);
+        assert_eq!(r.routes[0].pocket, "Fuliza");
+        assert_eq!(r.routes[1].group, "fee");
+        assert_eq!(r.routes[1].role, RouteRole::Fee);
+        assert_eq!(r.routes[1].pocket, "Fuliza fees");
+    }
+
+    #[test]
+    fn what_it_learned_reads_the_next_message_of_that_shape() {
+        // ★★★ Positional, not remembered. The rule must read 250.00 and 1.38
+        //     out of a message it has never seen, from where 1,000.00 and 5.52
+        //     sat in the one it was taught on.
+        let r = synthesize_from_training("mpesa", FULIZA, &fuliza_figures(), "t1")
+            .expect("it learns");
+        let out = run_rules(&[r], FULIZA_2).expect("it recognises the sibling");
+        assert_eq!(out.parsed_fields().get("amount").and_then(|v| v.as_f64()), Some(250.0));
+        assert_eq!(out.parsed_fields().get("fee").and_then(|v| v.as_f64()), Some(1.38));
+    }
+
+
+    #[test]
+    fn it_reads_the_message_it_was_taught_on() {
+        let r = synthesize_from_training("mpesa", FULIZA, &fuliza_figures(), "t1")
+            .expect("it learns");
+        let out = run_rules(&[r], FULIZA).expect("fidelity to its own example");
+        assert_eq!(out.parsed_fields().get("amount").and_then(|v| v.as_f64()), Some(1000.0));
+        assert_eq!(out.parsed_fields().get("fee").and_then(|v| v.as_f64()), Some(5.52));
+    }
+
+    #[test]
+    fn a_taught_shape_with_a_fee_still_asks_him() {
+        // ★★★ The money-safety asymmetry, and teaching does not weaken it.
+        //     What a taught rule saves is the re-typing, never the deciding.
+        let r = synthesize_from_training("mpesa", FULIZA, &fuliza_figures(), "t1")
+            .expect("it learns");
+        assert_eq!(r.status, RuleStatus::ParsedUnmapped);
+        assert!(r.operator.is_none(), "nothing files itself here");
+        assert!(r.reason_template.is_some(), "and it says why it is waiting");
+    }
+
+    #[test]
+    fn money_arriving_on_its_own_may_file_itself() {
+        // ★★ The one case that auto-files, unchanged from every other learner
+        //    in this codebase: an arrival, alone, with nothing else to decide.
+        let figures = vec![TrainedFigure {
+            text: "1,000.00".into(),
+            role: RouteRole::In,
+            pocket: "salary".into(),
+        }];
+        let r = synthesize_from_training("mpesa", FULIZA, &figures, "t2").expect("it learns");
+        assert_eq!(r.status, RuleStatus::Mapped);
+        assert_eq!(r.operator.as_deref(), Some("budget.record_income"));
+        assert_eq!(r.params.get("amount").and_then(|v| v.as_str()), Some("$amount"));
+    }
+
+    #[test]
+    fn an_arrival_that_also_carries_a_fee_does_not_file_itself() {
+        // ★★★ Two decisions, and one of them is a spend. Auto-filing the
+        //     arrival would file half a message and leave the other half
+        //     unaccounted, which is worse than asking.
+        let r = synthesize_from_training("mpesa", FULIZA, &fuliza_figures(), "t1")
+            .expect("it learns");
+        assert_eq!(r.status, RuleStatus::ParsedUnmapped);
+    }
+
+    #[test]
+    fn the_particulars_do_not_get_frozen_into_the_rule() {
+        // ★★★ The discipline the correction learner already holds. A rule that
+        //     kept this day's date and this reference could never match a
+        //     second message, and would carry the sample around forever.
+        let r = synthesize_from_training("mpesa", FULIZA, &fuliza_figures(), "t1")
+            .expect("it learns");
+        assert!(!r.pattern.contains("TFF9J0ABCD"), "the reference is generalised: {}", r.pattern);
+        assert!(!r.pattern.contains("15/8/26"), "the date is generalised: {}", r.pattern);
+        assert!(!r.pattern.contains("1,000.00"), "nor the figure he pointed at: {}", r.pattern);
+        assert!(!r.pattern.contains("5.52"), "nor the fee: {}", r.pattern);
+    }
+
+    #[test]
+    fn a_figure_that_is_not_in_the_message_is_refused_by_name() {
+        // ★★ Refused, not dropped. A rule quietly missing a figure he thought
+        //    he taught would read the wrong number out of every later message,
+        //    and nothing on screen would say so.
+        let figures = vec![TrainedFigure {
+            text: "999.99".into(),
+            role: RouteRole::Out,
+            pocket: "food".into(),
+        }];
+        let err = synthesize_from_training("mpesa", FULIZA, &figures, "t3").unwrap_err();
+        match err {
+            LearningRefusal::NotInTheText { ref figure } => assert_eq!(figure, "999.99"),
+            other => panic!("expected NotInTheText, got {other:?}"),
+        }
+        assert!(err.to_string().contains("999.99"), "and it names it: {err}");
+    }
+
+    #[test]
+    fn two_figures_claiming_the_same_ground_are_refused() {
+        let figures = vec![
+            TrainedFigure { text: "1,000.00".into(), role: RouteRole::In, pocket: "a".into() },
+            TrainedFigure { text: "1,000.00".into(), role: RouteRole::Fee, pocket: "b".into() },
+        ];
+        let err = synthesize_from_training("mpesa", FULIZA, &figures, "t4").unwrap_err();
+        assert!(matches!(err, LearningRefusal::Overlapping { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn pointing_at_nothing_teaches_nothing() {
+        let err = synthesize_from_training("mpesa", FULIZA, &[], "t5").unwrap_err();
+        assert!(matches!(err, LearningRefusal::NothingToLearn), "got {err:?}");
+    }
+
+    #[test]
+    fn a_third_figure_of_the_same_kind_gets_its_own_group() {
+        // ★★ Numbered rather than colliding. Two fees in one message is not
+        //    hypothetical -- providers itemise -- and the second must not
+        //    silently overwrite the first.
+        let figures = vec![
+            TrainedFigure { text: "1,000.00".into(), role: RouteRole::In, pocket: "a".into() },
+            TrainedFigure { text: "5.52".into(), role: RouteRole::Fee, pocket: "b".into() },
+            TrainedFigure { text: "1,005.52".into(), role: RouteRole::Out, pocket: "c".into() },
+        ];
+        let r = synthesize_from_training("mpesa", FULIZA, &figures, "t6").expect("it learns");
+        let groups: Vec<&str> = r.routes.iter().map(|x| x.group.as_str()).collect();
+        assert_eq!(groups, vec!["amount", "fee", "amount_2"]);
+        // ★ And the numbered group must read a NUMBER, not words.
+        let out = run_rules(&[r], FULIZA_2).expect("sibling");
+        assert_eq!(out.parsed_fields().get("amount_2").and_then(|v| v.as_f64()), Some(251.38));
+    }
+
+    #[test]
+    fn a_rule_written_before_routes_existed_still_loads() {
+        // ★★★ The seed library is JSON on disk and predates all of this. If
+        //     `routes` were required, every shipped rule would fail to load and
+        //     the household would lose every format it already knew.
+        let json = r#"{
+            "id": "old", "source": "mpesa", "pattern": "Ksh(?P<amount>[0-9.]+)",
+            "status": "parsed_unmapped", "extract": {}
+        }"#;
+        let r: ParseRule = serde_json::from_str(json).expect("it loads");
+        assert!(r.routes.is_empty(), "and means the honest 'nobody has said yet'");
     }
 }

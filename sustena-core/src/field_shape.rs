@@ -599,6 +599,9 @@ pub fn induce(text: &str, source: &str, id: &str) -> Result<ParseRule, NotInduci
         //    the raw text is kept, and it is kept BY the caller who already had
         //    it — nothing new is disclosed by a rule remembering what made it.
         examples: vec![text.to_string()],
+        // ★ An induced rule proposes a shape, never a destination. Where a
+        //   figure belongs is a thing only the household knows.
+        routes: Vec::new(),
     })
 }
 
@@ -634,6 +637,13 @@ fn literal(raw: &str) -> String {
 /// learned rule and an induced one would bind different names for the same
 /// field and the operator layer would need to know which made it.
 pub fn group_pattern(group: &str) -> String {
+    // ★★ A person can point at more than one figure in the same message — a
+    //    Fuliza borrow has a sum AND an access fee — so the trainer numbers the
+    //    extras (`amount_2`, `fee_2`). Matching by PREFIX keeps those numeric;
+    //    falling to the text pattern below would have them read words.
+    if group.starts_with("amount") || group.starts_with("fee") || group.starts_with("balance") {
+        return format!(r"(?P<{group}>[0-9][0-9,]*(?:\.[0-9]{{1,2}})?)");
+    }
     let inner = match group {
         "amount" | "balance_after" | "fee" => r"[0-9][0-9,]*(?:\.[0-9]{1,2})?",
         "ref" => r"[A-Z0-9]{8,16}",

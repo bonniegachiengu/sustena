@@ -1034,6 +1034,22 @@ pub struct ShapeOfferDto {
     pub count: u32,
 }
 
+/// One figure a person pointed at while teaching a shape.
+///
+/// ★★★ He points at a number in his own bank's text and says what it is and
+/// where it belongs. Nothing here is an operator name or a field path — those
+/// are the machine's vocabulary, and he is describing his own money.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TrainedFigureDto {
+    /// The figure exactly as it appears in the message, e.g. `"5.52"`.
+    pub text: String,
+    /// `in` | `out` | `fee`.
+    pub role: String,
+    /// The pocket he said it belongs to.
+    pub pocket: String,
+}
+
 /// The whole curated view.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

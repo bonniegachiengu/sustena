@@ -1021,6 +1021,87 @@ pub fn learn_rule(
     Ok(candidate.id)
 }
 
+/// **Teach a shape by pointing at its figures.**
+///
+/// ★★★ The difference from [`learn_rule`] is who is talking. `learn_rule`
+/// learns from a decision already made — it takes the amount he confirmed and
+/// works out the shape around it. This takes what he is *saying about the
+/// message in front of him*: these numbers mean these things and belong in
+/// these pockets. Only the second can express a Fuliza borrow, which carries a
+/// sum AND an access fee that belong in different places.
+///
+/// ★★ Refusals come back as they are, in the words the refusal itself uses. A
+/// figure he named that is not in the text is a thing he can see and fix; a
+/// silent drop would leave a rule that reads the wrong number out of every
+/// later message with nothing on screen to say so.
+///
+/// ★ Nothing is filed here. A taught rule with anything other than a lone
+/// arrival is `ParsedUnmapped` by construction — it makes the message
+/// READABLE, and he still confirms each one. See `synthesize_from_training`.
+#[tauri::command]
+#[specta::specta]
+pub fn train_rule(
+    world: State<'_, World>,
+    message_id: String,
+    figures: Vec<crate::dto::TrainedFigureDto>,
+) -> Result<String, String> {
+    use sustena_core::{RouteRole, TrainedFigure};
+
+    let Some(m) = world
+        .ingest()
+        .current()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|m| m.id == message_id)
+    else {
+        return Err("no such captured message".into());
+    };
+
+    let mut trained: Vec<TrainedFigure> = Vec::new();
+    for f in &figures {
+        let role = match f.role.as_str() {
+            "in" => RouteRole::In,
+            "out" => RouteRole::Out,
+            "fee" => RouteRole::Fee,
+            other => return Err(format!("'{other}' is not a role a figure can have")),
+        };
+        if f.pocket.trim().is_empty() {
+            return Err("every figure needs a pocket to belong to".into());
+        }
+        trained.push(TrainedFigure {
+            text: f.text.trim().to_string(),
+            role,
+            pocket: f.pocket.trim().to_string(),
+        });
+    }
+
+    let id = format!("taught_{}_{}", m.source_id, &m.dedup_key[..12]);
+    let candidate =
+        sustena_core::synthesize_from_training(&m.source_id, &m.raw_payload, &trained, &id)
+            .map_err(|e| e.to_string())?;
+
+    let existing = world.rules_for(&m.source_id).map_err(|e| e.to_string())?;
+    sustena_core::verify_candidate(&candidate, &m.raw_payload, &existing, &world.operators)
+        .map_err(|e| e.to_string())?;
+    world.ingest().add_rule(&candidate).map_err(|e| e.to_string())?;
+
+    // ★★★ The rest of the shape, now. Teaching a format and leaving the two
+    //     hundred messages already sitting in it unreadable is the difference
+    //     between a queue that ends and one that only stops growing — and with
+    //     clusters this size it is the whole of the value.
+    //
+    // ★★ Readability only; `reparse_unparsed` never files anything. Best
+    //    effort, because the rule is already saved and correct and failing the
+    //    teach over a stumbled re-read would throw away the part that worked.
+    let rules = world.rules_for(&m.source_id).unwrap_or_default();
+    match world.ingest().reparse_unparsed(&m.sustain_id, &rules) {
+        Ok(n) if n > 0 => trace!("taught {}: {n} stored message(s) became readable", candidate.id),
+        Ok(_) => {}
+        Err(e) => trace!("taught {}, but re-reading the backlog failed: {e}", candidate.id),
+    }
+    Ok(candidate.id)
+}
+
 // ── Orchie ──────────────────────────────────────────────────
 
 /// **The curated feed** — `compose(r)` over one household.

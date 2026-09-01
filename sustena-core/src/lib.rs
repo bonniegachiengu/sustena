@@ -508,11 +508,12 @@ pub use effect_capture::{
     Choice, DeclaredParams, Inference, OperatorParams,
 };
 pub use parse_rule_learn::{
-    synthesize_from_correction, synthesize_with_shapes, verify_candidate, LearningRefusal,
+    synthesize_from_correction, synthesize_from_training, synthesize_with_shapes,
+    verify_candidate, LearningRefusal, TrainedFigure,
 };
 pub use parse_rule::{
-    apply_rule, run_rules, typecheck_rule, FieldKind, FieldSpec, NoOperators, OperatorUniverse,
-    ParseRule, ParseRuleTrust, RuleStatus,
+    apply_rule, run_rules, typecheck_rule, FieldKind, FieldSpec, FigureRoute, NoOperators,
+    OperatorUniverse, ParseRule, ParseRuleTrust, RouteRole, RuleStatus,
 };
 pub use transducer::{
     all_seed_rules, contains_sensitive_secret, parse_message, seed_rules, seed_sources,

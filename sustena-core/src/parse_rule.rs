@@ -136,6 +136,49 @@ pub enum ParseRuleTrust {
     ProposedConfirmed,
 }
 
+/// Which way a taught figure moves, in the words a person would use.
+///
+/// ★★★ **Roles, not operators.** He is pointing at a number in his own
+/// bank's text and saying what it is. "Access fee" is a thing he can see; a
+/// `budget.spend` call with a `fee` param is not, and asking him to think in
+/// one to describe the other is the jargon this screen exists without.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteRole {
+    /// Money arriving.
+    In,
+    /// Money leaving.
+    Out,
+    /// What the movement cost on top of itself.
+    Fee,
+}
+
+/// One figure in a message, and where it belongs.
+///
+/// ★★★ **The whole point of teaching by example.** A Fuliza borrow carries
+/// two numbers that mean different things and belong in different places — the
+/// sum borrowed, and the access fee charged for borrowing it. A rule that can
+/// only carry ONE amount forces the fee to be re-typed on every single message
+/// of a shape he has already explained once.
+///
+/// ★★ **Positional, and that is what makes it general.** The route names a
+/// captured GROUP, not a value. The group is bound to where the figure sat in
+/// the sample, so the same route reads the right number out of every message of
+/// that shape, whatever the figures happen to be.
+///
+/// ★ **A pocket here is a proposal, never a filing.** Nothing about a route
+/// moves money; it pre-fills the question so he is confirming rather than
+/// re-typing. See `RuleStatus` — a routed rule is still `ParsedUnmapped` unless
+/// the money is arriving.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FigureRoute {
+    /// The captured group this reads, e.g. `amount` or `fee`.
+    pub group: String,
+    pub role: RouteRole,
+    /// The pocket he said it belongs to.
+    pub pocket: String,
+}
+
 /// A declared rule: the whole of what `τ` knows about one message shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParseRule {
@@ -168,6 +211,13 @@ pub struct ParseRule {
     /// The regression corpus: texts this rule is known to match.
     #[serde(default)]
     pub examples: Vec<String>,
+    /// Which figure belongs where, when a person has said.
+    ///
+    /// ★★ Defaulted, so every rule written before routes existed — including
+    /// the whole shipped seed library — loads unchanged and means exactly what
+    /// it meant. An empty list is the honest "nobody has said yet".
+    #[serde(default)]
+    pub routes: Vec<FigureRoute>,
 }
 
 fn one() -> u32 {
@@ -615,6 +665,7 @@ mod tests {
             trust: ParseRuleTrust::Shipped,
             provenance: "test".into(),
             examples: vec![],
+            routes: Vec::new(),
         }
     }
 
