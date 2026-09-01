@@ -234,6 +234,36 @@ async lockIdentity() : Promise<IdentityDto> {
     return await TAURI_INVOKE("lock_identity");
 },
 /**
+ * **The phrase that carries this identity to another device.**
+ * 
+ * ★★★ It hands back the key itself, so it needs the passphrase even
+ * though the app is already unlocked: an unlocked screen left on a table
+ * should not be a way to walk off with somebody's identity.
+ */
+async recoveryPhrase(passphrase: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("recovery_phrase", { passphrase }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **Become the same person on a device that has never seen him.**
+ * 
+ * ★★★ This is what makes a second device HIM rather than a new principal.
+ * The keypair is restored, not generated, so the public key that owns his
+ * Sustains and authenticates to a peer is identical on both.
+ */
+async restoreIdentity(handle: string, passphrase: string, phrase: string) : Promise<Result<IdentityDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("restore_identity", { handle, passphrase, phrase }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * The capture queue, the declared sources, and the rules in force.
  */
 async getIngest(sustainId: string) : Promise<Result<IngestDto, string>> {
@@ -496,6 +526,13 @@ async applyTransfers(sustainId: string) : Promise<Result<TransferDto, string>> {
  * ★★ Retroactive by design. He answers this in the middle of a backlog full
  * of the same shape, so a rule that only covered future messages would leave
  * the pile it was meant to clear exactly as it was.
+ * ★★★ **Runs off the main thread.** A plain Tauri command executes on
+ * the main thread, which is the UI thread for the webview -- and this one
+ * walks the whole message store, verifies a candidate against every rule,
+ * then re-reads the entire unparsed backlog. On a real store of a few
+ * thousand texts that is seconds of frozen screen, which is exactly what
+ * he saw when he tapped the button. Declaring it async puts it on the
+ * async runtime instead, so the screen keeps answering.
  */
 async learnSkip(sustainId: string, messageId: string) : Promise<Result<SkipLearnedDto, string>> {
     try {
@@ -590,6 +627,13 @@ async linkNumber(sustainId: string, pocketName: string, number: string) : Promis
  * message that taught it, and must not capture a message an existing rule
  * already handles. ★★★ A learned SPEND rule carries no operator, so a
  * correction can never teach the system to spend on someone's behalf.
+ * ★★★ **Runs off the main thread.** A plain Tauri command executes on
+ * the main thread, which is the UI thread for the webview -- and this one
+ * walks the whole message store, verifies a candidate against every rule,
+ * then re-reads the entire unparsed backlog. On a real store of a few
+ * thousand texts that is seconds of frozen screen, which is exactly what
+ * he saw when he tapped the button. Declaring it async puts it on the
+ * async runtime instead, so the screen keeps answering.
  */
 async learnRule(messageId: string, operator: string, params: JsonValue) : Promise<Result<string, string>> {
     try {
@@ -617,6 +661,13 @@ async learnRule(messageId: string, operator: string, params: JsonValue) : Promis
  * ★ Nothing is filed here. A taught rule with anything other than a lone
  * arrival is `ParsedUnmapped` by construction — it makes the message
  * READABLE, and he still confirms each one. See `synthesize_from_training`.
+ * ★★★ **Runs off the main thread.** A plain Tauri command executes on
+ * the main thread, which is the UI thread for the webview -- and this one
+ * walks the whole message store, verifies a candidate against every rule,
+ * then re-reads the entire unparsed backlog. On a real store of a few
+ * thousand texts that is seconds of frozen screen, which is exactly what
+ * he saw when he tapped the button. Declaring it async puts it on the
+ * async runtime instead, so the screen keeps answering.
  */
 async trainRule(messageId: string, figures: TrainedFigureDto[]) : Promise<Result<string, string>> {
     try {
@@ -692,6 +743,13 @@ async forgetThread(id: string) : Promise<Result<ThreadDto[], string>> {
  * waiting, and on an inbox that had been read that was thousands of them. The
  * screen froze for about a minute after unlocking, with no reading happening
  * at all: this is what it was doing.
+ * ★★★ **Runs off the main thread.** A plain Tauri command executes on
+ * the main thread, which is the UI thread for the webview -- and this one
+ * walks the whole message store, verifies a candidate against every rule,
+ * then re-reads the entire unparsed backlog. On a real store of a few
+ * thousand texts that is seconds of frozen screen, which is exactly what
+ * he saw when he tapped the button. Declaring it async puts it on the
+ * async runtime instead, so the screen keeps answering.
  */
 async getFeed(sustainId: string, query: string | null) : Promise<Result<FeedDto, string>> {
     try {

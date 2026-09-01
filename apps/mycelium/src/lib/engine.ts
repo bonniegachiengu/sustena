@@ -351,6 +351,23 @@ export const engine = {
     unwrap(await commands.autoFiled(sustainId, limit)),
 
   /** The threads this household reads money texts from. */
+  /**
+   * The phrase that carries this identity to another device.
+   *
+   * ★★ Needs the passphrase even though the app is unlocked: it hands back the
+   * key itself, and an unlocked screen left on a table should not be a way to
+   * walk off with somebody's identity.
+   */
+  recoveryPhrase: async (passphrase: string): Promise<string> =>
+    unwrap(await commands.recoveryPhrase(passphrase)),
+
+  /** Become the same person on a device that has never seen him. */
+  restoreIdentity: async (
+    handle: string,
+    passphrase: string,
+    phrase: string,
+  ): Promise<IdentityDto> => unwrap(await commands.restoreIdentity(handle, passphrase, phrase)),
+
   threads: async (): Promise<ThreadDto[]> => unwrap(await commands.threads()),
 
   /**

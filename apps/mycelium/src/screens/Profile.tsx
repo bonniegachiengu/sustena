@@ -15,7 +15,7 @@
  * `permitted` the gate asks. A screen computing permission its own way would
  * eventually disagree with the thing that actually decides.
  */
-import { createResource, For, Show } from "solid-js";
+import { createResource, createSignal, For, Show } from "solid-js";
 
 import { onPulse } from "../lib/pulse";
 import {
@@ -59,6 +59,33 @@ export default function Profile() {
 
   const totalEvents = () =>
     world.order.reduce((n, k) => n + (world.sustains[k]?.summary.events ?? 0), 0);
+
+  /**
+   * Carrying this identity to another device.
+   *
+   * ★★★ Shown ONCE, on purpose, and never stored. The phrase IS the key --
+   * anyone holding it is him -- so it is derived on demand from the sealed
+   * secret and lives only as long as this card is open. Keeping it around for
+   * convenience would put a second copy of his key on disk, which is exactly
+   * what the sealed file exists to prevent.
+   */
+  const [carryPass, setCarryPass] = createSignal("");
+  const [carried, setCarried] = createSignal<string | null>(null);
+  const [carryFailed, setCarryFailed] = createSignal<string | null>(null);
+  const [carrying, setCarrying] = createSignal(false);
+
+  const carry = async () => {
+    setCarrying(true);
+    setCarryFailed(null);
+    try {
+      setCarried(await engine.recoveryPhrase(carryPass()));
+      setCarryPass("");
+    } catch (e) {
+      setCarryFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setCarrying(false);
+    }
+  };
 
   return (
     <Split>
@@ -104,6 +131,60 @@ export default function Profile() {
             <Caption>
               Locking removes the private key from memory. A locked cockpit cannot act.
             </Caption>
+          </Note>
+
+          {/* ★★★ Carrying this identity to another device. Without it a second
+              device can only mint a NEW key -- a different principal that owns
+              none of these Sustains -- so "my laptop shows what my phone
+              shows" is impossible however well sync works. */}
+          <Note>
+            <Show
+              when={carried()}
+              fallback={
+                <>
+                  <Caption>
+                    To use this household on another device, that device needs this same
+                    identity. Your passphrase shows the phrase that carries it.
+                  </Caption>
+                  <Cluster>
+                    <input
+                      class={S.input}
+                      type="password"
+                      autocomplete="off"
+                      placeholder="your passphrase"
+                      value={carryPass()}
+                      onInput={(e) => setCarryPass(e.currentTarget.value)}
+                    />
+                    <Button
+                      variant="ghost"
+                      disabled={carrying() || carryPass() === ""}
+                      onClick={() => void carry()}
+                    >
+                      {carrying() ? "…" : "show recovery phrase"}
+                    </Button>
+                  </Cluster>
+                  <Show when={carryFailed()}>{(m) => <Caption>{m()}</Caption>}</Show>
+                </>
+              }
+            >
+              {(phrase) => (
+                <>
+                  <Value>{phrase()}</Value>
+                  {/* ★★ Said plainly rather than softened. This is the key
+                      itself: whoever holds it is him. */}
+                  <Caption>
+                    Write this down and keep it somewhere safe. Anyone who has it can open
+                    your household on any device. It is not stored anywhere — close this and
+                    it is gone.
+                  </Caption>
+                  <Cluster>
+                    <Button variant="ghost" onClick={() => setCarried(null)}>
+                      done, it is written down
+                    </Button>
+                  </Cluster>
+                </>
+              )}
+            </Show>
           </Note>
         </Card>
 
