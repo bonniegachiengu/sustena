@@ -522,7 +522,7 @@ mod tests {
         // real M-Pesa messages on 26 Aug: Fuliza (borrow, interest, repay,
         // statement), Pochi la Biashara (in, moved), M-Shwari (in, out),
         // send-to-a-business, agent withdrawal, balance enquiry, failures.
-        assert_eq!(seed_rules("mpesa").len(), 19);
+        assert_eq!(seed_rules("mpesa").len(), 20);
         // 17 = 15 original shapes, + kcb_reversal for refund netting, and
         // + kcb_send_to_mpesa, the real shape his KCB app sends when he moves
         // his own money to his own M-Pesa.
@@ -845,5 +845,48 @@ mod transfer_fee_read_tests {
         );
         assert_eq!(t.parsed_fields().get("amount").and_then(|v| v.as_f64()), Some(2000.0));
         assert!(t.parsed_fields().get("transaction_cost").is_none(), "absent, not invented");
+    }
+}
+
+#[cfg(test)]
+mod pochi_sent_tests {
+    //! Money leaving the business account, from his real inbox.
+    use super::*;
+
+    // Real shape, name replaced. 122 texts in his inbox quote a business
+    // balance and none of them had a rule that read this one.
+    const SENT: &str = "UFDB97W6VC Confirmed. Ksh250.00 sent to PLACEHOLDER NAME on 13/6/26 \
+        at 10:58 PM. New business balance is Ksh343.00. Transaction cost, Ksh7.00. \
+        Amount you can transact within the day is 499,490.00.";
+
+    #[test]
+    fn a_payment_from_pochi_is_read_as_pochi() {
+        // ★★★ The BUSINESS balance is what makes this a Pochi text. An ordinary
+        //     send quotes the M-PESA balance instead, and reading this one as
+        //     ordinary would file the payment against the wrong pot and leave
+        //     Pochi with no balance at all.
+        let t = parse_message(SENT, Some("mpesa"), &[]);
+        let f = t.parsed_fields();
+        assert_eq!(t.parser_name(), "mpesa_pochi_sent");
+        assert_eq!(f.get("instrument").and_then(|v| v.as_str()), Some("pochi"));
+        assert_eq!(f.get("pochi_balance").and_then(|v| v.as_f64()), Some(343.0));
+        assert_eq!(f.get("amount").and_then(|v| v.as_f64()), Some(250.0));
+        assert_eq!(f.get("transaction_cost").and_then(|v| v.as_f64()), Some(7.0));
+    }
+
+    #[test]
+    fn money_leaving_still_asks() {
+        assert_eq!(parse_message(SENT, Some("mpesa"), &[]).status(), "parsed_unmapped");
+    }
+
+    #[test]
+    fn an_ordinary_send_is_not_captured_by_it() {
+        // ★★ It must not swallow the common shape. An ordinary payment quotes
+        //    the M-PESA balance and has to keep its own rule.
+        let ordinary = "UHVB950V7A Confirmed. Ksh5.00 sent to PLACEHOLDER NAME on 31/8/26 \
+            at 11:20 PM. New M-PESA balance is Ksh0.00. Transaction cost, Ksh0.00.";
+        let t = parse_message(ordinary, Some("mpesa"), &[]);
+        assert_ne!(t.parser_name(), "mpesa_pochi_sent");
+        assert_eq!(t.parsed_fields().get("instrument").and_then(|v| v.as_str()), None);
     }
 }

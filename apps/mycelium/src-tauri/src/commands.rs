@@ -3209,7 +3209,32 @@ pub fn sms_drain_queue(
     if !batch.messages.is_empty() {
         trace!("sms drain: {} taken, {} left", batch.messages.len(), batch.remaining);
     }
-    Ok(sweep(&world, &sustain_id, batch))
+    let finished = batch.remaining == 0;
+    let swept = sweep(&world, &sustain_id, batch);
+
+    // ★★★ **Re-read what an older build could not.** A message is parsed once,
+    //     on the way in, and never again -- so every shape whose rule shipped
+    //     AFTER it was captured stays unreadable for ever. His inbox had 62
+    //     M-Shwari texts and 122 business-account texts sitting unparsed that
+    //     the CURRENT rules read perfectly, which is why those accounts had no
+    //     balance to show: not a gap in the rules, a gap in when they ran.
+    //
+    // ★★ At the END of a sweep, not per page: `remaining == 0` means the queue
+    //    is drained, so this happens once per open rather than once per batch.
+    //
+    // ★ Readability only. `reparse_unparsed` never files anything, so a
+    //   backlog re-read can add balances and better classify cards but can
+    //   never move money -- and both statuses it can produce are already
+    //   "needs attention", so nothing enters or leaves the queue because of it.
+    if finished {
+        let learned = world.ingest().effective_rules().unwrap_or_default();
+        match world.ingest().reparse_unparsed(&sustain_id, &learned) {
+            Ok(n) if n > 0 => trace!("re-read {n} stored message(s) with the current rules"),
+            Ok(_) => {}
+            Err(e) => trace!("backlog re-read failed, sweep still stands: {e}"),
+        }
+    }
+    Ok(swept)
 }
 
 /// How many texts are waiting, without taking any. Cheap enough to ask before
