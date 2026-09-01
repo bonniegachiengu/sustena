@@ -643,6 +643,48 @@ async autoFiled(sustainId: string, limit: number | null) : Promise<Result<AutoFi
 }
 },
 /**
+ * **The threads this household reads money texts from.**
+ * 
+ * ★★ The shipped two come back in the same list as the ones he added, because
+ * they are the same kind of thing -- they are simply already there.
+ */
+async threads() : Promise<Result<ThreadDto[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("threads") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * **Add a thread**: a sender whose money texts this node should read.
+ * 
+ * ★★★ This is what turns "M-Pesa and KCB" into "any patterned money text a
+ * household actually gets". Nothing about the new thread is special-cased:
+ * once its texts are captured they reach the same train page every other
+ * shape does, and he teaches them the same way.
+ */
+async declareThread(id: string, label: string, senders: string[]) : Promise<Result<ThreadDto[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("declare_thread", { id, label, senders }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stop reading a thread. ★ Its captured messages are untouched -- forgetting a
+ * sender is a decision about the future, not an erasure of the past.
+ */
+async forgetThread(id: string) : Promise<Result<ThreadDto[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("forget_thread", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * ★★★ `(async)`, because this reads the whole ingest log.
  * 
  * A sync command runs inline on the IPC thread, which on a phone is the thread
@@ -2409,6 +2451,28 @@ export type TemplateId =
  * rather than a separate thing to build.
  */
 "device"
+/**
+ * A thread this household reads money texts from.
+ * 
+ * ★★ The shipped two travel in the same shape as the ones a person adds,
+ * so nothing downstream can tell them apart -- which is the point: they are
+ * the same kind of thing, already there.
+ */
+export type ThreadDto = { 
+/**
+ * The `source_id` its captures are tagged with, e.g. `equity`.
+ */
+id: string; label: string; 
+/**
+ * Sender strings that belong to it, matched as case-insensitive
+ * substrings because sender ids are not standardised.
+ */
+senders: string[]; 
+/**
+ * Whether this one shipped, so the list can say so without deciding
+ * anything by it.
+ */
+builtIn: boolean }
 /**
  * One figure a person pointed at while teaching a shape.
  * 

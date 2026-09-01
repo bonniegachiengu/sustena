@@ -1078,6 +1078,32 @@ pub struct AutoFiledDto {
     pub doubts: Vec<String>,
 }
 
+/// A thread this household reads money texts from.
+///
+/// ★★ The shipped two travel in the same shape as the ones a person adds,
+/// so nothing downstream can tell them apart -- which is the point: they are
+/// the same kind of thing, already there.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadDto {
+    /// The `source_id` its captures are tagged with, e.g. `equity`.
+    pub id: String,
+    pub label: String,
+    /// Sender strings that belong to it, matched as case-insensitive
+    /// substrings because sender ids are not standardised.
+    pub senders: Vec<String>,
+    /// Whether this one shipped, so the list can say so without deciding
+    /// anything by it.
+    pub built_in: bool,
+}
+
+impl ThreadDto {
+    pub fn of(t: &sustena_core::Thread) -> Self {
+        let built_in = sustena_core::built_in_threads().iter().any(|b| b.id == t.id);
+        Self { id: t.id.clone(), label: t.label.clone(), senders: t.senders.clone(), built_in }
+    }
+}
+
 /// The whole curated view.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]

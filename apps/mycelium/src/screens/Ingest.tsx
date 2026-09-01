@@ -99,6 +99,45 @@ export default function Ingest() {
   const doubted = () => (review() ?? []).filter((r) => r.doubts.length > 0);
 
   /**
+   * The threads this household reads money texts from.
+   *
+   * (*) The shipped two sit in the same list as the ones he adds, because they
+   * are the same kind of thing -- they are simply already there. A list where
+   * two entries were invisible and unexplained is a list nobody trusts.
+   */
+  const [threads, { refetch: refetchThreads }] = createResource(() => engine.threads());
+  const [adding, setAdding] = createSignal(false);
+  const [tName, setTName] = createSignal("");
+  const [tSenders, setTSenders] = createSignal("");
+  const [tBusy, setTBusy] = createSignal(false);
+  const [tFailed, setTFailed] = createSignal<string | null>(null);
+
+  const addThread = async () => {
+    const label = tName().trim();
+    const senders = tSenders()
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+    if (!label || senders.length === 0) {
+      setTFailed("it needs a name and at least one sender to read");
+      return;
+    }
+    setTBusy(true);
+    setTFailed(null);
+    try {
+      await engine.declareThread(label.toLowerCase().replace(/\s+/g, "_"), label, senders);
+      setTName("");
+      setTSenders("");
+      setAdding(false);
+      void refetchThreads();
+    } catch (e) {
+      setTFailed(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setTBusy(false);
+    }
+  };
+
+  /**
    * (*) **Newest first.** The message a person still remembers is the cheapest
    * to answer, and an oldest-first backlog asks the hardest question first.
    * `current()` is ordered by seq ascending, so reversing it is the recency
@@ -409,6 +448,67 @@ export default function Ingest() {
                 <Caption>{ordered().length - shown()} older still below</Caption>
               </Cluster>
             </Show>
+          </Show>
+        </Card>
+
+        {/* (*) Add a thread. M-Pesa and KCB were hard-coded, so a household
+            banking anywhere else had no way in at all -- not worse support,
+            none. A declared sender's texts reach the same train page every
+            other shape does. */}
+        <Card title="threads it reads" right={<Meta>{threads()?.length ?? 0}</Meta>}>
+          <For each={threads() ?? []}>
+            {(t) => (
+              <Row>
+                <Value>{t.label}</Value>
+                <Meta>{t.senders.join(", ")}</Meta>
+                <Spacer />
+                <Show when={t.builtIn}>
+                  <Badge tone="quiet">shipped</Badge>
+                </Show>
+                <Chip
+                  onClick={() => {
+                    void engine.forgetThread(t.id).then(() => refetchThreads());
+                  }}
+                >
+                  stop reading
+                </Chip>
+              </Row>
+            )}
+          </For>
+          <Show
+            when={adding()}
+            fallback={<Chip onClick={() => setAdding(true)}>+ add a thread</Chip>}
+          >
+            <Caption>What do you call it?</Caption>
+            <input
+              class={S.input}
+              placeholder="Equity"
+              value={tName()}
+              onInput={(e) => setTName(e.currentTarget.value)}
+            />
+            {/* (*) Sender, never wording. A KCB text can say M-PESA three times
+                in its own sentence and is still KCB. */}
+            <Caption>
+              Who sends them? The name that appears above the message on your phone. Separate
+              several with commas.
+            </Caption>
+            <input
+              class={S.input}
+              placeholder="EQUITY, EQUITYBK"
+              value={tSenders()}
+              onInput={(e) => setTSenders(e.currentTarget.value)}
+            />
+            <Show when={tFailed()}>{(m) => <Caption>{m()}</Caption>}</Show>
+            <Cluster>
+              <Chip onClick={() => void addThread()}>{tBusy() ? "adding…" : "add it"}</Chip>
+              <Chip onClick={() => setAdding(false)}>not now</Chip>
+            </Cluster>
+            <Note>
+              <Caption>
+                Its texts will start arriving to be classified. Teach one with "train from
+                this" and the rest follow.
+              </Caption>
+            </Note>
           </Show>
         </Card>
 

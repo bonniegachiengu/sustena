@@ -174,6 +174,30 @@ impl<R: Runtime> SmsCapture<R> {
         Err(Error::Unsupported)
     }
 
+    /// **Tell the device which senders to look at.**
+    ///
+    /// ★★★ Pushed, not pulled, and that is forced by where the decision
+    /// happens: the receiver runs while the app does not, so the list has to be
+    /// sitting on the device before a text arrives.
+    ///
+    /// ★★ Sending an EMPTY list is meaningful -- it says read nothing -- so
+    /// it is passed through rather than treated as "unset".
+    pub fn set_threads(&self, _senders: Vec<String>) -> Result<()> {
+        #[cfg(target_os = "android")]
+        {
+            #[derive(serde::Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Args {
+                senders: Vec<String>,
+            }
+            self.0
+                .run_mobile_plugin::<()>("setThreads", Args { senders: _senders })
+                .map_err(|e| Error::PluginInvoke(e.to_string()))
+        }
+        #[cfg(not(target_os = "android"))]
+        Ok(())
+    }
+
     /// The backfill. Reads what is already in the inbox.
     pub fn read_inbox(&self, _args: ReadInboxArgs) -> Result<SmsBatch> {
         #[cfg(target_os = "android")]

@@ -56,6 +56,7 @@ import {
   type TrainedFigureDto,
   type RoutedFigureDto,
   type AutoFiledDto,
+  type ThreadDto,
   type InferenceDto,
   type AggregateDto,
   type SustainDto,
@@ -115,6 +116,7 @@ export type {
   TrainedFigureDto,
   RoutedFigureDto,
   AutoFiledDto,
+  ThreadDto,
   InferenceDto,
   SustainDto,
   SustainSummary,
@@ -347,6 +349,22 @@ export const engine = {
    */
   autoFiled: async (sustainId: string, limit: number | null = null): Promise<AutoFiledDto[]> =>
     unwrap(await commands.autoFiled(sustainId, limit)),
+
+  /** The threads this household reads money texts from. */
+  threads: async (): Promise<ThreadDto[]> => unwrap(await commands.threads()),
+
+  /**
+   * Add a thread: a sender whose money texts should be read.
+   *
+   * ★★ Nothing about a new thread is special-cased. Once its texts are
+   * captured they reach the same train page every other shape does.
+   */
+  declareThread: async (id: string, label: string, senders: string[]): Promise<ThreadDto[]> =>
+    unwrap(await commands.declareThread(id, label, senders)),
+
+  /** Stop reading a thread. Its captured messages are untouched. */
+  forgetThread: async (id: string): Promise<ThreadDto[]> =>
+    unwrap(await commands.forgetThread(id)),
   sustain: (id: string | null = null): Promise<SustainDto | null> => commands.getSustain(id),
   select: async (id: string): Promise<boolean> => unwrap(await commands.selectSustain(id)),
   create: async (
