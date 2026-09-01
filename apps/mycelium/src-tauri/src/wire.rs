@@ -153,6 +153,18 @@ pub enum Frame {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         holdings: Option<Holdings>,
     },
+    /// *Give me the captured messages for this Sustain that I do not have.*
+    ///
+    /// ★★★ A second conversation, not a bigger `Want`. The event log holds
+    /// what a household DECIDED; the queue holds what it was ASKED. They are
+    /// different logs on purpose -- a message changes no state and passes no
+    /// gate, and replaying one must never file anything -- so they are
+    /// different frames, and a node that only understands the first still
+    /// syncs the first.
+    WantIngest { sustain_id: String, have: VectorClock },
+    /// The reply. Opaque JSON here, as `Give` is: the wire does not need to
+    /// know what a captured message looks like.
+    GiveIngest { sustain_id: String, entries: Vec<Value>, frontier: VectorClock },
     /// *Which Sustains would you share with me?*
     Catalogue,
     /// The reply: `(sustain_id, label)` pairs this node is willing to share
