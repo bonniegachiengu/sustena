@@ -189,3 +189,5 @@ crates/tauri-plugin-sms-capture/Cargo.lock
 
 # Installable builds, collected for pinning. Artifacts, not source.
 /builds/
+
+adb-check/
