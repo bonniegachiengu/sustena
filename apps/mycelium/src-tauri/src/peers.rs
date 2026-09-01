@@ -575,7 +575,7 @@ impl Peering {
                     )?;
                 }
                 Frame::GiveIngest { sustain_id, entries, .. } => {
-                    self.accept_ingest(&sustain_id, entries, &public_key)?;
+                    self.accept_ingest(&sustain_id, entries)?;
                 }
                 Frame::Give { sustain_id, entries, .. } => {
                     self.accept_give(&mut session, stream, &peer, &sustain_id, entries, &public_key)?;
@@ -661,6 +661,12 @@ impl Peering {
         }
     }
 
+    /// Which DEVICE this is, for stamping. ★★ Never the key: two devices of
+    /// one person share a key, and stamping by it makes their entries collide.
+    fn stamp_node(&self) -> String {
+        crate::store::device_id(&self.root)
+    }
+
     /// Hand a peer the captured messages it does not have.
     ///
     /// ★★ The same permission gate the event log uses, checked separately
@@ -675,7 +681,7 @@ impl Peering {
         have: &VectorClock,
         me: &str,
     ) -> WireResult<()> {
-        if !self.book().may_have(peer.public_key(), sustain_id) {
+        if peer.public_key() != me && !self.book().may_have(peer.public_key(), sustain_id) {
             return session.send(
                 stream,
                 &Frame::Refused {
@@ -687,7 +693,7 @@ impl Peering {
         let ingest = crate::ingest::Ingested::at(&self.root)
             .map_err(|e| WireError::Io(e.to_string()))?;
         let replica =
-            ingest.replica(sustain_id, me).map_err(|e| WireError::Io(e.to_string()))?;
+            ingest.replica(sustain_id, &self.stamp_node()).map_err(|e| WireError::Io(e.to_string()))?;
         let entries: Vec<serde_json::Value> = replica
             .missing_from(have)
             .into_iter()
@@ -710,7 +716,6 @@ impl Peering {
         &self,
         sustain_id: &str,
         entries: Vec<serde_json::Value>,
-        me: &str,
     ) -> WireResult<()> {
         let incoming: Vec<_> = entries
             .into_iter()
@@ -722,7 +727,7 @@ impl Peering {
         let ingest = crate::ingest::Ingested::at(&self.root)
             .map_err(|e| WireError::Io(e.to_string()))?;
         let took = ingest
-            .merge_messages(sustain_id, me, incoming)
+            .merge_messages(sustain_id, &self.stamp_node(), incoming)
             .map_err(|e| WireError::Io(e.to_string()))?;
         if took > 0 {
             eprintln!("[peer] took {took} captured message(s) for {sustain_id}");
@@ -739,9 +744,11 @@ impl Peering {
         have: &VectorClock,
         me: &str,
     ) -> WireResult<()> {
-        if !self.book().may_have(peer.public_key(), sustain_id) {
+        if peer.public_key() != me && !self.book().may_have(peer.public_key(), sustain_id) {
             // ★★★ Authenticated, and refused anyway. The second conjunct,
-            //     visible on the wire.
+            //     visible on the wire. (`me` is this node's own key: a peer
+            //     presenting it is this person's other device, and he does not
+            //     need permission to read his own household.)
             return session.send(
                 stream,
                 &Frame::Refused {
@@ -752,7 +759,7 @@ impl Peering {
         }
         let replica = self
             .store
-            .read_replica(sustain_id, me)
+            .read_replica(sustain_id, &self.stamp_node())
             .map_err(|e| WireError::Io(e.to_string()))?;
         let entries: Vec<serde_json::Value> = replica
             .missing_from(have)
@@ -782,7 +789,7 @@ impl Peering {
         entries: Vec<serde_json::Value>,
         me: &str,
     ) -> WireResult<()> {
-        if !self.book().may_have(peer.public_key(), sustain_id) {
+        if peer.public_key() != me && !self.book().may_have(peer.public_key(), sustain_id) {
             return session.send(
                 stream,
                 &Frame::Refused {
@@ -792,14 +799,21 @@ impl Peering {
             );
         }
         let incoming = decode(entries, peer.public_key())?;
-        refuse_forged_origin(&incoming, me).map_err(WireError::NotPermitted)?;
+        // ★★★ Compared against this DEVICE, and that is what makes the guard
+        //     work again. It refuses entries stamped as ours, which is right:
+        //     nobody else may write history in our name. Against the KEY it
+        //     also refused his own laptop, because a travelling identity gives
+        //     both machines that key -- so the guard was correct and the thing
+        //     it compared was wrong.
+        let stamp = self.stamp_node();
+        refuse_forged_origin(&incoming, &stamp).map_err(WireError::NotPermitted)?;
         let written = self
             .store
-            .merge_entries(sustain_id, me, incoming)
+            .merge_entries(sustain_id, &stamp, incoming)
             .map_err(|e| WireError::Io(e.to_string()))?;
         let replica = self
             .store
-            .read_replica(sustain_id, me)
+            .read_replica(sustain_id, &self.stamp_node())
             .map_err(|e| WireError::Io(e.to_string()))?;
         if !written.is_empty() {
             // ★★★ The whole point of the channel: this node just changed, and
@@ -839,7 +853,12 @@ impl Peering {
         let key = peer.public_key().to_string();
 
         self.edit(|b| b.seen(&key, peer.handle(), Some(address.to_string())))?;
-        if !self.book().may_have(&key, sustain_id) {
+        // ★★★ **A person does not share a household with himself.** Since an
+        //     identity can travel, his laptop presents the same key as his
+        //     phone -- and requiring him to "trust" and "share with" his own
+        //     key would be a permission dialog asking whether he may read his
+        //     own books. The signature already proved this peer holds his key.
+        if key != me.public_key() && !self.book().may_have(&key, sustain_id) {
             let why = format!(
                 "this node has not shared {sustain_id} with {} — trust the key and share it first",
                 peer.handle()
@@ -848,7 +867,12 @@ impl Peering {
             return Err(why);
         }
 
-        let node = me.public_key();
+        // ★★★ The DEVICE stamps; the key only says who he is. His laptop
+        //     presents the same key as his phone -- that is the point of a
+        //     travelling identity -- so stamping by key would have both
+        //     machines writing the same `(node, counter)` for different
+        //     entries.
+        let node = self.stamp_node();
         let mine = self
             .store
             .read_replica(sustain_id, &node)

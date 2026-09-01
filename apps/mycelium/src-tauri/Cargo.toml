@@ -46,6 +46,11 @@ path = "src/bin/verify_taught_balance.rs"
 required-features = ["dev-bins"]
 
 [[bin]]
+name = "verify_store"
+path = "src/bin/verify_store.rs"
+required-features = ["dev-bins"]
+
+[[bin]]
 name = "verify_balances"
 path = "src/bin/verify_balances.rs"
 required-features = ["dev-bins"]

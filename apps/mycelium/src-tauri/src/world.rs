@@ -294,10 +294,20 @@ impl World {
             eprintln!("[mycelium] recovered an interrupted transfer: {id}");
         }
 
-        // ★ The public key, read without unlocking anything. Legacy lines with
-        //   no origin are attributed to it, so the fold needs it even when the
-        //   node is locked.
-        let node_id = IdentityStore::at(&store_root).read().ok().map(|f| f.public_key);
+        // ★★★ The DEVICE, not the person. Legacy lines carry no origin and are
+        //     attributed to whatever this is, which is correct either way --
+        //     this machine did write them. What changes is that two devices of
+        //     one person no longer collide on a stamp.
+        //
+        // ★★★ And it is always present, which closes a real fragility. This
+        //     was an `Option`: with no identity yet it was `None`, and the fold
+        //     fell back to reading the log in FILE order. His own homestead log
+        //     does not replay that way -- a second genesis was appended late,
+        //     so file order wipes state mid-history -- while the causal
+        //     reading reproduces his books exactly. A device id needs no
+        //     unlock, so the causal path is now the only path, and an unshared
+        //     Sustain can never be folded differently from a shared one.
+        let node_id = Some(crate::store::device_id(&store_root));
 
         let records = store.load_registry()?;
         let mut sustains = BTreeMap::new();
@@ -1451,7 +1461,11 @@ impl World {
         //    BEHIND proposes a lower slot, which has already been decided —
         //    and PREPARE hands it the accepted value, so it adopts, loses, and
         //    is told to retry. That is recovery, not a special case.
-        let slot = self.store.read_replica(sustain_id, &my_key).map_err(|e| e.to_string())?.len()
+        let slot = self
+            .store
+            .read_replica(sustain_id, &self.stamp_node())
+            .map_err(|e| e.to_string())?
+            .len()
             as u64;
         let mine = Write {
             operator: operator.to_string(),
@@ -2073,14 +2087,28 @@ impl World {
     /// **after** them — which is §IV's `max(C_i, C_msg) + 1` and the whole
     /// reason a merged history stays causal.
     fn stamped(&self, sustain_id: &str, seq: u64, line: LoggedEvent) -> LoggedEvent {
-        let Some(node) = self.node_id() else {
-            return line;
-        };
+        // ★★ A device always has a stamp id, even locked and even before
+        //    enrolment: it is a random string in a file, not the identity. The
+        //    early return this replaced existed because `node_id` needed an
+        //    unlocked key, and stamping should never have depended on that.
+        let node = self.stamp_node();
         let Ok(replica) = self.store.read_replica(sustain_id, &node) else {
             return line;
         };
         let lamport = replica.next_write(&node).1;
         line.written_by(&node, seq, lamport, replica.frontier())
+    }
+
+    /// **Which DEVICE this is**, for stamping entries.
+    ///
+    /// ★★★ Deliberately NOT `node_id`. That one is the person -- the public
+    /// key that owns Sustains, authenticates to peers and signs published
+    /// packages -- and it is the same string on every device a person carries
+    /// his identity to. Using it to stamp entries meant two machines writing
+    /// `key:1` for two different entries, which is silent loss rather than a
+    /// merge conflict. A person is a key; a device is this.
+    pub fn stamp_node(&self) -> String {
+        crate::store::device_id(self.store.root())
     }
 
     /// This node's own network identity — its public key — readable while
@@ -2328,7 +2356,7 @@ impl World {
     /// Returns `None` when they agree, `Some((shown, folded))` when they do
     /// not.
     pub fn fold_divergence(&self, sustain_id: &str) -> Option<(Value, Value)> {
-        let node = self.node_id()?;
+        let node = self.stamp_node();
         let shown = self.with(|i| i.get(sustain_id).map(|s| s.state.clone()))?;
         let folded = self.store.load_replicated(sustain_id, &node, None).ok()?.0.state;
         if shown == folded {
@@ -2376,7 +2404,7 @@ impl World {
     /// person needs told — every entry was admitted where it was made, and
     /// the merge was not.
     pub fn reload(&self, sustain_id: &str) -> Result<Reconciliation, String> {
-        let node = self.node_id().ok_or_else(|| "no identity on this machine".to_string())?;
+        let node = self.stamp_node();
         // ★★ The Sustain's OWN invariants, and only when enforcement is armed
         //    for it. A Sustain that never opted in is genuinely unmeasured
         //    rather than passing: reporting `admissible: true` for a household
