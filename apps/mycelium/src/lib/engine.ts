@@ -55,6 +55,7 @@ import {
   type ShapeOfferDto,
   type TrainedFigureDto,
   type RoutedFigureDto,
+  type AutoFiledDto,
   type InferenceDto,
   type AggregateDto,
   type SustainDto,
@@ -113,6 +114,7 @@ export type {
   ShapeOfferDto,
   TrainedFigureDto,
   RoutedFigureDto,
+  AutoFiledDto,
   InferenceDto,
   SustainDto,
   SustainSummary,
@@ -335,6 +337,16 @@ export const engine = {
    */
   trainRule: async (messageId: string, figures: TrainedFigureDto[]): Promise<string> =>
     unwrap(await commands.trainRule(messageId, figures)),
+
+  /**
+   * What filed itself, and what disagrees with it.
+   *
+   * ★★ A read. The guard makes automatic filings visible; it has no power to
+   * change one, because a guard that could act without being asked would be
+   * another instance of the thing it exists to catch.
+   */
+  autoFiled: async (sustainId: string, limit: number | null = null): Promise<AutoFiledDto[]> =>
+    unwrap(await commands.autoFiled(sustainId, limit)),
   sustain: (id: string | null = null): Promise<SustainDto | null> => commands.getSustain(id),
   select: async (id: string): Promise<boolean> => unwrap(await commands.selectSustain(id)),
   create: async (

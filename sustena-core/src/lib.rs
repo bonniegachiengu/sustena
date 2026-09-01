@@ -180,6 +180,7 @@ pub mod operative;
 pub mod operator;
 pub mod panel;
 pub mod parse_rule;
+pub mod audit;
 pub mod parse_rule_learn;
 pub mod path;
 pub mod pawa;
@@ -507,6 +508,7 @@ pub use effect_capture::{
     missing_required, narrow_by_verb, required_params_satisfiable, resolve_description, Capture,
     Choice, DeclaredParams, Inference, OperatorParams,
 };
+pub use audit::{doubts, Doubt, Filed};
 pub use parse_rule_learn::{
     synthesize_from_correction, synthesize_from_training, synthesize_with_shapes,
     verify_candidate, LearningRefusal, TrainedFigure,

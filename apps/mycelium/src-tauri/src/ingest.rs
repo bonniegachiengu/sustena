@@ -467,6 +467,16 @@ pub struct Reported {
     pub at: i64,
 }
 
+/// One automatic filing, and what disagrees with it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Reviewed {
+    pub message: IngestedMessage,
+    /// Empty when nothing disagrees — which is most of them, and is the point.
+    pub doubts: Vec<sustena_core::Doubt>,
+    /// When it happened, for ordering only.
+    pub at: i64,
+}
+
 /// The running balance a message states, and **which account it belongs to**.
 ///
 /// ★★★ **One sender is not one account.** Pochi la Biashara and M-Shwari arrive
@@ -1813,6 +1823,138 @@ impl Ingested {
             repaired += 1;
         }
         Ok(repaired)
+    }
+
+    /// **Was this filed without anyone looking at it?**
+    ///
+    /// ★★★ Derived rather than stored, and true by construction of the two
+    /// paths that can file a message. A person confirming one records a
+    /// `Filing` and then the outcome; the automatic path records only the
+    /// outcome, because there was no choice to record. So a message that was
+    /// applied and carries no filing is one nobody was asked about.
+    ///
+    /// ★★ `auto_filings_carry_no_filing_record` pins that invariant, because it
+    /// is an agreement between two call sites rather than something the type
+    /// system holds. If a future change starts recording a filing on the
+    /// automatic path, that test fails rather than this quietly reporting an
+    /// empty review forever — which is the failure mode a safety guard must
+    /// not have.
+    pub fn was_auto_filed(m: &IngestedMessage) -> bool {
+        m.applied && m.filed.is_empty()
+    }
+
+    /// Everything filed automatically, newest first, with what disagrees.
+    ///
+    /// ★★★ The point of the surface: nothing lands in his books silently. An
+    /// automatic filing is fast and usually right, and "usually" is exactly why
+    /// it has to be visible — a wrong one is invisible precisely because it did
+    /// not need him.
+    ///
+    /// ★★ Doubts are computed against the shape's OWN history: prior amounts
+    /// filed by the same parser, and the account's previously known balance as
+    /// stated by its own earlier message. Nothing is compared to a constant
+    /// picked in advance.
+    pub fn auto_filed_review(&self, sustain_id: &str, limit: usize) -> StoreResult<Vec<Reviewed>> {
+        let all = self.current()?;
+
+        // Prior amounts per shape, and each account's balance history, both
+        // read from the same log the filings came from.
+        let mut prior: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+        let mut balances: BTreeMap<String, Vec<(i64, f64)>> = BTreeMap::new();
+        for m in &all {
+            if m.sustain_id != sustain_id {
+                continue;
+            }
+            if m.applied {
+                if let Some(a) = m
+                    .params
+                    .get("amount")
+                    .and_then(|v| v.as_f64().or_else(|| v.as_str()?.replace(',', "").parse().ok()))
+                {
+                    prior.entry(m.parser_name.clone()).or_default().push(a);
+                }
+            }
+            if let (Some(at), Some((acct, bal))) =
+                (m.event_at_ms.or(m.sent_at_ms), reported_account_of(m))
+            {
+                balances.entry(acct).or_default().push((at, bal));
+            }
+        }
+        for v in balances.values_mut() {
+            v.sort_by_key(|(at, _)| *at);
+        }
+
+        let mut out: Vec<Reviewed> = Vec::new();
+        for m in &all {
+            if m.sustain_id != sustain_id || !Self::was_auto_filed(m) {
+                continue;
+            }
+            let at = m.event_at_ms.or(m.sent_at_ms);
+
+            // ★★ The shape's own history, MINUS this filing. Comparing a
+            //    message to a set that includes itself pulls the usual toward
+            //    the very value being judged, which is how an outlier hides.
+            let mut history: Vec<f64> = prior.get(&m.parser_name).cloned().unwrap_or_default();
+            if let Some(a) = m
+                .params
+                .get("amount")
+                .and_then(|v| v.as_f64().or_else(|| v.as_str()?.replace(',', "").parse().ok()))
+            {
+                if let Some(i) = history.iter().position(|x| (*x - a).abs() < f64::EPSILON) {
+                    history.remove(i);
+                }
+            }
+
+            // The last balance this account stated BEFORE this message.
+            let previous_balance = reported_account_of(m).and_then(|(acct, _)| {
+                let at = at?;
+                balances
+                    .get(&acct)?
+                    .iter()
+                    .filter(|(t, _)| *t < at)
+                    .next_back()
+                    .map(|(_, b)| *b)
+            });
+
+            let routes: Vec<(String, String)> = self
+                .learned_rules()
+                .unwrap_or_default()
+                .into_iter()
+                .find(|r| r.id == m.parser_name)
+                .map(|r| r.routes.into_iter().map(|x| (x.group, x.pocket)).collect())
+                .unwrap_or_default();
+
+            let doubts = sustena_core::doubts(
+                &sustena_core::Filed {
+                    message_id: &m.id,
+                    operator: m.operator.as_deref().unwrap_or(""),
+                    params: &m.params,
+                    parsed: &m.parsed_fields,
+                    routes: &routes,
+                    previous_balance,
+                },
+                &history,
+            );
+
+            out.push(Reviewed {
+                message: m.clone(),
+                doubts,
+                at: at.unwrap_or(0),
+            });
+        }
+
+        // ★ Doubted first, then newest. A person opening this should meet the
+        //   thing worth their attention, not scroll to it.
+        // ★★ `false` sorts before `true`, so comparing a-then-b on "has no
+        //    doubts" puts the doubted ones first. Written the other way round
+        //    it silently buried them under everything that was fine, which is
+        //    the exact opposite of what this surface is for -- and the test
+        //    that caught it asserts the POSITION, not just the membership.
+        out.sort_by(|a, b| {
+            a.doubts.is_empty().cmp(&b.doubts.is_empty()).then(b.at.cmp(&a.at))
+        });
+        out.truncate(limit);
+        Ok(out)
     }
 
     /// The rules in force: the latest version of each id.
@@ -5183,5 +5325,147 @@ mod backfill_event_time_tests {
         store_without_arrival(&ing, MSHWARI, 1);
         assert_eq!(ing.backfill_event_times("h", &seeded()).expect("first"), 1);
         assert_eq!(ing.backfill_event_times("h", &seeded()).expect("second"), 0);
+    }
+}
+
+#[cfg(test)]
+mod auto_filed_review_tests {
+    use super::*;
+    use std::{env, fs, path::PathBuf};
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!("sustena-review-{name}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    /// A real M-Pesa arrival: states the amount, the direction and the balance.
+    fn received(ref_: &str, amount: &str, balance: &str, date: &str, time: &str) -> String {
+        format!(
+            "{ref_} Confirmed. You have received Ksh{amount} from JANE DOE 254700000000              on {date} at {time}. New M-PESA balance is Ksh{balance}"
+        )
+    }
+
+    fn ingest(name: &str) -> Ingested {
+        Ingested::at(scratch(name)).expect("ingest")
+    }
+
+    fn capture(ing: &Ingested, raw: &str) -> IngestedMessage {
+        let rules = sustena_core::all_seed_rules();
+        let Capture::Stored(m) = ing.capture("h", "mpesa", raw, &rules).expect("capture") else {
+            panic!("stored")
+        };
+        *m
+    }
+
+    #[test]
+    fn what_a_person_confirmed_is_not_in_the_review() {
+        // ★★★ The whole distinction. This surface exists for filings NOBODY
+        //     looked at; putting confirmed ones in it would bury the point
+        //     under everything that is already fine.
+        let ing = ingest("confirmed-excluded");
+        let m = capture(&ing, &received("AAAAAAAAAA", "500.00", "9,000.00", "20/7/26", "4:30 PM"));
+        ing.record_filing(&m.id, "budget.record_income", &m.params).expect("filing");
+        ing.record_outcome(&m.id, true, None).expect("outcome");
+
+        assert!(ing.auto_filed_review("h", 20).expect("review").is_empty());
+    }
+
+    #[test]
+    fn what_filed_itself_is_in_the_review() {
+        let ing = ingest("auto-included");
+        let m = capture(&ing, &received("BBBBBBBBBB", "500.00", "9,000.00", "20/7/26", "4:30 PM"));
+        ing.record_outcome(&m.id, true, None).expect("outcome");
+
+        let got = ing.auto_filed_review("h", 20).expect("review");
+        assert_eq!(got.len(), 1, "it landed in his books and nobody was asked");
+        assert_eq!(got[0].message.id, m.id);
+    }
+
+    #[test]
+    fn a_filing_the_gate_refused_is_not_in_the_review() {
+        // ★★ Nothing landed, so there is nothing to catch. It is still in the
+        //    queue for him, which is where a refusal belongs.
+        let ing = ingest("refused");
+        let m = capture(&ing, &received("CCCCCCCCCC", "500.00", "9,000.00", "20/7/26", "4:30 PM"));
+        ing.record_outcome(&m.id, false, Some("no".into())).expect("outcome");
+        assert!(ing.auto_filed_review("h", 20).expect("review").is_empty());
+    }
+
+    #[test]
+    fn auto_filings_carry_no_filing_record() {
+        // ★★★ The invariant the whole surface rests on, pinned because it is
+        //     an agreement between two call sites rather than something the
+        //     type system holds. If the automatic path ever starts recording a
+        //     filing, this fails -- rather than the review quietly reporting
+        //     nothing forever, which is the one failure a guard must not have.
+        let ing = ingest("invariant");
+        let m = capture(&ing, &received("DDDDDDDDDD", "500.00", "9,000.00", "20/7/26", "4:30 PM"));
+        ing.record_outcome(&m.id, true, None).expect("outcome");
+        let stored = ing.current().expect("current");
+        let after = stored.iter().find(|x| x.id == m.id).expect("there");
+        assert!(after.applied, "it was applied");
+        assert!(after.filed.is_empty(), "and nobody chose it");
+        assert!(Ingested::was_auto_filed(after));
+    }
+
+    #[test]
+    fn a_filing_that_contradicts_its_own_balance_is_doubted() {
+        // ★★★ The real catch, end to end: an arrival is booked, and the
+        //     account's own next word says it holds far less than before.
+        let ing = ingest("contradiction");
+        // An earlier, larger balance for the same account.
+        let first = capture(&ing, &received("EEEEEEEEEE", "100.00", "9,000.00", "20/7/26", "1:00 PM"));
+        ing.record_outcome(&first.id, true, None).expect("outcome");
+        // Then an arrival that leaves the account almost empty.
+        let second =
+            capture(&ing, &received("FFFFFFFFFF", "1,000.00", "10.00", "21/7/26", "1:00 PM"));
+        ing.record_outcome(&second.id, true, None).expect("outcome");
+
+        let got = ing.auto_filed_review("h", 20).expect("review");
+        let doubted = got.iter().find(|r| r.message.id == second.id).expect("the second is there");
+        assert!(
+            doubted
+                .doubts
+                .iter()
+                .any(|d| matches!(d, sustena_core::Doubt::BalanceContradicts { .. })),
+            "money arrived but the account holds less: {:?}",
+            doubted.doubts
+        );
+    }
+
+    #[test]
+    fn an_ordinary_filing_is_listed_with_nothing_against_it() {
+        // ★★ Most automatic filings are right, and the surface says so plainly
+        //    rather than manufacturing a concern to look useful.
+        let ing = ingest("ordinary");
+        let m = capture(&ing, &received("GGGGGGGGGG", "500.00", "9,000.00", "20/7/26", "4:30 PM"));
+        ing.record_outcome(&m.id, true, None).expect("outcome");
+        let got = ing.auto_filed_review("h", 20).expect("review");
+        assert_eq!(got.len(), 1);
+        assert!(got[0].doubts.is_empty(), "nothing disagrees: {:?}", got[0].doubts);
+    }
+
+    #[test]
+    fn the_doubted_come_first() {
+        // ★★ He should meet the thing worth his attention, not scroll to it.
+        let ing = ingest("ordering");
+        let ok = capture(&ing, &received("HHHHHHHHHH", "500.00", "9,000.00", "20/7/26", "1:00 PM"));
+        ing.record_outcome(&ok.id, true, None).expect("outcome");
+        let bad = capture(&ing, &received("IIIIIIIIII", "1,000.00", "10.00", "21/7/26", "1:00 PM"));
+        ing.record_outcome(&bad.id, true, None).expect("outcome");
+
+        let got = ing.auto_filed_review("h", 20).expect("review");
+        assert!(!got[0].doubts.is_empty(), "the doubted one leads");
+        assert_eq!(got[0].message.id, bad.id);
+    }
+
+    #[test]
+    fn another_households_filings_are_not_shown() {
+        let ing = ingest("scoped");
+        let m = capture(&ing, &received("JJJJJJJJJJ", "500.00", "9,000.00", "20/7/26", "4:30 PM"));
+        ing.record_outcome(&m.id, true, None).expect("outcome");
+        assert!(ing.auto_filed_review("other", 20).expect("review").is_empty());
     }
 }

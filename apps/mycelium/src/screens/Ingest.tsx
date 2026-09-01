@@ -75,7 +75,28 @@ export default function Ingest() {
    * row already holds it. Looking it up again to get back what was in hand
    * would be a round trip for nothing.
    */
-  const [training, setTraining] = createSignal<MessageDto | null>(null);
+  /**
+   * The message he chose to teach Orchie the shape of.
+   *
+   * (*) Just the id and the text, which is all teaching needs. It used to hold
+   * the whole `MessageDto`, and that made the review card below unable to open
+   * the same flow -- it has a row, not a message. Narrowing the signal to what
+   * is actually used let both doors lead to the same place.
+   */
+  const [training, setTraining] = createSignal<{ id: string; raw: string } | null>(null);
+
+  /**
+   * What was filed without anyone being asked.
+   *
+   * (*) Its own resource rather than part of the main load: it answers a
+   * different question ("what did Orchie do on its own?") and a person opens
+   * this screen far more often than they need to audit it.
+   */
+  const [review, { refetch: refetchReview }] = createResource(
+    () => sustain(),
+    (id: string) => (id ? engine.autoFiled(id, 40) : Promise.resolve([])),
+  );
+  const doubted = () => (review() ?? []).filter((r) => r.doubts.length > 0);
 
   /**
    * (*) **Newest first.** The message a person still remembers is the cheapest
@@ -367,7 +388,7 @@ export default function Ingest() {
                           read. A message the parser read WRONGLY is worth
                           teaching too, and it is the row he is looking at when
                           he notices -- so the way to fix it belongs here. */}
-                      <Chip onClick={() => setTraining(m)}>train from this</Chip>
+                      <Chip onClick={() => setTraining({ id: m.id, raw: m.rawPayload })}>train from this</Chip>
                       <Show when={m.needsAttention}>
                         <Caption>filed here · nothing moves until you confirm</Caption>
                       </Show>
@@ -388,6 +409,66 @@ export default function Ingest() {
                 <Caption>{ordered().length - shown()} older still below</Caption>
               </Cluster>
             </Show>
+          </Show>
+        </Card>
+
+        {/* (*) The safety guard. As Orchie files more on its own -- income
+            that maps itself, a taught shape across a whole cluster, a pocket
+            pre-filled from a route -- more lands in his books that nobody
+            looked at. Most of it is right, and that is exactly why a wrong
+            one is invisible: it never needed him, so it never reached him. */}
+        <Card
+          title="filed without asking"
+          right={
+            <Meta>
+              {doubted().length > 0
+                ? `${doubted().length} to check`
+                : `${(review() ?? []).length}`}
+            </Meta>
+          }
+        >
+          <Show
+            when={(review() ?? []).length > 0}
+            fallback={<Empty>nothing has filed itself yet</Empty>}
+          >
+            <Show when={doubted().length === 0}>
+              <Caption>nothing here disagrees with itself</Caption>
+            </Show>
+            <For each={review()}>
+              {(r) => (
+                <div class={S.pocketBlock}>
+                  <Cluster>
+                    <Badge tone={r.doubts.length > 0 ? "danger" : "quiet"}>
+                      {r.doubts.length > 0 ? "check this" : "filed"}
+                    </Badge>
+                    <Meta>{r.when}</Meta>
+                    <Spacer />
+                    <Value>{fmt(r.amount)}</Value>
+                  </Cluster>
+                  <Caption>{r.what}</Caption>
+                  {/* (*) The doubt's own words, not a re-phrasing. Each names
+                      BOTH sides of its disagreement, so he can settle it by
+                      reading rather than by trusting the guard. */}
+                  <For each={r.doubts}>
+                    {(d) => (
+                      <NoteRow tone="danger">
+                        <Caption>{d}</Caption>
+                      </NoteRow>
+                    )}
+                  </For>
+                  <pre class={S.codeBlock}>{r.raw}</pre>
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <Cluster>
+                      {/* (*) One tap to put it right, through the ordinary
+                          append-only correction. The first filing stays on the
+                          record and the change is added after it. */}
+                      <Chip onClick={() => setClassifying(r.messageId)}>fix this</Chip>
+                      <Chip onClick={() => setTraining({ id: r.messageId, raw: r.raw })}>train from this</Chip>
+                    </Cluster>
+                  </div>
+                </div>
+              )}
+            </For>
           </Show>
         </Card>
 
@@ -430,8 +511,11 @@ export default function Ingest() {
           <TrainFlow
             sustain={sustain()}
             messageId={m().id}
-            raw={m().rawPayload}
-            onDone={() => void refetch()}
+            raw={m().raw}
+            onDone={() => {
+              void refetch();
+              void refetchReview();
+            }}
             onClose={() => setTraining(null)}
           />
         </Modal>
@@ -449,6 +533,9 @@ export default function Ingest() {
             onDone={() => {
               setClassifying(null);
               void refetch();
+              // (*) The guard has to forget what he just settled, or it goes
+              //     on asking about a filing he has already put right.
+              void refetchReview();
             }}
           />
         </Modal>

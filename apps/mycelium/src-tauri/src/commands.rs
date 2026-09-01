@@ -1102,6 +1102,69 @@ pub fn train_rule(
     Ok(candidate.id)
 }
 
+/// **What filed itself, and what disagrees with it.**
+///
+/// ★★★ A read, and only a read. The guard's whole job is to make automatic
+/// filings visible; giving it any power to change one would make it another
+/// thing that acts without being asked. Fixing goes through the ordinary
+/// append-only correction a person already uses.
+#[tauri::command]
+#[specta::specta]
+pub fn auto_filed(
+    world: State<'_, World>,
+    sustain_id: String,
+    limit: Option<u32>,
+) -> Result<Vec<crate::dto::AutoFiledDto>, String> {
+    let limit = limit.unwrap_or(40) as usize;
+    let rows = world.ingest().auto_filed_review(&sustain_id, limit).map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let m = r.message;
+            let amount = m
+                .params
+                .get("amount")
+                .and_then(|v| v.as_f64().or_else(|| v.as_str()?.replace(',', "").parse().ok()))
+                .unwrap_or(0.0);
+            let pocket = m
+                .params
+                .get("pocket_name")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let operator = m.operator.clone().unwrap_or_default();
+            let when = [
+                m.parsed_fields.get("date").and_then(Value::as_str).unwrap_or(""),
+                m.parsed_fields.get("time").and_then(Value::as_str).unwrap_or(""),
+            ]
+            .join(" ")
+            .trim()
+            .to_string();
+            crate::dto::AutoFiledDto {
+                message_id: m.id,
+                raw: m.raw_payload,
+                what: plain_filing(&operator, amount, pocket.as_deref()),
+                operator,
+                amount,
+                pocket,
+                when,
+                // ★★ The doubt's OWN words. Re-phrasing them here would put a
+                //    second voice between the disagreement and the person.
+                doubts: r.doubts.iter().map(sustena_core::Doubt::say).collect(),
+            }
+        })
+        .collect())
+}
+
+/// What was booked, said the way a person would say it.
+fn plain_filing(operator: &str, amount: f64, pocket: Option<&str>) -> String {
+    match (operator, pocket) {
+        ("budget.record_income", _) => format!("Ksh {amount:.0} recorded as money in"),
+        ("budget.spend", Some(p)) => format!("Ksh {amount:.0} spent from {p}"),
+        ("budget.spend", None) => format!("Ksh {amount:.0} spent"),
+        (other, _) => format!("{other} ran with Ksh {amount:.0}"),
+    }
+}
+
 // ── Orchie ──────────────────────────────────────────────────
 
 /// **The curated feed** — `compose(r)` over one household.

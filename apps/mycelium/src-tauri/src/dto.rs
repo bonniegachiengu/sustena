@@ -1050,6 +1050,34 @@ pub struct TrainedFigureDto {
     pub pocket: String,
 }
 
+/// One filing nobody was asked about, and what disagrees with it.
+///
+/// ★★★ The surface exists so nothing lands in his books silently. Most of
+/// these are right, which is exactly why a wrong one is invisible without it:
+/// it did not need him, so it never reached him.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoFiledDto {
+    pub message_id: String,
+    /// The text as it arrived.
+    pub raw: String,
+    /// What was booked, in plain words.
+    pub what: String,
+    pub operator: String,
+    pub amount: f64,
+    /// The pocket it went to, when it went to one.
+    pub pocket: Option<String>,
+    /// When it happened, in the message's own words (`"30/7/26 9:10 PM"`).
+    ///
+    /// ★★ The text's own date and clock rather than an epoch, for two reasons:
+    /// the ordering is already settled by the time this is built, and quoting
+    /// what the message says needs no formatting decisions that could differ
+    /// from what he would read on his phone.
+    pub when: String,
+    /// Empty when nothing disagrees — which is most of them, and is the point.
+    pub doubts: Vec<String>,
+}
+
 /// The whole curated view.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
